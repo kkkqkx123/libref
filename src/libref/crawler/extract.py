@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from markdownify import markdownify as md
 from selectolax.lexbor import LexborHTMLParser as HTMLParser
+from urllib.parse import urljoin
 
 # 直接剔除的噪点标签
 _STRIP_TAGS = ("script", "style", "noscript", "nav", "footer", "aside", "form", "header")
@@ -18,10 +19,12 @@ _MAIN_CANDIDATES = ("main", "article")
 def extract_to_markdown(html: str, base_url: str | None = None) -> str:
     """HTML → 正文 Markdown；净化后无正文返回空串（empty 结局）。"""
     tree = HTMLParser(html)
+    if base_url:
+        _absolutize_links(tree, base_url)
     for tag in _STRIP_TAGS:
-        for node in tree.css(tag):
+        for node in list(tree.css(tag)):
             node.decompose()
-    for node in tree.css('[role="navigation"]'):
+    for node in list(tree.css('[role="navigation"]')):
         node.decompose()
 
     root = _pick_main_root(tree)
@@ -30,6 +33,17 @@ def extract_to_markdown(html: str, base_url: str | None = None) -> str:
     inner = root.html or ""
     markdown = md(inner, heading_style="ATX", strip=["img"])
     return _normalize(markdown)
+
+
+def _absolutize_links(tree: HTMLParser, base_url: str) -> None:
+    for node in tree.css("a[href]"):
+        href = node.attributes.get("href", "")
+        if href and not href.startswith(("http://", "https://", "mailto:", "#", "data:")):
+            node.attributes["href"] = urljoin(base_url, href)
+    for node in tree.css("img[src]"):
+        src = node.attributes.get("src", "")
+        if src and not src.startswith(("http://", "https://", "data:")):
+            node.attributes["src"] = urljoin(base_url, src)
 
 
 def _pick_main_root(tree: HTMLParser):
@@ -43,14 +57,17 @@ def _pick_main_root(tree: HTMLParser):
 
 def _prune_empty_nodes(root) -> None:
     """丢弃无文本且无代码/图片内容的叶节点（Pruning 思路：文本密度过滤的轻量版）。"""
-    for node in root.iter():
+    doomed = []
+    for node in list(root.iter()):
         tag = node.tag or ""
-        if tag in ("pre", "code", "td", "th", "br", "hr"):
+        if tag in ("pre", "code", "td", "th", "br", "hr", "table"):
             continue
         if node.text(strip=True) or any(c.tag in ("img", "pre", "code") for c in node.iter()):
             continue
         if not node.child():
-            node.decompose()
+            doomed.append(node)
+    for node in doomed:
+        node.decompose()
 
 
 def _normalize(markdown: str) -> str:

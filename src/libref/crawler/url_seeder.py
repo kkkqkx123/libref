@@ -19,6 +19,25 @@ from libref.crawler.robots import RobotsChecker
 _LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
 
 
+def _clean_link_token(token: str) -> str:
+    cleaned = token.strip().strip('<"\'([')
+    cleaned = cleaned.rstrip('.,;:!?"\'`)]}>')
+    if cleaned.endswith(")") and "(" not in cleaned:
+        cleaned = cleaned[:-1]
+    return cleaned.strip()
+
+
+def _looks_like_doc_path(token: str) -> bool:
+    if not token or " " in token or ":" in token:
+        return False
+    if token.startswith((".", "/")):
+        return True
+    lowered = token.lower()
+    if lowered.endswith((".md", ".html", ".htm", ".txt", ".mdx")):
+        return True
+    return "/" in token and len(token) < 256
+
+
 @dataclass
 class SeedResult:
     urls: list[str] = field(default_factory=list)
@@ -71,15 +90,27 @@ class UrlSeeder:
             return SeedResult()
         urls = []
         for line in resp.text.splitlines():
-            line = line.strip()
-            if not line.startswith("- "):
-                continue
-            # llms.txt 规范用 Markdown 链接 [text](url)；也容忍裸 URL / 相对路径
-            for token in _LINK_RE.findall(line) + line[2:].split():
-                if token.startswith(("http://", "https://")):
-                    urls.append(token)
-                elif token.startswith("/"):
-                    urls.append(urljoin(base, token))
+            stripped = line.strip()
+            if stripped.startswith(("- ", "* ", "+ ")):
+                content = stripped[2:].strip()
+            else:
+                numbered = re.match(r"\d+\.\s+(.*)", stripped)
+                if not numbered:
+                    continue
+                content = numbered.group(1).strip()
+            link_urls = [_clean_link_token(t) for t in _LINK_RE.findall(content)]
+            remainder = _LINK_RE.sub(" ", content)
+            raw_tokens = remainder.split()
+            for token in link_urls + raw_tokens:
+                cleaned = _clean_link_token(token)
+                if not cleaned or cleaned.startswith(("#", "mailto:", "data:")):
+                    continue
+                if cleaned.startswith(("http://", "https://")):
+                    urls.append(cleaned)
+                elif cleaned.startswith("/"):
+                    urls.append(urljoin(base + "/", cleaned))
+                elif _looks_like_doc_path(cleaned):
+                    urls.append(urljoin(base + "/", cleaned))
         if not urls:
             return SeedResult()
         return SeedResult(urls=urls, source="llms.txt")
@@ -87,7 +118,11 @@ class UrlSeeder:
     # ── sitemap（含 .gz 与 index 递归一层）──
 
     async def _from_sitemap(self, base: str, depth: int = 0) -> SeedResult:
-        for candidate in (f"{base}/sitemap.xml", f"{base}/sitemap_index.xml"):
+        for candidate in (
+            f"{base}/sitemap.xml",
+            f"{base}/sitemap.xml.gz",
+            f"{base}/sitemap_index.xml",
+        ):
             body = await self._fetch_body(candidate)
             if body is None:
                 continue

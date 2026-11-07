@@ -246,10 +246,13 @@ class IngestService:
 
             async def process(url: str) -> None:
                 async with sem:
-                    page = store.get_page(version_id, url)
-                    result = await self._fetch_and_store(
-                        fetcher, robots, store, library_id, version_id, url, page
-                    )
+                    try:
+                        page = store.get_page(version_id, url)
+                        result = await self._fetch_and_store(
+                            fetcher, robots, store, library_id, version_id, url, page
+                        )
+                    except Exception:
+                        result = StoreResult("failed")
                     counts[result.outcome] = counts.get(result.outcome, 0) + 1
                     removed_all.extend(result.removed_ids)
                     inserted_all.extend(result.inserted_ids)

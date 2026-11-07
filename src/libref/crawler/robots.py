@@ -62,25 +62,26 @@ class RobotsChecker:
 
     # ── 内部 ──
 
-    def _host(self, url: str) -> str:
+    def _cache_key(self, url: str) -> str:
         parts = urlsplit(url)
-        return parts.netloc
+        scheme = (parts.scheme or "https").lower()
+        return f"{scheme}://{parts.netloc.lower()}"
 
     async def _parser_for(self, url: str) -> urllib.robotparser.RobotFileParser | None:
-        host = self._host(url)
-        body = self._cached_body(host)
+        key = self._cache_key(url)
+        body = self._cached_body(key)
         if body is None:
-            body = await self._fetch_body(host)
+            body = await self._fetch_body(url)
             if body is None:
                 return None  # robots 不可达 → 全允许
-            self._store(host, body)
+            self._store(key, body)
         rp = urllib.robotparser.RobotFileParser()
         rp.parse(body.splitlines())
         return rp
 
-    def _cached_body(self, host: str) -> str | None:
+    def _cached_body(self, key: str) -> str | None:
         row = self._conn.execute(
-            "SELECT body, body_md5, fetched_at FROM robots_cache WHERE host=?", (host,)
+            "SELECT body, body_md5, fetched_at FROM robots_cache WHERE host=?", (key,)
         ).fetchone()
         if row is None:
             return None
@@ -91,21 +92,23 @@ class RobotsChecker:
             return None
         return body
 
-    def _store(self, host: str, body: str) -> None:
+    def _store(self, key: str, body: str) -> None:
         self._conn.execute(
             "INSERT INTO robots_cache(host, body, body_md5, fetched_at) VALUES(?,?,?,?) "
             "ON CONFLICT(host) DO UPDATE SET body=excluded.body, body_md5=excluded.body_md5, "
             "fetched_at=excluded.fetched_at",
-            (host, body, hashlib.md5(body.encode()).hexdigest(), time.time()),
+            (key, body, hashlib.md5(body.encode()).hexdigest(), time.time()),
         )
         self._conn.commit()
 
-    async def _fetch_body(self, host: str) -> str | None:
+    async def _fetch_body(self, url: str) -> str | None:
         import httpx
 
-        url = f"https://{host}/robots.txt"
+        parts = urlsplit(url)
+        scheme = (parts.scheme or "https").lower()
+        target = f"{scheme}://{parts.netloc}/robots.txt"
         try:
-            resp = await self._client.get(url)
+            resp = await self._client.get(target)
         except httpx.HTTPError:
             return None
         if resp.status_code >= 400:

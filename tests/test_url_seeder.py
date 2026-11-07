@@ -44,6 +44,8 @@ def test_sitemap_gz_and_index():
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/sitemap.xml":
             return httpx.Response(404)
+        if request.url.path == "/sitemap.xml.gz":
+            return httpx.Response(404)
         if request.url.path == "/sitemap_index.xml":
             return httpx.Response(200, text=(
                 "<sitemapindex><sitemap><loc>https://d.example/sub.xml.gz</loc></sitemap></sitemapindex>"

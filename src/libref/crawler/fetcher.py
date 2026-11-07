@@ -17,7 +17,7 @@ import httpx
 @dataclass
 class FetchOutcome:
     url: str
-    status: str  # ok / unchanged / failed
+    status: str  # ok / unchanged / absent / failed
     content: str | None = None
     etag: str | None = None
     last_modified: str | None = None
@@ -54,6 +54,7 @@ class HttpFetcher:
             headers["If-Modified-Since"] = last_modified
 
         delay = crawl_delay if crawl_delay is not None else self._default_delay
+        delay = min(max(delay, 0.0), 30.0)
         error: str | None = None
         for attempt in range(self._max_retries + 1):
             await self._throttle(url, delay)
@@ -61,8 +62,10 @@ class HttpFetcher:
                 resp = await self._client.get(url, headers=headers)
             except httpx.HTTPError as exc:
                 error = f"{type(exc).__name__}: {exc}"
+                await self._mark(url)
                 await asyncio.sleep(0.5 * (2**attempt))
                 continue
+            await self._mark(url)
             if resp.status_code == 304:
                 return FetchOutcome(url=url, status="unchanged")
             if resp.status_code == 404 or resp.status_code == 410:
@@ -84,7 +87,7 @@ class HttpFetcher:
         return FetchOutcome(url=url, status="failed", error=error)
 
     async def _throttle(self, url: str, delay: float) -> None:
-        host = urlsplit(url).netloc
+        host = urlsplit(url).netloc.lower()
         lock = self._locks.setdefault(host, asyncio.Lock())
         async with lock:
             last = self._last_request_at.get(host)
@@ -92,4 +95,9 @@ class HttpFetcher:
                 wait = delay - (time.monotonic() - last)
                 if wait > 0:
                     await asyncio.sleep(wait)
+
+    async def _mark(self, url: str) -> None:
+        host = urlsplit(url).netloc.lower()
+        lock = self._locks.setdefault(host, asyncio.Lock())
+        async with lock:
             self._last_request_at[host] = time.monotonic()
