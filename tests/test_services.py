@@ -10,7 +10,14 @@ import httpx
 
 from libref.chunking import Chunk
 from libref.config import LibrefSettings
-from libref.services import IngestService, JobManager, SearchService
+from libref.services import (
+    IngestService,
+    JobManager,
+    SearchService,
+    build_scrape_runner,
+    run_scrape_job_sync,
+    start_scrape_job,
+)
 from libref.store.document_store import DocumentStore
 
 
@@ -185,3 +192,146 @@ def test_scrape_docs_end_to_end_with_mock(conn, tmp_path):
 
 def make_client(handler) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+def _patch_client(handler):
+    """将 ingest._client 换成 MockTransport 注入（不出网），返回复原函数。"""
+    mock_client = make_client(handler)
+
+    @contextlib.asynccontextmanager
+    async def fake_client(_settings):
+        yield mock_client
+
+    import libref.services.ingest as ingest_mod
+    original = ingest_mod._client
+    ingest_mod._client = fake_client
+
+    def restore():
+        ingest_mod._client = original
+        asyncio.run(mock_client.aclose())
+
+    return restore
+
+
+def test_scrape_sweeps_pages_missing_from_seed_to_absent(conn):
+    seed_lv(conn)
+    store = DocumentStore(conn)
+    keep_url = "https://d.example/keep.html"
+    stale_url = "https://d.example/stale.html"
+    for url, body in ((keep_url, "keep body quetzalkeep"),
+                      (stale_url, "stale body quetzalstale")):
+        store.store_page(
+            1, 1, url, "stored",
+            chunks=[Chunk(url=url, path="G", title="G", content=body, sort_order=0)],
+            raw_content=body,
+        )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="")
+        if request.url.path == "/llms.txt":
+            return httpx.Response(200, text=f"- [Keep]({keep_url})\n")
+        if request.url.path == "/keep.html":
+            return httpx.Response(
+                200, text="<html><body><main><p>keep body quetzalkeep</p></main></body></html>")
+        raise AssertionError(request.url.path)
+
+    settings = LibrefSettings(
+        request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
+        robots_cache_ttl_days=1.0,
+    )
+    restore = _patch_client(handler)
+    try:
+        counts = IngestService(settings, conn).scrape_docs("docs", "1.0", "https://d.example/")
+    finally:
+        restore()
+
+    assert counts["absent"] == 1
+    assert store.get_page(1, stale_url) is None
+    assert store.get_page(1, keep_url) is not None
+    assert SearchService(conn).search_docs("quetzalstale") == []
+
+
+def test_scrape_skips_sweep_when_seed_truncated(conn):
+    seed_lv(conn)
+    store = DocumentStore(conn)
+    other_url = "https://d.example/other.html"
+    store.store_page(
+        1, 1, other_url, "stored",
+        chunks=[Chunk(url=other_url, path="G", title="G", content="other body", sort_order=0)],
+        raw_content="other body",
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="")
+        if request.url.path == "/llms.txt":
+            return httpx.Response(200, text=(
+                "- [A](https://d.example/a.html)\n"
+                "- [B](https://d.example/b.html)\n"
+            ))
+        if request.url.path in ("/a.html", "/b.html"):
+            return httpx.Response(
+                200, text="<html><body><main><p>page body</p></main></body></html>")
+        raise AssertionError(request.url.path)
+
+    settings = LibrefSettings(
+        request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
+        robots_cache_ttl_days=1.0,
+    )
+    restore = _patch_client(handler)
+    try:
+        # max_pages=1 截断发现集：缺席清理必须跳过，避免误删未覆盖页面
+        IngestService(settings, conn).scrape_docs(
+            "docs", "1.0", "https://d.example/", max_pages=1)
+    finally:
+        restore()
+
+    assert store.get_page(1, other_url) is not None
+
+
+def test_start_scrape_job_runs_through_queue(conn):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="")
+        if request.url.path == "/llms.txt":
+            return httpx.Response(200, text="- [Install](https://d.example/install.html)\n")
+        if request.url.path == "/install.html":
+            return httpx.Response(
+                200, text="<html><body><main><p>use uv to install libref</p></main></body></html>")
+        raise AssertionError(request.url.path)
+
+    settings = LibrefSettings(
+        request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
+        robots_cache_ttl_days=1.0,
+    )
+    mgr = JobManager(conn)
+    assert mgr.recover() == []
+    job_id = start_scrape_job(mgr, "docs", "1.0", "https://d.example/", max_pages=5)
+    assert mgr.get(job_id).kind == "scrape_docs"
+
+    restore = _patch_client(handler)
+    try:
+        job = run_scrape_job_sync(mgr, settings, conn, job_id, timeout=30.0)
+    finally:
+        restore()
+
+    assert job.status == "done"
+    assert SearchService(conn).search_docs("libref") != []
+
+
+def test_scrape_runner_rejects_unknown_kind(conn):
+    settings = LibrefSettings(crawl_delay_default=0.0)
+    mgr = JobManager(conn)
+    job_id = mgr.submit("nope", {})
+
+    async def scenario():
+        mgr.start_worker(build_scrape_runner(settings, conn))
+        try:
+            return await mgr.wait_for(job_id, timeout=30.0)
+        finally:
+            mgr.stop_worker()
+
+    job = asyncio.run(scenario())
+    assert job.status == "failed"
+    assert "unsupported job kind" in (job.error or "")

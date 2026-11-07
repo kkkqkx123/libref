@@ -11,13 +11,14 @@ import sys
 
 from libref.config import LibrefSettings
 from libref.db import apply_migrations, open_db
-from libref.services.ingest import IngestService
+from libref.services.ingest import IngestService, run_scrape_job_sync, start_scrape_job
+from libref.services.jobs import JobManager
 from libref.services.search import SearchService
 
 
-def _connect(settings: LibrefSettings):
+def _connect(settings: LibrefSettings, *, check_same_thread: bool = True):
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = open_db(settings.db_path)
+    conn = open_db(settings.db_path, check_same_thread=check_same_thread)
     apply_migrations(conn)
     return conn
 
@@ -40,6 +41,16 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     settings = LibrefSettings()
     conn = _connect(settings)
     try:
+        if args.run_async:
+            mgr = JobManager(conn)
+            mgr.recover()
+            job_id = start_scrape_job(
+                mgr, args.library, args.version, args.start_url,
+                max_pages=args.max_pages, prefilter=args.prefilter,
+            )
+            job = run_scrape_job_sync(mgr, settings, conn, job_id)
+            print(f"job {job.id} {job.status}" + (f" error={job.error}" if job.error else ""))
+            return 0 if job.status == "done" else 1
         service = IngestService(settings, conn)
         counts = service.scrape_docs(
             args.library, args.version, args.start_url,
@@ -87,7 +98,8 @@ def cmd_read_page(args: argparse.Namespace) -> int:
 def cmd_serve_mcp(_args: argparse.Namespace) -> int:
     from libref.mcp_server import build_mcp_server
 
-    conn = _connect(LibrefSettings())
+    # MCPServer 在 worker 线程执行工具，连接需跨线程复用。
+    conn = _connect(LibrefSettings(), check_same_thread=False)
     mcp = build_mcp_server(conn)
     mcp.run("stdio")  # 阻塞直到 stdio 关闭
     conn.close()
@@ -106,6 +118,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument("start_url")
     p_ingest.add_argument("--max-pages", type=int, default=None)
     p_ingest.add_argument("--prefilter", action="store_true", help="HEAD 存活预筛")
+    p_ingest.add_argument("--async", dest="run_async", action="store_true",
+                          help="经 jobs 队列执行（提交→同进程 worker 消费→回写 jobs 表）")
     p_ingest.set_defaults(func=cmd_ingest)
 
     p_search = sub.add_parser("search", help="FTS 全文检索")

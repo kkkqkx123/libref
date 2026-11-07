@@ -9,7 +9,11 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.mcpserver import MCPServer as FastMCP
+    """mcp>=2 重命名 FastMCP → MCPServer；别名保持注册/运行调用不变。"""
+except ImportError:
+    from mcp.server.fastmcp import FastMCP
 
 from libref.services.search import SearchService
 

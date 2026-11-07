@@ -103,6 +103,20 @@ class JobManager:
             self._worker.cancel()
             self._worker = None
 
+    async def wait_for(self, job_id: int, *, timeout: float = 300.0,
+                       poll: float = 0.02) -> Job:
+        """等待任务落定（done/failed），超时抛 TimeoutError。"""
+        deadline = time.monotonic() + timeout
+        while True:
+            job = self.get(job_id)
+            if job is None:
+                raise KeyError(f"unknown job: {job_id}")
+            if job.status in ("done", "failed"):
+                return job
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"job {job_id} not finished within {timeout}s")
+            await asyncio.sleep(poll)
+
     # ── 心跳恢复 ──
 
     def recover(self) -> list[int]:

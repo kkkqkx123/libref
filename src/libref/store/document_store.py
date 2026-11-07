@@ -47,6 +47,14 @@ class DocumentStore:
         return PageRecord(page_id=row[0], url=row[1], etag=row[2],
                           last_modified=row[3], content_hash=row[4])
 
+    def list_page_urls(self, version_id: int) -> list[str]:
+        """列出该版本下已有 pages 的全部 URL（供 ingest 缺席清理做差集）。"""
+        rows = self._conn.execute(
+            "SELECT url FROM pages WHERE version_id=? ORDER BY url",
+            (version_id,),
+        ).fetchall()
+        return [r[0] for r in rows]
+
     def list_page_documents(self, page_id: int) -> list[dict[str, Any]]:
         rows = self._conn.execute(
             "SELECT id, url, content, metadata, sort_order FROM documents "
