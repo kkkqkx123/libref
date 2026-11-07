@@ -151,3 +151,8 @@ CREATE TABLE schema_meta(
   value TEXT NOT NULL
 );
 """
+
+# ── 003 pages 内容指纹（P1 增量：内容 hash 未变 → unchanged 短路）──
+PAGES_CONTENT_HASH_SQL = """
+ALTER TABLE pages ADD COLUMN content_hash TEXT;
+"""

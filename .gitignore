@@ -21,9 +21,10 @@ htmlcov/
 # 参考仓库（只读，不参与构建；锚定仓库根目录，避免误伤 docs/ref/）
 /ref/
 
-# 环境变量与编辑器
+# 环境变量与编辑器（.env.example 模板需入库，故显式放行）
 .env
 .env.*
+!.env.example
 .idea/
 .vscode/
 

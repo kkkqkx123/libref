@@ -88,7 +88,7 @@ def search(self, query_vec: list[float], *, k: int, version_id: int) -> list[tup
     return [(p.id, p.score) for p in res.points]
 ```
 
-- query 向量生成仍属 P3 `store/embeddings.py`（sentence-transformers），本层只接受已编码向量；
+- query 向量生成仍属 P3 `store/embeddings.py`（OpenAI 兼容 Embedding API，主后端 SiliconFlow bge-m3），本层只接受已编码向量；
 - RRF 融合（P3 retriever）基于**排名**融合，score 语义变化无影响；频次重排若需用相似度分值，
   统一按 COSINE similarity（越大越近）；
 - Qdrant 服务不可达时的降级：检索侧回退为 FTS-only（RRF 单路），由 services 层捕获连接异常实现——

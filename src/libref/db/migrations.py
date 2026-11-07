@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from libref.db.schema import (
     INITIAL_SCHEMA_SQL,
     MINING_REVIEW_SCHEMA_SQL,
+    PAGES_CONTENT_HASH_SQL,
     VECTOR_META_SQL,
 )
 
@@ -27,6 +28,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(0, "initial-schema", INITIAL_SCHEMA_SQL),
     Migration(1, "mining-review-schema", MINING_REVIEW_SCHEMA_SQL),
     Migration(2, "vector-meta", VECTOR_META_SQL),
+    Migration(3, "pages-content-hash", PAGES_CONTENT_HASH_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

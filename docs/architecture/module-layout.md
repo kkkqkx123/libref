@@ -61,7 +61,9 @@ libref/
 │   │   ├── __init__.py
 │   │   ├── document_store.py   # [P1/P3] pages/documents 读写、增量结局六态
 │   │   ├── vec_store.py        # [P0] QdrantVecStore：向量写入/KNN/集合治理（真源 SQLite 的可重建派生索引）
-│   │   ├── embeddings.py       # [P3] sentence-transformers 封装 + 模型/维度失效检测
+│   │   ├── embeddings.py       # [P3] Embedding API 封装（主后端 SiliconFlow bge-m3，
+│   │   │                       #      OpenAI 兼容 /v1/embeddings，接口抽象预留多后端）
+│   │   │                       #      + 模型/维度失效检测
 │   │   └── retriever.py        # [P3] FTS5 BM25 + Qdrant KNN → RRF → 频次重排 → 段落重组
 │   │
 │   ├── services/               # ── 业务工具层（三出口唯一调用面）──
@@ -82,7 +84,7 @@ libref/
 │   │   └── api.py              # [P3] REST 模型（pydantic）
 │   │
 │   └── cli.py                  # [P1] Typer/argparse 入口（只调 services/）
-├── webui/                      # [P3] 前端独立工程（npm/Vite，不进 pyproject）
+├── webui/                      # [P3] 前端独立工程（npm/Vite + Vue 3 + Element Plus，不进 pyproject）
 └── tests/
     ├── conftest.py
     ├── test_prefixspan.py      # [P2] README 黄金样例 + closed 定义校验 + 随机对拍

@@ -16,9 +16,9 @@
 | 分块 | 自研两阶段分块（结构感知切分 + 贪心合并 + 代码围栏平衡） | docs-mcp-server 的 SemanticMarkdownSplitter / GreedySplitter 模式，纯逻辑无依赖。 |
 | 序列挖掘 | **自研 PrefixSpan**（约 300 行，归一化整数索引输入），以 `ref/PrefixSpan-py` 为复刻蓝本（见 docs/ref/prefixspan.md） | PrefixSpan-py 为纯 Python、无重依赖的成熟极简实现，可直接复刻并定制（加权支持度、流式落库、closed 去冗余）；不引入 pyfim（2020 年停更、wheel 仅到 cp37 且无 abi3，非硬性依赖）。APP-Miner 仅借鉴其支持度阈值与 maximal 剪枝思路。 |
 | 频次统计 | 自研（借鉴 EpiCoder `extract_frequency_count.py` 层级聚合 + top-N 剪枝、"结构树/频次表"分离存储） | EpiCoder 该部分为纯静态代码，可直接改写复用；其特征抽取靠 LLM，必须替换为 tree-sitter 静态抽取。 |
-| Embedding | **sentence-transformers 本地模型**（如 BAAI/bge-small-zh / all-MiniLM） | 避免 OpenAI 依赖与密钥管理；记录模型名+维度，变更时整体失效向量（借鉴 docs-mcp-server 的 metadata 校验机制）。 |
+| Embedding | **主后端 SiliconFlow 免费 `BAAI/bge-m3`**（OpenAI 兼容 `/v1/embeddings`，1024 维；2026-11 用户决策，暂定策略），接口抽象预留多后端（本地 llama-server 等同协议端点可切换，`tools/hurl/` 已有示范） | 免本地权重分发，密钥经 `.env` 注入不入库；记录模型名+维度，变更时整体失效向量（借鉴 docs-mcp-server 的 metadata 校验机制）。 |
 | MCP 出口 | **官方 `mcp` Python SDK**（FastMCP），stdio + Streamable HTTP 传输，令牌鉴权 | init-req 指定 MCP 官方 servers 为协议参考；Python SDK 的 FastMCP 覆盖 tools/resources 两类能力，与 docs-mcp-server 工具面（search_docs / read_page / list_libraries…）一一对应。 |
-| Web 出口 | **FastAPI + uvicorn**，前端 **Vue 3 + Vite + Element Plus**（或 React + TanStack Query，二选一，见 §7 决策点） | docs-mcp-server 的三出口架构中 Web 层仅是服务层调用方；Python 侧 FastAPI 生态与 MCP SDK 的 HTTP transport 均基于 ASGI，可同进程部署。 |
+| Web 出口 | **FastAPI + uvicorn**，前端 **Vue 3 + Vite + Element Plus**（§7 决策点 1 已定） | docs-mcp-server 的三出口架构中 Web 层仅是服务层调用方；Python 侧 FastAPI 生态与 MCP SDK 的 HTTP transport 均基于 ASGI，可同进程部署。 |
 | 数据校验 | **pydantic v2**（贯穿：抽取结果 schema、MCP 工具参数、API 模型） | graphify 的 validate.py 与 MCP SDK 的参数校验均需要统一 schema 层。 |
 | 溯源与置信 | 自研字段：文档条目绑 URL；代码条目绑文件+**行范围**+实参列表；边带 EXTRACTED/INFERRED/AMBIGUOUS 置信标签 | overview 差异化创新点 3、4；graphify 的置信标签直接沿用作为审核优先级依据。 |
 | 测试 | **pytest + pytest-asyncio**；检索质量基准（MRR/Recall@k）做成 CI 门禁 | docs-mcp-server 的检索基准模式被列为"重写时照搬防退化"。 |
@@ -202,7 +202,8 @@ dependencies += [
     "mcp>=1.2",                        # 官方 SDK，FastMCP
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
-    "sentence-transformers>=3.2",      # 本地 embedding
+    # Embedding 决策 2026-11：SiliconFlow bge-m3 API（OpenAI 兼容，复用 P1 的 httpx），
+    # 不再引入 sentence-transformers——免本地权重分发
 ]
 ```
 
@@ -216,8 +217,11 @@ dependencies += [
 
 ## 7. 待用户决策点
 
-1. **Web 前端**：Vue 3（国内生态、Element Plus 后台组件全）vs React（与 docs-mcp-server 参考实现同构，照搬页面结构更顺）。默认建议 React。
-2. **Embedding 模型**：纯本地 sentence-transformers（无 API 依赖，需下载模型权重）vs 预留 OpenAI/Ollama 接口（照搬 docs-mcp-server 的多后端 + 维度校验机制）。默认建议本地优先 + 接口抽象预留多后端。
+1. **Web 前端** ✅ 已定（2026-11）：**Vue 3 + Vite + Element Plus**。
+2. **Embedding 模型** ✅ 已定（2026-11，暂定策略）：**SiliconFlow 免费 `BAAI/bge-m3` API**
+   （OpenAI 兼容 `/v1/embeddings`，1024 维，key 经 `.env` 注入）；接口抽象预留多后端，
+   本地 llama-server 等同协议端点已示范可切（`tools/hurl/`）；
+   SiliconFlow `/v1/rerank`（bge-reranker-v2-m3）留作检索精排可选档，不入 P3 验收。
 3. **MCP 传输范围**：P3 先做 stdio（本地助手场景）还是 stdio+HTTP 同步上（需要令牌鉴权与 Origin/SSRF 校验）。默认建议先 stdio，HTTP 放 P3.5。
 4. **PrefixSpan 对拍基准**：自研复刻（蓝本 ref/PrefixSpan-py）后，对拍基准用纯 Python 参考实现还是 README 黄金样例集。默认建议两者都用：README 示例做单元测试黄金样例，纯 Python 参考实现做随机数据对拍。
 
