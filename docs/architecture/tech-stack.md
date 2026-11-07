@@ -1,7 +1,7 @@
 # libref 技术栈与依赖设计
 
 > 依据：`docs/req/init-req.md`（课题目标）与 `docs/ref/overview.md`（六项目源码级调查结论）。
-> 结论先行：**Python + uv 单语言单体仓库，SQLite 作为唯一存储与检索引擎，tree-sitter 做源码解析，自研爬虫（借鉴 crawl4ai 模式而非直接依赖）**。系统三层（挖掘构建 / 知识库检索 / Web+MCP 双出口）全部落在同一个 Python 包内，分阶段引入依赖。
+> 结论先行：**Python + uv 单语言单体仓库，SQLite 作为唯一真源存储（元数据/正文/FTS），Qdrant 作为向量检索引擎（可重建派生索引），tree-sitter 做源码解析，自研爬虫（借鉴 crawl4ai 模式而非直接依赖）**。系统三层（挖掘构建 / 知识库检索 / Web+MCP 双出口）全部落在同一个 Python 包内，分阶段引入依赖。
 
 ---
 
@@ -9,8 +9,8 @@
 
 | 层 | 选型 | 理由（对应对标项目核实结论） |
 |---|---|---|
-| 语言 / 包管理 | **Python ≥3.14 + uv**（uv 管依赖、虚拟环境、构建与脚本入口） | 全部核心借鉴对象（graphify、crawl4ai、EpiCoder、APP-Miner）均为 Python；docs-mcp-server 虽为 TS，但 init-req 明确"学习架构、Python 重写"。核心依赖（tree-sitter 0.26、tree-sitter-python 0.25 abi3、sqlite-vec 0.1.9 py3-none）均已有兼容 3.14 的 wheel（PyPI 已核实）。 |
-| 存储 | **SQLite**（sqlite3 标准库 + FTS5 全文 + sqlite-vec 向量） | docs-mcp-server 单机 SQLite 零外部依赖的架构被核实为可行且成熟；FTS5 内置 porter/unicode61 分词；sqlite-vec 虚拟表按 (library_id, version_id) 分区实现版本隔离。 |
+| 语言 / 包管理 | **Python ≥3.14 + uv**（uv 管依赖、虚拟环境、构建与脚本入口） | 全部核心借鉴对象（graphify、crawl4ai、EpiCoder、APP-Miner）均为 Python；docs-mcp-server 虽为 TS，但 init-req 明确"学习架构、Python 重写"。核心依赖（tree-sitter 0.26、tree-sitter-python 0.25 abi3）均已有兼容 3.14 的 wheel（PyPI 已核实）。 |
+| 存储 | **SQLite（真源）+ Qdrant（向量索引）** | SQLite（sqlite3 标准库 + FTS5 全文）：docs-mcp-server 单机零外部依赖的架构被核实为可行且成熟，FTS5 内置 porter/unicode61 分词，承载全部元数据/正文/审核。Qdrant（qdrant-client 1.20）：sqlite-vec 无 ANN 索引（纯暴力扫描），库文档+库代码全量灌入后容量不足，已迁移至 Qdrant HNSW + payload 版本过滤（决策见 docs/plan/qdrant-migration.md）；Qdrant 定位为可重建派生索引，崩溃后按 SQLite 重灌，不做双写事务。 |
 | AST 解析 | **tree-sitter（py-tree-sitter）+ 声明式 LanguageConfig** | graphify 已验证"声明式语言配置 + 通用抽取引擎"模式：新增语言只加配置不改引擎，且带文件 hash + grammar fingerprint 增量缓存。 |
 | 文档抓取 | **自研爬虫：httpx + selectolax + 升级备选 Playwright**，借鉴 crawl4ai 的 URL 发现与正文净化算法 | 核实结论：crawl4ai 是通用爬虫框架，依赖重（自带 browser 池、LLM 模块），本课题只需其 robots→sitemap 链式发现、PruningContentFilter 正文净化、robots 缓存三个思路，自研实现量小且可控。 |
 | 分块 | 自研两阶段分块（结构感知切分 + 贪心合并 + 代码围栏平衡） | docs-mcp-server 的 SemanticMarkdownSplitter / GreedySplitter 模式，纯逻辑无依赖。 |
@@ -138,14 +138,15 @@ grammar wheel 与 py-tree-sitter 存在 ABI 兼容窗口，`uv.lock` 钉死全�
 
 ## 5. 存储与检索
 
-- **SQLite 表结构**直接以 docs-mcp-server 迁移目录（db/migrations 000~019）为事实标准用 Python 重写：`libraries / versions / pages / documents / documents_fts / documents_vec` + 本课题扩展表：
+- **SQLite 表结构**直接以 docs-mcp-server 迁移目录（db/migrations 000~019）为事实标准用 Python 重写：`libraries / versions / pages / documents / documents_fts` + 本课题扩展表：
   - `api_entities`（确定性 ID、限定名、库版本归属）
   - `call_instances`（callee、args JSON、file、line_range、confidence）
   - `seq_patterns`（PrefixSpan 产出：pattern、support、来源实例引用）
   - `review_status`（审核工作流：pending/approved/conflict，挂每条知识条目）
+  - `schema_meta`（键值元数据：vec_model/vec_dim，供向量索引失效校验）
 - FTS5：`tokenize='porter unicode61'`，触发器同步（按列收窄的 update 触发器照搬）。
-- 向量：`sqlite-vec`，rowid=documents.id，(library_id, version_id) 分区。
-- 检索：FTS5 BM25（bm25(10.0,1.0,5.0,1.0) 权重）+ sqlite-vec KNN 两路 CTE → **RRF 融合** → 频次特征重排（本课题创新：seq_patterns 支持度作为加权项）→ 段落重组（按 URL 分组扩展兄弟/父块）。
+- 向量：**Qdrant 单集合**（`libref_chunks`），Point id=documents.id，payload 只存 `library_id`/`version_id` 过滤键（`version_id` 整数索引 `is_principal=True` 租户优化），正文命中后回 SQLite 取；模型/维度变更时集合删除重建（元数据记于 schema_meta）。
+- 检索：FTS5 BM25（bm25(10.0,1.0,5.0,1.0) 权重）+ Qdrant KNN（COSINE，version_id 过滤）两路 → **RRF 融合** → 频次特征重排（本课题创新：seq_patterns 支持度作为加权项）→ 段落重组（按 URL 分组扩展兄弟/父块）；Qdrant 不可达时降级为 FTS-only 单路。
 
 ---
 
@@ -155,17 +156,18 @@ grammar wheel 与 py-tree-sitter 存在 ABI 兼容窗口，`uv.lock` 钉死全�
 
 ```toml
 [project]
-requires-python = ">=3.14"   # tree-sitter cp314 wheel / abi3 grammar wheel / sqlite-vec py3-none wheel 均已核实兼容（2026-11）
+requires-python = ">=3.14"   # tree-sitter cp314 wheel / abi3 grammar wheel 均已核实兼容（2026-11）
 dependencies = [
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
+    "qdrant-client>=1.20",             # 向量索引（本地服务部署要求，见 §5 与 docs/plan/qdrant-migration.md）
 ]
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "mypy>=1.11"]
 ```
 
-> 注：`requires-python` 维持 `>=3.14`。已核实（2026-11，PyPI JSON API）：tree-sitter 0.26.0 提供 cp314 wheel（全平台）；tree-sitter-python/java 等 grammar wheel 为 `cp310-abi3`（稳定 ABI，3.14 兼容）；sqlite-vec 0.1.9 为 `py3-none-*` wheel（与 Python 版本无关）。三者均无版本兼容问题。
+> 注：`requires-python` 维持 `>=3.14`。已核实（2026-11，PyPI JSON API）：tree-sitter 0.26.0 提供 cp314 wheel（全平台）；tree-sitter-python/java 等 grammar wheel 为 `cp310-abi3`（稳定 ABI，3.14 兼容）。均无版本兼容问题。（原 sqlite-vec 0.1.9 py3-none wheel 的兼容性核实已随向量层迁移 Qdrant 失效。）
 
 ### P1 分支 A（文档链路）
 
@@ -175,7 +177,6 @@ dependencies += [
     "selectolax>=0.3",
     "markdownify>=0.13",
     "bm25s>=0.2",
-    "sqlite-vec>=0.1.6",
 ]
 [project.optional-dependencies]
 browser = ["playwright>=1.47"]      # 反爬兜底，默认不装
