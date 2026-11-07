@@ -18,8 +18,8 @@ venv/
 .coverage
 htmlcov/
 
-# 参考仓库（只读，不参与构建）
-ref/
+# 参考仓库（只读，不参与构建；锚定仓库根目录，避免误伤 docs/ref/）
+/ref/
 
 # 环境变量与编辑器
 .env
