@@ -1,0 +1,32 @@
+# Python 字节码与缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# 虚拟环境（uv 管理）
+.venv/
+venv/
+
+# 测试与工具缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 参考仓库（只读，不参与构建）
+ref/
+
+# 环境变量与编辑器
+.env
+.env.*
+.idea/
+.vscode/
+
+# 系统文件
+.DS_Store
+Thumbs.db

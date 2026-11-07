@@ -1,7 +1,7 @@
 # 对标项目功能分析汇总（docs/ref）
 
 > 本目录是对六个对标项目**源码级调查**的分析文档，逐篇见同目录各文件：
-> `docs-mcp-server.md`、`crawl4ai.md`、`graphify.md`、`epicoder.md`、`app-miner.md`。
+> `docs-mcp-server.md`、`crawl4ai.md`、`graphify.md`、`epicoder.md`、`app-miner.md`、`prefixspan.md`。
 > 结论基于对本地仓库（`ref/<项目名>`）的实际代码核实，与 `docs/req/init-req.md` 中的调研描述有出入之处已在各篇中标出。
 
 ## 一、项目对照总表
