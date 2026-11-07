@@ -1,8 +1,4 @@
-"""CLI 出口（stdlib argparse，只调 services/）。
-
-子命令：init-db / ingest / search / read-page / serve-mcp。
-出口零业务逻辑：参数解析 + services 调用 + 打印（module-layout §2.2）。
-"""
+"""命令行出口，只做参数解析加服务调用加结果打印。"""
 
 from __future__ import annotations
 
@@ -11,9 +7,15 @@ import sys
 
 from libref.config import LibrefSettings
 from libref.db import apply_migrations, open_db
-from libref.services.ingest import IngestService, run_scrape_job_sync, start_scrape_job
+from libref.services.ingest import (
+    IngestService,
+    build_embed_fn,
+    run_scrape_job_sync,
+    start_scrape_job,
+)
 from libref.services.jobs import JobManager
 from libref.services.search import SearchService
+from libref.store.vec_store import QdrantVecStore, collection_for
 
 
 def _connect(settings: LibrefSettings, *, check_same_thread: bool = True):
@@ -37,9 +39,23 @@ def applied_count(conn) -> int:
     return len(applied_versions(conn) & {m.version for m in MIGRATIONS})
 
 
+def _build_vector(settings: LibrefSettings):
+    """按配置构造向量存储与编码函数，无密钥时返回空，走纯全文路。"""
+    embed = build_embed_fn(settings)
+    if embed is None:
+        return None, None
+    vec = QdrantVecStore(
+        settings.qdrant_url,
+        collection_for(settings.qdrant_collection, settings.db_path),
+        timeout=settings.qdrant_timeout,
+    )
+    return vec, embed
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     settings = LibrefSettings()
     conn = _connect(settings)
+    vec_store, embed = _build_vector(settings)
     try:
         if args.run_async:
             mgr = JobManager(conn)
@@ -48,10 +64,11 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 mgr, args.library, args.version, args.start_url,
                 max_pages=args.max_pages, prefilter=args.prefilter,
             )
-            job = run_scrape_job_sync(mgr, settings, conn, job_id)
+            job = run_scrape_job_sync(mgr, settings, conn, job_id,
+                                        vec_store=vec_store, embed=embed)
             print(f"job {job.id} {job.status}" + (f" error={job.error}" if job.error else ""))
             return 0 if job.status == "done" else 1
-        service = IngestService(settings, conn)
+        service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
         counts = service.scrape_docs(
             args.library, args.version, args.start_url,
             max_pages=args.max_pages, prefilter=args.prefilter,

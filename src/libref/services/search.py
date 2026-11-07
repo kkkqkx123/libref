@@ -1,7 +1,4 @@
-"""检索服务：FTS5 BM25 全文检索 + 页面读取 + 库/版本列举。
-
-P1 只做 FTS 单路；Qdrant KNN + RRF 融合 + 频次重排在 P3（store/retriever.py）。
-"""
+"""检索服务：全文检索加页面读取加库版本列举。"""
 
 from __future__ import annotations
 
@@ -30,7 +27,7 @@ def _make_snippet(content: str | None, query: str) -> str:
     prefix = "…" if start > 0 else ""
     suffix = "…" if end < len(text) else ""
     window = text[start:end]
-    # 命中的查询词用 >>> <<< 标记，与蓝本 snippet 输出形态一致
+    # 命中的查询词用 >>> <<< 标记
     for token in sorted(set(re.findall(r"[\w-]+", query)), key=len, reverse=True):
         pattern = re.compile(re.escape(token), re.IGNORECASE)
         window = pattern.sub(lambda m: f">>>{m.group(0)}<<<", window)
@@ -49,10 +46,11 @@ class SearchService:
         version: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        """FTS5 bm25 检索；library/version 为可选过滤。
+        """全文检索，库名与版本号为可选过滤。
 
-        定制点：external-content FTS5 的 snippet()/highlight() 辅助函数在本库形态下
-        报 "SQL logic error"（无法回取原文），故片段在 Python 侧按查询词截取。
+        外部内容表的 snippet 系列辅助函数在本库形态下不可用，
+        片段在 Python 侧按查询词截取。列权重按信息密度给定：
+        标题最高，路径次之，内容与地址为基准。
         """
         filters = []
         params: list[Any] = [query]
@@ -65,7 +63,7 @@ class SearchService:
         where = ("AND " + " AND ".join(filters) + " ") if filters else ""
         params.append(limit)
         sql = (
-            "SELECT d.url, bm25(documents_fts) AS score, d.content, "
+            "SELECT d.id, d.url, bm25(documents_fts, 1.0, 5.0, 1.0, 3.0) AS score, d.content, "
             "json_extract(d.metadata, '$.title') AS title, "
             "json_extract(d.metadata, '$.path') AS path, "
             "l.name AS library, v.version AS version "
@@ -79,13 +77,14 @@ class SearchService:
         rows = self._conn.execute(sql, params).fetchall()
         return [
             {
-                "url": r[0],
-                "score": r[1],
-                "snippet": _make_snippet(r[2], query),
-                "title": r[3],
-                "path": r[4],
-                "library": r[5],
-                "version": r[6],
+                "id": r[0],
+                "url": r[1],
+                "score": r[2],
+                "snippet": _make_snippet(r[3], query),
+                "title": r[4],
+                "path": r[5],
+                "library": r[6],
+                "version": r[7],
             }
             for r in rows
         ]

@@ -1,14 +1,8 @@
-"""DDL 定义。
-
-蓝本 ref/docs-mcp-server/db/migrations/000-initial-schema.sql。
-定制点：直接落地 004/009/014 后的规范化形态（documents 带 library_id/version_id
-外键与 url 冗余列），不重演蓝本的多次重建；documents_vec 不在此建表，
-由 conn.ensure_vec_table 在 sqlite-vec 可用时延迟创建（P1）。
-"""
+"""DDL 定义：核心表、全文索引与触发器、扩展表、向量元数据、内容指纹。"""
 
 from __future__ import annotations
 
-# ── 000 初始 schema：核心表 + FTS5 + 触发器 ──
+# ── 核心表加全文索引与触发器 ──
 INITIAL_SCHEMA_SQL = """
 CREATE TABLE libraries(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,7 +55,7 @@ CREATE VIRTUAL TABLE documents_fts USING fts5(
   content_rowid='id'
 );
 
--- title/path 存于 documents.metadata JSON（蓝本语义）
+-- title 与 path 存于 documents.metadata JSON，触发器同步抽取
 CREATE TRIGGER documents_fts_after_insert
 AFTER INSERT ON documents BEGIN
   INSERT INTO documents_fts(rowid, content, title, url, path)
@@ -87,9 +81,9 @@ AFTER UPDATE OF content, metadata, url, page_id ON documents BEGIN
 END;
 """
 
-# ── 001 扩展表：源码挖掘与审核（module-layout §1）──
+# ── 扩展表：源码挖掘与审核 ──
 MINING_REVIEW_SCHEMA_SQL = """
--- api_entities：确定性 ID（graphify ids.py 模式）+ 限定名 + 库版本归属
+-- api_entities：确定性标识加限定名加库版本归属
 CREATE TABLE api_entities(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   entity_uid TEXT NOT NULL UNIQUE,          -- sha1 确定性 ID（含冲突盐）
@@ -102,7 +96,7 @@ CREATE TABLE api_entities(
 
 CREATE INDEX idx_api_entities_name ON api_entities(qualified_name);
 
--- call_instances：调用实例记录（行范围 + 实参 + 置信）
+-- call_instances：调用实例记录
 CREATE TABLE call_instances(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   call_uid TEXT NOT NULL UNIQUE,            -- sha1 确定性 ID（含冲突盐）
@@ -118,7 +112,7 @@ CREATE TABLE call_instances(
 
 CREATE INDEX idx_call_instances_callee ON call_instances(callee_entity_id);
 
--- seq_patterns：PrefixSpan 产出
+-- seq_patterns：序列挖掘产出
 CREATE TABLE seq_patterns(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
@@ -131,7 +125,7 @@ CREATE TABLE seq_patterns(
 
 CREATE INDEX idx_seq_patterns_support ON seq_patterns(version_id, support DESC);
 
--- review_status：审核工作流，挂每条知识条目
+-- review_status：审核工作流
 CREATE TABLE review_status(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   entity_type TEXT NOT NULL,                -- document / call_instance / seq_pattern
@@ -143,8 +137,7 @@ CREATE TABLE review_status(
 );
 """
 
-# ── 002 向量索引元数据（向量本体在 Qdrant，见 docs/plan/qdrant-migration.md）──
-# schema_meta 记录 vec_model/vec_dim，供 store 层 ensure_collection 校验失效
+# ── 向量索引元数据：向量本体在外部向量服务，库内只记模型名与维度 ──
 VECTOR_META_SQL = """
 CREATE TABLE schema_meta(
   key TEXT PRIMARY KEY,
@@ -152,7 +145,7 @@ CREATE TABLE schema_meta(
 );
 """
 
-# ── 003 pages 内容指纹（P1 增量：内容 hash 未变 → unchanged 短路）──
+# ── 页面内容指纹：内容不变时短路为不变结局 ──
 PAGES_CONTENT_HASH_SQL = """
 ALTER TABLE pages ADD COLUMN content_hash TEXT;
 """

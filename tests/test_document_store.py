@@ -1,4 +1,4 @@
-"""DocumentStore 测试：六态结局、增量短路、FTS 级联。"""
+"""DocumentStore 测试：六态结局、增量短路、同步增量、全文级联。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from libref.store.document_store import DocumentStore, content_hash
 
 
 def seed_lv(conn, library: str = "docs", version: str = "1.0") -> tuple[int, int]:
-    """测试库/版本外键行（固定 id=1，供 store_page(version_id=1, library_id=1) 使用）。"""
+    """测试库与版本外键行，固定标识为 1。"""
     conn.execute("INSERT INTO libraries(id, name) VALUES(1, ?)", (library,))
     conn.execute("INSERT INTO versions(id, library_id, version) VALUES(1, 1, ?)", (version,))
     conn.commit()
@@ -24,11 +24,13 @@ def make_chunks(url: str = "https://d.example/a.html") -> list[Chunk]:
 def test_stored_creates_page_documents_and_fts(conn):
     seed_lv(conn)
     store = DocumentStore(conn)
-    outcome = store.store_page(
+    result = store.store_page(
         version_id=1, library_id=1, url="https://d.example/a.html",
         outcome="stored", chunks=make_chunks(), raw_content="# Guide\ninstall libref now",
     )
-    assert outcome == "stored"
+    assert result.outcome == "stored"
+    assert result.removed_ids == []
+    assert len(result.inserted_ids) == 2
     rows = conn.execute("SELECT count(*) FROM documents").fetchone()
     assert rows[0] == 2
     hits = conn.execute(
@@ -43,10 +45,12 @@ def test_unchanged_keeps_documents(conn):
     store.store_page(1, 1, "https://d.example/a.html", "stored",
                      chunks=make_chunks(), raw_content="v1 body")
     before = conn.execute("SELECT count(*) FROM documents").fetchone()[0]
-    # 同内容再次 stored 判定 → ensure_changed 短路
+    # 同内容再次存入走短路判定
     outcome = store.ensure_changed(1, "https://d.example/a.html", "v1 body")
     assert outcome == "unchanged"
-    store.store_page(1, 1, "https://d.example/a.html", "unchanged")
+    result = store.store_page(1, 1, "https://d.example/a.html", "unchanged")
+    assert result.outcome == "unchanged"
+    assert result.removed_ids == [] and result.inserted_ids == []
     after = conn.execute("SELECT count(*) FROM documents").fetchone()[0]
     assert before == after == 2
 
@@ -56,27 +60,53 @@ def test_unchanged_updates_fetched_at_only(conn):
     store = DocumentStore(conn)
     store.store_page(1, 1, "https://d.example/a.html", "stored",
                      chunks=make_chunks(), raw_content="body")
-    assert store.store_page(1, 1, "https://d.example/a.html", "unchanged") == "unchanged"
+    result = store.store_page(1, 1, "https://d.example/a.html", "unchanged")
+    assert result.outcome == "unchanged"
 
 
 def test_absent_deletes_page_and_documents(conn):
     seed_lv(conn)
     store = DocumentStore(conn)
-    store.store_page(1, 1, "https://d.example/a.html", "stored", chunks=make_chunks(), raw_content="b")
-    assert store.store_page(1, 1, "https://d.example/a.html", "absent") == "absent"
+    first = store.store_page(1, 1, "https://d.example/a.html", "stored",
+                             chunks=make_chunks(), raw_content="b")
+    result = store.store_page(1, 1, "https://d.example/a.html", "absent")
+    assert result.outcome == "absent"
+    assert sorted(result.removed_ids) == sorted(first.inserted_ids)
     assert conn.execute("SELECT count(*) FROM pages").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 0
-    # FTS 触发器级联清空
+    # 全文触发器级联清空
     hits = conn.execute(
         "SELECT count(*) FROM documents_fts WHERE documents_fts MATCH 'libref'"
     ).fetchone()[0]
     assert hits == 0
 
 
+def test_restored_reports_replaced_ids(conn):
+    seed_lv(conn)
+    store = DocumentStore(conn)
+    first = store.store_page(1, 1, "https://d.example/a.html", "stored",
+                             chunks=make_chunks(), raw_content="v1")
+    second = store.store_page(
+        1, 1, "https://d.example/a.html", "stored",
+        chunks=[Chunk(url="https://d.example/a.html", path="G", title="G",
+                      content="brand new body", sort_order=0)],
+        raw_content="v2",
+    )
+    assert second.outcome == "stored"
+    assert sorted(second.removed_ids) == sorted(first.inserted_ids)
+    assert len(second.inserted_ids) == 1
+    assert set(second.removed_ids).isdisjoint(second.inserted_ids)
+
+
 def test_empty_keeps_page_without_documents(conn):
     seed_lv(conn)
     store = DocumentStore(conn)
-    assert store.store_page(1, 1, "https://d.example/a.html", "empty", raw_content="") == "empty"
+    first = store.store_page(1, 1, "https://d.example/a.html", "stored",
+                             chunks=make_chunks(), raw_content="b")
+    result = store.store_page(1, 1, "https://d.example/a.html", "empty", raw_content="")
+    assert result.outcome == "empty"
+    assert sorted(result.removed_ids) == sorted(first.inserted_ids)
+    assert result.inserted_ids == []
     assert conn.execute("SELECT count(*) FROM pages").fetchone()[0] == 1
     assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 0
 
@@ -84,8 +114,8 @@ def test_empty_keeps_page_without_documents(conn):
 def test_skipped_and_failed_are_noop_writes(conn):
     seed_lv(conn)
     store = DocumentStore(conn)
-    assert store.store_page(1, 1, "u1", "skipped") == "skipped"
-    assert store.store_page(1, 1, "u2", "failed") == "failed"
+    assert store.store_page(1, 1, "u1", "skipped").outcome == "skipped"
+    assert store.store_page(1, 1, "u2", "failed").outcome == "failed"
     assert conn.execute("SELECT count(*) FROM pages").fetchone()[0] == 0
 
 
@@ -95,6 +125,19 @@ def test_unknown_outcome_rejected(conn):
     store = DocumentStore(conn)
     with pytest.raises(ValueError):
         store.store_page(1, 1, "u", "exploded")
+
+
+def test_get_documents_batch_roundtrip(conn):
+    seed_lv(conn)
+    store = DocumentStore(conn)
+    result = store.store_page(1, 1, "https://d.example/a.html", "stored",
+                              chunks=make_chunks(), raw_content="b")
+    docs = store.get_documents(list(reversed(result.inserted_ids)) + [999999])
+    assert [d["id"] for d in docs] == list(reversed(result.inserted_ids))
+    assert docs[0]["content"] == "import libref"
+    assert docs[0]["metadata"] == {"title": "Usage", "path": "Guide / Usage"}
+    assert docs[0]["library_id"] == 1 and docs[0]["version_id"] == 1
+    assert store.get_documents([]) == []
 
 
 def test_content_hash_stability():

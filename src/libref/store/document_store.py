@@ -1,7 +1,7 @@
-"""pages/documents 读写与增量结局六态。
+"""页面与文档块的读写入口，增量结局共六种。
 
-蓝本 docs-mcp-server 增量抓取语义：stored/unchanged/absent/empty/skipped/failed。
-FTS 由 db/schema.py 触发器自动同步，本层不做 FTS 双写。
+全文索引由 SQLite 触发器随文档表自动同步，本层只写页面与文档两张表，
+不做索引双写。每次存储同时返回同步增量，供调用方同步派生索引。
 """
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from libref.chunking.splitter import Chunk
@@ -30,6 +30,13 @@ class PageRecord:
     content_hash: str | None
 
 
+@dataclass
+class StoreResult:
+    outcome: str
+    removed_ids: list[int] = field(default_factory=list)
+    inserted_ids: list[int] = field(default_factory=list)
+
+
 class DocumentStore:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
@@ -48,7 +55,7 @@ class DocumentStore:
                           last_modified=row[3], content_hash=row[4])
 
     def list_page_urls(self, version_id: int) -> list[str]:
-        """列出该版本下已有 pages 的全部 URL（供 ingest 缺席清理做差集）。"""
+        """列出该版本下已有页面的全部地址，供调用方做缺席差集。"""
         rows = self._conn.execute(
             "SELECT url FROM pages WHERE version_id=? ORDER BY url",
             (version_id,),
@@ -72,6 +79,31 @@ class DocumentStore:
             for r in rows
         ]
 
+    def get_documents(self, doc_ids: list[int]) -> list[dict[str, Any]]:
+        """按标识批量取回文档，供派生索引编码取材与孤儿过滤。"""
+        if not doc_ids:
+            return []
+        marks = ",".join("?" for _ in doc_ids)
+        rows = self._conn.execute(
+            "SELECT id, library_id, version_id, url, content, metadata, sort_order "
+            f"FROM documents WHERE id IN ({marks}) ORDER BY id",
+            doc_ids,
+        ).fetchall()
+        found = [
+            {
+                "id": r[0],
+                "library_id": r[1],
+                "version_id": r[2],
+                "url": r[3],
+                "content": r[4],
+                "metadata": json.loads(r[5]) if r[5] else {},
+                "sort_order": r[6],
+            }
+            for r in rows
+        ]
+        by_id = {d["id"]: d for d in found}
+        return [by_id[i] for i in doc_ids if i in by_id]
+
     # ── 写：唯一入口 ──
 
     def store_page(
@@ -85,53 +117,62 @@ class DocumentStore:
         raw_content: str | None = None,
         etag: str | None = None,
         last_modified: str | None = None,
-    ) -> str:
-        """按结局写库，返回结局名。stored 时 chunks 必填；unchanged 时更新 fetched_at。"""
+    ) -> StoreResult:
+        """按结局写库并返回结局与文档增量，单事务提交。
+
+        存入新内容时先记下被替换的旧文档标识，写入后返回新文档标识。
+        删除整页时返回被级联删掉的文档标识。内容不变与跳过失败时增量为空。
+        """
         if outcome not in OUTCOMES:
             raise ValueError(f"unknown outcome: {outcome}")
-
-        if outcome == "absent":
-            self._delete_page(version_id, url)
-            return outcome
-
-        if outcome in ("skipped", "failed"):
-            self._conn.commit()
-            return outcome
-
-        if outcome == "empty":
-            # empty 保留 page 行（记录 etag 状态）但确保无 documents
+        try:
+            if outcome == "absent":
+                removed = self._delete_page(version_id, url)
+                self._conn.commit()
+                return StoreResult(outcome, removed_ids=removed)
+            if outcome in ("skipped", "failed"):
+                self._conn.commit()
+                return StoreResult(outcome)
+            if outcome == "empty":
+                self._upsert_page(version_id, url, etag, last_modified, raw_content)
+                page = self.get_page(version_id, url)
+                assert page is not None
+                removed = self._delete_documents(page.page_id)
+                self._conn.commit()
+                return StoreResult(outcome, removed_ids=removed)
+            if outcome == "unchanged":
+                page = self.get_page(version_id, url)
+                if page is not None:
+                    self._conn.execute(
+                        "UPDATE pages SET fetched_at=datetime('now') WHERE id=?",
+                        (page.page_id,),
+                    )
+                self._conn.commit()
+                return StoreResult(outcome)
             self._upsert_page(version_id, url, etag, last_modified, raw_content)
             page = self.get_page(version_id, url)
             assert page is not None
-            self._delete_documents(page.page_id)
-            return outcome
-
-        if outcome == "unchanged":
-            page = self.get_page(version_id, url)
-            if page is not None:
-                self._conn.execute(
-                    "UPDATE pages SET fetched_at=datetime('now') WHERE id=?", (page.page_id,)
+            removed = self._delete_documents(page.page_id)
+            inserted: list[int] = []
+            for chunk in chunks or []:
+                metadata = json.dumps(
+                    {"title": chunk.title, "path": chunk.path}, ensure_ascii=False
                 )
-                self._conn.commit()
-            return outcome
-
-        # stored：新页面或内容变化
-        self._upsert_page(version_id, url, etag, last_modified, raw_content)
-        page = self.get_page(version_id, url)
-        assert page is not None
-        self._delete_documents(page.page_id)
-        for chunk in chunks or []:
-            metadata = json.dumps({"title": chunk.title, "path": chunk.path}, ensure_ascii=False)
-            self._conn.execute(
-                "INSERT INTO documents(library_id, version_id, page_id, url, content, metadata, sort_order) "
-                "VALUES(?,?,?,?,?,?,?)",
-                (library_id, version_id, page.page_id, chunk.url, chunk.content, metadata, chunk.sort_order),
-            )
-        self._conn.commit()
-        return outcome
+                cur = self._conn.execute(
+                    "INSERT INTO documents(library_id, version_id, page_id, url, content, metadata, sort_order) "
+                    "VALUES(?,?,?,?,?,?,?)",
+                    (library_id, version_id, page.page_id, chunk.url,
+                     chunk.content, metadata, chunk.sort_order),
+                )
+                inserted.append(int(cur.lastrowid))
+            self._conn.commit()
+            return StoreResult(outcome, removed_ids=removed, inserted_ids=inserted)
+        except BaseException:
+            self._conn.rollback()
+            raise
 
     def ensure_changed(self, version_id: int, url: str, raw_content: str | None) -> str:
-        """按内容 hash 判定 stored / unchanged（304 之外的二次短路）。"""
+        """按内容指纹判定存入还是不变，服务端未给 304 时的二次短路。"""
         page = self.get_page(version_id, url)
         if (
             page is not None
@@ -159,12 +200,24 @@ class DocumentStore:
             "fetched_at=datetime('now'), content_hash=excluded.content_hash",
             (version_id, url, etag, last_modified, content_hash(raw_content)),
         )
-        self._conn.commit()
 
-    def _delete_page(self, version_id: int, url: str) -> None:
+    def _delete_page(self, version_id: int, url: str) -> list[int]:
+        """删除整页，返回被外键级联删掉的文档标识。"""
+        page = self.get_page(version_id, url)
+        if page is None:
+            return []
+        rows = self._conn.execute(
+            "SELECT id FROM documents WHERE page_id=?", (page.page_id,)
+        ).fetchall()
+        removed = [r[0] for r in rows]
         self._conn.execute("DELETE FROM pages WHERE version_id=? AND url=?", (version_id, url))
-        self._conn.commit()
+        return removed
 
-    def _delete_documents(self, page_id: int) -> None:
+    def _delete_documents(self, page_id: int) -> list[int]:
+        """清空一页的文档块，返回删掉的标识。"""
+        rows = self._conn.execute(
+            "SELECT id FROM documents WHERE page_id=?", (page_id,)
+        ).fetchall()
+        removed = [r[0] for r in rows]
         self._conn.execute("DELETE FROM documents WHERE page_id=?", (page_id,))
-        self._conn.commit()
+        return removed
