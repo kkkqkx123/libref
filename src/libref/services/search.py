@@ -512,6 +512,67 @@ class SearchService:
                     break
         return out
 
+    def feature_tree(
+        self,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        prefix: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        vids = self._mining_version_ids(library, version, ecosystem)
+        if not vids:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        params: list[Any] = list(vids)
+        filt = ""
+        if prefix:
+            filt = " AND (path = ? OR path LIKE ? ESCAPE '\\')"
+            params.extend([prefix, prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + ".%"])
+        params.append(limit)
+        rows = self._conn.execute(
+            "SELECT path, parent, depth, kind, calls, scopes FROM feature_nodes"
+            f" WHERE version_id IN ({placeholders}){filt}"
+            " ORDER BY calls DESC, path LIMIT ?",
+            params,
+        ).fetchall()
+        return [
+            {"path": r[0], "parent": r[1], "depth": r[2], "kind": r[3], "calls": r[4], "scopes": r[5]}
+            for r in rows
+        ]
+
+    def api_clusters(
+        self,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        containing: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        vids = self._mining_version_ids(library, version, ecosystem)
+        if not vids:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        rows = self._conn.execute(
+            "SELECT cluster_id, member, size, representative FROM api_clusters"
+            f" WHERE version_id IN ({placeholders})"
+            " ORDER BY cluster_id, member",
+            tuple(vids),
+        ).fetchall()
+        grouped: dict[int, dict[str, Any]] = {}
+        order: list[int] = []
+        for cid, member, size, rep in rows:
+            slot = grouped.get(int(cid))
+            if slot is None:
+                slot = {"cluster_id": int(cid), "members": [], "size": int(size), "representative": rep}
+                grouped[int(cid)] = slot
+                order.append(int(cid))
+            slot["members"].append(member)
+        out = [grouped[cid] for cid in order]
+        if containing:
+            out = [g for g in out if all(n in g["members"] for n in containing)]
+        return out[:limit]
+
     def ensure_library_version(
         self,
         library: str,

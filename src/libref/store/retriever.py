@@ -143,6 +143,26 @@ def _pattern_supports(
     return out
 
 
+def _cluster_sets(
+    conn: sqlite3.Connection, version_ids: list[int]
+) -> dict[int, list[set[str]]]:
+    if not version_ids:
+        return {}
+    marks = ",".join("?" for _ in version_ids)
+    rows = conn.execute(
+        "SELECT version_id, cluster_id, member FROM api_clusters "
+        f"WHERE version_id IN ({marks})",
+        version_ids,
+    ).fetchall()
+    grouped: dict[tuple[int, int], set[str]] = {}
+    for vid, cid, member in rows:
+        grouped.setdefault((int(vid), int(cid)), set()).add(str(member))
+    out: dict[int, list[set[str]]] = {}
+    for (vid, _), members in grouped.items():
+        out.setdefault(vid, []).append(members)
+    return out
+
+
 class HybridRetriever:
     """双路召回与融合重排的编排位置，向量与重排失败只标记降级。"""
 
@@ -249,8 +269,10 @@ class HybridRetriever:
         details = _fetch_details(self._conn, fused, query)
         fts_set, vec_set = set(fts_ids), set(vec_ids)
         alpha = float(getattr(self._settings, "freq_alpha", 0.15))
+        cluster_alpha = float(getattr(self._settings, "cluster_alpha", 0.05))
         vids = sorted({details[d]["version_id"] for d in fused if d in details})
         patterns = _pattern_supports(self._conn, vids)
+        clusters = _cluster_sets(self._conn, vids)
         scored: list[tuple[float, int]] = []
         for doc in fused:
             info = details.get(doc)
@@ -266,8 +288,17 @@ class HybridRetriever:
                         default=0,
                     )
                     bonus = hit / ceiling
+            cluster_bonus = 0.0
+            clist = clusters.get(info["version_id"], [])
+            if clist and cluster_alpha > 0:
+                content = info["content"] or ""
+                for members in clist:
+                    hits = sum(1 for n in members if n in content)
+                    if hits >= 2:
+                        cluster_bonus = 1.0
+                        break
             base = 1.0
-            scored.append((base * (1.0 + alpha * bonus), doc))
+            scored.append((base * (1.0 + alpha * bonus + cluster_alpha * cluster_bonus), doc))
         scored.sort(key=lambda kv: kv[0], reverse=True)
         out: list[dict[str, Any]] = []
         for _, doc in scored:

@@ -37,6 +37,9 @@ class LibrefSettings(BaseSettings):
     rrf_w_fts: float = 1.0
     rrf_w_vec: float = 0.5
     freq_alpha: float = 0.15
+    cluster_alpha: float = 0.05
+    cluster_threshold: float = 0.15
+    cluster_min_size: int = 2
     # 注册表解析配置：缓存有效期、离线开关、私有放行、生态基址映射、外部覆盖文件。
     # 密钥型鉴权不在本方案内，镜像地址经此处显式开启后方可使用。
     # 新增生态时在 registry_bases 追加默认基址并新增 registry_<eco>.py 提供方。

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from libref.db.schema import (
     AST_CHUNK_RELATION_SQL,
+    FEATURE_TREE_CLUSTER_SQL,
     INITIAL_SCHEMA_SQL,
     MINING_PROVENANCE_INDEX_SQL,
     MINING_REVIEW_SCHEMA_SQL,
@@ -31,6 +32,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(4, "repos-astcache-call-scope", REPOS_ASTCACHE_SQL),
     Migration(5, "ast-chunk-relation", AST_CHUNK_RELATION_SQL),
     Migration(6, "mining-provenance-index", MINING_PROVENANCE_INDEX_SQL),
+    Migration(7, "feature-tree-cluster", FEATURE_TREE_CLUSTER_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

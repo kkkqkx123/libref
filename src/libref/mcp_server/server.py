@@ -86,6 +86,25 @@ def build_mcp_server(
         return search.pattern_evidence(pattern, library=library, version=version, limit=limit)
 
     @mcp.tool()
+    def feature_tree(
+        library: str | None = None,
+        version: str | None = None,
+        prefix: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """按前缀浏览分层特征节点。"""
+        return search.feature_tree(library=library, version=version, prefix=prefix, limit=limit)
+
+    @mcp.tool()
+    def api_clusters(
+        library: str | None = None,
+        version: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """浏览接口分组。"""
+        return search.api_clusters(library=library, version=version, limit=limit)
+
+    @mcp.tool()
     async def resolve_package(
         ecosystem: str | None,
         name: str,

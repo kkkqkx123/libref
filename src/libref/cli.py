@@ -202,7 +202,9 @@ def cmd_mine(args: argparse.Namespace) -> int:
             job_id = mgr.submit(MINE_PATTERNS_JOB_KIND, {"library": args.library,
                 "version": args.version, "minsup": args.minsup,
                 "topn": args.topn, "maxlen": args.maxlen, "minlen": args.minlen,
-                "include_ambiguous": bool(args.include_ambiguous)})
+                "include_ambiguous": bool(args.include_ambiguous),
+                "cluster_threshold": args.cluster_threshold,
+                "cluster_min_size": args.cluster_min_size})
             async def _drive():
                 mgr.start_worker(build_repo_runner(settings, conn))
                 try:
@@ -215,7 +217,9 @@ def cmd_mine(args: argparse.Namespace) -> int:
         results = mine_patterns(conn, args.library, args.version,
                                 minsup=args.minsup, topn=args.topn, maxlen=args.maxlen,
                                 minlen=args.minlen,
-                                include_ambiguous=bool(args.include_ambiguous))
+                                include_ambiguous=bool(args.include_ambiguous),
+                                cluster_threshold=args.cluster_threshold,
+                                cluster_min_size=args.cluster_min_size)
     finally:
         conn.close()
     for item in results:
@@ -252,6 +256,35 @@ def cmd_read_page(args: argparse.Namespace) -> int:
         print(f"(page not found: {args.url})", file=sys.stderr)
         return 1
     print(page["content"])
+    return 0
+
+
+def cmd_feature_tree(args: argparse.Namespace) -> int:
+    import json
+    conn = _connect(LibrefSettings())
+    try:
+        rows = SearchService(conn).feature_tree(
+            args.library, args.version, prefix=args.prefix, limit=args.limit,
+        )
+    finally:
+        conn.close()
+    for r in rows:
+        print(json.dumps(r, ensure_ascii=False))
+    return 0
+
+
+def cmd_clusters(args: argparse.Namespace) -> int:
+    import json
+    conn = _connect(LibrefSettings())
+    try:
+        containing = args.containing.split(",") if args.containing else None
+        rows = SearchService(conn).api_clusters(
+            args.library, args.version, containing=containing, limit=args.limit,
+        )
+    finally:
+        conn.close()
+    for r in rows:
+        print(json.dumps(r, ensure_ascii=False))
     return 0
 
 
@@ -325,9 +358,25 @@ def build_parser() -> argparse.ArgumentParser:
                         help="将待定调用纳入序列（默认只用显式与推导）")
     p_mine.add_argument("--maxlen", type=int, default=10)
     p_mine.add_argument("--minlen", type=int, default=2)
+    p_mine.add_argument("--cluster-threshold", type=float, default=0.15)
+    p_mine.add_argument("--cluster-min-size", type=int, default=2)
     p_mine.add_argument("--async", dest="run_async", action="store_true",
                         help="经 jobs 队列执行")
     p_mine.set_defaults(func=cmd_mine)
+
+    p_tree = sub.add_parser("feature-tree", help="按前缀浏览分层特征")
+    p_tree.add_argument("library")
+    p_tree.add_argument("version")
+    p_tree.add_argument("--prefix", default=None)
+    p_tree.add_argument("--limit", type=int, default=100)
+    p_tree.set_defaults(func=cmd_feature_tree)
+
+    p_clusters = sub.add_parser("clusters", help="浏览接口分组")
+    p_clusters.add_argument("library")
+    p_clusters.add_argument("version")
+    p_clusters.add_argument("--containing", default=None, help="逗号分隔的必含接口")
+    p_clusters.add_argument("--limit", type=int, default=50)
+    p_clusters.set_defaults(func=cmd_clusters)
     return parser
 
 

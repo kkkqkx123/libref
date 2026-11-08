@@ -224,3 +224,32 @@ ALTER TABLE call_instances ADD COLUMN call_order INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE call_instances ADD COLUMN start_byte INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE call_instances ADD COLUMN end_byte INTEGER NOT NULL DEFAULT 0;
 """
+
+# ── 分层特征与接口分组：批量构建落库，查询时浏览 ──
+FEATURE_TREE_CLUSTER_SQL = """
+CREATE TABLE feature_nodes(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  parent TEXT NOT NULL DEFAULT '',
+  depth INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'package',
+  calls INTEGER NOT NULL,
+  scopes INTEGER NOT NULL,
+  UNIQUE(version_id, path)
+);
+CREATE INDEX idx_feature_nodes_parent ON feature_nodes(version_id, parent);
+CREATE INDEX idx_feature_nodes_calls ON feature_nodes(version_id, calls DESC);
+CREATE TABLE api_clusters(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  cluster_id INTEGER NOT NULL,
+  member TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  representative TEXT NOT NULL,
+  UNIQUE(version_id, member)
+);
+CREATE INDEX idx_api_clusters_version ON api_clusters(version_id, cluster_id);
+"""
