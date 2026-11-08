@@ -57,6 +57,13 @@ def encode_records(
                 "kind": decl.kind,
                 "line_start": decl.line_start,
                 "line_end": decl.line_end,
+                "start_byte": decl.start_byte,
+                "end_byte": decl.end_byte,
+                "signature": decl.signature,
+                "params": list(decl.params),
+                "bases": list(decl.bases),
+                "parent": decl.parent,
+                "depth": decl.depth,
             }
         )
     for alias, full in aliases:
@@ -70,6 +77,11 @@ def encode_records(
                 "line_start": call.line_start,
                 "line_end": call.line_end,
                 "caller": call.caller,
+                "start_byte": call.start_byte,
+                "end_byte": call.end_byte,
+                "receiver": call.receiver,
+                "func": call.func,
+                "argument_count": call.argument_count,
             }
         )
     return records
@@ -91,6 +103,13 @@ def decode_records(
                     file=path,
                     line_start=int(item.get("line_start", 1)),
                     line_end=int(item.get("line_end", 1)),
+                    start_byte=int(item.get("start_byte", 0)),
+                    end_byte=int(item.get("end_byte", 0)),
+                    signature=str(item.get("signature", "")),
+                    params=list(item.get("params", [])),
+                    bases=list(item.get("bases", [])),
+                    parent=item.get("parent"),
+                    depth=int(item.get("depth", 0)),
                 )
             )
         elif kind == "alias":
@@ -104,6 +123,11 @@ def decode_records(
                     caller=item.get("caller"),
                     line_start=int(item["line_start"]),
                     line_end=int(item["line_end"]),
+                    start_byte=int(item.get("start_byte", 0)),
+                    end_byte=int(item.get("end_byte", 0)),
+                    receiver=item.get("receiver"),
+                    func=str(item.get("func", "") or item["raw"].rpartition(".")[2]),
+                    argument_count=int(item.get("argument_count", len(item.get("args", [])))),
                 )
             )
     return decls, aliases, calls

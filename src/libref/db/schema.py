@@ -200,3 +200,20 @@ ALTER TABLE call_instances ADD COLUMN caller TEXT;
 CREATE INDEX idx_call_instances_version ON call_instances(version_id, caller_file);
 CREATE INDEX idx_call_instances_repo ON call_instances(repo, caller_file);
 """
+
+# ── 分段与关系所需字段：声明签名族与调用拆分族 ──
+AST_CHUNK_RELATION_SQL = """
+ALTER TABLE api_entities ADD COLUMN parent TEXT;
+ALTER TABLE api_entities ADD COLUMN signature TEXT NOT NULL DEFAULT '';
+ALTER TABLE api_entities ADD COLUMN params JSON NOT NULL DEFAULT '[]';
+ALTER TABLE api_entities ADD COLUMN bases JSON NOT NULL DEFAULT '[]';
+ALTER TABLE api_entities ADD COLUMN start_byte INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE api_entities ADD COLUMN end_byte INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE api_entities ADD COLUMN depth INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE call_instances ADD COLUMN receiver TEXT;
+ALTER TABLE call_instances ADD COLUMN func TEXT NOT NULL DEFAULT '';
+ALTER TABLE call_instances ADD COLUMN argument_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE call_instances ADD COLUMN call_order INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE call_instances ADD COLUMN start_byte INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE call_instances ADD COLUMN end_byte INTEGER NOT NULL DEFAULT 0;
+"""

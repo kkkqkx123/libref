@@ -6,6 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from libref.db.schema import (
+    AST_CHUNK_RELATION_SQL,
     INITIAL_SCHEMA_SQL,
     MINING_REVIEW_SCHEMA_SQL,
     PAGES_CONTENT_HASH_SQL,
@@ -27,6 +28,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(2, "vector-meta", VECTOR_META_SQL),
     Migration(3, "pages-content-hash", PAGES_CONTENT_HASH_SQL),
     Migration(4, "repos-astcache-call-scope", REPOS_ASTCACHE_SQL),
+    Migration(5, "ast-chunk-relation", AST_CHUNK_RELATION_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

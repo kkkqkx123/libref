@@ -570,18 +570,28 @@ def _collect_repo(
 
 
 def _persist_entities(conn, library_id: int, version_id: int, all_decls) -> tuple[int, int]:
-    pending: dict[tuple[str, str], tuple[str, str]] = {}
+    import json as _decl_json
+
+    pending: dict[tuple[str, str], object] = {}
     for decl in all_decls:
-        pending[(decl.qualified_name, decl.kind)] = (decl.qualified_name, decl.kind)
-    for qualified_name, kind in pending.values():
+        pending[(decl.qualified_name, decl.kind)] = decl
+    for qualified_name, kind in list(pending):
+        decl = pending[(qualified_name, kind)]
         uid = entity_uid(version_id, qualified_name, kind)
         conn.execute(
             "INSERT INTO api_entities(entity_uid, library_id, version_id,"
-            " qualified_name, kind) VALUES(?, ?, ?, ?, ?)"
-            " ON CONFLICT(entity_uid) DO NOTHING",
-            (uid, library_id, version_id, qualified_name, kind),
+            " qualified_name, kind, parent, signature, params, bases,"
+            " start_byte, end_byte, depth) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(entity_uid) DO UPDATE SET parent=excluded.parent,"
+            " signature=excluded.signature, params=excluded.params, bases=excluded.bases,"
+            " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
+            " depth=excluded.depth",
+            (uid, library_id, version_id, qualified_name, kind, decl.parent,
+             decl.signature, _decl_json.dumps(list(decl.params), ensure_ascii=False),
+             _decl_json.dumps(list(decl.bases), ensure_ascii=False),
+             decl.start_byte, decl.end_byte, decl.depth),
         )
-    wanted = {entity_uid(version_id, q, k) for q, k in pending.values()}
+    wanted = {entity_uid(version_id, q, k) for q, k in pending.keys()}
     if wanted:
         placeholders = ",".join("?" for _ in wanted)
         dead = conn.execute(
@@ -630,15 +640,20 @@ def _persist_calls(conn, library_id: int, version_id: int, resolved) -> tuple[in
         conn.execute(
             "INSERT INTO call_instances(call_uid, callee_entity_id, callee_name, args,"
             " repo, caller_file, line_start, line_end, confidence,"
-            " library_id, version_id, caller)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " library_id, version_id, caller, receiver, func, argument_count,"
+            " call_order, start_byte, end_byte)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(call_uid) DO UPDATE SET callee_entity_id=excluded.callee_entity_id,"
             " callee_name=excluded.callee_name, args=excluded.args,"
             " confidence=excluded.confidence, library_id=excluded.library_id,"
-            " version_id=excluded.version_id, caller=excluded.caller",
+            " version_id=excluded.version_id, caller=excluded.caller,"
+            " receiver=excluded.receiver, func=excluded.func,"
+            " argument_count=excluded.argument_count, call_order=excluded.call_order,"
+            " start_byte=excluded.start_byte, end_byte=excluded.end_byte",
             (uid, ent_id, call.callee, args_json, call.repo, call.caller_file,
              call.line_start, call.line_end, call.confidence,
-             library_id, version_id, call.caller),
+             library_id, version_id, call.caller, call.receiver, call.func,
+             call.argument_count, call.call_order, call.start_byte, call.end_byte),
         )
         if call.confidence == "AMBIGUOUS":
             row = conn.execute(
