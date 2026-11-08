@@ -66,6 +66,8 @@ def encode_records(
                 "bases": list(decl.bases),
                 "parent": decl.parent,
                 "depth": decl.depth,
+                "has_doc": bool(decl.has_doc),
+                "span_kind": decl.span_kind,
             }
         )
     for alias, full in aliases:
@@ -114,6 +116,9 @@ def decode_records(
                     bases=list(item.get("bases", [])),
                     parent=item.get("parent"),
                     depth=int(item.get("depth", 0)),
+                    has_doc=bool(item.get("has_doc", False)),
+                    span_kind=str(item.get("span_kind", "exact_entities"))
+                    or "exact_entities",
                 )
             )
         elif kind == "alias":

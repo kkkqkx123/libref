@@ -135,7 +135,10 @@ def test_get_documents_batch_roundtrip(conn):
     docs = store.get_documents(list(reversed(result.inserted_ids)) + [999999])
     assert [d["id"] for d in docs] == list(reversed(result.inserted_ids))
     assert docs[0]["content"] == "import libref"
-    assert docs[0]["metadata"] == {"title": "Usage", "path": "Guide / Usage"}
+    assert docs[0]["metadata"]["title"] == "Usage"
+    assert docs[0]["metadata"]["path"] == "Guide / Usage"
+    assert docs[0]["metadata"]["chunk_path"] == "embedding"
+    assert docs[0]["metadata"]["span_kind"] == "document_range"
     assert docs[0]["library_id"] == 1 and docs[0]["version_id"] == 1
     assert store.get_documents([]) == []
 

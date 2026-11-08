@@ -24,6 +24,8 @@ class ApiDeclRecord(BaseModel):
     bases: list[str] = Field(default_factory=list)
     parent: str | None = None
     depth: int = 0
+    has_doc: bool = False
+    span_kind: str = "exact_entities"
 
 
 class RawCall(BaseModel):

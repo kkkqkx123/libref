@@ -156,7 +156,17 @@ class DocumentStore:
             inserted: list[int] = []
             for chunk in chunks or []:
                 metadata = json.dumps(
-                    {"title": chunk.title, "path": chunk.path}, ensure_ascii=False
+                    {
+                        "title": chunk.title,
+                        "path": chunk.path,
+                        "chunk_path": getattr(chunk, "chunk_path", "embedding"),
+                        "source_group_id": getattr(chunk, "source_group_id", ""),
+                        "chunk_id": getattr(chunk, "chunk_id", ""),
+                        "span_kind": getattr(chunk, "span_kind", "document_range"),
+                        "merged_from": list(getattr(chunk, "merged_from", []) or []),
+                        "overlap_from": getattr(chunk, "overlap_from", None),
+                    },
+                    ensure_ascii=False,
                 )
                 cur = self._conn.execute(
                     "INSERT INTO documents(library_id, version_id, page_id, url, content, metadata, sort_order) "

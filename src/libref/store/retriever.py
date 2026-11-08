@@ -99,7 +99,8 @@ def _fetch_details(
     marks = ",".join("?" for _ in doc_ids)
     rows = conn.execute(
         "SELECT d.id, d.url, d.content, json_extract(d.metadata, '$.title'), "
-        "json_extract(d.metadata, '$.path'), l.name, v.version, d.version_id "
+        "json_extract(d.metadata, '$.path'), l.name, v.version, d.version_id, "
+        "d.metadata "
         "FROM documents d "
         "JOIN versions v ON v.id = d.version_id "
         "JOIN libraries l ON l.id = d.library_id "
@@ -108,6 +109,10 @@ def _fetch_details(
     ).fetchall()
     out: dict[int, dict[str, Any]] = {}
     for r in rows:
+        try:
+            meta = json.loads(r[8]) if r[8] else {}
+        except ValueError:
+            meta = {}
         out[int(r[0])] = {
             "id": int(r[0]),
             "url": r[1],
@@ -118,7 +123,37 @@ def _fetch_details(
             "version": r[6],
             "version_id": int(r[7]),
             "content": r[2] or "",
+            "chunk_path": meta.get("chunk_path", "embedding"),
+            "source_group_id": meta.get("source_group_id", ""),
         }
+    return out
+
+
+def _collapse_by_group(
+    conn: sqlite3.Connection, fused: list[int]
+) -> list[int]:
+    """同源分组只保留排序最前的块，两路孪生块合并为一次命中。"""
+    if len(fused) < 2:
+        return fused
+    marks = ",".join("?" for _ in fused)
+    rows = conn.execute(
+        f"SELECT id, metadata FROM documents WHERE id IN ({marks})", fused
+    ).fetchall()
+    groups: dict[int, str] = {}
+    for doc_id, raw in rows:
+        try:
+            meta = json.loads(raw) if raw else {}
+        except ValueError:
+            meta = {}
+        groups[int(doc_id)] = meta.get("source_group_id") or f"doc:{doc_id}"
+    seen: set[str] = set()
+    out: list[int] = []
+    for doc_id in fused:
+        key = groups.get(doc_id, f"doc:{doc_id}")
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(doc_id)
     return out
 
 
@@ -213,6 +248,7 @@ class HybridRetriever:
         elif self._vec is not None and self._embed is not None:
             degraded = True
         fused = self._rrf(fts_ids, vec_ids)
+        fused = _collapse_by_group(self._conn, fused)
         if not fused:
             return [], degraded
         reranked = await self._apply_rerank(query, fused, limit, degraded)
@@ -321,6 +357,8 @@ class HybridRetriever:
                     "library": info["library"],
                     "version": info["version"],
                     "sources": sources,
+                    "chunk_path": info.get("chunk_path", "embedding"),
+                    "source_group_id": info.get("source_group_id", ""),
                 }
             )
         fused_pos = {d: i for i, d in enumerate(fused)}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 from typing import Any
 
 from tree_sitter import Parser, Query, QueryCursor
@@ -38,7 +39,7 @@ def _compiled_queries(cfg: LanguageConfig) -> dict[str, Query]:
     language = load_language(cfg)
     compiled = {
         kind: Query(language, _queries.get(cfg.name, kind))
-        for kind in ("entity", "call", "dependency")
+        for kind in ("entity", "call", "dependency", "comment")
     }
     _compiled[key] = compiled
     return compiled
@@ -117,8 +118,13 @@ def extract_file(
     entity_matches = QueryCursor(compiled["entity"]).matches(tree.root_node)
     call_matches = QueryCursor(compiled["call"]).matches(tree.root_node)
     dep_matches = QueryCursor(compiled["dependency"]).matches(tree.root_node)
+    comment_matches = QueryCursor(compiled["comment"]).matches(tree.root_node)
     module = determine_module_path(path, cfg.name)
-    decls = _build_decls(path, cfg, source, entity_matches, dep_matches, module)
+    doc_nodes, line_nodes = _comment_spans(comment_matches)
+    decls = _build_decls(
+        path, cfg, source, entity_matches, dep_matches, module,
+        doc_nodes=doc_nodes, line_nodes=line_nodes,
+    )
     alias_module = module
     if module is not None and path.replace("\\", "/").endswith("__init__.py"):
         alias_module = f"{module}.__init__"
@@ -141,7 +147,63 @@ def extract_file(
     return decls, aliases, calls
 
 
-def _build_decls(path, cfg, source, entity_matches, dep_matches, module=None) -> list[ApiDeclRecord]:
+def _comment_spans(comment_matches) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+    doc: list[tuple[int, int]] = []
+    line: list[tuple[int, int]] = []
+    for _, captures in comment_matches:
+        for name, nodes in captures.items():
+            for node in nodes:
+                span = (node.start_byte, node.end_byte)
+                if name.endswith((".docstring", ".doc")):
+                    doc.append(span)
+                elif name.endswith(".line"):
+                    line.append(span)
+    doc.sort()
+    line.sort()
+    return doc, line
+
+
+def _body_opens_with_string(body, source: bytes) -> bool:
+    for child in body.children:
+        if not child.is_named:
+            continue
+        if child.type != "expression_statement":
+            return False
+        for sub in child.children:
+            if sub.is_named:
+                return sub.type == "string"
+        return False
+    return False
+
+
+def _has_doc(
+    node, body, source: bytes,
+    doc_nodes: list[tuple[int, int]],
+    line_nodes: list[tuple[int, int]],
+) -> bool:
+    if body is not None and _body_opens_with_string(body, source):
+        return True
+    start = node.start_byte
+    head_end = body.start_byte if body is not None else node.end_byte
+    for span_start, span_end in doc_nodes:
+        if start <= span_start and span_end <= head_end:
+            return True
+    for span_start, span_end in line_nodes:
+        if start <= span_start and span_end <= head_end:
+            return True
+    spans = sorted(doc_nodes + line_nodes, key=lambda span: span[1])
+    ends = [end for _, end in spans]
+    idx = bisect.bisect_right(ends, start) - 1
+    if idx >= 0:
+        _, end = spans[idx]
+        if end <= start and source[end:start].strip() == b"":
+            return True
+    return False
+
+
+def _build_decls(path, cfg, source, entity_matches, dep_matches, module=None, doc_nodes=None, line_nodes=None) -> list[ApiDeclRecord]:
+    doc_spans = list(doc_nodes or [])
+    line_spans = list(line_nodes or [])
     groups = _merge_matches(entity_matches)
     cands: list[dict] = []
     for node, captures in groups:
@@ -240,6 +302,7 @@ def _build_decls(path, cfg, source, entity_matches, dep_matches, module=None) ->
                 bases=bases,
                 parent=parent,
                 depth=depth,
+                has_doc=_has_doc(node, body, source, doc_spans, line_spans),
             )
         )
         stack.append(decls[-1])

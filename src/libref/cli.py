@@ -413,6 +413,60 @@ def cmd_clusters(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dump_chunks(args: argparse.Namespace) -> int:
+    from pathlib import Path
+
+    from libref.chunking import default_budgets, split_markdown_dual
+
+    budgets = default_budgets()
+    if args.markdown is not None:
+        text = Path(args.markdown).read_text(encoding="utf-8")
+        url = args.url or "preview://local"
+        dual = split_markdown_dual(text, url, budgets=budgets)
+        for stream in (dual.embedding, dual.bm25):
+            for chunk in stream:
+                print(
+                    f"[{chunk.chunk_id}] {chunk.path or '(root)'} | "
+                    f"{chunk.title} | kind={chunk.span_kind} "
+                    f"merged={chunk.merged_from} "
+                    f"overlap_from={chunk.overlap_from}"
+                )
+                print(f"    {chunk.content[:160].replace(chr(10), ' ')}")
+        print(
+            f"embedding={len(dual.embedding)} bm25={len(dual.bm25)} "
+            f"empty_dropped={dual.empty_dropped} deduped={dual.deduped}"
+        )
+        return 0
+    from libref.astminer import config as ast_config
+    from libref.astminer import engine as ast_engine
+    from libref.astminer import grouping as ast_grouping
+    from libref.astminer import source_chunk as ast_source_chunk
+
+    data = Path(args.source).read_bytes()
+    suffix = Path(args.source).suffix
+    cfg = ast_config.config_for_suffix(suffix)
+    if cfg is None:
+        print(f"unsupported suffix: {suffix}", file=sys.stderr)
+        return 2
+    decls, _aliases, _raw = ast_engine.extract_file(args.source, cfg, data)
+    groups = ast_grouping.build_groups(decls, data, args.source)
+    by_qual = {d.qualified_name: d for d in decls}
+    split = ast_source_chunk.build_source_chunks(
+        groups, by_qual, data, args.source, budgets=budgets, repo="preview"
+    )
+    for group in groups:
+        print(f"group {group.group_id} kind={group.kind} members={group.member_quals}")
+    for chunk in split.chunks:
+        print(
+            f"[{chunk.chunk_id}] {chunk.qual} kind={chunk.span_kind} "
+            f"bytes={chunk.start_byte}-{chunk.end_byte} merged={chunk.merged_quals} "
+            f"overlap_from={chunk.overlap_from}"
+        )
+        print(f"    {chunk.content[:160].replace(chr(10), ' ')}")
+    print(f"chunks={len(split.chunks)} empty_dropped={split.empty_dropped}")
+    return 0
+
+
 def cmd_serve_mcp(_args: argparse.Namespace) -> int:
     from libref.mcp_server import build_mcp_server
 
@@ -544,6 +598,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_clusters.add_argument("--containing", default=None, help="逗号分隔的必含接口")
     p_clusters.add_argument("--limit", type=int, default=50)
     p_clusters.set_defaults(func=cmd_clusters)
+
+    p_dump = sub.add_parser("dump-chunks", help="预览分块：文件到分块的行号字节标题")
+    group = p_dump.add_mutually_exclusive_group(required=True)
+    group.add_argument("--markdown", default=None, help="Markdown 文档路径")
+    group.add_argument("--source", default=None, help="源码文件路径")
+    p_dump.add_argument("--url", default=None, help="文档块地址标注")
+    p_dump.set_defaults(func=cmd_dump_chunks)
     return parser
 
 

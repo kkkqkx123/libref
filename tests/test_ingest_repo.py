@@ -24,6 +24,11 @@ def test_ingest_repo_end_to_end(conn, tmp_path):
     )
     assert counts["files"] == 5
     assert counts["parsed"] == 5
+    assert counts["source_chunks"] > 0
+    repo_docs = conn.execute(
+        "SELECT count(*) FROM documents WHERE url LIKE 'repo://%'"
+    ).fetchone()[0]
+    assert repo_docs == counts["source_chunks"]
     calls = conn.execute(
         "SELECT callee_name, confidence, caller_file, caller FROM call_instances"
     ).fetchall()
@@ -45,6 +50,7 @@ def test_ingest_repo_end_to_end(conn, tmp_path):
         assert isinstance(json.loads(raw), list)
     second = index_repo(conn, "demo", "0.1", str(repo), repos_dir=repos_dir)
     assert second["cached"] == 5 and second["parsed"] == 0
+    assert second["source_chunks"] == counts["source_chunks"]
     n_calls = conn.execute("SELECT count(*) FROM call_instances").fetchone()[0]
     assert n_calls == len(calls)
     commit = conn.execute(

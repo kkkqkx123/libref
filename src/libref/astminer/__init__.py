@@ -25,9 +25,11 @@ from libref.astminer.context import (
     resolve_python_relative,
 )
 from libref.astminer.engine import extract_file
+from libref.astminer.grouping import EntityGroup, build_groups
 from libref.astminer.models import ApiDeclRecord, CallInstanceRecord, RawCall
 from libref.astminer.repos import RepoManager
 from libref.astminer.resolution import resolve_calls
+from libref.astminer.source_chunk import SourceChunk, SourceSplit, build_source_chunks
 
 __all__ = [
     "JAVASCRIPT_CONFIG",
@@ -36,10 +38,15 @@ __all__ = [
     "PYTHON_CONFIG",
     "ApiDeclRecord",
     "CallInstanceRecord",
+    "EntityGroup",
     "LanguageConfig",
     "RawCall",
     "RepoManager",
+    "SourceChunk",
+    "SourceSplit",
     "all_suffixes",
+    "build_groups",
+    "build_source_chunks",
     "check_config",
     "config_for_suffix",
     "decode_records",

@@ -23,6 +23,13 @@ class LibrefSettings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "libref_chunks"
     qdrant_timeout: float = 5.0
+    chunk_embed_max_tokens: int = 512
+    chunk_embed_overlap_tokens: int = 50
+    chunk_embed_min_tokens: int = 150
+    chunk_bm25_max_terms: int = 150
+    chunk_bm25_overlap_terms: int = 5
+    chunk_bm25_min_terms: int = 45
+    chunk_reserve_ratio: float = 0.06
     # 编码模型名与维度登记在库内，变更时向量索引整体失效重建。
     # 密钥缺省时向量路禁用，只走全文检索。
     embedding_model: str = "BAAI/bge-m3"

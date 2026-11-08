@@ -88,7 +88,7 @@ class SearchService:
             "SELECT d.id, d.url, bm25(documents_fts, 1.0, 5.0, 1.0, 3.0) AS score, d.content, "
             "json_extract(d.metadata, '$.title') AS title, "
             "json_extract(d.metadata, '$.path') AS path, "
-            "l.name AS library, v.version AS version "
+            "l.name AS library, v.version AS version, d.metadata " 
             "FROM documents_fts "
             "JOIN documents d ON d.id = documents_fts.rowid "
             "JOIN versions v ON v.id = d.version_id "
@@ -97,19 +97,30 @@ class SearchService:
             "ORDER BY score LIMIT ?"
         )
         rows = self._conn.execute(sql, params).fetchall()
-        return [
-            {
-                "id": r[0],
-                "url": r[1],
-                "score": r[2],
-                "snippet": _make_snippet(r[3], query),
-                "title": r[4],
-                "path": r[5],
-                "library": r[6],
-                "version": r[7],
-            }
-            for r in rows
-        ]
+        out = []
+        seen: set[tuple] = set()
+        for r in rows:
+            try:
+                meta = json.loads(r[8]) if r[8] else {}
+            except ValueError:
+                meta = {}
+            key = (r[1], meta.get("source_group_id") or f"doc:{r[0]}")
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(
+                {
+                    "id": r[0],
+                    "url": r[1],
+                    "score": r[2],
+                    "snippet": _make_snippet(r[3], query),
+                    "title": r[4],
+                    "path": r[5],
+                    "library": r[6],
+                    "version": r[7],
+                }
+            )
+        return out
 
     async def search_hybrid_async(
         self,
@@ -173,9 +184,18 @@ class SearchService:
         ).fetchall()
         if not rows:
             return {"docs": 0, "upserted": 0}
+        embeddable = []
+        for r in rows:
+            try:
+                meta = json.loads(r[4]) if r[4] else {}
+            except ValueError:
+                meta = {}
+            if meta.get("chunk_path", "embedding") == "bm25":
+                continue
+            embeddable.append(r)
         upserted = 0
-        for i in range(0, len(rows), 64):
-            batch = rows[i:i + 64]
+        for i in range(0, len(embeddable), 64):
+            batch = embeddable[i:i + 64]
             texts = []
             for r in batch:
                 try:
@@ -234,6 +254,8 @@ class SearchService:
             "JOIN versions v ON v.id = p.version_id "
             "JOIN libraries l ON l.id = v.library_id "
             "LEFT JOIN documents d ON d.page_id = p.id "
+            "AND (json_extract(d.metadata, '$.chunk_path') IS NULL "
+            "OR json_extract(d.metadata, '$.chunk_path') != 'bm25') "
             f"WHERE {' AND '.join(filters)} ORDER BY d.sort_order",
             params,
         ).fetchall()

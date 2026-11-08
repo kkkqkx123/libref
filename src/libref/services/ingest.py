@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -14,7 +15,13 @@ from typing import Any
 
 import httpx
 
-from libref.chunking import split_markdown
+from libref.chunking import ChunkPath, split_markdown_dual
+from libref.chunking.budget import (
+    ChunkBudget,
+    default_budgets,
+    estimate_tokens,
+    truncate_to_cost,
+)
 from libref.crawler import (
     HttpFetcher,
     RobotsChecker,
@@ -165,6 +172,31 @@ async def _client(settings) -> AsyncIterator[httpx.AsyncClient]:
         yield client
 
 
+def _doc_budgets(settings) -> dict[ChunkPath, ChunkBudget]:
+    """按配置生成文档分块的双路预算，缺省回退到内置默认值。"""
+    resolved = default_budgets()
+    resolved[ChunkPath.EMBEDDING] = ChunkBudget(
+        hard_limit=int(getattr(settings, "chunk_embed_max_tokens", 512)),
+        min_limit=int(getattr(settings, "chunk_embed_min_tokens", 150)),
+        overlap=int(getattr(settings, "chunk_embed_overlap_tokens", 50)),
+        reserve_ratio=float(getattr(settings, "chunk_reserve_ratio", 0.06)),
+    )
+    resolved[ChunkPath.BM25] = ChunkBudget(
+        hard_limit=int(getattr(settings, "chunk_bm25_max_terms", 150)),
+        min_limit=int(getattr(settings, "chunk_bm25_min_terms", 45)),
+        overlap=int(getattr(settings, "chunk_bm25_overlap_terms", 5)),
+        reserve_ratio=float(getattr(settings, "chunk_reserve_ratio", 0.06)),
+    )
+    return resolved
+
+
+def ensure_embed_limit(text: str, hard_limit: int) -> tuple[str, bool]:
+    """向量编码文本的最终校验，超限截尾并报告是否截断。"""
+    if hard_limit <= 0 or estimate_tokens(text) <= hard_limit:
+        return text, False
+    return truncate_to_cost(text, ChunkPath.EMBEDDING, hard_limit), True
+
+
 class IngestService:
     def __init__(
         self,
@@ -178,6 +210,7 @@ class IngestService:
         self._conn = conn
         self._vec = vec_store if embed is not None else None
         self._embed = embed if vec_store is not None else None
+        self._budgets = _doc_budgets(settings)
 
     def scrape_docs(
         self,
@@ -325,6 +358,8 @@ class IngestService:
                 "skipped",
                 "failed",
                 "vector_failed",
+                "chunk_empty_dropped",
+                "chunk_truncated",
             )
         }
         async with _version_lock(ecosystem, library, version):
@@ -384,7 +419,7 @@ class IngestService:
                     async with sem:
                         try:
                             page = store.get_page(version_id, url)
-                            result = await self._fetch_and_store(
+                            result, empty_dropped = await self._fetch_and_store(
                                 fetcher,
                                 robots,
                                 store,
@@ -394,8 +429,9 @@ class IngestService:
                                 page,
                             )
                         except Exception:  # noqa: BLE001 —— 单页失败隔离计数，不中断整站抓取
-                            result = StoreResult("failed")
+                            result, empty_dropped = StoreResult("failed"), 0
                         counts[result.outcome] = counts.get(result.outcome, 0) + 1
+                        counts["chunk_empty_dropped"] += empty_dropped
                         removed_all.extend(result.removed_ids)
                         inserted_all.extend(result.inserted_ids)
 
@@ -442,13 +478,23 @@ class IngestService:
             counts["vector_failed"] += len(removed) + len(inserted)
             return
         try:
-            docs = store.get_documents(inserted)
-            texts = [
-                build_embed_text(
+            docs = [
+                d for d in store.get_documents(inserted)
+                if d["metadata"].get("chunk_path", "embedding") != "bm25"
+            ]
+            hard = int(getattr(self._settings, "chunk_embed_max_tokens", 512))
+            texts = []
+            for d in docs:
+                text = build_embed_text(
                     d["metadata"].get("title"), d["metadata"].get("path"), d["content"]
                 )
-                for d in docs
-            ]
+                clipped, was_clipped = ensure_embed_limit(text, hard)
+                if was_clipped:
+                    counts["chunk_truncated"] = counts.get("chunk_truncated", 0) + 1
+                    logging.getLogger(__name__).warning(
+                        "embedding text clipped to %d tokens for doc %d", hard, d["id"]
+                    )
+                texts.append(clipped)
             vecs = await self._embed(texts) if texts else []
             if len(vecs) != len(docs):
                 raise RuntimeError("embedding count mismatch")
@@ -483,6 +529,8 @@ class IngestService:
         removed: list[int] = []
         discovered = set(accepted_urls)
         for url in store.list_page_urls(version_id):
+            if not url.startswith(("http://", "https://")):
+                continue
             if url not in discovered:
                 result = store.store_page(version_id, library_id, url, "absent")
                 removed.extend(result.removed_ids)
@@ -498,9 +546,9 @@ class IngestService:
         version_id: int,
         url: str,
         page,
-    ) -> StoreResult:
+    ) -> tuple[StoreResult, int]:
         if not await robots.can_fetch(url):
-            return StoreResult("skipped")
+            return StoreResult("skipped"), 0
         delay = await robots.crawl_delay(url)
         result = await fetcher.fetch(
             url,
@@ -509,11 +557,11 @@ class IngestService:
             crawl_delay=delay,
         )
         if result.status == "unchanged":
-            return store.store_page(version_id, library_id, url, "unchanged")
+            return store.store_page(version_id, library_id, url, "unchanged"), 0
         if result.status == "absent":
-            return store.store_page(version_id, library_id, url, "absent")
+            return store.store_page(version_id, library_id, url, "absent"), 0
         if result.status == "failed":
-            return store.store_page(version_id, library_id, url, "failed")
+            return store.store_page(version_id, library_id, url, "failed"), 0
 
         raw_html = result.content or ""
         try:
@@ -522,7 +570,7 @@ class IngestService:
             markdown = ""
         if not markdown:
             if looks_like_js_rendered(raw_html, markdown):
-                return StoreResult("skipped")
+                return StoreResult("skipped"), 0
             return store.store_page(
                 version_id,
                 library_id,
@@ -531,11 +579,14 @@ class IngestService:
                 raw_content=result.content,
                 etag=result.etag,
                 last_modified=result.last_modified,
-            )
+            ), 0
         outcome = store.ensure_changed(version_id, url, markdown)
         if outcome == "unchanged":
-            return store.store_page(version_id, library_id, url, "unchanged")
-        chunks = split_markdown(markdown, url)
+            return store.store_page(version_id, library_id, url, "unchanged"), 0
+        dual = split_markdown_dual(markdown, url, budgets=self._budgets)
+        chunks = dual.embedding + dual.bm25
+        for order, chunk in enumerate(chunks):
+            chunk.sort_order = order
         return store.store_page(
             version_id,
             library_id,
@@ -545,7 +596,7 @@ class IngestService:
             raw_content=markdown,
             etag=result.etag,
             last_modified=result.last_modified,
-        )
+        ), dual.empty_dropped
 
 
 INDEX_REPO_JOB_KIND = "index_repo"
@@ -586,6 +637,7 @@ def _collect_repo(
     list,
     dict[str, int],
     dict[str, tuple[str, int]],
+    dict[str, bytes],
 ]:
     import hashlib
     from pathlib import Path
@@ -599,6 +651,7 @@ def _collect_repo(
     all_raw: list = []
     counts = {"files": 0, "parsed": 0, "cached": 0}
     live: dict[str, tuple[str, int]] = {}
+    sources: dict[str, bytes] = {}
     for rel in files:
         counts["files"] += 1
         cfg = ast_config.config_for_suffix(Path(rel).suffix)
@@ -607,6 +660,7 @@ def _collect_repo(
         fp = ast_config.grammar_fingerprint(cfg)
         live[rel] = (fp, cfg.config_version)
         data = (root / rel).read_bytes()
+        sources[rel] = data
         sha = hashlib.sha1(data).hexdigest()
         hit = ast_cache.lookup(conn, repo_name, rel, fp, cfg.config_version)
         if hit is not None and hit[0] == sha:
@@ -630,7 +684,55 @@ def _collect_repo(
             cfg.config_version,
             ast_cache.encode_records(decls, aliases, raw_calls),
         )
-    return all_decls, file_aliases, all_raw, counts, live
+    return all_decls, file_aliases, all_raw, counts, live, sources
+
+
+def _store_source_chunks(
+    conn,
+    repo_name: str,
+    sources: dict[str, bytes],
+    all_decls,
+    library_id: int,
+    version_id: int,
+    budgets=None,
+) -> tuple[int, int]:
+    """源码分块落库：按文件分组装配后经文档表复用落库，返回块数与空块计数。"""
+    from libref.astminer import grouping as _grouping
+    from libref.astminer import source_chunk as _source_chunk
+    from libref.chunking import default_budgets
+    from libref.store.document_store import DocumentStore
+
+    resolved = budgets or default_budgets()
+    by_file: dict[str, list] = {}
+    for decl in all_decls:
+        by_file.setdefault(decl.file, []).append(decl)
+    store = DocumentStore(conn)
+    n_chunks = 0
+    dropped = 0
+    for rel in sorted(sources):
+        decls = by_file.get(rel, [])
+        if not decls:
+            continue
+        data = sources[rel]
+        groups = _grouping.build_groups(decls, data, rel)
+        by_qual = {d.qualified_name: d for d in decls}
+        split = _source_chunk.build_source_chunks(
+            groups, by_qual, data, rel, budgets=resolved, repo=repo_name
+        )
+        dropped += split.empty_dropped
+        page_url = f"repo://{repo_name}/{rel}"
+        chunks = [_source_chunk.as_chunk(c, page_url) for c in split.chunks]
+        if not chunks:
+            continue
+        for order, chunk in enumerate(chunks):
+            chunk.sort_order = order
+        store.store_page(
+            version_id, library_id, page_url, "stored",
+            chunks=chunks,
+            raw_content=data.decode("utf-8", "replace"),
+        )
+        n_chunks += len(chunks)
+    return n_chunks, dropped
 
 
 def _persist_entities(
@@ -837,7 +939,7 @@ def index_repo(
     root, commit = manager.ensure(conn, repo_name, source, update=update)
     conn.commit()
     files = [r for r in iter_source_files(root, ast_config.all_suffixes())]
-    all_decls, file_aliases, all_raw, counts, live = _collect_repo(
+    all_decls, file_aliases, all_raw, counts, live, sources = _collect_repo(
         conn,
         repo_name,
         root,
@@ -854,11 +956,16 @@ def index_repo(
     n_calls, swept_calls = _persist_calls(
         conn, library_id, version_id, resolved, commit
     )
+    n_chunks, chunk_dropped = _store_source_chunks(
+        conn, repo_name, sources, all_decls, library_id, version_id
+    )
     conn.commit()
     counts["entities"] = n_entities
     counts["calls"] = n_calls
     counts["swept_entities"] = swept_entities
     counts["swept_calls"] = swept_calls
+    counts["source_chunks"] = n_chunks
+    counts["chunk_empty_dropped"] = chunk_dropped
     return counts
 
 
