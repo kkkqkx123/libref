@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 
 from libref.chunking import split_markdown
+from libref.store.embeddings import build_embed_fn as _store_build_embed_fn
 from libref.crawler import (
     HttpFetcher,
     RobotsChecker,
@@ -104,70 +105,9 @@ def _version_lock(ecosystem: str, library: str, version: str) -> asyncio.Lock:
         return lock
 
 
-def build_embed_fn(settings) -> EmbedFn | None:
+def build_embed_fn(settings, transport=None) -> EmbedFn | None:
     """按配置构造编码函数，无密钥时返回空，调用方走纯全文路。"""
-    api_key = getattr(settings, "embedding_api_key", None)
-    if not api_key:
-        return None
-    base = getattr(settings, "embedding_api_base", "")
-    model = getattr(settings, "embedding_model", "")
-    dim = getattr(settings, "embedding_dim", 0)
-    timeout = getattr(settings, "request_timeout", 30.0)
-
-    async def embed(texts: list[str]) -> list[list[float]]:
-        out: list[list[float]] = []
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            for i in range(0, len(texts), _EMBED_BATCH):
-                out.extend(
-                    await _embed_batch(client, base, api_key, model, dim,
-                                       texts[i:i + _EMBED_BATCH])
-                )
-        return out
-
-    return embed
-
-
-async def _embed_batch(
-    client: httpx.AsyncClient,
-    base: str,
-    key: str,
-    model: str,
-    dim: int,
-    texts: list[str],
-    *,
-    retries: int = 3,
-) -> list[list[float]]:
-    """调兼容接口批量编码，429 与服务端错误退避重试，其余失败直接抛错。"""
-    url = base.rstrip("/") + "/embeddings"
-    headers = {"Authorization": f"Bearer {key}"}
-    body = {"model": model, "input": texts}
-    error: str | None = None
-    for attempt in range(retries + 1):
-        try:
-            resp = await client.post(url, json=body, headers=headers)
-        except httpx.HTTPError as exc:
-            error = f"{type(exc).__name__}: {exc}"
-            await asyncio.sleep(0.5 * (2**attempt))
-            continue
-        if resp.status_code == 429 or resp.status_code >= 500:
-            error = f"HTTP {resp.status_code}"
-            await asyncio.sleep(0.5 * (2**attempt))
-            continue
-        if resp.status_code >= 400:
-            raise RuntimeError(f"embedding rejected: HTTP {resp.status_code}")
-        items = sorted(resp.json()["data"], key=lambda d: d["index"])
-        vecs: list[list[float]] = []
-        for item in items:
-            vec = item["embedding"]
-            norm = sum(x * x for x in vec) ** 0.5
-            vec = [x / norm for x in vec] if norm > 0 else vec
-            if dim and len(vec) != dim:
-                raise RuntimeError(f"embedding dim mismatch: got {len(vec)}, want {dim}")
-            vecs.append(vec)
-        if len(vecs) != len(texts):
-            raise RuntimeError("embedding count mismatch")
-        return vecs
-    raise RuntimeError(f"embedding failed: {error}")
+    return _store_build_embed_fn(settings, transport=transport)
 
 
 def build_scrape_runner(settings, conn, *, vec_store=None, embed=None):

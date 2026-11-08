@@ -29,6 +29,14 @@ class LibrefSettings(BaseSettings):
     embedding_dim: int = 1024
     embedding_api_base: str = "https://api.siliconflow.cn/v1"
     embedding_api_key: str | None = None
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_enabled: bool = False
+    rerank_candidate_limit: int = 30
+    rerank_top_n: int = 10
+    rrf_k: int = 20
+    rrf_w_fts: float = 1.0
+    rrf_w_vec: float = 0.5
+    freq_alpha: float = 0.15
     # 注册表解析配置：缓存有效期、离线开关、私有放行、生态基址映射、外部覆盖文件。
     # 密钥型鉴权不在本方案内，镜像地址经此处显式开启后方可使用。
     # 新增生态时在 registry_bases 追加默认基址并新增 registry_<eco>.py 提供方。
@@ -43,3 +51,9 @@ class LibrefSettings(BaseSettings):
     )
     registry_overrides_file: Path | None = None
     registry_override_ttl_days: float = 180.0
+    chat_model: str = "Qwen/Qwen3.5-4B"
+    chat_enabled: bool = False
+    chat_api_base: str = "https://api.siliconflow.cn/v1"
+    chat_api_key: str | None = None
+    chat_timeout: float = 60.0
+    chat_enable_thinking: bool = False

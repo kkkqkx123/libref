@@ -1,6 +1,7 @@
 # SiliconFlow Embeddings API Debug
-# 用法：hurl embeddings.hurl --variable SILICONFLOW_API_KEY="你的密钥" --insecure
-# --insecure用于避免证书问题
+# 运行方式（仓库根目录，密钥经 .env 注入，不硬编码）：
+#   set -a; . ./.env; set +a
+#   hurl tools/hurl/silicon-emb.hurl --variable SILICONFLOW_API_KEY="$LIBREF_EMBEDDING_API_KEY" --insecure
 
 POST https://api.siliconflow.cn/v1/embeddings
 Authorization: Bearer {{SILICONFLOW_API_KEY}}

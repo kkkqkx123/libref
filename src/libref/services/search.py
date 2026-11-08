@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import sqlite3
 from typing import Any
+
+from libref.store.vec_store import build_embed_text
 
 def _is_subsequence(pattern: list[str], names: list[str]) -> bool:
     pos = 0
@@ -46,8 +49,12 @@ def _make_snippet(content: str | None, query: str) -> str:
 
 
 class SearchService:
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn, settings=None, *, vec_store=None, embed=None, rerank=None) -> None:
         self._conn = conn
+        self._settings = settings
+        self._vec = vec_store if embed is not None else None
+        self._embed = embed if vec_store is not None else None
+        self._rerank = rerank
 
     def search_docs(
         self,
@@ -103,6 +110,103 @@ class SearchService:
             }
             for r in rows
         ]
+
+    async def search_hybrid_async(
+        self,
+        query: str,
+        *,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 8,
+        vec_store=None,
+        embed=None,
+        rerank=None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """混合检索，返回结果与降级标记；向量缺失时只走全文。"""
+        from libref.store.retriever import HybridRetriever
+
+        retriever = HybridRetriever(
+            self._conn,
+            self._settings,
+            vec_store=vec_store if vec_store is not None else self._vec,
+            embed=embed if embed is not None else self._embed,
+            rerank=rerank if rerank is not None else self._rerank,
+        )
+        return await retriever.search_async(
+            query, library=library, version=version,
+            ecosystem=ecosystem, limit=limit,
+        )
+
+    async def reembed_library_async(
+        self,
+        library: str,
+        version: str,
+        ecosystem: str | None = None,
+        *,
+        settings=None,
+        vec_store=None,
+        embed=None,
+    ) -> dict[str, int]:
+        """按真源全量重灌整版本向量，返回文档数与写入数。"""
+        settings = settings if settings is not None else self._settings
+        vec = vec_store if vec_store is not None else self._vec
+        fn = embed if embed is not None else self._embed
+        if settings is None:
+            raise ValueError("settings is required")
+        if vec is None or fn is None:
+            raise ValueError("vec_store and embed are required")
+        vids = self._mining_version_ids(library, version, ecosystem)
+        if len(vids) != 1:
+            raise ValueError("library version must resolve to a single version")
+        version_id = vids[0]
+        vec.ensure_collection(
+            self._conn,
+            getattr(settings, "embedding_model", ""),
+            getattr(settings, "embedding_dim", 0),
+        )
+        vec.delete_version(version_id)
+        rows = self._conn.execute(
+            "SELECT id, library_id, version_id, content, metadata "
+            "FROM documents WHERE version_id=? ORDER BY id",
+            (version_id,),
+        ).fetchall()
+        if not rows:
+            return {"docs": 0, "upserted": 0}
+        upserted = 0
+        for i in range(0, len(rows), 64):
+            batch = rows[i:i + 64]
+            texts = []
+            for r in batch:
+                try:
+                    meta = json.loads(r[4]) if r[4] else {}
+                except ValueError:
+                    meta = {}
+                texts.append(build_embed_text(meta.get("title"), meta.get("path"), r[3]))
+            vecs = await fn(texts)
+            if len(vecs) != len(batch):
+                raise RuntimeError("embedding count mismatch")
+            vec.upsert_batch([
+                (r[0], r[1], r[2], v) for r, v in zip(batch, vecs)
+            ])
+            upserted += len(batch)
+        return {"docs": len(rows), "upserted": upserted}
+
+    def reembed_library(
+        self,
+        library: str,
+        version: str,
+        ecosystem: str | None = None,
+        *,
+        settings=None,
+        vec_store=None,
+        embed=None,
+    ) -> dict[str, int]:
+        """重灌的同步入口，供命令行直接调用。"""
+        return asyncio.run(self.reembed_library_async(
+            library, version, ecosystem,
+            settings=settings, vec_store=vec_store, embed=embed,
+        ))
 
     def read_page(
         self,
