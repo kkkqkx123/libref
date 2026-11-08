@@ -1,11 +1,12 @@
 """源码抽取包：配置、模型、引擎、解析、缓存、仓库管理。"""
 
-from libref.astminer.cache import lookup, store
+from libref.astminer.cache import decode_records, encode_records, lookup, store, sweep_repo
 from libref.astminer.config import (
     JAVA_CONFIG,
     LANGUAGE_CONFIGS,
     PYTHON_CONFIG,
     LanguageConfig,
+    all_suffixes,
     check_config,
     config_for_suffix,
     grammar_fingerprint,
@@ -24,11 +25,15 @@ __all__ = [
     "LanguageConfig",
     "RawCall",
     "RepoManager",
+    "all_suffixes",
     "check_config",
     "config_for_suffix",
+    "decode_records",
+    "encode_records",
     "extract_file",
     "grammar_fingerprint",
     "lookup",
     "resolve_calls",
     "store",
+    "sweep_repo",
 ]

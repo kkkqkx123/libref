@@ -525,86 +525,55 @@ def call_uid(repo: str, caller_file: str, line_start: int, line_end: int,
     return hashlib.sha1(blob).hexdigest()
 
 
-def index_repo(conn, library: str, version: str, source: str, *, update: bool = False,
-               repos_dir=None, ecosystem: str = "custom") -> dict[str, int]:
+def _collect_repo(
+    conn, repo_name: str, root, files: list[str],
+) -> tuple[list, dict[str, list[tuple[str, str]]], list, dict[str, int], dict[str, tuple[str, int]]]:
     import hashlib
-    import json
     from pathlib import Path
 
     from libref.astminer import cache as ast_cache
     from libref.astminer import config as ast_config
     from libref.astminer import engine as ast_engine
-    from libref.astminer import resolution as ast_resolution
-    from libref.astminer.models import ApiDeclRecord
-    from libref.astminer.repos import RepoManager, iter_source_files
-    from libref.services.search import SearchService
 
-    settings_dir = Path(repos_dir) if repos_dir is not None else Path("data/repos")
-    search = SearchService(conn)
-    library_id, version_id = search.ensure_library_version(
-        library, version, ecosystem, repo_url=source,
-        resolved_from="explicit", registry_confirmed=True,
-    )
-    manager = RepoManager(settings_dir)
-    repo_name = f"{ecosystem}/{library}/{version}"
-    root, _commit = manager.ensure(conn, repo_name, source, update=update)
-    suffixes: tuple[str, ...] = (".py", ".java")
-    files = [r for r in iter_source_files(root, suffixes)]
-    counts = {"files": 0, "parsed": 0, "cached": 0,
-              "entities": 0, "calls": 0}
-    all_decls: list[ApiDeclRecord] = []
-    all_aliases: list[tuple[str, str]] = []
+    all_decls: list = []
+    file_aliases: dict[str, list[tuple[str, str]]] = {}
     all_raw: list = []
+    counts = {"files": 0, "parsed": 0, "cached": 0}
+    live: dict[str, tuple[str, int]] = {}
     for rel in files:
         counts["files"] += 1
         cfg = ast_config.config_for_suffix(Path(rel).suffix)
         if cfg is None:
             continue
         fp = ast_config.grammar_fingerprint(cfg)
+        live[rel] = (fp, cfg.config_version)
         data = (root / rel).read_bytes()
         sha = hashlib.sha1(data).hexdigest()
         hit = ast_cache.lookup(conn, repo_name, rel, fp, cfg.config_version)
         if hit is not None and hit[0] == sha:
             counts["cached"] += 1
-            for item in hit[1]:
-                if item.get("type") == "decl":
-                    all_decls.append(ApiDeclRecord(
-                        qualified_name=item["qualified_name"], kind=item["kind"],
-                        file=rel, line_start=item.get("line_start", 1),
-                        line_end=item.get("line_end", 1)))
-                elif item.get("type") == "alias":
-                    all_aliases.append((item["alias"], item["full"]))
-                else:
-                    from libref.astminer.models import RawCall as _RawCall
-
-                    all_raw.append(_RawCall(
-                        raw_callee=item["raw"], args=list(item.get("args", [])),
-                        caller_file=rel, caller=item.get("caller"),
-                        line_start=item["line_start"], line_end=item["line_end"]))
+            decls, aliases, raw_calls = ast_cache.decode_records(hit[1], rel)
+            all_decls.extend(decls)
+            file_aliases[rel] = aliases
+            all_raw.extend(raw_calls)
             continue
         counts["parsed"] += 1
         decls, aliases, raw_calls = ast_engine.extract_file(rel, cfg, data)
         all_decls.extend(decls)
-        all_aliases.extend(aliases)
+        file_aliases[rel] = list(aliases)
         all_raw.extend(raw_calls)
-        records: list[dict] = []
-        for decl in decls:
-            records.append({"type": "decl", "qualified_name": decl.qualified_name,
-                            "kind": decl.kind, "line_start": decl.line_start,
-                            "line_end": decl.line_end})
-        for alias, full in aliases:
-            records.append({"type": "alias", "alias": alias, "full": full})
-        for call in raw_calls:
-            records.append({"type": "raw_call", "raw": call.raw_callee,
-                            "args": list(call.args), "line_start": call.line_start,
-                            "line_end": call.line_end, "caller": call.caller})
-        ast_cache.store(conn, repo_name, rel, sha, fp, cfg.config_version, records)
-    conn.commit()
-    resolved = ast_resolution.resolve_calls(all_decls, all_aliases, all_raw, repo_name)
-    pending_entities: dict[tuple[str, str], tuple[str, str]] = {}
+        ast_cache.store(
+            conn, repo_name, rel, sha, fp, cfg.config_version,
+            ast_cache.encode_records(decls, aliases, raw_calls),
+        )
+    return all_decls, file_aliases, all_raw, counts, live
+
+
+def _persist_entities(conn, library_id: int, version_id: int, all_decls) -> tuple[int, int]:
+    pending: dict[tuple[str, str], tuple[str, str]] = {}
     for decl in all_decls:
-        pending_entities[(decl.qualified_name, decl.kind)] = (decl.qualified_name, decl.kind)
-    for qualified_name, kind in pending_entities.values():
+        pending[(decl.qualified_name, decl.kind)] = (decl.qualified_name, decl.kind)
+    for qualified_name, kind in pending.values():
         uid = entity_uid(version_id, qualified_name, kind)
         conn.execute(
             "INSERT INTO api_entities(entity_uid, library_id, version_id,"
@@ -612,20 +581,49 @@ def index_repo(conn, library: str, version: str, source: str, *, update: bool = 
             " ON CONFLICT(entity_uid) DO NOTHING",
             (uid, library_id, version_id, qualified_name, kind),
         )
-    conn.commit()
+    wanted = {entity_uid(version_id, q, k) for q, k in pending.values()}
+    if wanted:
+        placeholders = ",".join("?" for _ in wanted)
+        dead = conn.execute(
+            f"SELECT entity_uid FROM api_entities WHERE version_id=?"
+            f" AND entity_uid NOT IN ({placeholders})",
+            (version_id, *sorted(wanted)),
+        ).fetchall()
+        if dead:
+            conn.execute(
+                f"DELETE FROM api_entities WHERE version_id=?"
+                f" AND entity_uid NOT IN ({placeholders})",
+                (version_id, *sorted(wanted)),
+            )
+    else:
+        dead = conn.execute(
+            "SELECT entity_uid FROM api_entities WHERE version_id=?", (version_id,)
+        ).fetchall()
+        if dead:
+            conn.execute(
+                "DELETE FROM api_entities WHERE version_id=?", (version_id,)
+            )
+    return len(pending), len(dead)
+
+
+def _persist_calls(conn, library_id: int, version_id: int, resolved) -> tuple[int, int]:
     import json as _uid_json
+
     entity_ids = {
         r[0]: r[1] for r in conn.execute(
             "SELECT qualified_name || '|' || kind, id FROM api_entities"
             " WHERE version_id=?", (version_id,)
         )
     }
+    kinds = ("function", "method", "class", "interface", "enum", "constructor")
+    wanted: set[str] = set()
     for call in resolved:
         args_json = _uid_json.dumps(list(call.args), ensure_ascii=False)
         uid = call_uid(call.repo, call.caller_file, call.line_start,
                        call.line_end, call.callee, list(call.args))
+        wanted.add(uid)
         ent_id = None
-        for kind in ("function", "method", "class"):
+        for kind in kinds:
             ent_id = entity_ids.get(f"{call.callee}|{kind}")
             if ent_id is not None:
                 break
@@ -653,9 +651,67 @@ def index_repo(conn, library: str, version: str, source: str, *, update: bool = 
                     " ON CONFLICT(entity_type, entity_id) DO NOTHING",
                     (int(row[0]),),
                 )
+    if wanted:
+        placeholders = ",".join("?" for _ in wanted)
+        dead_rows = conn.execute(
+            f"SELECT id, call_uid FROM call_instances WHERE version_id=?"
+            f" AND call_uid NOT IN ({placeholders})",
+            (version_id, *sorted(wanted)),
+        ).fetchall()
+    else:
+        dead_rows = conn.execute(
+            "SELECT id, call_uid FROM call_instances WHERE version_id=?", (version_id,)
+        ).fetchall()
+    for dead_id, _ in dead_rows:
+        conn.execute(
+            "DELETE FROM review_status WHERE entity_type='call_instance' AND entity_id=?",
+            (int(dead_id),),
+        )
+    if dead_rows:
+        dead_uids = sorted(uid for _, uid in dead_rows)
+        placeholders = ",".join("?" for _ in dead_uids)
+        conn.execute(
+            f"DELETE FROM call_instances WHERE version_id=?"
+            f" AND call_uid IN ({placeholders})",
+            (version_id, *dead_uids),
+        )
+    return len(resolved), len(dead_rows)
+
+
+def index_repo(conn, library: str, version: str, source: str, *, update: bool = False,
+               repos_dir=None, ecosystem: str = "custom") -> dict[str, int]:
+    from pathlib import Path
+
+    from libref.astminer import cache as ast_cache
+    from libref.astminer import config as ast_config
+    from libref.astminer import resolution as ast_resolution
+    from libref.astminer.repos import RepoManager, iter_source_files
+    from libref.services.search import SearchService
+
+    settings_dir = Path(repos_dir) if repos_dir is not None else Path("data/repos")
+    search = SearchService(conn)
+    library_id, version_id = search.ensure_library_version(
+        library, version, ecosystem, repo_url=source,
+        resolved_from="explicit", registry_confirmed=True,
+    )
+    manager = RepoManager(settings_dir)
+    repo_name = f"{ecosystem}/{library}/{version}"
+    root, _commit = manager.ensure(conn, repo_name, source, update=update)
     conn.commit()
-    counts["entities"] = len(pending_entities)
-    counts["calls"] = len(resolved)
+    files = [r for r in iter_source_files(root, ast_config.all_suffixes())]
+    all_decls, file_aliases, all_raw, counts, live = _collect_repo(
+        conn, repo_name, root, files,
+    )
+    counts["evicted"] = ast_cache.sweep_repo(conn, repo_name, live)
+    conn.commit()
+    resolved = ast_resolution.resolve_calls(all_decls, file_aliases, all_raw, repo_name)
+    n_entities, swept_entities = _persist_entities(conn, library_id, version_id, all_decls)
+    n_calls, swept_calls = _persist_calls(conn, library_id, version_id, resolved)
+    conn.commit()
+    counts["entities"] = n_entities
+    counts["calls"] = n_calls
+    counts["swept_entities"] = swept_entities
+    counts["swept_calls"] = swept_calls
     return counts
 
 

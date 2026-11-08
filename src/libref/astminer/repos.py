@@ -8,23 +8,25 @@ from pathlib import Path
 _SKIP_DIRS = frozenset(
     {".git", "__pycache__", "node_modules", "vendor", ".venv", "venv", "target"}
 )
-_SKIP_NAME_PARTS = ("test", "tests")
 
 
 def _should_skip(rel: str) -> bool:
-    lowered = rel.lower()
     for part in rel.split("/"):
         if part in _SKIP_DIRS:
             return True
-        if part in _SKIP_NAME_PARTS:
-            return True
-    if ".min." in lowered:
+    if ".min." in rel.lower():
         return True
     return False
 
 
-def iter_source_files(root: Path, suffixes: tuple[str, ...]):
-    for path in sorted(root.rglob("*")):
+def iter_source_files(
+    root: Path,
+    suffixes: tuple[str, ...],
+    *,
+    max_file_bytes: int = 1_000_000,
+):
+    found: list[str] = []
+    for path in root.rglob("*"):
         if not path.is_file():
             continue
         if path.suffix not in suffixes:
@@ -32,7 +34,14 @@ def iter_source_files(root: Path, suffixes: tuple[str, ...]):
         rel = path.relative_to(root).as_posix()
         if _should_skip(rel):
             continue
-        yield rel
+        try:
+            if path.stat().st_size > max_file_bytes:
+                continue
+        except OSError:
+            continue
+        found.append(rel)
+    found.sort()
+    yield from found
 
 
 class RepoManager:
@@ -51,9 +60,8 @@ class RepoManager:
         maybe_local = Path(source)
         if maybe_local.is_dir():
             local = maybe_local.resolve()
-            commit = "local"
-            self._record(conn, name, source, commit, str(local))
-            return local, commit
+            self._record(conn, name, source, "local", str(local))
+            return local, "local"
         target = self._base / name
         if target.is_dir() and (target / ".git").is_dir():
             if update:
@@ -77,17 +85,14 @@ class RepoManager:
         porcelain.pull(str(target))
 
     def _head_commit(self, target: Path) -> str:
-        try:
-            from dulwich.repo import Repo
+        from dulwich.repo import Repo
 
-            repo = Repo(str(target))
+        repo = Repo(str(target))
+        try:
             head = repo.head()
-            try:
-                return head.decode() if isinstance(head, bytes) else str(head)
-            finally:
-                repo.close()
-        except Exception:
-            return "unknown"
+            return head.decode() if isinstance(head, bytes) else str(head)
+        finally:
+            repo.close()
 
     def _record(
         self, conn: sqlite3.Connection, name: str, url: str,
@@ -100,4 +105,3 @@ class RepoManager:
             " commit_sha=excluded.commit_sha, local_path=excluded.local_path",
             (name, url, commit, local_path),
         )
-        conn.commit()

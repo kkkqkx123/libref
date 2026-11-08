@@ -11,7 +11,7 @@ Confidence = Literal["EXTRACTED", "INFERRED", "AMBIGUOUS"]
 
 class ApiDeclRecord(BaseModel):
     qualified_name: str
-    kind: str = Field(pattern="^(class|function|method)$")
+    kind: str = Field(pattern="^(class|function|method|interface|enum|constructor)$")
     file: str
     line_start: int
     line_end: int

@@ -4,20 +4,22 @@ from __future__ import annotations
 
 from libref.astminer.models import ApiDeclRecord, CallInstanceRecord, RawCall
 
+_SELF_HEADS = frozenset({"self", "cls", "this"})
+
 
 def resolve_calls(
     decls: list[ApiDeclRecord],
-    aliases: list[tuple[str, str]],
+    file_aliases: dict[str, list[tuple[str, str]]],
     calls: list[RawCall],
     repo: str,
 ) -> list[CallInstanceRecord]:
     declared = {d.qualified_name for d in decls}
-    leaf_names = {d.qualified_name.split(".")[-1] for d in decls}
-    alias_map = dict(aliases)
+    alias_per_file = {path: dict(items) for path, items in file_aliases.items()}
     out: list[CallInstanceRecord] = []
     for call in calls:
+        alias_map = alias_per_file.get(call.caller_file, {})
         resolved, confidence = resolve_one(
-            call.raw_callee, call.caller, declared, leaf_names, alias_map
+            call.raw_callee, call.caller, declared, alias_map
         )
         out.append(
             CallInstanceRecord(
@@ -39,14 +41,13 @@ def resolve_one(
     raw: str,
     caller: str | None,
     declared: set[str],
-    leaf_names: set[str],
     alias_map: dict[str, str],
 ) -> tuple[str, str]:
     if not raw:
         return raw, "AMBIGUOUS"
     head, _, _rest = raw.partition(".")
-    if head in ("self", "cls") and caller:
-        base = caller.rpartition(".")[0] if "." in (caller or "") else caller
+    if head in _SELF_HEADS and caller:
+        base = caller.rpartition(".")[0] if "." in caller else caller
         resolved = (base + raw[len(head):]) if base else raw
         if resolved in declared:
             return resolved, "EXTRACTED"
@@ -58,6 +59,4 @@ def resolve_one(
         return resolved, "INFERRED"
     if raw in declared:
         return raw, "EXTRACTED"
-    if head in leaf_names or raw.split(".")[-1] in leaf_names:
-        return raw, "AMBIGUOUS"
     return raw, "AMBIGUOUS"
