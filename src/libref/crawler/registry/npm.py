@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from libref.crawler.registry import sanitize_http_url
+from libref.crawler.registry import is_repo_host_url, sanitize_http_url
 
 
 def normalize_npm_name(name: str) -> str:
@@ -22,7 +22,9 @@ def parse_npm_payload(
     stable = tags.get("latest")
     versions = [str(v) for v in (payload.get("versions") or {})]
     homepage = sanitize_http_url(payload.get("homepage"), allow_private=allow_private)
-    candidates = [homepage] if homepage else []
+    candidates = []
+    if homepage and not is_repo_host_url(homepage):
+        candidates.append(homepage)
     repo_url = None
     repo = payload.get("repository") or {}
     if isinstance(repo, dict):

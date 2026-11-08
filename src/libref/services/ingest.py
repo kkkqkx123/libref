@@ -393,6 +393,9 @@ class IngestService:
                 counts["skipped"] += len(rejected)
                 if seed.source == "none" and seed.failed:
                     counts["failed"] += 1
+                if not accepted and policy.accept(start_url):
+                    # 无站点地图与 llms.txt 时回退抓起始页本身，覆盖 javadoc 类站点。
+                    accepted = [start_url]
                 ingest_truncated = False
                 if max_pages is not None and len(accepted) > max_pages:
                     accepted = accepted[:max_pages]

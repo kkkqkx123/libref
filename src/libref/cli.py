@@ -550,7 +550,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument(
         "start_url", nargs="?", default=None, help="显式形态必填，与 --ecosystem 互斥"
     )
-    p_ingest.add_argument("--ecosystem", default=None, help="按名称解析：pypi|npm")
+    p_ingest.add_argument("--ecosystem", default=None, help="按名称解析：pypi|npm|maven，java 坐标形如 group:artifact")
     p_ingest.add_argument("--offline", action="store_true", help="只读缓存，不请求网络")
     p_ingest.add_argument("--max-pages", type=int, default=None)
     p_ingest.add_argument("--prefilter", action="store_true", help="HEAD 存活预筛")

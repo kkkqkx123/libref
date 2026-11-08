@@ -57,6 +57,7 @@ class LibrefSettings(BaseSettings):
         default_factory=lambda: {
             "pypi": "https://pypi.org/pypi",
             "npm": "https://registry.npmjs.org",
+            "maven": "https://repo1.maven.org/maven2",
         }
     )
     registry_overrides_file: Path | None = None

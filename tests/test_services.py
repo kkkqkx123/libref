@@ -290,6 +290,29 @@ def test_scrape_skips_sweep_when_seed_truncated(conn):
     assert store.get_page(1, other_url) is not None
 
 
+def test_scrape_falls_back_to_start_url_without_seed(conn):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/robots.txt":
+            return httpx.Response(200, text="")
+        if request.url.path == "/javadoc/index.html":
+            return httpx.Response(
+                200, text="<html><body><main><p>javadoc fallback body</p></main></body></html>")
+        return httpx.Response(404)
+
+    settings = LibrefSettings(
+        request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
+        robots_cache_ttl_days=1.0,
+    )
+    restore = _patch_client(handler)
+    try:
+        counts = IngestService(settings, conn).scrape_docs(
+            "docs", "1.0", "https://d.example/javadoc/index.html")
+    finally:
+        restore()
+    assert counts["stored"] == 1
+    assert SearchService(conn).search_docs("javadoc") != []
+
+
 def test_start_scrape_job_runs_through_queue(conn):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":

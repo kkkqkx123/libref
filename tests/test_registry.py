@@ -455,3 +455,71 @@ def test_stale_overrides_gate_lists_expired():
     })
     stale = find_stale_overrides(180.0, date(2026, 11, 8))
     assert [k for k, _ in stale] == [("pypi", "old")]
+
+
+MAVEN_METADATA = (
+    "<metadata><groupId>org.springframework</groupId>"
+    "<artifactId>spring-core</artifactId><versioning><release>6.1.0</release>"
+    "<versions><version>6.0.0</version><version>6.1.0</version></versions>"
+    "</versioning></metadata>"
+)
+MAVEN_POM = (
+    "<project><url>https://spring.io/projects/spring-framework</url>"
+    "<scm><url>scm:git:https://github.com/spring-projects/spring-framework.git"
+    "</url></scm></project>"
+)
+
+
+def maven_handler(request: httpx.Request) -> httpx.Response:
+    if request.url.path.endswith("maven-metadata.xml"):
+        return httpx.Response(200, text=MAVEN_METADATA)
+    if request.url.path.endswith(".pom"):
+        return httpx.Response(200, text=MAVEN_POM)
+    raise AssertionError(request.url.path)
+
+
+def test_maven_resolves_docs_and_versions(conn):
+    settings = make_settings()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(maven_handler))
+    try:
+        res = run(resolve_package(conn, client, settings, "maven", "org.springframework:spring-core"))
+    finally:
+        run(client.aclose())
+    assert res.ecosystem == "maven"
+    assert res.version == "6.1.0"
+    assert res.docs_url == "https://spring.io/projects/spring-framework"
+    assert res.repo_url == "https://github.com/spring-projects/spring-framework.git"
+    assert res.source == "registry"
+
+
+def test_maven_infers_from_colon_and_rejects_bare(conn):
+    settings = make_settings()
+    client = httpx.AsyncClient(transport=httpx.MockTransport(maven_handler))
+    try:
+        res = run(resolve_package(conn, client, settings, None, "org.springframework:spring-core"))
+    finally:
+        run(client.aclose())
+    assert res.ecosystem == "maven"
+    with pytest.raises(ValueError, match="maven name must look like"):
+        run(resolve_package(conn, client, settings, "maven", "spring-core"))
+
+
+def test_npm_repo_homepage_excluded_from_candidates(conn):
+    settings = make_settings()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={
+            "dist-tags": {"latest": "1.0.0"},
+            "versions": {"1.0.0": {}},
+            "homepage": "https://github.com/org/repo",
+            "repository": {"url": "git+https://github.com/org/repo.git"},
+        })
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        with pytest.raises(RegistryError) as exc:
+            run(resolve_package(conn, client, settings, "npm", "pkg"))
+    finally:
+        run(client.aclose())
+    assert exc.value.kind == "no_docs"
+    assert exc.value.hint.get("repo_url") == "https://github.com/org/repo.git"

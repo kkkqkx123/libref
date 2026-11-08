@@ -1,6 +1,6 @@
 """注册表子包门面：模型、地址卫生、版本比较、传输加生态分发。
 
-生态专属解析落 pypi 与 npm 提供方，覆盖规则落 overrides，
+生态专属解析落各提供方模块，覆盖规则落 overrides，
 本门面只保留分发与通用逻辑，不读写库。
 网络统一走注入的 httpx.AsyncClient。
 跨包边界的结论为 pydantic 模型。
@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import BaseModel, Field
 
-SUPPORTED_ECOSYSTEMS = ("pypi", "npm")
+SUPPORTED_ECOSYSTEMS = ("pypi", "npm", "maven")
 
 _DOCS_HOST_HINTS = (
     "docs.",
@@ -81,6 +81,10 @@ def normalize_name(ecosystem: str, name: str) -> str:
         from libref.crawler.registry.npm import normalize_npm_name
 
         return normalize_npm_name(name)
+    if ecosystem == "maven":
+        from libref.crawler.registry.maven import normalize_maven_name
+
+        return normalize_maven_name(name)
     raise ValueError(f"unsupported ecosystem: {ecosystem}")
 
 
@@ -228,6 +232,27 @@ async def _get_json(
     raise RegistryError("retryable", f"registry unreachable: {error}")
 
 
+async def _get_text(
+    client: httpx.AsyncClient, url: str, *, retries: int = 3
+) -> httpx.Response:
+    error: str | None = None
+    for attempt in range(retries + 1):
+        try:
+            resp = await client.get(url, headers={"Accept": "text/xml, application/xml, */*"})
+        except (httpx.HTTPError, OSError, TimeoutError) as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            await asyncio.sleep(min(0.05 * (2**attempt), 0.4))
+            continue
+        if resp.status_code == 404:
+            return resp
+        if resp.status_code == 429 or resp.status_code >= 500:
+            error = f"HTTP {resp.status_code}"
+            await asyncio.sleep(min(0.05 * (2**attempt), 0.4))
+            continue
+        return resp
+    raise RegistryError("retryable", f"registry unreachable: {error}")
+
+
 async def fetch_snapshot(
     ecosystem: str, raw_name: str, client: httpx.AsyncClient, settings
 ) -> RegistrySnapshot:
@@ -249,7 +274,7 @@ async def fetch_snapshot(
         stable, versions, homepage, candidates, repo_url = parse_pypi_payload(
             resp.json(), allow_private=allow_private
         )
-    else:
+    elif ecosystem == "npm":
         from libref.crawler.registry.npm import npm_snapshot_url, parse_npm_payload
 
         base = registry_base_for(ecosystem, settings)
@@ -261,6 +286,37 @@ async def fetch_snapshot(
         stable, versions, homepage, candidates, repo_url = parse_npm_payload(
             resp.json(), allow_private=allow_private
         )
+    else:
+        from libref.crawler.registry.maven import (
+            maven_metadata_url,
+            maven_pom_url,
+            parse_maven_metadata,
+            parse_maven_pom,
+            split_maven_name,
+        )
+
+        base = registry_base_for(ecosystem, settings)
+        group, artifact = split_maven_name(name)
+        meta_resp = await _get_text(client, maven_metadata_url(base, group, artifact))
+        if meta_resp.status_code == 404:
+            raise RegistryError("not_found", f"package not found: maven:{name}")
+        if meta_resp.status_code >= 400:
+            raise RegistryError("retryable", f"registry HTTP {meta_resp.status_code}")
+        stable, versions = parse_maven_metadata(meta_resp.text)
+        if not versions:
+            raise RegistryError("not_found", f"package not found: maven:{name}")
+        pom_version = stable or best_effort_stable(versions) or versions[0]
+        pom_resp = await _get_text(client, maven_pom_url(base, group, artifact, pom_version))
+        if pom_resp.status_code >= 400:
+            homepage, candidates, repo_url = None, [], None
+        else:
+            homepage, candidates, repo_url = parse_maven_pom(
+                pom_resp.text, allow_private=allow_private
+            )
+        if stable is not None:
+            javadoc_url = f"https://javadoc.io/doc/{group}/{artifact}/{stable}"
+            if javadoc_url not in candidates:
+                candidates.append(javadoc_url)
     return RegistrySnapshot(
         ecosystem=ecosystem,
         name=name,

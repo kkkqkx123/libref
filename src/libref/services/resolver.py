@@ -22,17 +22,22 @@ from libref.crawler.registry.overrides import ensure_overrides_file, get_overrid
 
 
 def infer_ecosystem(explicit: str | None, name: str) -> str:
-    """生态判定：显式优先，裸名不猜测，仅作用域形态可推断。"""
+    """生态判定：显式优先，裸名不猜测，仅作用域与坐标形态可推断。"""
     if explicit is not None:
         eco = explicit.strip().lower()
-        if eco not in ("pypi", "npm"):
+        if eco not in ("pypi", "npm", "maven"):
             raise ValueError(f"unsupported ecosystem: {explicit}")
         if eco == "pypi" and name.strip().startswith("@"):
             raise ValueError("pypi package must not start with '@'")
+        if eco == "maven" and ":" not in name:
+            raise ValueError("maven name must look like group:artifact")
         return eco
-    if name.strip().startswith("@") and "/" in name:
+    stripped = name.strip()
+    if stripped.startswith("@") and "/" in stripped:
         return "npm"
-    raise ValueError("ecosystem required: pass --ecosystem pypi|npm")
+    if ":" in stripped:
+        return "maven"
+    raise ValueError("ecosystem required: pass --ecosystem pypi|npm|maven")
 
 
 def read_cache(conn: sqlite3.Connection, ecosystem: str, name: str) -> dict | None:
@@ -160,7 +165,7 @@ async def resolve_package(
             raise ValueError(f"invalid documentation address: {explicit_url}")
         eco = (ecosystem.strip().lower() if ecosystem else "custom")
         label = name.strip()
-        if eco in ("pypi", "npm"):
+        if eco in ("pypi", "npm", "maven"):
             label = normalize_name(eco, name)
         return Resolution(
             ecosystem=eco,
