@@ -253,10 +253,13 @@ class HybridRetriever:
             return [], degraded
         reranked = await self._apply_rerank(query, fused, limit, degraded)
         fused, degraded = reranked
-        results = self._assemble(query, fused[:limit], fts_ids, vec_ids)
-        return results, degraded
+        window_f = max(2 * limit, 10)
+        results = self._assemble(query, fused[:window_f], fts_ids, vec_ids)
+        return results[:limit], degraded
 
-    def _rrf(self, fts_ids: list[int], vec_ids: list[int]) -> list[int]:
+    def _rrf_scores(
+        self, fts_ids: list[int], vec_ids: list[int]
+    ) -> dict[int, float]:
         k = int(getattr(self._settings, "rrf_k", 20))
         w_fts = float(getattr(self._settings, "rrf_w_fts", 1.0))
         w_vec = float(getattr(self._settings, "rrf_w_vec", 0.5))
@@ -270,6 +273,10 @@ class HybridRetriever:
             if doc in rank_vec:
                 s += w_vec / (k + rank_vec[doc])
             scored[doc] = s
+        return scored
+
+    def _rrf(self, fts_ids: list[int], vec_ids: list[int]) -> list[int]:
+        scored = self._rrf_scores(fts_ids, vec_ids)
         return sorted(scored, key=lambda d: scored[d], reverse=True)
 
     async def _apply_rerank(
@@ -306,6 +313,7 @@ class HybridRetriever:
         fts_set, vec_set = set(fts_ids), set(vec_ids)
         alpha = float(getattr(self._settings, "freq_alpha", 0.15))
         cluster_alpha = float(getattr(self._settings, "cluster_alpha", 0.05))
+        rrf = self._rrf_scores(fts_ids, vec_ids)
         vids = sorted({details[d]["version_id"] for d in fused if d in details})
         patterns = _pattern_supports(self._conn, vids)
         clusters = _cluster_sets(self._conn, vids)
@@ -314,6 +322,7 @@ class HybridRetriever:
             info = details.get(doc)
             if info is None:
                 continue
+            base = rrf.get(doc, 0.0)
             bonus = 0.0
             plist = patterns.get(info["version_id"], [])
             if plist and alpha > 0:
@@ -333,11 +342,11 @@ class HybridRetriever:
                     if hits >= 2:
                         cluster_bonus = 1.0
                         break
-            base = 1.0
-            scored.append((base * (1.0 + alpha * bonus + cluster_alpha * cluster_bonus), doc))
+            final = base * (1.0 + alpha * bonus + cluster_alpha * cluster_bonus)
+            scored.append((final, doc))
         scored.sort(key=lambda kv: kv[0], reverse=True)
         out: list[dict[str, Any]] = []
-        for _, doc in scored:
+        for final, doc in scored:
             info = details[doc]
             sources = []
             if doc in fts_set:
@@ -348,9 +357,7 @@ class HybridRetriever:
                 {
                     "id": info["id"],
                     "url": info["url"],
-                    "score": next(
-                        (i for i, d in enumerate(fused) if d == doc), 0
-                    ),
+                    "score": final,
                     "snippet": info["snippet"],
                     "title": info["title"],
                     "path": info["path"],
@@ -361,8 +368,6 @@ class HybridRetriever:
                     "source_group_id": info.get("source_group_id", ""),
                 }
             )
-        fused_pos = {d: i for i, d in enumerate(fused)}
-        out.sort(key=lambda r: fused_pos[r["id"]])
         return out
 
 

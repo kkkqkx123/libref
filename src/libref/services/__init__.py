@@ -11,12 +11,14 @@ from libref.services.ingest import (
 )
 from libref.services.jobs import JobManager
 from libref.services.resolver import infer_ecosystem, resolve_package
+from libref.services.review import ReviewService
 from libref.services.search import SearchService
 
 __all__ = [
     "SCRAPE_JOB_KIND",
     "IngestService",
     "JobManager",
+    "ReviewService",
     "SearchService",
     "answer_query",
     "answer_query_async",

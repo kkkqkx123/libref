@@ -1,7 +1,7 @@
-"""MCP 出口：FastMCP 实例与工具注册（只调 services/）。
+"""MCP 出口：MCPServer 实例与工具注册（只调 services/）。
 
 工具体只做参数解析 + services 调用 + 结果格式化（module-layout §2 出口零业务逻辑）。
-stdio 传输由 CLI `serve-mcp` 启动。
+传输（stdio / Streamable HTTP）由 CLI `serve-mcp` 选择启动；SSE 已被官方废弃，不提供。
 """
 
 from __future__ import annotations
@@ -9,11 +9,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-try:
-    from mcp.server.mcpserver import MCPServer as FastMCP
-    """mcp>=2 重命名 FastMCP → MCPServer；别名保持注册/运行调用不变。"""
-except ImportError:
-    from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from libref.config import LibrefSettings
 from libref.crawler.registry import RegistryError
@@ -23,9 +19,9 @@ from libref.services.search import SearchService
 
 def build_mcp_server(
     conn: sqlite3.Connection, settings: LibrefSettings | None = None
-) -> FastMCP:
-    """构建 FastMCP 实例并注册文档检索工具；连接由调用方管理生命周期。"""
-    mcp: FastMCP = FastMCP("libref")
+) -> MCPServer:
+    """构建 MCPServer 实例并注册文档检索工具；连接由调用方管理生命周期。"""
+    mcp = MCPServer("libref")
     search = SearchService(conn)
     resolve_settings = settings or LibrefSettings()
 

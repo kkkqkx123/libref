@@ -21,6 +21,7 @@ from libref.services.ingest import (
     start_scrape_job,
 )
 from libref.services.jobs import JobManager
+from libref.services.review import ReviewService
 from libref.services.search import SearchService
 from libref.store.vec_store import QdrantVecStore, collection_for
 
@@ -467,13 +468,68 @@ def cmd_dump_chunks(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_serve_mcp(_args: argparse.Namespace) -> int:
+def cmd_reembed(args: argparse.Namespace) -> int:
+    settings = LibrefSettings()
+    conn = _connect(settings)
+    try:
+        vec_store, embed = _build_vector(settings)
+        if vec_store is None or embed is None:
+            print("embedding is not configured (missing key)", file=sys.stderr)
+            return 1
+        out = SearchService(conn, settings, vec_store=vec_store, embed=embed).reembed_library(
+            args.library, args.version, ecosystem=args.ecosystem,
+        )
+    finally:
+        conn.close()
+    print(f"docs: {out['docs']} upserted: {out['upserted']}")
+    return 0
+
+
+def cmd_review(args: argparse.Namespace) -> int:
+    conn = _connect(LibrefSettings())
+    try:
+        svc = ReviewService(conn)
+        action = args.review_action
+        if action == "list":
+            for r in svc.list_pending(limit=args.limit):
+                print(
+                    f"{r['entity_id']} {r['confidence']} {r['callee']} "
+                    f"{r['caller_file']}:{r['line_start']}-{r['line_end']}"
+                )
+            return 0
+        if action == "approve":
+            svc.approve(args.entity_id)
+        elif action == "conflict":
+            svc.mark_conflict(args.entity_id)
+        elif action == "reopen":
+            svc.reopen(args.entity_id)
+        else:
+            print(f"unknown review action: {action}", file=sys.stderr)
+            return 2
+    except ValueError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
+    print("ok")
+    return 0
+
+
+def cmd_serve_mcp(args: argparse.Namespace) -> int:
     from libref.mcp_server import build_mcp_server
 
+    settings = LibrefSettings()
     # MCPServer 在 worker 线程执行工具，连接需跨线程复用。
-    conn = _connect(LibrefSettings(), check_same_thread=False)
-    mcp = build_mcp_server(conn)
-    mcp.run("stdio")  # 阻塞直到 stdio 关闭
+    conn = _connect(settings, check_same_thread=False)
+    mcp = build_mcp_server(conn, settings)
+    if args.http:
+        host = args.host or settings.mcp_host
+        port = args.port or settings.mcp_port
+        path = args.path or settings.mcp_path
+        mcp.run("streamable-http", host=host, port=port,
+                streamable_http_path=path)  # 阻塞直到进程退出
+    else:
+        mcp.run("stdio")  # 阻塞直到 stdio 关闭
     conn.close()
     return 0
 
@@ -547,9 +603,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_read.add_argument("--version", default=None)
     p_read.set_defaults(func=cmd_read_page)
 
-    sub.add_parser("serve-mcp", help="以 stdio 传输启动 MCP 服务").set_defaults(
-        func=cmd_serve_mcp
-    )
+    p_mcp = sub.add_parser("serve-mcp", help="启动 MCP 服务（默认 stdio）")
+    p_mcp.add_argument("--http", action="store_true",
+                       help="改用 Streamable HTTP 传输（默认只绑本地回环）")
+    p_mcp.add_argument("--host", default=None, help="HTTP 监听地址")
+    p_mcp.add_argument("--port", type=int, default=None, help="HTTP 监听端口")
+    p_mcp.add_argument("--path", default=None, help="HTTP 端点路径")
+    p_mcp.set_defaults(func=cmd_serve_mcp)
 
     p_repo = sub.add_parser("index-repo", help="索引源码仓库并落调用实例")
     p_repo.add_argument("library")
@@ -605,6 +665,22 @@ def build_parser() -> argparse.ArgumentParser:
     group.add_argument("--source", default=None, help="源码文件路径")
     p_dump.add_argument("--url", default=None, help="文档块地址标注")
     p_dump.set_defaults(func=cmd_dump_chunks)
+
+    p_reembed = sub.add_parser("reembed", help="按真源全量重灌整版本向量")
+    p_reembed.add_argument("library")
+    p_reembed.add_argument("version")
+    p_reembed.add_argument("--ecosystem", default=None)
+    p_reembed.set_defaults(func=cmd_reembed)
+
+    p_review = sub.add_parser("review", help="审核待定调用实例")
+    review_sub = p_review.add_subparsers(dest="review_action", required=True)
+    review_sub.add_parser("list", help="列出待定项").add_argument(
+        "--limit", type=int, default=50,
+    )
+    for _name in ("approve", "conflict", "reopen"):
+        _p = review_sub.add_parser(_name)
+        _p.add_argument("entity_id", type=int)
+    p_review.set_defaults(func=cmd_review)
     return parser
 
 

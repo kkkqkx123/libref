@@ -67,3 +67,7 @@ class LibrefSettings(BaseSettings):
     chat_api_key: str | None = None
     chat_timeout: float = 60.0
     chat_enable_thinking: bool = False
+    # MCP Streamable HTTP 传输：默认只绑本地回环，无鉴权不对外暴露。
+    mcp_host: str = "127.0.0.1"
+    mcp_port: int = 8000
+    mcp_path: str = "/mcp"
