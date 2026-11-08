@@ -503,3 +503,232 @@ class IngestService:
             chunks=chunks, raw_content=markdown,
             etag=result.etag, last_modified=result.last_modified,
         )
+
+
+INDEX_REPO_JOB_KIND = "index_repo"
+MINE_PATTERNS_JOB_KIND = "mine_patterns"
+
+
+def entity_uid(version_id: int, qualified_name: str, kind: str) -> str:
+    import hashlib
+
+    blob = f"{version_id}\0{qualified_name}\0{kind}".encode()
+    return hashlib.sha1(blob).hexdigest()
+
+
+def call_uid(repo: str, caller_file: str, line_start: int, line_end: int,
+             callee: str, args: list[str]) -> str:
+    import hashlib
+
+    blob = "\0".join([repo, caller_file, str(line_start), str(line_end),
+                          callee, "\x1f".join(args)]).encode()
+    return hashlib.sha1(blob).hexdigest()
+
+
+def index_repo(conn, library: str, version: str, source: str, *, update: bool = False,
+               repos_dir=None, ecosystem: str = "custom") -> dict[str, int]:
+    import hashlib
+    import json
+    from pathlib import Path
+
+    from libref.astminer import cache as ast_cache
+    from libref.astminer import config as ast_config
+    from libref.astminer import engine as ast_engine
+    from libref.astminer import resolution as ast_resolution
+    from libref.astminer.models import ApiDeclRecord
+    from libref.astminer.repos import RepoManager, iter_source_files
+    from libref.services.search import SearchService
+
+    settings_dir = Path(repos_dir) if repos_dir is not None else Path("data/repos")
+    search = SearchService(conn)
+    library_id, version_id = search.ensure_library_version(
+        library, version, ecosystem, repo_url=source,
+        resolved_from="explicit", registry_confirmed=True,
+    )
+    manager = RepoManager(settings_dir)
+    repo_name = f"{ecosystem}/{library}/{version}"
+    root, _commit = manager.ensure(conn, repo_name, source, update=update)
+    suffixes: tuple[str, ...] = (".py", ".java")
+    files = [r for r in iter_source_files(root, suffixes)]
+    counts = {"files": 0, "parsed": 0, "cached": 0,
+              "entities": 0, "calls": 0}
+    all_decls: list[ApiDeclRecord] = []
+    all_aliases: list[tuple[str, str]] = []
+    all_raw: list = []
+    for rel in files:
+        counts["files"] += 1
+        cfg = ast_config.config_for_suffix(Path(rel).suffix)
+        if cfg is None:
+            continue
+        fp = ast_config.grammar_fingerprint(cfg)
+        data = (root / rel).read_bytes()
+        sha = hashlib.sha1(data).hexdigest()
+        hit = ast_cache.lookup(conn, repo_name, rel, fp, cfg.config_version)
+        if hit is not None and hit[0] == sha:
+            counts["cached"] += 1
+            for item in hit[1]:
+                if item.get("type") == "decl":
+                    all_decls.append(ApiDeclRecord(
+                        qualified_name=item["qualified_name"], kind=item["kind"],
+                        file=rel, line_start=item.get("line_start", 1),
+                        line_end=item.get("line_end", 1)))
+                elif item.get("type") == "alias":
+                    all_aliases.append((item["alias"], item["full"]))
+                else:
+                    from libref.astminer.models import RawCall as _RawCall
+
+                    all_raw.append(_RawCall(
+                        raw_callee=item["raw"], args=list(item.get("args", [])),
+                        caller_file=rel, caller=item.get("caller"),
+                        line_start=item["line_start"], line_end=item["line_end"]))
+            continue
+        counts["parsed"] += 1
+        decls, aliases, raw_calls = ast_engine.extract_file(rel, cfg, data)
+        all_decls.extend(decls)
+        all_aliases.extend(aliases)
+        all_raw.extend(raw_calls)
+        records: list[dict] = []
+        for decl in decls:
+            records.append({"type": "decl", "qualified_name": decl.qualified_name,
+                            "kind": decl.kind, "line_start": decl.line_start,
+                            "line_end": decl.line_end})
+        for alias, full in aliases:
+            records.append({"type": "alias", "alias": alias, "full": full})
+        for call in raw_calls:
+            records.append({"type": "raw_call", "raw": call.raw_callee,
+                            "args": list(call.args), "line_start": call.line_start,
+                            "line_end": call.line_end, "caller": call.caller})
+        ast_cache.store(conn, repo_name, rel, sha, fp, cfg.config_version, records)
+    conn.commit()
+    resolved = ast_resolution.resolve_calls(all_decls, all_aliases, all_raw, repo_name)
+    pending_entities: dict[tuple[str, str], tuple[str, str]] = {}
+    for decl in all_decls:
+        pending_entities[(decl.qualified_name, decl.kind)] = (decl.qualified_name, decl.kind)
+    for qualified_name, kind in pending_entities.values():
+        uid = entity_uid(version_id, qualified_name, kind)
+        conn.execute(
+            "INSERT INTO api_entities(entity_uid, library_id, version_id,"
+            " qualified_name, kind) VALUES(?, ?, ?, ?, ?)"
+            " ON CONFLICT(entity_uid) DO NOTHING",
+            (uid, library_id, version_id, qualified_name, kind),
+        )
+    conn.commit()
+    import json as _uid_json
+    entity_ids = {
+        r[0]: r[1] for r in conn.execute(
+            "SELECT qualified_name || '|' || kind, id FROM api_entities"
+            " WHERE version_id=?", (version_id,)
+        )
+    }
+    for call in resolved:
+        args_json = _uid_json.dumps(list(call.args), ensure_ascii=False)
+        uid = call_uid(call.repo, call.caller_file, call.line_start,
+                       call.line_end, call.callee, list(call.args))
+        ent_id = None
+        for kind in ("function", "method", "class"):
+            ent_id = entity_ids.get(f"{call.callee}|{kind}")
+            if ent_id is not None:
+                break
+        conn.execute(
+            "INSERT INTO call_instances(call_uid, callee_entity_id, callee_name, args,"
+            " repo, caller_file, line_start, line_end, confidence,"
+            " library_id, version_id, caller)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(call_uid) DO UPDATE SET callee_entity_id=excluded.callee_entity_id,"
+            " callee_name=excluded.callee_name, args=excluded.args,"
+            " confidence=excluded.confidence, library_id=excluded.library_id,"
+            " version_id=excluded.version_id, caller=excluded.caller",
+            (uid, ent_id, call.callee, args_json, call.repo, call.caller_file,
+             call.line_start, call.line_end, call.confidence,
+             library_id, version_id, call.caller),
+        )
+        if call.confidence == "AMBIGUOUS":
+            row = conn.execute(
+                "SELECT id FROM call_instances WHERE call_uid=?", (uid,)
+            ).fetchone()
+            if row is not None:
+                conn.execute(
+                    "INSERT INTO review_status(entity_type, entity_id, status)"
+                    " VALUES('call_instance', ?, 'pending')"
+                    " ON CONFLICT(entity_type, entity_id) DO NOTHING",
+                    (int(row[0]),),
+                )
+    conn.commit()
+    counts["entities"] = len(pending_entities)
+    counts["calls"] = len(resolved)
+    return counts
+
+
+def mine_patterns(conn, library: str, version: str, *, minsup: int = 2,
+                  topn: int | None = None, maxlen: int = 10) -> list[dict]:
+    import json as _json
+
+    from libref.mining import PrefixSpan
+    from libref.mining import frequency as _freq
+    from libref.mining import normalize as _norm
+    from libref.services.search import SearchService
+
+    search = SearchService(conn)
+    library_id, version_id = search.ensure_library_version(library, version)
+    rows = conn.execute(
+        "SELECT callee_name, caller_file, line_start, caller FROM call_instances"
+        " WHERE version_id=? ORDER BY caller_file, line_start", (version_id,)
+    ).fetchall()
+    if not rows:
+        return []
+    groups: dict[str, list[tuple[int, str]]] = {}
+    for callee, caller_file, line_start, caller in rows:
+        key = f"{caller_file}::{caller}" if caller else str(caller_file)
+        groups.setdefault(key, []).append((int(line_start), str(callee)))
+    str_seqs = [[name for _, name in sorted(items)] for items in groups.values()]
+    str_seqs = [seq for seq in str_seqs if seq]
+    if not str_seqs:
+        return []
+    if topn is not None:
+        flat = [name for seq in str_seqs for name in seq]
+        counts = _freq.level_counts(flat)
+        kept = _freq.prune_to_top_n(counts, topn)
+        leaf_allowed = {n for seq in str_seqs for n in seq if n in kept}
+        str_seqs = [[n for n in seq if n in leaf_allowed] for seq in str_seqs]
+        str_seqs = [seq for seq in str_seqs if seq]
+        if not str_seqs:
+            return []
+    table = _norm.build_table([n for seq in str_seqs for n in seq])
+    reverse = _norm.reverse_table(table)
+    db = _norm.encode_sequences(str_seqs, table)
+    miner = PrefixSpan(db)
+    miner.minlen = 2
+    miner.maxlen = maxlen
+    mined = miner.frequent(minsup, closed=True)
+    results: list[dict] = []
+    for support, pattern in (mined or []):
+        names = _norm.decode_pattern(list(pattern), reverse)
+        payload = _json.dumps(names, ensure_ascii=False)
+        conn.execute(
+            "INSERT INTO seq_patterns(library_id, version_id, pattern, support, is_closed)"
+            " VALUES(?, ?, ?, ?, 1)"
+            " ON CONFLICT(version_id, pattern) DO UPDATE SET support=excluded.support,"
+            " is_closed=1",
+            (library_id, version_id, payload, int(support)),
+        )
+        results.append({"pattern": names, "support": int(support), "is_closed": 1})
+    conn.commit()
+    results.sort(key=lambda r: (-r["support"], r["pattern"]))
+    return results
+
+
+def build_repo_runner(settings, conn, repos_dir=None):
+    async def runner(job) -> None:
+        if job.kind == INDEX_REPO_JOB_KIND:
+            p = job.params
+            index_repo(conn, p["library"], p["version"], p["source"],
+                       update=bool(p.get("update", False)), repos_dir=repos_dir)
+        elif job.kind == MINE_PATTERNS_JOB_KIND:
+            p = job.params
+            mine_patterns(conn, p["library"], p["version"],
+                          minsup=int(p.get("minsup", 2)),
+                          topn=p.get("topn"), maxlen=int(p.get("maxlen", 10)))
+        else:
+            raise ValueError(f"unsupported job kind: {job.kind}")
+
+    return runner

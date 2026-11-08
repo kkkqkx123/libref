@@ -107,7 +107,7 @@ MINING_REVIEW_SCHEMA_SQL = """
 -- api_entities：确定性标识加限定名加库版本归属
 CREATE TABLE api_entities(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  entity_uid TEXT NOT NULL UNIQUE,          -- sha1 确定性 ID（含冲突盐）
+  entity_uid TEXT NOT NULL UNIQUE,          -- 语义键哈希，相同即同一实体
   library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
   version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
   qualified_name TEXT NOT NULL,
@@ -117,13 +117,13 @@ CREATE TABLE api_entities(
 
 CREATE INDEX idx_api_entities_name ON api_entities(qualified_name);
 
--- call_instances：调用实例记录
+-- call_instances：调用实例记录，归属库版本，仓库名只做溯源
 CREATE TABLE call_instances(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  call_uid TEXT NOT NULL UNIQUE,            -- sha1 确定性 ID（含冲突盐）
+  call_uid TEXT NOT NULL UNIQUE,            -- 语义键哈希，相同即同一调用
   callee_entity_id INTEGER REFERENCES api_entities(id) ON DELETE SET NULL,
-  callee_name TEXT NOT NULL,                -- 解析别名前的原始限定名
-  args JSON NOT NULL DEFAULT '[]',          -- 实参列表
+  callee_name TEXT NOT NULL,                -- 别名解析后的限定名
+  args JSON NOT NULL DEFAULT '[]',          -- 实参摘要列表
   repo TEXT NOT NULL,
   caller_file TEXT NOT NULL,
   line_start INTEGER NOT NULL,
@@ -169,4 +169,34 @@ CREATE TABLE schema_meta(
 # ── 页面内容指纹：内容不变时短路为不变结局 ──
 PAGES_CONTENT_HASH_SQL = """
 ALTER TABLE pages ADD COLUMN content_hash TEXT;
+"""
+
+# ── 仓库登记与增量缓存，以及调用实例的版本归属补齐 ──
+REPOS_ASTCACHE_SQL = """
+CREATE TABLE repos(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  url TEXT,
+  commit_sha TEXT,
+  local_path TEXT NOT NULL
+);
+
+CREATE TABLE ast_cache(
+  repo TEXT NOT NULL,
+  path TEXT NOT NULL,
+  file_sha1 TEXT NOT NULL,
+  fp TEXT NOT NULL,
+  cfg_version INTEGER NOT NULL,
+  records JSON NOT NULL DEFAULT '[]',
+  PRIMARY KEY(repo, path, fp, cfg_version)
+);
+
+ALTER TABLE call_instances ADD COLUMN library_id INTEGER
+  REFERENCES libraries(id) ON DELETE CASCADE;
+ALTER TABLE call_instances ADD COLUMN version_id INTEGER
+  REFERENCES versions(id) ON DELETE CASCADE;
+ALTER TABLE call_instances ADD COLUMN caller TEXT;
+
+CREATE INDEX idx_call_instances_version ON call_instances(version_id, caller_file);
+CREATE INDEX idx_call_instances_repo ON call_instances(repo, caller_file);
 """

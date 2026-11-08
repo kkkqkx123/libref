@@ -1,9 +1,3 @@
-# 蓝本 ref/PrefixSpan-py（MIT, chuanconggao/PrefixSpan-py）。
-# 定制点（相对蓝本，详见 docs/ref/prefixspan.md §3）：
-#   1. 内联蓝本的外部依赖（extratools.nextentries 等），零第三方依赖；
-#   2. 仅保留 frequent / topk 与 BIDE closed 支持，不复刻 FEAT generator（场景不需要）；
-#   3. maxlen 默认 10（API 调用序列场景，长序列无知识价值），minlen 默认 2；
-#   4. key/bound 保留加权支持度扩展点；callback 用于流式落库（大结果集不驻内存）。
 """自研 PrefixSpan 频繁序列模式挖掘（含 BIDE closed 模式）。
 
 输入约定：db 为 item 已归一化为整数索引的序列库 ``list[list[int]]``

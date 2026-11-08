@@ -9,8 +9,13 @@ from libref.config import LibrefSettings
 from libref.crawler.registry import RegistryError
 from libref.db import apply_migrations, open_db
 from libref.services.ingest import (
+    INDEX_REPO_JOB_KIND,
+    MINE_PATTERNS_JOB_KIND,
     IngestService,
     build_embed_fn,
+    build_repo_runner,
+    index_repo,
+    mine_patterns,
     run_scrape_job_sync,
     start_scrape_job,
 )
@@ -156,6 +161,65 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_index_repo(args: argparse.Namespace) -> int:
+    import asyncio
+    settings = LibrefSettings()
+    conn = _connect(settings)
+    repos_dir = settings.db_path.parent / "repos"
+    try:
+        if args.run_async:
+            mgr = JobManager(conn)
+            mgr.recover()
+            job_id = mgr.submit(INDEX_REPO_JOB_KIND, {"library": args.library,
+                "version": args.version, "source": args.source, "update": bool(args.update)})
+            async def _drive():
+                mgr.start_worker(build_repo_runner(settings, conn, repos_dir))
+                try:
+                    return await mgr.wait_for(job_id)
+                finally:
+                    mgr.stop_worker()
+            job = asyncio.run(_drive())
+            print(f"job {job.id} {job.status}" + (f" error={job.error}" if job.error else ""))
+            return 0 if job.status == "done" else 1
+        counts = index_repo(conn, args.library, args.version, args.source,
+                            update=bool(args.update), repos_dir=repos_dir)
+    finally:
+        conn.close()
+    for outcome, n in counts.items():
+        print(f"{outcome}: {n}")
+    return 0
+
+
+def cmd_mine(args: argparse.Namespace) -> int:
+    import asyncio
+    import json
+    settings = LibrefSettings()
+    conn = _connect(settings)
+    try:
+        if args.run_async:
+            mgr = JobManager(conn)
+            mgr.recover()
+            job_id = mgr.submit(MINE_PATTERNS_JOB_KIND, {"library": args.library,
+                "version": args.version, "minsup": args.minsup,
+                "topn": args.topn, "maxlen": args.maxlen})
+            async def _drive():
+                mgr.start_worker(build_repo_runner(settings, conn))
+                try:
+                    return await mgr.wait_for(job_id)
+                finally:
+                    mgr.stop_worker()
+            job = asyncio.run(_drive())
+            print(f"job {job.id} {job.status}" + (f" error={job.error}" if job.error else ""))
+            return 0 if job.status == "done" else 1
+        results = mine_patterns(conn, args.library, args.version,
+                                minsup=args.minsup, topn=args.topn, maxlen=args.maxlen)
+    finally:
+        conn.close()
+    for item in results:
+        print(f"{item['support']} {json.dumps(item['pattern'], ensure_ascii=False)}")
+    return 0
+
+
 def cmd_search(args: argparse.Namespace) -> int:
     conn = _connect(LibrefSettings())
     try:
@@ -238,6 +302,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_read.set_defaults(func=cmd_read_page)
 
     sub.add_parser("serve-mcp", help="以 stdio 传输启动 MCP 服务").set_defaults(func=cmd_serve_mcp)
+
+    p_repo = sub.add_parser("index-repo", help="索引源码仓库并落调用实例")
+    p_repo.add_argument("library")
+    p_repo.add_argument("version")
+    p_repo.add_argument("source", help="远端地址或本地路径")
+    p_repo.add_argument("--update", action="store_true", help="已存在仓库时拉取更新")
+    p_repo.add_argument("--async", dest="run_async", action="store_true",
+                        help="经 jobs 队列执行")
+    p_repo.set_defaults(func=cmd_index_repo)
+
+    p_mine = sub.add_parser("mine", help="挖掘闭合调用序列模式")
+    p_mine.add_argument("library")
+    p_mine.add_argument("version")
+    p_mine.add_argument("--minsup", type=int, default=2)
+    p_mine.add_argument("--topn", type=int, default=None)
+    p_mine.add_argument("--maxlen", type=int, default=10)
+    p_mine.add_argument("--async", dest="run_async", action="store_true",
+                        help="经 jobs 队列执行")
+    p_mine.set_defaults(func=cmd_mine)
     return parser
 
 

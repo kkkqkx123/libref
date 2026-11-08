@@ -9,6 +9,7 @@ from libref.db.schema import (
     INITIAL_SCHEMA_SQL,
     MINING_REVIEW_SCHEMA_SQL,
     PAGES_CONTENT_HASH_SQL,
+    REPOS_ASTCACHE_SQL,
     VECTOR_META_SQL,
 )
 
@@ -25,6 +26,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(1, "mining-review-schema", MINING_REVIEW_SCHEMA_SQL),
     Migration(2, "vector-meta", VECTOR_META_SQL),
     Migration(3, "pages-content-hash", PAGES_CONTENT_HASH_SQL),
+    Migration(4, "repos-astcache-call-scope", REPOS_ASTCACHE_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """
