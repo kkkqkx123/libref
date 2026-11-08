@@ -20,7 +20,7 @@ def parse_npm_payload(
 ) -> tuple[str | None, list[str], str | None, list[str], str | None]:
     tags = payload.get("dist-tags") or {}
     stable = tags.get("latest")
-    versions = [str(v) for v in (payload.get("versions") or {}).keys()]
+    versions = [str(v) for v in (payload.get("versions") or {})]
     homepage = sanitize_http_url(payload.get("homepage"), allow_private=allow_private)
     candidates = [homepage] if homepage else []
     repo_url = None

@@ -208,9 +208,9 @@ class UrlSeeder:
                 cleaned = _clean_link_token(token)
                 if not cleaned or cleaned.startswith(("#", "mailto:", "data:")):
                     continue
-                if cleaned.startswith(("http://", "https://")) or cleaned.startswith("/"):
-                    _emit(cleaned)
-                elif _looks_like_doc_path(cleaned):
+                if cleaned.startswith(
+                    ("http://", "https://", "/")
+                ) or _looks_like_doc_path(cleaned):
                     _emit(cleaned)
         return urls, cross
 
@@ -263,7 +263,7 @@ class UrlSeeder:
         if self._robots is not None:
             try:
                 declared = await self._robots.sitemap_urls(start_url)
-            except Exception:
+            except Exception:  # noqa: BLE001 —— robots 不可达时降级直连，不阻断发现
                 declared = []
             for loc in declared:
                 if loc not in queue:

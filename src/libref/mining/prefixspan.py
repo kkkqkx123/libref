@@ -7,8 +7,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from heapq import heappush, heappushpop
-from typing import Callable, Optional
 
 __all__ = ["PrefixSpan"]
 
@@ -40,7 +40,7 @@ def _next_entries(db: DB, matches: Matches) -> Occurs:
     return occurs
 
 
-def _reverse_scan(db: DB, patt: list[Optional[int]], matches: Matches) -> bool:
+def _reverse_scan(db: DB, patt: list[int | None], matches: Matches) -> bool:
     """BIDE 反向扫描：各匹配位置向前找，收集可无代价插入的 item 集合。
 
     蓝本 closed.py.__reversescan；会原地更新 matches（向前收缩匹配位置）。
@@ -116,9 +116,9 @@ class PrefixSpan:
         canpass: Callable[[int], bool],
         verify_extra: Callable[[Pattern, Matches], bool],
         closed: bool,
-        filter_fn: Optional[Filter],
-        callback: Optional[Callback],
-    ) -> Optional[Results]:
+        filter_fn: Filter | None,
+        callback: Callback | None,
+    ) -> Results | None:
         """公共递归驱动（frequent 与 topk 共用框架）。"""
         self._results.clear()
 
@@ -154,11 +154,11 @@ class PrefixSpan:
         minsup: int,
         *,
         closed: bool = False,
-        key: Optional[Key] = None,
-        bound: Optional[Key] = None,
-        filter: Optional[Filter] = None,  # noqa: A002 —— 与蓝本 API 对齐
-        callback: Optional[Callback] = None,
-    ) -> Optional[Results]:
+        key: Key | None = None,
+        bound: Key | None = None,
+        filter: Filter | None = None,  # 与蓝本 API 对齐，刻意遮蔽内置名
+        callback: Callback | None = None,
+    ) -> Results | None:
         """挖掘支持度 >= minsup 的频繁模式；closed=True 时仅返回 closed 模式。"""
         key = key or self._default_key
         bound = bound or key
@@ -179,11 +179,11 @@ class PrefixSpan:
         k: int,
         *,
         closed: bool = False,
-        key: Optional[Key] = None,
-        bound: Optional[Key] = None,
-        filter: Optional[Filter] = None,  # noqa: A002
-        callback: Optional[Callback] = None,
-    ) -> Optional[Results]:
+        key: Key | None = None,
+        bound: Key | None = None,
+        filter: Filter | None = None,  # 与蓝本 API 对齐，刻意遮蔽内置名
+        callback: Callback | None = None,
+    ) -> Results | None:
         """挖掘支持度最高的 k 个模式（蓝本 topk.py：堆 + 动态阈值 + 上界 break）。"""
         key = key or self._default_key
         bound = bound or key

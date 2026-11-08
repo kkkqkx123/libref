@@ -70,11 +70,11 @@ def load_overrides_file(path: str | Path) -> dict[tuple[str, str], dict[str, str
     resolved = Path(path)
     payload = json.loads(resolved.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
-        raise ValueError(f"overrides file must hold a list: {resolved}")
+        raise TypeError(f"overrides file must hold a list: {resolved}")
     entries: dict[tuple[str, str], dict[str, str]] = {}
     for raw in payload:
         if not isinstance(raw, dict):
-            raise ValueError(f"invalid override entry: {raw!r}")
+            raise TypeError(f"invalid override entry: {raw!r}")
         key, item = _check_entry(raw)
         entries[key] = item
     set_file_overrides(entries)

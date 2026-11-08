@@ -11,8 +11,8 @@ import httpx
 import pytest
 
 from libref.config import LibrefSettings
-from libref.crawler.registry import overrides as _overrides_state
 from libref.crawler.registry import RegistryError, normalize_name, sanitize_http_url
+from libref.crawler.registry import overrides as _overrides_state
 from libref.services.resolver import resolve_package
 
 
@@ -24,12 +24,12 @@ def _clean_file_overrides():
 
 
 def make_settings(**kw) -> LibrefSettings:
-    base = dict(
-        request_timeout=5.0,
-        registry_cache_ttl_days=1.0,
-        registry_offline=False,
-        registry_allow_private=False,
-    )
+    base = {
+        "request_timeout": 5.0,
+        "registry_cache_ttl_days": 1.0,
+        "registry_offline": False,
+        "registry_allow_private": False,
+    }
     base.update(kw)
     return LibrefSettings(**base)
 

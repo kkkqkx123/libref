@@ -119,8 +119,7 @@ def sanitize_http_url(url: str | None, *, allow_private: bool = False) -> str | 
     if not url:
         return None
     text = url.strip().strip("<>\"'")
-    if text.startswith("git+"):
-        text = text[4:]
+    text = text.removeprefix("git+")
     if text.startswith("git://"):
         text = "https://" + text[len("git://"):]
     try:
@@ -262,7 +261,6 @@ async def fetch_snapshot(
         stable, versions, homepage, candidates, repo_url = parse_npm_payload(
             resp.json(), allow_private=allow_private
         )
-    docs_url = candidates[0] if candidates else None
     return RegistrySnapshot(
         ecosystem=ecosystem,
         name=name,

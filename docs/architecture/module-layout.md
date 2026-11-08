@@ -57,18 +57,27 @@ libref/
 │   │   ├── cooccur.py          # [P2] (api_i, api_j) 共现矩阵（文件级倒排）
 │   │   └── normalize.py        # [P2] 限定名 ↔ 整数 id 映射（对接 api_entities 表）
 │   │
+│   ├── llm/                    # ── 独立传输层（借鉴 llm-suite 分层思想，仓内顶层包）──
+│   │   ├── __init__.py         # 装配入口：三路构造器加公共件与网关
+│   │   ├── errors.py           # 错误分类：配置请求远端解码传输超时熔断七变体
+│   │   ├── retry.py            # 重试策略：指数退避加等待提示下限加观察回调
+│   │   ├── resilience.py       # 传输保护：令牌桶限流加连续失败熔断
+│   │   ├── models.py           # 模型目录：已验证模型的数据登记
+│   │   ├── embeddings.py       # 编码传输（主后端 SiliconFlow bge-m3，兼容端点）
+│   │   ├── rerank.py           # 重排传输（配对重排模型，截断加严格校验）
+│   │   ├── chat.py             # 问答传输（非流式加流式，工具调用与用量透出）
+│   │   └── gateway.py          # 统一装配：按端点共享弹性状态
+│   │
 │   ├── store/                  # ── 知识库与检索 ──
 │   │   ├── __init__.py
 │   │   ├── document_store.py   # [P1/P3] pages/documents 读写、增量结局六态
 │   │   ├── vec_store.py        # [P0] QdrantVecStore：向量写入/KNN/集合治理（真源 SQLite 的可重建派生索引）
-│   │   ├── embeddings.py       # [P3] Embedding API 封装（主后端 SiliconFlow bge-m3，
-│   │   │                       #      OpenAI 兼容 /v1/embeddings，接口抽象预留多后端）
-│   │   │                       #      + 模型/维度失效检测
 │   │   └── retriever.py        # [P3] FTS5 BM25 + Qdrant KNN → RRF → 频次重排 → 段落重组
 │   │
 │   ├── services/               # ── 业务工具层（三出口唯一调用面）──
 │   │   ├── __init__.py
 │   │   ├── search.py           # [P1/P3] search_docs / read_page / list_libraries …
+│   │   ├── answer.py           # 问答编排：混合检索加 grounded 生成
 │   │   ├── ingest.py           # [P1/P2] scrape_docs / refresh_version / 索引源码仓库
 │   │   ├── jobs.py             # [P1] 内存队列 + versions 表 write-through + 心跳恢复
 │   │   └── review.py           # [P3] 审核工作流：pending/approved/conflict
@@ -103,8 +112,9 @@ libref/
 ```
 crawler ─┐
 chunking ├→ db ←─ store ←─ services ←─ {cli, mcp_server, web}
-astminer ┘   ↑     └→ Qdrant（store/vec_store 唯一触达点）
-mining ──────┘（只依赖 db 与自身，供 services 调度）
+astminer ┘   ↑       ↑
+mining ──────┘       llm（传输叶，只依赖 httpx；store 经函数注入消费，services 经构造器装配）
+              └→ Qdrant（store/vec_store 唯一触达点）
 ```
 
 1. **单向依赖**：`db` 是唯一被共享的 SQL 底层；`services/` 是唯一编排层；三个出口模块（`cli/mcp_server/web`）**禁止**绕过 services 直接调 store/crawler/mining。

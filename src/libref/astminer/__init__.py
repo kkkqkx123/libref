@@ -30,8 +30,8 @@ from libref.astminer.repos import RepoManager
 from libref.astminer.resolution import resolve_calls
 
 __all__ = [
-    "JAVA_CONFIG",
     "JAVASCRIPT_CONFIG",
+    "JAVA_CONFIG",
     "LANGUAGE_CONFIGS",
     "PYTHON_CONFIG",
     "ApiDeclRecord",

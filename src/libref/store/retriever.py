@@ -207,7 +207,7 @@ class HybridRetriever:
                         query_vec, k=need, version_id=single_version
                     )
                 ]
-            except Exception:
+            except Exception:  # noqa: BLE001 —— 向量失败标记降级，走纯全文
                 degraded = True
                 vec_ids = []
         elif self._vec is not None and self._embed is not None:
@@ -254,7 +254,7 @@ class HybridRetriever:
             return fused, degraded
         try:
             scored = await self._rerank(query, texts, len(head))
-        except Exception:
+        except Exception:  # noqa: BLE001 —— 重排失败标记降级，保留融合排序
             return fused, True
         order = sorted(scored, key=lambda kv: kv[1], reverse=True)
         pos_of = {idx: rank for rank, (idx, _) in enumerate(order)}

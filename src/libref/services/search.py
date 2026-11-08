@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import sqlite3
 from typing import Any
 
 from libref.store.vec_store import build_embed_text
+
 
 def _is_subsequence(pattern: list[str], names: list[str]) -> bool:
     pos = 0

@@ -65,7 +65,7 @@ def support_of(db: list[list[int]], patt: tuple[int, ...]) -> int:
 
 def is_closed(db: list[list[int]], patt: tuple[int, ...], sup: int) -> bool:
     """closed 定义：不存在支持度相同的单扩展超模式。"""
-    for ext in set(item for seq in db for item in seq):
+    for ext in {item for seq in db for item in seq}:
         if support_of(db, (*patt, ext)) == sup:
             return False
     return True

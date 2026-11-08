@@ -58,7 +58,7 @@ def cluster_apis(
         if len(members) < min_size:
             continue
         members = sorted(members)
-        representative = sorted(members, key=lambda n: (-occ[n], n))[0]
+        representative = min(members, key=lambda n: (-occ[n], n))
         out.append({
             "members": members,
             "representative": representative,

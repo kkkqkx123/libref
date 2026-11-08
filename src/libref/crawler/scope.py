@@ -76,9 +76,9 @@ class ScopePolicy:
                 return False
         if self._include_res and not any(rx.search(url) for rx in self._include_res):
             return False
-        if self.max_depth is not None and not _depth_ok(self.start_url, url, self.max_depth):
-            return False
-        return True
+        if self.max_depth is None:
+            return True
+        return _depth_ok(self.start_url, url, self.max_depth)
 
     def filter(self, urls: list[str]) -> tuple[list[str], list[str]]:
         accepted: list[str] = []
@@ -104,11 +104,9 @@ def build_scope(start_url: str, opts: dict | None) -> ScopePolicy:
 
 
 def _host_ok(host: str, base_host: str, allow_subdomains: bool) -> bool:
-    if host == base_host:
-        return True
-    if allow_subdomains and host.endswith("." + base_host):
-        return True
-    return False
+    return host == base_host or (
+        allow_subdomains and host.endswith("." + base_host)
+    )
 
 
 def _base_dir_segments(start_url: str) -> list[str]:

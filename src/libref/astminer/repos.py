@@ -28,9 +28,7 @@ def _should_skip(rel: str) -> bool:
         return True
     if filename.endswith((".g.py", ".pb2.py", ".pb2_grpc.py")):
         return True
-    if ".min." in lowered:
-        return True
-    return False
+    return ".min." in lowered
 
 
 def iter_source_files(

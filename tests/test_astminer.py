@@ -26,7 +26,7 @@ def _resolve(decls, aliases_by_file: dict | list, raw, repo="test/repo"):
 
 def test_extract_call_shape():
     source = b"import numpy as np\n\n\ndef load():\n    np.array([1])\n    np.zeros(3, dtype=int)\n"
-    decls, aliases, raw = _parse("a.py", source)
+    _decls, aliases, raw = _parse("a.py", source)
     assert ("np", "numpy") in aliases
     by_raw = {c.raw_callee: c for c in raw}
     assert "np.array" in by_raw and "np.zeros" in by_raw
@@ -111,14 +111,14 @@ def test_grammar_fingerprint_stable():
 
 
 def test_multi_import_all_bindings():
-    decls, aliases, _raw = _parse("m.py", b"import os, sys\nimport numpy as np\n")
+    _decls, aliases, _raw = _parse("m.py", b"import os, sys\nimport numpy as np\n")
     assert ("os", "os") in aliases
     assert ("sys", "sys") in aliases
     assert ("np", "numpy") in aliases
 
 
 def test_from_import_list_and_alias():
-    decls, aliases, _raw = _parse("m.py", b"from m import a, b as c\n")
+    _decls, aliases, _raw = _parse("m.py", b"from m import a, b as c\n")
     by_alias = dict(aliases)
     assert by_alias.get("a") == "m.a"
     assert by_alias.get("c") == "m.b"

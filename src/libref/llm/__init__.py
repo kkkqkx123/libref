@@ -1,0 +1,105 @@
+"""独立传输层：编码重排问答三路加错误分类重试保护与统一装配。"""
+
+from libref.llm.chat import (
+    ChatClient,
+    ChatConfig,
+    ChatResult,
+    ChatStreamFn,
+    ToolCall,
+    build_chat_fn,
+    build_chat_stream_fn,
+)
+from libref.llm.embeddings import (
+    EMBED_BATCH,
+    EmbeddingClient,
+    EmbeddingConfig,
+    EmbeddingInput,
+    EmbeddingResult,
+    EmbedFn,
+    ImageRef,
+    Preprocessor,
+    build_embed_fn,
+)
+from libref.llm.errors import (
+    LlmCircuitOpenError,
+    LlmConfigError,
+    LlmDecodeError,
+    LlmError,
+    LlmInvalidRequestError,
+    LlmProviderError,
+    LlmTimeoutError,
+    LlmTransportError,
+)
+from libref.llm.gateway import LlmGateway
+from libref.llm.models import (
+    KNOWN_CHAT_MODELS,
+    KNOWN_EMBEDDING_DIMS,
+    KNOWN_RERANK_MODELS,
+    embedding_dim_for,
+)
+from libref.llm.rerank import (
+    RERANK_TRUNCATE,
+    RerankClient,
+    RerankConfig,
+    RerankFn,
+    build_rerank_fn,
+    truncate_content,
+)
+from libref.llm.resilience import (
+    CircuitBreaker,
+    RateLimiter,
+    Resilience,
+    with_resilience,
+)
+from libref.llm.retry import (
+    RetryAttempt,
+    RetryPolicy,
+    execute_with_retry,
+    parse_retry_after_ms,
+)
+
+__all__ = [
+    "EMBED_BATCH",
+    "KNOWN_CHAT_MODELS",
+    "KNOWN_EMBEDDING_DIMS",
+    "KNOWN_RERANK_MODELS",
+    "RERANK_TRUNCATE",
+    "ChatClient",
+    "ChatConfig",
+    "ChatResult",
+    "ChatStreamFn",
+    "CircuitBreaker",
+    "EmbedFn",
+    "EmbeddingClient",
+    "EmbeddingConfig",
+    "EmbeddingInput",
+    "EmbeddingResult",
+    "ImageRef",
+    "LlmCircuitOpenError",
+    "LlmConfigError",
+    "LlmDecodeError",
+    "LlmError",
+    "LlmGateway",
+    "LlmInvalidRequestError",
+    "LlmProviderError",
+    "LlmTimeoutError",
+    "LlmTransportError",
+    "Preprocessor",
+    "RateLimiter",
+    "RerankClient",
+    "RerankConfig",
+    "RerankFn",
+    "Resilience",
+    "RetryAttempt",
+    "RetryPolicy",
+    "ToolCall",
+    "build_chat_fn",
+    "build_chat_stream_fn",
+    "build_embed_fn",
+    "build_rerank_fn",
+    "embedding_dim_for",
+    "execute_with_retry",
+    "parse_retry_after_ms",
+    "truncate_content",
+    "with_resilience",
+]

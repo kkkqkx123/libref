@@ -19,9 +19,9 @@ URL = "http://localhost:6333"
 
 def _server_up() -> bool:
     try:
-        QdrantClient(url=URL, timeout=2.0).get_collections()
+        QdrantClient(url=URL, timeout=2.0, check_compatibility=False).get_collections()
         return True
-    except Exception:
+    except Exception:  # noqa: BLE001 —— 探活：任何异常即视为服务不可达
         return False
 
 

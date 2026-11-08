@@ -6,9 +6,10 @@ docs-mcp-server 中间件链的 HtmlToMarkdown 环节。纯函数、零网络。
 
 from __future__ import annotations
 
+from urllib.parse import urljoin
+
 from markdownify import markdownify as md
 from selectolax.lexbor import LexborHTMLParser as HTMLParser
-from urllib.parse import urljoin
 
 # 直接剔除的噪点标签
 _STRIP_TAGS = ("script", "style", "noscript", "nav", "footer", "aside", "form", "header")
