@@ -60,6 +60,40 @@ class RobotsChecker:
         delay = rp.crawl_delay(self._ua)
         return float(delay) if delay is not None else None
 
+    async def sitemap_urls(self, start_url: str) -> list[str]:
+        """robots 中声明的 Sitemap 地址，按出现顺序去重返回。"""
+        body = await self.raw_body(start_url)
+        if not body:
+            return []
+        seen: set[str] = set()
+        out: list[str] = []
+        for line in body.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if ":" not in stripped:
+                continue
+            name, _, value = stripped.partition(":")
+            if name.strip().lower() != "sitemap":
+                continue
+            loc = value.strip().strip("<>\"'")
+            if loc and loc not in seen:
+                seen.add(loc)
+                out.append(loc)
+        return out
+
+    async def raw_body(self, url: str) -> str | None:
+        """取 robots 文本（命中缓存则直接返回），不可达返回空。"""
+        key = self._cache_key(url)
+        body = self._cached_body(key)
+        if body is not None:
+            return body
+        body = await self._fetch_body(url)
+        if body is None:
+            return None
+        self._store(key, body)
+        return body
+
     # ── 内部 ──
 
     def _cache_key(self, url: str) -> str:

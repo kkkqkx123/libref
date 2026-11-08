@@ -5,17 +5,21 @@
 httpx.AsyncClient（便于测试 MockTransport）。
 """
 
-from libref.crawler.extract import extract_to_markdown
+from libref.crawler.extract import extract_to_markdown, looks_like_js_rendered
 from libref.crawler.fetcher import FetchOutcome, HttpFetcher
 from libref.crawler.robots import RobotsChecker, ensure_robots_cache
+from libref.crawler.scope import ScopePolicy, build_scope
 from libref.crawler.url_seeder import SeedResult, UrlSeeder
 
 __all__ = [
     "FetchOutcome",
     "HttpFetcher",
     "RobotsChecker",
+    "ScopePolicy",
     "SeedResult",
     "UrlSeeder",
+    "build_scope",
     "ensure_robots_cache",
     "extract_to_markdown",
+    "looks_like_js_rendered",
 ]

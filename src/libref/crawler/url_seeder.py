@@ -1,7 +1,7 @@
 """URL 链式发现：robots→llms.txt→sitemap(.gz/index)（蓝本 crawl4ai AsyncUrlSeeder 模式）。
 
 定制点：所有请求经注入的 httpx.AsyncClient（测试用 MockTransport，不联网）；
-llms.txt 优先于 sitemap；同 host 限定 + robots Disallow 过滤 + 去重；
+llms.txt 优先于 sitemap；同站限定 + robots Disallow 过滤 + 去重；
 HEAD 存活预筛为可选步骤。
 """
 
@@ -17,6 +17,12 @@ import httpx
 from libref.crawler.robots import RobotsChecker
 
 _LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
+
+_SITEMAP_NAMES = ("sitemap.xml", "sitemap_index.xml", "sitemap-index.xml")
+_SITEMAP_GZ_NAMES = ("sitemap.xml.gz", "sitemap_index.xml.gz", "sitemap-index.xml.gz")
+_LLMS_VARIANTS = ("llms.txt", "llms-full.txt")
+_MAX_SITEMAP_DEPTH = 3
+_MAX_SITEMAP_URLS = 20000
 
 
 def _clean_link_token(token: str) -> str:
@@ -42,10 +48,15 @@ def _looks_like_doc_path(token: str) -> bool:
 class SeedResult:
     urls: list[str] = field(default_factory=list)
     source: str = "none"  # llms.txt / sitemap / none
+    attempted: list[str] = field(default_factory=list)
+    errors: dict[str, str] = field(default_factory=dict)
+    truncated: bool = False
+    failed: bool = False
+    cross_site: list[str] = field(default_factory=list)
 
 
 class UrlSeeder:
-    def __init__(self, client: httpx.AsyncClient, robots: RobotsChecker) -> None:
+    def __init__(self, client: httpx.AsyncClient, robots: RobotsChecker | None) -> None:
         self._client = client
         self._robots = robots
 
@@ -56,40 +67,129 @@ class UrlSeeder:
         prefilter: bool = False,
         max_pages: int | None = None,
     ) -> SeedResult:
-        """从站点根发现文档 URL；start_url 任意路径，取 scheme+netloc 为站点根。"""
+        """从起始地址发现文档 URL；目录级回退找 llms.txt，否则走站点地图队列。"""
         parts = urlsplit(start_url)
-        base = f"{parts.scheme}://{parts.netloc}"
+        host = parts.netloc
 
-        result = await self._from_llms_txt(base)
-        if result.source == "none":
-            result = await self._from_sitemap(base)
+        llms = await self._collect_llms(start_url)
+        if llms.urls:
+            result = llms
+            attempted = list(llms.attempted)
+            errors = dict(llms.errors)
+            truncated = llms.truncated
+            transient = False
+        else:
+            sitemap = await self._collect_sitemap(start_url)
+            result = sitemap
+            attempted = list(dict.fromkeys(llms.attempted + sitemap.attempted))
+            errors = {**llms.errors, **sitemap.errors}
+            truncated = llms.truncated or sitemap.truncated
+            transient = llms.failed or sitemap.failed
 
         seen: set[str] = set()
         urls: list[str] = []
+        cross_site: list[str] = []
         for url in result.urls:
-            if url in seen or urlsplit(url).netloc != parts.netloc:
+            if url in seen:
                 continue
-            if not await self._robots.can_fetch(url):
+            if urlsplit(url).netloc != host:
+                if url not in cross_site:
+                    cross_site.append(url)
+                continue
+            if self._robots is not None and not await self._robots.can_fetch(url):
                 continue
             if prefilter and not await self._head_ok(url):
                 continue
             seen.add(url)
             urls.append(url)
             if max_pages is not None and len(urls) >= max_pages:
+                # 数量截断只对过滤后集合生效；是否还有更多候选决定截断标记
+                truncated = truncated or len(result.urls) > len(urls)
                 break
-        return SeedResult(urls=urls, source=result.source)
 
-    # ── llms.txt ──
+        if not urls:
+            return SeedResult(
+                urls=[],
+                source="none",
+                attempted=attempted,
+                errors=errors,
+                truncated=truncated,
+                failed=transient,
+                cross_site=cross_site,
+            )
+        return SeedResult(
+            urls=urls,
+            source=result.source,
+            attempted=attempted,
+            errors=errors,
+            truncated=truncated,
+            failed=False,
+            cross_site=cross_site,
+        )
+
+    # ── llms.txt（含目录级回退与文档变体）──
 
     async def _from_llms_txt(self, base: str) -> SeedResult:
-        try:
-            resp = await self._client.get(f"{base}/llms.txt")
-        except httpx.HTTPError:
-            return SeedResult()
-        if resp.status_code >= 400:
-            return SeedResult()
-        urls = []
-        for line in resp.text.splitlines():
+        return await self._collect_llms(base)
+
+    async def _collect_llms(self, start_url: str) -> SeedResult:
+        attempted: list[str] = []
+        errors: dict[str, str] = {}
+        transient_seen = False
+        for directory in _llms_directories(start_url):
+            for variant in _LLMS_VARIANTS:
+                candidate = f"{directory}/{variant}"
+                attempted.append(candidate)
+                body, note, transient = await self._get_text(candidate)
+                if body is None:
+                    errors[candidate] = note or "fetch failed"
+                    transient_seen = transient_seen or transient
+                    continue
+                urls, cross = self._parse_llms_body(body, candidate, start_url)
+                if urls:
+                    return SeedResult(
+                        urls=urls + cross,
+                        source="llms.txt",
+                        attempted=attempted,
+                        errors=errors,
+                        cross_site=[],
+                    )
+                errors[candidate] = "no urls"
+        return SeedResult(
+            attempted=attempted, errors=errors, failed=transient_seen,
+        )
+
+    def _parse_llms_body(
+        self, body: str, llms_url: str, start_url: str
+    ) -> tuple[list[str], list[str]]:
+        """解析 llms 列表；显式链接目标全收（相对按 llms 地址归一化），裸词仅收文档形。"""
+        host = urlsplit(start_url).netloc
+        urls: list[str] = []
+        cross: list[str] = []
+        seen: set[str] = set()
+
+        def _emit(raw: str) -> None:
+            cleaned = _clean_link_token(raw)
+            if not cleaned or cleaned.startswith(("#", "mailto:", "data:")):
+                return
+            if cleaned.startswith(("http://", "https://")):
+                norm = cleaned
+            elif cleaned.startswith("/"):
+                norm = urljoin(llms_url, cleaned)
+            else:
+                # 相对路径与裸相对链接按 llms 地址归一化
+                if ":" in cleaned and not cleaned.startswith((".", "/")):
+                    return
+                norm = urljoin(llms_url, cleaned)
+            if urlsplit(norm).netloc != host:
+                if norm not in cross and norm not in seen:
+                    cross.append(norm)
+                return
+            if norm not in seen:
+                seen.add(norm)
+                urls.append(norm)
+
+        for line in body.splitlines():
             stripped = line.strip()
             if stripped.startswith(("- ", "* ", "+ ")):
                 content = stripped[2:].strip()
@@ -98,66 +198,156 @@ class UrlSeeder:
                 if not numbered:
                     continue
                 content = numbered.group(1).strip()
-            link_urls = [_clean_link_token(t) for t in _LINK_RE.findall(content)]
+            link_targets = [_clean_link_token(t) for t in _LINK_RE.findall(content)]
+            for target in link_targets:
+                if not target or target.startswith(("#", "mailto:", "data:")):
+                    continue
+                _emit(target)
             remainder = _LINK_RE.sub(" ", content)
-            raw_tokens = remainder.split()
-            for token in link_urls + raw_tokens:
+            for token in remainder.split():
                 cleaned = _clean_link_token(token)
                 if not cleaned or cleaned.startswith(("#", "mailto:", "data:")):
                     continue
-                if cleaned.startswith(("http://", "https://")):
-                    urls.append(cleaned)
-                elif cleaned.startswith("/"):
-                    urls.append(urljoin(base + "/", cleaned))
+                if cleaned.startswith(("http://", "https://")) or cleaned.startswith("/"):
+                    _emit(cleaned)
                 elif _looks_like_doc_path(cleaned):
-                    urls.append(urljoin(base + "/", cleaned))
-        if not urls:
-            return SeedResult()
-        return SeedResult(urls=urls, source="llms.txt")
+                    _emit(cleaned)
+        return urls, cross
 
-    # ── sitemap（含 .gz 与 index 递归一层）──
+    # ── sitemap（含 robots 声明、多层索引、魔数解压）──
 
     async def _from_sitemap(self, base: str, depth: int = 0) -> SeedResult:
-        for candidate in (
-            f"{base}/sitemap.xml",
-            f"{base}/sitemap.xml.gz",
-            f"{base}/sitemap_index.xml",
-        ):
-            body = await self._fetch_body(candidate)
-            if body is None:
-                continue
-            if candidate.endswith(".gz") or body[:2] == b"\x1f\x8b":
-                body = gzip.decompress(body)
-            text = body.decode("utf-8", errors="replace")
-            if "<sitemapindex" in text and depth == 0:
-                # sitemap index：先于 <loc> 泛解析判定，递归一层取子 sitemap 的 URL
-                nested: list[str] = []
-                for child in self._parse_sitemap_locs(text):
-                    child_body = await self._fetch_body(
-                        child if child.startswith("http") else urljoin(base, child)
-                    )
-                    if child_body is None:
-                        continue
-                    if child_body[:2] == b"\x1f\x8b":
-                        child_body = gzip.decompress(child_body)
-                    nested.extend(
-                        self._parse_loc_tags(child_body.decode("utf-8", errors="replace"))
-                    )
-                urls = nested
-            else:
-                urls = self._parse_loc_tags(text)
-            if urls:
-                return SeedResult(urls=urls, source="sitemap")
-        return SeedResult()
+        return await self._collect_sitemap(base, depth=depth)
 
-    async def _fetch_body(self, url: str) -> bytes | None:
+    async def _collect_sitemap(self, start_url: str, depth: int = 0) -> SeedResult:
+        attempted: list[str] = []
+        errors: dict[str, str] = {}
+        transient_seen = False
+        truncated = False
+        for candidate in await self._sitemap_candidates(start_url):
+            attempted.append(candidate)
+            body, note, transient = await self._get_bytes(candidate)
+            if body is None:
+                errors[candidate] = note or "fetch failed"
+                transient_seen = transient_seen or transient
+                continue
+            try:
+                payload = _maybe_gunzip(body)
+            except OSError as exc:
+                errors[candidate] = f"gzip error: {exc}"
+                continue
+            text = payload.decode("utf-8", errors="replace")
+            urls, child_truncated = await self._expand_sitemap_text(
+                text, candidate, depth, attempted, errors,
+            )
+            truncated = truncated or child_truncated
+            if urls:
+                capped, capped_truncated = _cap_urls(urls)
+                return SeedResult(
+                    urls=capped,
+                    source="sitemap",
+                    attempted=attempted,
+                    errors=errors,
+                    truncated=truncated or capped_truncated,
+                )
+            errors[candidate] = "no urls"
+        return SeedResult(
+            attempted=attempted, errors=errors,
+            truncated=truncated, failed=transient_seen,
+        )
+
+    async def _sitemap_candidates(self, start_url: str) -> list[str]:
+        parts = urlsplit(start_url)
+        root = f"{parts.scheme}://{parts.netloc}"
+        queue: list[str] = []
+        if self._robots is not None:
+            try:
+                declared = await self._robots.sitemap_urls(start_url)
+            except Exception:
+                declared = []
+            for loc in declared:
+                if loc not in queue:
+                    queue.append(loc)
+        dirs = _sitemap_directories(start_url)
+        for name in _SITEMAP_NAMES:
+            for directory in dirs:
+                candidate = f"{directory}/{name}"
+                if candidate not in queue:
+                    queue.append(candidate)
+        for name in _SITEMAP_GZ_NAMES:
+            for directory in dirs:
+                candidate = f"{directory}/{name}"
+                if candidate not in queue:
+                    queue.append(candidate)
+        # 根兜底：起始地址异常时至少试站点根
+        if not queue:
+            queue.append(f"{root}/sitemap.xml")
+        return queue
+
+    async def _expand_sitemap_text(
+        self,
+        text: str,
+        base_url: str,
+        depth: int,
+        attempted: list[str],
+        errors: dict[str, str],
+    ) -> tuple[list[str], bool]:
+        if "<sitemapindex" not in text:
+            return _cap_urls(self._parse_loc_tags(text))
+        if depth >= _MAX_SITEMAP_DEPTH:
+            return [], True
+        nested: list[str] = []
+        for child in self._parse_sitemap_locs(text):
+            child_url = child if child.startswith("http") else urljoin(base_url, child)
+            attempted.append(child_url)
+            body, note, _ = await self._get_bytes(child_url)
+            if body is None:
+                errors[child_url] = note or "fetch failed"
+                continue
+            try:
+                payload = _maybe_gunzip(body)
+            except OSError as exc:
+                errors[child_url] = f"gzip error: {exc}"
+                continue
+            child_text = payload.decode("utf-8", errors="replace")
+            if "<sitemapindex" in child_text:
+                deeper, _ = await self._expand_sitemap_text(
+                    child_text, child_url, depth + 1, attempted, errors,
+                )
+                nested.extend(deeper)
+            else:
+                nested.extend(self._parse_loc_tags(child_text))
+            if len(nested) >= _MAX_SITEMAP_URLS:
+                return _cap_urls(nested)
+        return _cap_urls(nested)
+
+    async def _get_text(self, url: str) -> tuple[str | None, str | None, bool]:
+        body, note, transient = await self._get_bytes(url)
+        if body is None:
+            return None, note, transient
+        try:
+            payload = _maybe_gunzip(body)
+        except OSError:
+            # llms 为纯文本：魔数不符直接按原文解码
+            payload = body
+        return payload.decode("utf-8", errors="replace"), None, False
+
+    async def _get_bytes(self, url: str) -> tuple[bytes | None, str | None, bool]:
         try:
             resp = await self._client.get(url)
-        except httpx.HTTPError:
-            return None
+        except httpx.HTTPError as exc:
+            return None, f"{type(exc).__name__}: {exc}", True
+        if resp.status_code >= 500:
+            return None, f"HTTP {resp.status_code}", True
+        if resp.status_code == 429:
+            return None, "HTTP 429", True
         if resp.status_code >= 400:
-            return None
-        return resp.content
+            return None, f"HTTP {resp.status_code}", False
+        return resp.content, None, False
+
+    async def _fetch_body(self, url: str) -> bytes | None:
+        body, _, _ = await self._get_bytes(url)
+        return body
 
     async def _head_ok(self, url: str) -> bool:
         try:
@@ -196,3 +386,72 @@ class UrlSeeder:
                 if loc:
                     locs.append(loc)
         return locs
+
+
+def _maybe_gunzip(body: bytes) -> bytes:
+    if body[:2] == b"\x1f\x8b":
+        return gzip.decompress(body)
+    return body
+
+
+def _cap_urls(urls: list[str]) -> tuple[list[str], bool]:
+    if len(urls) > _MAX_SITEMAP_URLS:
+        return urls[:_MAX_SITEMAP_URLS], True
+    return urls, len(urls) >= _MAX_SITEMAP_URLS
+
+
+def _llms_directories(start_url: str) -> list[str]:
+    parts = urlsplit(start_url)
+    root = f"{parts.scheme}://{parts.netloc}"
+    segments = [s for s in parts.path.split("/") if s and s != ""]
+    if parts.path.endswith("/"):
+        dirs_from_start = [root + "/" + "/".join(segments)] if segments else [root]
+    else:
+        page_dir = segments[:-1]
+        dirs_from_start = [root + "/" + "/".join(page_dir)] if page_dir else [root]
+        # 起始为文件时同时尝试去掉后缀的同名目录？不猜测，只按父目录回退
+    out: list[str] = []
+    current = dirs_from_start[0]
+    while True:
+        out.append(current.rstrip("/") if current != root else root)
+        if current == root:
+            break
+        parent_parts = urlsplit(current)
+        segs = [s for s in parent_parts.path.split("/") if s]
+        if not segs:
+            current = root
+        else:
+            current = root + "/" + "/".join(segs[:-1]) if len(segs) > 1 else root
+    # 去重保序
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for directory in out:
+        normalized = directory.rstrip("/") or root
+        if normalized not in seen:
+            seen.add(normalized)
+            ordered.append(normalized)
+    return ordered
+
+
+def _sitemap_directories(start_url: str) -> list[str]:
+    parts = urlsplit(start_url)
+    root = f"{parts.scheme}://{parts.netloc}"
+    segments = [s for s in parts.path.split("/") if s]
+    if not segments:
+        return [root]
+    if parts.path.endswith("/"):
+        start_dir = root + "/" + "/".join(segments)
+    else:
+        start_dir = root + "/" + "/".join(segments[:-1]) if len(segments) > 1 else root
+    dirs = [root]
+    if start_dir != root and start_dir not in dirs:
+        dirs.append(start_dir.rstrip("/"))
+        # 起始深层时补全中间父目录，保证逐级可试
+        current = start_dir.rstrip("/")
+        while current != root:
+            parent_parts = urlsplit(current)
+            segs = [s for s in parent_parts.path.split("/") if s]
+            current = root + "/" + "/".join(segs[:-1]) if len(segs) > 1 else root
+            if current not in dirs and current != start_dir:
+                dirs.append(current)
+    return dirs

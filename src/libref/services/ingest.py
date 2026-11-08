@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -14,7 +15,14 @@ from typing import Any
 import httpx
 
 from libref.chunking import split_markdown
-from libref.crawler import HttpFetcher, RobotsChecker, UrlSeeder, extract_to_markdown
+from libref.crawler import (
+    HttpFetcher,
+    RobotsChecker,
+    UrlSeeder,
+    build_scope,
+    extract_to_markdown,
+    looks_like_js_rendered,
+)
 from libref.services.jobs import Job, JobManager
 from libref.services.search import SearchService
 from libref.store.document_store import DocumentStore, StoreResult
@@ -37,6 +45,7 @@ def scrape_job_params(
     *,
     max_pages: int | None = None,
     prefilter: bool = False,
+    scope: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """构造抓取任务参数。"""
     return {
@@ -45,6 +54,7 @@ def scrape_job_params(
         "start_url": start_url,
         "max_pages": max_pages,
         "prefilter": prefilter,
+        "scope": scope or {},
     }
 
 
@@ -56,13 +66,29 @@ def start_scrape_job(
     *,
     max_pages: int | None = None,
     prefilter: bool = False,
+    scope: dict[str, Any] | None = None,
 ) -> int:
     """提交抓取任务到队列，返回任务标识，执行由 worker 加 runner 完成。"""
     return mgr.submit(
         SCRAPE_JOB_KIND,
         scrape_job_params(library, version, start_url,
-                          max_pages=max_pages, prefilter=prefilter),
+                          max_pages=max_pages, prefilter=prefilter, scope=scope),
     )
+
+
+_version_locks: dict[tuple[str, str], asyncio.Lock] = {}
+_version_locks_guard = threading.Lock()
+
+
+def _version_lock(library: str, version: str) -> asyncio.Lock:
+    """同版本同时只允许一个抓取任务执行，第二个任务排队等待。"""
+    key = (library, version)
+    with _version_locks_guard:
+        lock = _version_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            _version_locks[key] = lock
+        return lock
 
 
 def build_embed_fn(settings) -> EmbedFn | None:
@@ -145,6 +171,7 @@ def build_scrape_runner(settings, conn, *, vec_store=None, embed=None):
             params["start_url"],
             max_pages=params.get("max_pages"),
             prefilter=params.get("prefilter", False),
+            scope=params.get("scope"),
         )
 
     return runner
@@ -192,10 +219,12 @@ class IngestService:
         *,
         max_pages: int | None = None,
         prefilter: bool = False,
+        scope: dict[str, Any] | None = None,
     ) -> dict[str, int]:
         """同步入口：发现、抓取、净化、分块、落库，返回各类结局计数。"""
         return asyncio.run(self.scrape_docs_async(library, version, start_url,
-                                                  max_pages=max_pages, prefilter=prefilter))
+                                                  max_pages=max_pages, prefilter=prefilter,
+                                                  scope=scope))
 
     async def scrape_docs_async(
         self,
@@ -205,10 +234,12 @@ class IngestService:
         *,
         max_pages: int | None = None,
         prefilter: bool = False,
+        scope: dict[str, Any] | None = None,
     ) -> dict[str, int]:
         """异步入口，任务 worker 复用，避免在运行中的事件循环内嵌套启动。"""
         return await self._scrape_async(library, version, start_url,
-                                        max_pages=max_pages, prefilter=prefilter)
+                                        max_pages=max_pages, prefilter=prefilter,
+                                        scope=scope)
 
     async def _scrape_async(
         self,
@@ -218,52 +249,65 @@ class IngestService:
         *,
         max_pages: int | None,
         prefilter: bool,
+        scope: dict[str, Any] | None = None,
     ) -> dict[str, int]:
         counts = {k: 0 for k in
                   ("stored", "unchanged", "absent", "empty", "skipped", "failed",
                    "vector_failed")}
-        removed_all: list[int] = []
-        inserted_all: list[int] = []
-        async with _client(self._settings) as client:
-            robots = RobotsChecker(
-                self._conn, client,
-                ttl_days=getattr(self._settings, "robots_cache_ttl_days", _DEFAULT_SEED_HOST_TTL),
-                user_agent=getattr(self._settings, "user_agent", "libref-crawler/0.1"),
-            )
-            seeder = UrlSeeder(client, robots)
-            fetcher = HttpFetcher(
-                client,
-                max_retries=getattr(self._settings, "fetch_max_retries", 3),
-                default_delay=getattr(self._settings, "crawl_delay_default", 1.0),
-            )
-            seed = await seeder.discover(start_url, prefilter=prefilter, max_pages=max_pages)
+        async with _version_lock(library, version):
+            removed_all: list[int] = []
+            inserted_all: list[int] = []
+            async with _client(self._settings) as client:
+                robots = RobotsChecker(
+                    self._conn, client,
+                    ttl_days=getattr(self._settings, "robots_cache_ttl_days", _DEFAULT_SEED_HOST_TTL),
+                    user_agent=getattr(self._settings, "user_agent", "libref-crawler/0.1"),
+                )
+                seeder = UrlSeeder(client, robots)
+                fetcher = HttpFetcher(
+                    client,
+                    max_retries=getattr(self._settings, "fetch_max_retries", 3),
+                    default_delay=getattr(self._settings, "crawl_delay_default", 1.0),
+                )
+                seed = await seeder.discover(start_url, prefilter=prefilter, max_pages=None)
+                policy = build_scope(start_url, scope)
+                candidates = seed.urls + [u for u in seed.cross_site if u not in seed.urls]
+                accepted, rejected = policy.filter(candidates)
+                counts["skipped"] += len(rejected)
+                if seed.source == "none" and seed.failed:
+                    counts["failed"] += 1
+                ingest_truncated = False
+                if max_pages is not None and len(accepted) > max_pages:
+                    accepted = accepted[:max_pages]
+                    ingest_truncated = True
+                truncated = seed.truncated or ingest_truncated
 
-            store = DocumentStore(self._conn)
-            search = SearchService(self._conn)
-            library_id, version_id = search.ensure_library_version(library, version)
+                store = DocumentStore(self._conn)
+                search = SearchService(self._conn)
+                library_id, version_id = search.ensure_library_version(library, version)
 
-            sem = asyncio.Semaphore(getattr(self._settings, "fetch_concurrency", 4))
+                sem = asyncio.Semaphore(getattr(self._settings, "fetch_concurrency", 4))
 
-            async def process(url: str) -> None:
-                async with sem:
-                    try:
-                        page = store.get_page(version_id, url)
-                        result = await self._fetch_and_store(
-                            fetcher, robots, store, library_id, version_id, url, page
-                        )
-                    except Exception:
-                        result = StoreResult("failed")
-                    counts[result.outcome] = counts.get(result.outcome, 0) + 1
-                    removed_all.extend(result.removed_ids)
-                    inserted_all.extend(result.inserted_ids)
+                async def process(url: str) -> None:
+                    async with sem:
+                        try:
+                            page = store.get_page(version_id, url)
+                            result = await self._fetch_and_store(
+                                fetcher, robots, store, library_id, version_id, url, page
+                            )
+                        except Exception:
+                            result = StoreResult("failed")
+                        counts[result.outcome] = counts.get(result.outcome, 0) + 1
+                        removed_all.extend(result.removed_ids)
+                        inserted_all.extend(result.inserted_ids)
 
-            await asyncio.gather(*(process(u) for u in seed.urls))
-            removed_all.extend(
-                self._sweep_absent(store, library_id, version_id, seed,
-                                   max_pages=max_pages, counts=counts)
-            )
-            await self._sync_vectors(store, counts, removed_all, inserted_all)
-        return counts
+                await asyncio.gather(*(process(u) for u in accepted))
+                removed_all.extend(
+                    self._sweep_absent(store, library_id, version_id, seed, accepted,
+                                       truncated=truncated, counts=counts)
+                )
+                await self._sync_vectors(store, counts, removed_all, inserted_all)
+            return counts
 
     async def _sync_vectors(
         self,
@@ -310,18 +354,18 @@ class IngestService:
             counts["vector_failed"] += len(inserted)
 
     def _sweep_absent(self, store: DocumentStore, library_id: int, version_id: int,
-                      seed, *, max_pages: int | None,
+                      seed, accepted_urls: list[str], *, truncated: bool,
                       counts: dict[str, int]) -> list[int]:
         """缺席清理：已有页面减去本次发现集，返回删掉的文档标识。
 
-        发现截断或发现源为空时跳过，避免把未覆盖或瞬时失败的页面误删。
+        有效完整发现才执行；截断或失败一律跳过，避免误删。
         """
         if seed.source == "none":
             return []
-        if max_pages is not None and len(seed.urls) >= max_pages:
+        if seed.failed or truncated:
             return []
         removed: list[int] = []
-        discovered = set(seed.urls)
+        discovered = set(accepted_urls)
         for url in store.list_page_urls(version_id):
             if url not in discovered:
                 result = store.store_page(version_id, library_id, url, "absent")
@@ -353,8 +397,14 @@ class IngestService:
         if result.status == "failed":
             return store.store_page(version_id, library_id, url, "failed")
 
-        markdown = extract_to_markdown(result.content or "", url)
+        raw_html = result.content or ""
+        try:
+            markdown = extract_to_markdown(raw_html, url)
+        except Exception:
+            markdown = ""
         if not markdown:
+            if looks_like_js_rendered(raw_html, markdown):
+                return StoreResult("skipped")
             return store.store_page(
                 version_id, library_id, url, "empty",
                 raw_content=result.content, etag=result.etag, last_modified=result.last_modified,

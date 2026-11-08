@@ -52,17 +52,30 @@ def _build_vector(settings: LibrefSettings):
     return vec, embed
 
 
+def _scope_from_args(args: argparse.Namespace) -> dict:
+    return {
+        "allow_cross_site": bool(getattr(args, "allow_cross_site", False)),
+        "allow_subdomains": bool(getattr(args, "allow_subdomains", False)),
+        "path_prefixes": list(getattr(args, "path_prefix", None) or []),
+        "path_suffixes": list(getattr(args, "path_suffix", None) or []),
+        "include_patterns": list(getattr(args, "include_pattern", None) or []),
+        "exclude_patterns": list(getattr(args, "exclude_pattern", None) or []),
+        "max_depth": getattr(args, "max_depth", None),
+    }
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     settings = LibrefSettings()
     conn = _connect(settings)
     vec_store, embed = _build_vector(settings)
+    scope = _scope_from_args(args)
     try:
         if args.run_async:
             mgr = JobManager(conn)
             mgr.recover()
             job_id = start_scrape_job(
                 mgr, args.library, args.version, args.start_url,
-                max_pages=args.max_pages, prefilter=args.prefilter,
+                max_pages=args.max_pages, prefilter=args.prefilter, scope=scope,
             )
             job = run_scrape_job_sync(mgr, settings, conn, job_id,
                                         vec_store=vec_store, embed=embed)
@@ -71,7 +84,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
         counts = service.scrape_docs(
             args.library, args.version, args.start_url,
-            max_pages=args.max_pages, prefilter=args.prefilter,
+            max_pages=args.max_pages, prefilter=args.prefilter, scope=scope,
         )
     finally:
         conn.close()
@@ -137,6 +150,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument("--prefilter", action="store_true", help="HEAD 存活预筛")
     p_ingest.add_argument("--async", dest="run_async", action="store_true",
                           help="经 jobs 队列执行（提交→同进程 worker 消费→回写 jobs 表）")
+    p_ingest.add_argument("--allow-cross-site", action="store_true", help="允许跨站抓取")
+    p_ingest.add_argument("--allow-subdomains", action="store_true", help="允许同域子域")
+    p_ingest.add_argument("--path-prefix", action="append", default=None, help="仅接受此前缀路径，可重复")
+    p_ingest.add_argument("--path-suffix", action="append", default=None, help="仅接受此后缀路径，可重复")
+    p_ingest.add_argument("--include-pattern", action="append", default=None, help="正则白名单，可重复")
+    p_ingest.add_argument("--exclude-pattern", action="append", default=None, help="正则黑名单，可重复")
+    p_ingest.add_argument("--max-depth", type=int, default=None, help="相对起始目录的最大深度")
     p_ingest.set_defaults(func=cmd_ingest)
 
     p_search = sub.add_parser("search", help="FTS 全文检索")

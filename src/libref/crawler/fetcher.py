@@ -13,11 +13,15 @@ from urllib.parse import urlsplit
 
 import httpx
 
+_BACKOFF_CAP = 8.0
+_DELAY_CAP = 30.0
+_RETRYABLE_STATUS = (408, 429)
+
 
 @dataclass
 class FetchOutcome:
     url: str
-    status: str  # ok / unchanged / absent / failed
+    status: str  # ok / unchanged / absent / failed（empty 与 skipped 由编排层判定）
     content: str | None = None
     etag: str | None = None
     last_modified: str | None = None
@@ -54,25 +58,25 @@ class HttpFetcher:
             headers["If-Modified-Since"] = last_modified
 
         delay = crawl_delay if crawl_delay is not None else self._default_delay
-        delay = min(max(delay, 0.0), 30.0)
+        delay = min(max(delay, 0.0), _DELAY_CAP)
         error: str | None = None
         for attempt in range(self._max_retries + 1):
             await self._throttle(url, delay)
             try:
                 resp = await self._client.get(url, headers=headers)
-            except httpx.HTTPError as exc:
+            except (httpx.HTTPError, OSError, TimeoutError) as exc:
                 error = f"{type(exc).__name__}: {exc}"
                 await self._mark(url)
-                await asyncio.sleep(0.5 * (2**attempt))
+                await asyncio.sleep(min(0.5 * (2**attempt), _BACKOFF_CAP))
                 continue
             await self._mark(url)
             if resp.status_code == 304:
                 return FetchOutcome(url=url, status="unchanged")
             if resp.status_code == 404 or resp.status_code == 410:
                 return FetchOutcome(url=url, status="absent", error=f"HTTP {resp.status_code}")
-            if resp.status_code >= 500:
+            if resp.status_code >= 500 or resp.status_code in _RETRYABLE_STATUS:
                 error = f"HTTP {resp.status_code}"
-                await asyncio.sleep(0.5 * (2**attempt))
+                await asyncio.sleep(min(0.5 * (2**attempt), _BACKOFF_CAP))
                 continue
             if resp.status_code >= 400:
                 return FetchOutcome(url=url, status="failed", error=f"HTTP {resp.status_code}")
