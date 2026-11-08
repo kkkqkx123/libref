@@ -6,16 +6,37 @@ from __future__ import annotations
 INITIAL_SCHEMA_SQL = """
 CREATE TABLE libraries(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL UNIQUE,
-  description TEXT
+  ecosystem TEXT NOT NULL DEFAULT 'custom',
+  name TEXT NOT NULL,
+  description TEXT,
+  homepage TEXT,
+  docs_url TEXT,
+  repo_url TEXT,
+  resolved_from TEXT,
+  resolved_at TEXT,
+  UNIQUE(ecosystem, name)
 );
 
 CREATE TABLE versions(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
   version TEXT NOT NULL,
+  registry_confirmed INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(library_id, version)
+);
+
+CREATE TABLE registry_cache(
+  ecosystem TEXT NOT NULL,
+  name TEXT NOT NULL,
+  docs_url TEXT,
+  candidates JSON NOT NULL DEFAULT '[]',
+  versions JSON NOT NULL DEFAULT '[]',
+  stable TEXT,
+  homepage TEXT,
+  repo_url TEXT,
+  fetched_at REAL NOT NULL,
+  PRIMARY KEY(ecosystem, name)
 );
 
 CREATE TABLE pages(

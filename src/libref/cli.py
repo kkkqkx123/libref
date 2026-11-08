@@ -6,6 +6,7 @@ import argparse
 import sys
 
 from libref.config import LibrefSettings
+from libref.crawler.registry import RegistryError
 from libref.db import apply_migrations, open_db
 from libref.services.ingest import (
     IngestService,
@@ -64,18 +65,78 @@ def _scope_from_args(args: argparse.Namespace) -> dict:
     }
 
 
+def _resolve_for_cli(settings, conn, ecosystem, library, requested_version):
+    """命令行解析形态：生态加名称解析出地址与版本，失败打印分类错误。"""
+    import asyncio
+
+    import httpx
+
+    from libref.services.resolver import resolve_package
+
+    async def _run():
+        async with httpx.AsyncClient(
+            timeout=settings.request_timeout,
+            follow_redirects=True,
+            headers={"User-Agent": getattr(settings, "user_agent", "libref-crawler/0.1")},
+            http2=True,
+        ) as client:
+            return await resolve_package(
+                conn, client, settings, ecosystem, library, requested_version,
+            )
+
+    return asyncio.run(_run())
+
+
 def cmd_ingest(args: argparse.Namespace) -> int:
     settings = LibrefSettings()
+    if getattr(args, "offline", False):
+        settings.registry_offline = True
     conn = _connect(settings)
     vec_store, embed = _build_vector(settings)
     scope = _scope_from_args(args)
     try:
+        resolve_mode = args.ecosystem is not None or args.start_url is None
+        if resolve_mode:
+            if not args.library:
+                print("resolve mode requires library (package name)", file=sys.stderr)
+                return 2
+            if args.start_url is not None:
+                print("--ecosystem and start_url are mutually exclusive", file=sys.stderr)
+                return 2
+            try:
+                resolution = _resolve_for_cli(
+                    settings, conn, args.ecosystem, args.library, args.version,
+                )
+            except ValueError as exc:
+                print(f"invalid: {exc}", file=sys.stderr)
+                return 2
+            except RegistryError as exc:
+                hint = f" hint={exc.hint}" if exc.hint else ""
+                print(f"resolve failed [{exc.kind}]: {exc}{hint}", file=sys.stderr)
+                return 1
+            assert resolution.docs_url is not None
+            library, version, start_url = resolution.name, resolution.version, resolution.docs_url
+            ecosystem = resolution.ecosystem
+            resolved_from: str | None = resolution.source
+            registry_confirmed = resolution.registry_confirmed
+            homepage, repo_url = resolution.homepage, resolution.repo_url
+            print(f"resolved {ecosystem}:{library} {version} -> {start_url} [{resolved_from}]"
+                  + (" (version unconfirmed)" if not registry_confirmed else ""))
+        else:
+            if not (args.library and args.version and args.start_url):
+                print("explicit mode requires library version start_url", file=sys.stderr)
+                return 2
+            library, version, start_url = args.library, args.version, args.start_url
+            ecosystem, resolved_from = "custom", "explicit"
+            registry_confirmed, homepage, repo_url = True, None, None
         if args.run_async:
             mgr = JobManager(conn)
             mgr.recover()
             job_id = start_scrape_job(
-                mgr, args.library, args.version, args.start_url,
+                mgr, library, version, start_url,
                 max_pages=args.max_pages, prefilter=args.prefilter, scope=scope,
+                ecosystem=ecosystem, resolved_from=resolved_from,
+                registry_confirmed=registry_confirmed,
             )
             job = run_scrape_job_sync(mgr, settings, conn, job_id,
                                         vec_store=vec_store, embed=embed)
@@ -83,8 +144,10 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             return 0 if job.status == "done" else 1
         service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
         counts = service.scrape_docs(
-            args.library, args.version, args.start_url,
+            library, version, start_url,
             max_pages=args.max_pages, prefilter=args.prefilter, scope=scope,
+            ecosystem=ecosystem, resolved_from=resolved_from,
+            registry_confirmed=registry_confirmed, homepage=homepage, repo_url=repo_url,
         )
     finally:
         conn.close()
@@ -143,9 +206,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init-db", help="初始化数据库（应用迁移）").set_defaults(func=cmd_init_db)
 
     p_ingest = sub.add_parser("ingest", help="抓取文档站并入库")
-    p_ingest.add_argument("library")
-    p_ingest.add_argument("version")
-    p_ingest.add_argument("start_url")
+    p_ingest.add_argument("library", nargs="?", help="显式形态为库名，解析形态为包名")
+    p_ingest.add_argument("version", nargs="?", default=None, help="显式形态必填，解析形态缺省取稳定版")
+    p_ingest.add_argument("start_url", nargs="?", default=None, help="显式形态必填，与 --ecosystem 互斥")
+    p_ingest.add_argument("--ecosystem", default=None, help="按名称解析：pypi|npm")
+    p_ingest.add_argument("--offline", action="store_true", help="只读缓存，不请求网络")
     p_ingest.add_argument("--max-pages", type=int, default=None)
     p_ingest.add_argument("--prefilter", action="store_true", help="HEAD 存活预筛")
     p_ingest.add_argument("--async", dest="run_async", action="store_true",

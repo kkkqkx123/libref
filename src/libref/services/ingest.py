@@ -46,8 +46,11 @@ def scrape_job_params(
     max_pages: int | None = None,
     prefilter: bool = False,
     scope: dict[str, Any] | None = None,
+    ecosystem: str = "custom",
+    resolved_from: str | None = None,
+    registry_confirmed: bool = True,
 ) -> dict[str, Any]:
-    """构造抓取任务参数。"""
+    """构造抓取任务参数，含解析来源以保证可重放。"""
     return {
         "library": library,
         "version": version,
@@ -55,6 +58,9 @@ def scrape_job_params(
         "max_pages": max_pages,
         "prefilter": prefilter,
         "scope": scope or {},
+        "ecosystem": ecosystem,
+        "resolved_from": resolved_from,
+        "registry_confirmed": registry_confirmed,
     }
 
 
@@ -67,22 +73,29 @@ def start_scrape_job(
     max_pages: int | None = None,
     prefilter: bool = False,
     scope: dict[str, Any] | None = None,
+    ecosystem: str = "custom",
+    resolved_from: str | None = None,
+    registry_confirmed: bool = True,
 ) -> int:
     """提交抓取任务到队列，返回任务标识，执行由 worker 加 runner 完成。"""
     return mgr.submit(
         SCRAPE_JOB_KIND,
-        scrape_job_params(library, version, start_url,
-                          max_pages=max_pages, prefilter=prefilter, scope=scope),
+        scrape_job_params(
+            library, version, start_url,
+            max_pages=max_pages, prefilter=prefilter, scope=scope,
+            ecosystem=ecosystem, resolved_from=resolved_from,
+            registry_confirmed=registry_confirmed,
+        ),
     )
 
 
-_version_locks: dict[tuple[str, str], asyncio.Lock] = {}
+_version_locks: dict[tuple[str, str, str], asyncio.Lock] = {}
 _version_locks_guard = threading.Lock()
 
 
-def _version_lock(library: str, version: str) -> asyncio.Lock:
+def _version_lock(ecosystem: str, library: str, version: str) -> asyncio.Lock:
     """同版本同时只允许一个抓取任务执行，第二个任务排队等待。"""
-    key = (library, version)
+    key = (ecosystem, library, version)
     with _version_locks_guard:
         lock = _version_locks.get(key)
         if lock is None:
@@ -172,6 +185,9 @@ def build_scrape_runner(settings, conn, *, vec_store=None, embed=None):
             max_pages=params.get("max_pages"),
             prefilter=params.get("prefilter", False),
             scope=params.get("scope"),
+            ecosystem=params.get("ecosystem", "custom"),
+            resolved_from=params.get("resolved_from"),
+            registry_confirmed=params.get("registry_confirmed", True),
         )
 
     return runner
@@ -220,11 +236,19 @@ class IngestService:
         max_pages: int | None = None,
         prefilter: bool = False,
         scope: dict[str, Any] | None = None,
+        ecosystem: str = "custom",
+        resolved_from: str | None = None,
+        registry_confirmed: bool = True,
+        homepage: str | None = None,
+        repo_url: str | None = None,
     ) -> dict[str, int]:
         """同步入口：发现、抓取、净化、分块、落库，返回各类结局计数。"""
-        return asyncio.run(self.scrape_docs_async(library, version, start_url,
-                                                  max_pages=max_pages, prefilter=prefilter,
-                                                  scope=scope))
+        return asyncio.run(self.scrape_docs_async(
+            library, version, start_url,
+            max_pages=max_pages, prefilter=prefilter, scope=scope,
+            ecosystem=ecosystem, resolved_from=resolved_from,
+            registry_confirmed=registry_confirmed, homepage=homepage, repo_url=repo_url,
+        ))
 
     async def scrape_docs_async(
         self,
@@ -235,11 +259,62 @@ class IngestService:
         max_pages: int | None = None,
         prefilter: bool = False,
         scope: dict[str, Any] | None = None,
+        ecosystem: str = "custom",
+        resolved_from: str | None = None,
+        registry_confirmed: bool = True,
+        homepage: str | None = None,
+        repo_url: str | None = None,
     ) -> dict[str, int]:
         """异步入口，任务 worker 复用，避免在运行中的事件循环内嵌套启动。"""
-        return await self._scrape_async(library, version, start_url,
-                                        max_pages=max_pages, prefilter=prefilter,
-                                        scope=scope)
+        return await self._scrape_async(
+            library, version, start_url,
+            max_pages=max_pages, prefilter=prefilter, scope=scope,
+            ecosystem=ecosystem, resolved_from=resolved_from,
+            registry_confirmed=registry_confirmed, homepage=homepage, repo_url=repo_url,
+        )
+
+    def scrape_by_name(
+        self,
+        ecosystem: str | None,
+        package: str,
+        requested_version: str | None = None,
+        *,
+        max_pages: int | None = None,
+        prefilter: bool = False,
+        scope: dict[str, Any] | None = None,
+    ) -> dict[str, int]:
+        """按名称解析后抓取：先解析出地址与版本，再走标准抓取链路。"""
+        return asyncio.run(self.scrape_by_name_async(
+            ecosystem, package, requested_version,
+            max_pages=max_pages, prefilter=prefilter, scope=scope,
+        ))
+
+    async def scrape_by_name_async(
+        self,
+        ecosystem: str | None,
+        package: str,
+        requested_version: str | None = None,
+        *,
+        max_pages: int | None = None,
+        prefilter: bool = False,
+        scope: dict[str, Any] | None = None,
+    ) -> dict[str, int]:
+        """按名称解析后抓取的异步入口，供任务 worker 复用。"""
+        from libref.services.resolver import resolve_package
+
+        async with _client(self._settings) as client:
+            resolution = await resolve_package(
+                self._conn, client, self._settings,
+                ecosystem, package, requested_version,
+            )
+        assert resolution.docs_url is not None
+        return await self._scrape_async(
+            resolution.name, resolution.version, resolution.docs_url,
+            max_pages=max_pages, prefilter=prefilter, scope=scope,
+            ecosystem=resolution.ecosystem, resolved_from=resolution.source,
+            registry_confirmed=resolution.registry_confirmed,
+            homepage=resolution.homepage, repo_url=resolution.repo_url,
+        )
 
     async def _scrape_async(
         self,
@@ -250,11 +325,16 @@ class IngestService:
         max_pages: int | None,
         prefilter: bool,
         scope: dict[str, Any] | None = None,
+        ecosystem: str = "custom",
+        resolved_from: str | None = None,
+        registry_confirmed: bool = True,
+        homepage: str | None = None,
+        repo_url: str | None = None,
     ) -> dict[str, int]:
         counts = {k: 0 for k in
                   ("stored", "unchanged", "absent", "empty", "skipped", "failed",
                    "vector_failed")}
-        async with _version_lock(library, version):
+        async with _version_lock(ecosystem, library, version):
             removed_all: list[int] = []
             inserted_all: list[int] = []
             async with _client(self._settings) as client:
@@ -284,7 +364,12 @@ class IngestService:
 
                 store = DocumentStore(self._conn)
                 search = SearchService(self._conn)
-                library_id, version_id = search.ensure_library_version(library, version)
+                library_id, version_id = search.ensure_library_version(
+                    library, version, ecosystem,
+                    homepage=homepage, docs_url=start_url, repo_url=repo_url,
+                    resolved_from=resolved_from or ("explicit" if ecosystem == "custom" else None),
+                    registry_confirmed=registry_confirmed,
+                )
 
                 sem = asyncio.Semaphore(getattr(self._settings, "fetch_concurrency", 4))
 

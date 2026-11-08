@@ -1,0 +1,233 @@
+"""库解析编排：查缓存、调客户端、写缓存、应用覆盖规则。
+
+唯一读写注册表缓存表的位置。库元数据行由检索服务的库版本入口维护，
+本模块只返回解析结论，不直接写库表。
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import time
+
+from libref.crawler.registry import (
+    RegistryError,
+    Resolution,
+    best_effort_stable,
+    fetch_snapshot,
+    normalize_name,
+    sanitize_http_url,
+)
+from libref.crawler.registry_overrides import get_override
+
+
+def infer_ecosystem(explicit: str | None, name: str) -> str:
+    """生态判定：显式优先，裸名不猜测，仅作用域形态可推断。"""
+    if explicit is not None:
+        eco = explicit.strip().lower()
+        if eco not in ("pypi", "npm"):
+            raise ValueError(f"unsupported ecosystem: {explicit}")
+        if eco == "pypi" and name.strip().startswith("@"):
+            raise ValueError("pypi package must not start with '@'")
+        return eco
+    if name.strip().startswith("@") and "/" in name:
+        return "npm"
+    raise ValueError("ecosystem required: pass --ecosystem pypi|npm")
+
+
+def read_cache(conn: sqlite3.Connection, ecosystem: str, name: str) -> dict | None:
+    row = conn.execute(
+        "SELECT docs_url, candidates, versions, stable, homepage, repo_url, fetched_at "
+        "FROM registry_cache WHERE ecosystem=? AND name=?",
+        (ecosystem, name),
+    ).fetchone()
+    if row is None:
+        return None
+    return {
+        "docs_url": row[0],
+        "candidates": json.loads(row[1]) if row[1] else [],
+        "versions": json.loads(row[2]) if row[2] else [],
+        "stable": row[3],
+        "homepage": row[4],
+        "repo_url": row[5],
+        "fetched_at": row[6],
+    }
+
+
+def write_cache(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem: str,
+    name: str,
+    docs_url: str | None,
+    candidates: list[str],
+    versions: list[str],
+    stable: str | None,
+    homepage: str | None,
+    repo_url: str | None,
+    fetched_at: float,
+) -> None:
+    conn.execute(
+        "INSERT INTO registry_cache(ecosystem, name, docs_url, candidates, versions, "
+        "stable, homepage, repo_url, fetched_at) VALUES(?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(ecosystem, name) DO UPDATE SET docs_url=excluded.docs_url, "
+        "candidates=excluded.candidates, versions=excluded.versions, stable=excluded.stable, "
+        "homepage=excluded.homepage, repo_url=excluded.repo_url, "
+        "fetched_at=excluded.fetched_at",
+        (
+            ecosystem, name, docs_url,
+            json.dumps(candidates, ensure_ascii=False),
+            json.dumps(versions, ensure_ascii=False),
+            stable, homepage, repo_url, fetched_at,
+        ),
+    )
+    conn.commit()
+
+
+def _is_fresh(fetched_at: float, ttl_days: float) -> bool:
+    return (time.time() - fetched_at) < ttl_days * 86400
+
+
+def _pick_version(
+    versions: list[str], stable: str | None, requested: str | None
+) -> tuple[str, bool]:
+    if requested is not None:
+        return requested, requested in versions
+    if stable:
+        return stable, True
+    best = best_effort_stable(versions)
+    if best is not None:
+        return best, True
+    raise RegistryError("no_docs", "registry lists no versions")
+
+
+def _build_resolution(
+    *,
+    ecosystem: str,
+    name: str,
+    requested: str | None,
+    versions: list[str],
+    stable: str | None,
+    homepage: str | None,
+    repo_url: str | None,
+    override_docs: str | None,
+    registry_docs: str | None,
+    candidates: list[str],
+    source: str,
+) -> Resolution:
+    docs_url = override_docs or registry_docs
+    if docs_url is None:
+        raise RegistryError(
+            "no_docs",
+            "registry has no documentation address",
+            hint={"homepage": homepage, "repo_url": repo_url},
+        )
+    version, confirmed = _pick_version(versions, stable, requested)
+    final_candidates = [docs_url]
+    for c in candidates:
+        if c != docs_url and c not in final_candidates:
+            final_candidates.append(c)
+    return Resolution(
+        ecosystem=ecosystem,
+        name=name,
+        requested_version=requested,
+        version=version,
+        registry_confirmed=confirmed,
+        docs_url=docs_url,
+        candidates=final_candidates,
+        homepage=homepage,
+        repo_url=repo_url,
+        source=source,
+    )
+
+
+async def resolve_package(
+    conn: sqlite3.Connection,
+    client,
+    settings,
+    ecosystem: str | None,
+    name: str,
+    requested_version: str | None = None,
+    explicit_url: str | None = None,
+) -> Resolution:
+    """名称解析唯一入口：显式地址直通，其余走覆盖加缓存加注册表。"""
+    allow_private = bool(getattr(settings, "registry_allow_private", False))
+    if explicit_url is not None:
+        if requested_version is None:
+            raise ValueError("explicit address requires a version")
+        clean = sanitize_http_url(explicit_url, allow_private=allow_private)
+        if clean is None:
+            raise ValueError(f"invalid documentation address: {explicit_url}")
+        eco = (ecosystem.strip().lower() if ecosystem else "custom")
+        label = name.strip()
+        if eco in ("pypi", "npm"):
+            label = normalize_name(eco, name)
+        return Resolution(
+            ecosystem=eco,
+            name=label,
+            requested_version=requested_version,
+            version=requested_version,
+            registry_confirmed=True,
+            docs_url=clean,
+            candidates=[clean],
+            source="explicit",
+        )
+
+    eco = infer_ecosystem(ecosystem, name)
+    norm = normalize_name(eco, name)
+    if not norm:
+        raise ValueError("empty package name")
+    override = get_override(eco, norm)
+    override_docs = None
+    if override is not None:
+        override_docs = sanitize_http_url(
+            override.get("docs_url"), allow_private=allow_private
+        )
+    ttl = float(getattr(settings, "registry_cache_ttl_days", 1.0))
+    offline = bool(getattr(settings, "registry_offline", False))
+
+    cached = read_cache(conn, eco, norm)
+    if offline:
+        if cached is None:
+            raise RegistryError("retryable", "offline cache miss")
+        return _build_resolution(
+            ecosystem=eco, name=norm, requested=requested_version,
+            versions=cached["versions"], stable=cached["stable"],
+            homepage=cached["homepage"], repo_url=cached["repo_url"],
+            override_docs=override_docs, registry_docs=cached["docs_url"],
+            candidates=cached["candidates"], source="override" if override_docs else "registry",
+        )
+    if cached is not None and _is_fresh(cached["fetched_at"], ttl):
+        return _build_resolution(
+            ecosystem=eco, name=norm, requested=requested_version,
+            versions=cached["versions"], stable=cached["stable"],
+            homepage=cached["homepage"], repo_url=cached["repo_url"],
+            override_docs=override_docs, registry_docs=cached["docs_url"],
+            candidates=cached["candidates"], source="override" if override_docs else "registry",
+        )
+    try:
+        snap = await fetch_snapshot(eco, norm, client, settings)
+    except RegistryError as exc:
+        if exc.kind == "retryable" and cached is not None:
+            return _build_resolution(
+                ecosystem=eco, name=norm, requested=requested_version,
+                versions=cached["versions"], stable=cached["stable"],
+                homepage=cached["homepage"], repo_url=cached["repo_url"],
+                override_docs=override_docs, registry_docs=cached["docs_url"],
+                candidates=cached["candidates"],
+                source="override" if override_docs else "registry-stale",
+            )
+        raise
+    write_cache(
+        conn, ecosystem=eco, name=norm, docs_url=snap.doc_candidates[0] if snap.doc_candidates else None,
+        candidates=snap.doc_candidates, versions=snap.versions, stable=snap.stable,
+        homepage=snap.homepage, repo_url=snap.repo_url, fetched_at=time.time(),
+    )
+    return _build_resolution(
+        ecosystem=eco, name=norm, requested=requested_version,
+        versions=snap.versions, stable=snap.stable,
+        homepage=snap.homepage, repo_url=snap.repo_url,
+        override_docs=override_docs,
+        registry_docs=snap.doc_candidates[0] if snap.doc_candidates else None,
+        candidates=snap.doc_candidates, source="override" if override_docs else "registry",
+    )

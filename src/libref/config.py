@@ -28,3 +28,11 @@ class LibrefSettings(BaseSettings):
     embedding_dim: int = 1024
     embedding_api_base: str = "https://api.siliconflow.cn/v1"
     embedding_api_key: str | None = None
+    # 注册表解析配置：缓存有效期、离线开关、私有放行、镜像基址。
+    # 密钥型鉴权不在本方案内，镜像地址经此处显式开启后方可使用。
+    registry_cache_ttl_days: float = 1.0
+    registry_offline: bool = False
+    registry_allow_private: bool = False
+    registry_pypi_base: str = "https://pypi.org/pypi"
+    registry_npm_base: str = "https://registry.npmjs.org"
+    registry_override_ttl_days: float = 180.0

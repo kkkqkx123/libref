@@ -15,13 +15,19 @@ try:
 except ImportError:
     from mcp.server.fastmcp import FastMCP
 
+from libref.config import LibrefSettings
+from libref.crawler.registry import RegistryError
+from libref.services.resolver import resolve_package as _resolve_package
 from libref.services.search import SearchService
 
 
-def build_mcp_server(conn: sqlite3.Connection) -> FastMCP:
+def build_mcp_server(
+    conn: sqlite3.Connection, settings: LibrefSettings | None = None
+) -> FastMCP:
     """构建 FastMCP 实例并注册文档检索工具；连接由调用方管理生命周期。"""
     mcp: FastMCP = FastMCP("libref")
     search = SearchService(conn)
+    resolve_settings = settings or LibrefSettings()
 
     @mcp.tool()
     def search_docs(
@@ -44,8 +50,35 @@ def build_mcp_server(conn: sqlite3.Connection) -> FastMCP:
         return search.list_libraries()
 
     @mcp.tool()
-    def list_versions(library: str) -> list[dict[str, Any]]:
+    def list_versions(
+        library: str, ecosystem: str | None = None
+    ) -> list[dict[str, Any]]:
         """列出指定库的全部版本及页面数。"""
-        return search.list_versions(library)
+        return search.list_versions(library, ecosystem)
+
+    @mcp.tool()
+    async def resolve_package(
+        ecosystem: str | None,
+        name: str,
+        version: str | None = None,
+    ) -> dict[str, Any]:
+        """按生态加名称解析文档源，只读，不触发抓取。"""
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=resolve_settings.request_timeout,
+                follow_redirects=True,
+                headers={"User-Agent": resolve_settings.user_agent},
+                http2=True,
+            ) as client:
+                resolution = await _resolve_package(
+                    conn, client, resolve_settings, ecosystem, name, version,
+                )
+        except ValueError as exc:
+            return {"error": "invalid", "message": str(exc)}
+        except RegistryError as exc:
+            return {"error": exc.kind, "message": str(exc), "hint": exc.hint}
+        return resolution.model_dump()
 
     return mcp

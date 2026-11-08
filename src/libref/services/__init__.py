@@ -10,6 +10,7 @@ from libref.services.ingest import (
     start_scrape_job,
 )
 from libref.services.jobs import JobManager
+from libref.services.resolver import infer_ecosystem, resolve_package
 from libref.services.search import SearchService
 
 __all__ = [
@@ -19,6 +20,8 @@ __all__ = [
     "SearchService",
     "build_embed_fn",
     "build_scrape_runner",
+    "infer_ecosystem",
+    "resolve_package",
     "run_scrape_job_sync",
     "scrape_job_params",
     "start_scrape_job",
