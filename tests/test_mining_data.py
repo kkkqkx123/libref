@@ -102,3 +102,20 @@ def test_retrieval_queries_over_mined_data(conn, tmp_path):
     assert first["caller_file"] and first["caller"]
     assert [c["callee"] for c in first["calls"]][:2] == ["numpy.array", "numpy.zeros"]
     assert all(c["confidence"] != "AMBIGUOUS" for c in first["calls"])
+
+
+def test_minlen_filters_short_patterns(conn):
+    _seed_calls(conn, rows=[
+        ("p.a", "a.py", "f", 1, 1, 10, "INFERRED", []),
+        ("p.b", "a.py", "f", 2, 2, 20, "INFERRED", []),
+        ("p.c", "a.py", "f", 3, 3, 30, "INFERRED", []),
+        ("p.a", "b.py", "g", 1, 1, 10, "INFERRED", []),
+        ("p.b", "b.py", "g", 2, 2, 20, "INFERRED", []),
+        ("p.c", "b.py", "g", 3, 3, 30, "INFERRED", []),
+        ("p.a", "c.py", "h", 1, 1, 10, "INFERRED", []),
+        ("p.b", "c.py", "h", 2, 2, 20, "INFERRED", []),
+    ])
+    short = mine_patterns(conn, "demo", "t", minsup=2, minlen=2)
+    assert any(len(r["pattern"]) == 2 for r in short)
+    long_only = mine_patterns(conn, "demo", "t", minsup=2, minlen=3)
+    assert long_only and all(len(r["pattern"]) >= 3 for r in long_only)

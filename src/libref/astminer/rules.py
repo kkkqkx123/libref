@@ -247,6 +247,97 @@ def params_from_params_node(params_node: Any, source: bytes) -> list[str]:
     return names
 
 
+def type_text_of_param(pnode: Any, source: bytes) -> str:
+    for child in pnode.children:
+        if child.type == "type":
+            text = slice_text(child, source).strip()
+            if text:
+                return text[:128]
+        if child.type in ("type_identifier", "generic_type", "scoped_type_identifier"):
+            text = slice_text(child, source).strip()
+            if text:
+                return text[:128]
+    for child in pnode.children:
+        if not child.is_named:
+            continue
+        if child.type in ("identifier", "list_splat_pattern", "dictionary_splat_pattern"):
+            continue
+        text = type_text_of_param(child, source)
+        if text:
+            return text
+    typed = pnode.child_by_field_name("type")
+    if typed is not None:
+        text = slice_text(typed, source).strip()
+        if text:
+            return text[:128]
+    return ""
+
+
+def param_types_from_params_node(params_node: Any, source: bytes) -> list[str]:
+    types: list[str] = []
+    for param in params_node.children:
+        if not param.is_named:
+            continue
+        name = param_name(param, source)
+        if not name:
+            continue
+        types.append(type_text_of_param(param, source))
+    return types
+
+
+def shaped_return(node: Any | None, source: bytes) -> str:
+    if node is None:
+        return ""
+    return slice_text(node, source).strip()[:128]
+
+
+def collect_simple_var_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if node.type == "assignment":
+            left = node.child_by_field_name("left")
+            right = node.child_by_field_name("right")
+            if left is not None and right is not None and left.type == "identifier":
+                var = slice_text(left, source).strip()
+                target = _call_target_name(right, source)
+                if var and target:
+                    found.append((var, target))
+        elif node.type == "variable_declarator":
+            name_node = node.child_by_field_name("name")
+            value_node = node.child_by_field_name("value")
+            if name_node is not None and value_node is not None:
+                var = slice_text(name_node, source).strip()
+                target = _call_target_name(value_node, source)
+                if var and target:
+                    found.append((var, target))
+        stack.extend(node.children)
+    return found
+
+
+def _call_target_name(node: Any, source: bytes) -> str:
+    if node.type not in ("call", "call_expression", "new_expression",
+                         "object_creation_expression"):
+        return ""
+    fn = node.child_by_field_name("function")
+    if fn is None:
+        fn = node.child_by_field_name("name")
+    if fn is None:
+        fn = node.child_by_field_name("constructor")
+    if fn is None:
+        fn = node.child_by_field_name("type")
+    if fn is None:
+        for child in node.children:
+            if child.type in ("identifier", "attribute", "dotted_name",
+                              "scoped_identifier", "type_identifier"):
+                fn = child
+                break
+    if fn is None:
+        return ""
+    return generic_dotted(fn, source).strip()[:128]
+
+
 def _split_aliased(node: Any, source: bytes) -> tuple[str, str]:
     original = ""
     alias = ""

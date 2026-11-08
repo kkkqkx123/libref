@@ -19,6 +19,8 @@ class ApiDeclRecord(BaseModel):
     end_byte: int = 0
     signature: str = ""
     params: list[str] = Field(default_factory=list)
+    param_types: list[str] = Field(default_factory=list)
+    return_type: str = ""
     bases: list[str] = Field(default_factory=list)
     parent: str | None = None
     depth: int = 0
@@ -54,3 +56,4 @@ class CallInstanceRecord(BaseModel):
     call_order: int = 0
     confidence: Confidence
     repo: str = ""
+    commit_sha: str = ""

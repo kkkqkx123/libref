@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from libref.mining.cooccur import cooccur_matrix
-from libref.mining.frequency import level_counts, prune_to_top_n
+from libref.mining.frequency import exact_counts, level_counts, prune_to_top_n
 from libref.mining.normalize import (
     build_table,
     decode_pattern,
@@ -16,6 +16,11 @@ def test_level_counts_hand_computed():
     names = ["a.b", "a.b", "a.c"]
     counts = level_counts(names)
     assert counts == {"a": 3, "a.b": 2, "a.c": 1}
+
+
+def test_exact_counts_for_truncation():
+    names = ["a.b", "a.b", "a.c"]
+    assert exact_counts(names) == {"a.b": 2, "a.c": 1}
 
 
 def test_prune_to_top_n_per_depth():

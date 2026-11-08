@@ -29,7 +29,7 @@ def test_ingest_repo_end_to_end(conn, tmp_path):
     ).fetchall()
     assert calls
     assert any(c[0] == "numpy.array" and c[1] == "INFERRED" for c in calls)
-    assert any(c[0] == "helper" and c[1] == "EXTRACTED" for c in calls)
+    assert any(c[0] == "d.helper" and c[1] == "EXTRACTED" for c in calls)
     assert any(c[1] == "AMBIGUOUS" for c in calls)
     pending = conn.execute(
         "SELECT count(*) FROM review_status WHERE entity_type='call_instance'"
@@ -47,3 +47,13 @@ def test_ingest_repo_end_to_end(conn, tmp_path):
     assert second["cached"] == 5 and second["parsed"] == 0
     n_calls = conn.execute("SELECT count(*) FROM call_instances").fetchone()[0]
     assert n_calls == len(calls)
+    commit = conn.execute(
+        "SELECT commit_sha FROM call_instances LIMIT 1"
+    ).fetchone()[0]
+    assert commit == "local"
+    try:
+        index_repo(conn, "demo", "0.1", str(repo) + "_other", repos_dir=repos_dir)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("different source for same version must be rejected")

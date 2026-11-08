@@ -31,9 +31,9 @@ def test_python_decorated_and_async_shapes():
     )
     decls, _aliases, raw = ast_engine.extract_file("m.py", cfg, source)
     by_qual = {d.qualified_name: d for d in decls}
-    assert "fetch" in by_qual
-    assert by_qual["fetch"].signature.startswith("async def fetch")
-    assert "url" in by_qual["fetch"].params
+    assert "m.fetch" in by_qual
+    assert by_qual["m.fetch"].signature.startswith("async def fetch")
+    assert "url" in by_qual["m.fetch"].params
     assert {c.raw_callee for c in raw} == {"functools.lru_cache", "get"}
 
 
@@ -48,12 +48,12 @@ def test_python_chained_and_super_shapes():
     )
     decls, _aliases, raw = ast_engine.extract_file("m.py", cfg, source)
     by_qual = {d.qualified_name: d for d in decls}
-    assert by_qual["A"].bases == ["B"]
-    assert by_qual["A.f"].kind == "method"
+    assert by_qual["m.A"].bases == ["B"]
+    assert by_qual["m.A.f"].kind == "method"
     by_raw = {c.raw_callee: c for c in raw}
-    assert by_raw["self.g"].caller == "A.f"
-    assert by_raw["a.b().c"].caller == "A.f"
-    assert by_raw["super().m"].caller == "A.f"
+    assert by_raw["self.g"].caller == "m.A.f"
+    assert by_raw["a.b().c"].caller == "m.A.f"
+    assert by_raw["super().m"].caller == "m.A.f"
 
 
 def test_python_wildcard_and_relative_yield_no_alias():

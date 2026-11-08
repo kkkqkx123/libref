@@ -117,16 +117,31 @@ def extract_file(
     entity_matches = QueryCursor(compiled["entity"]).matches(tree.root_node)
     call_matches = QueryCursor(compiled["call"]).matches(tree.root_node)
     dep_matches = QueryCursor(compiled["dependency"]).matches(tree.root_node)
-    decls = _build_decls(path, cfg, source, entity_matches, dep_matches)
     module = determine_module_path(path, cfg.name)
+    decls = _build_decls(path, cfg, source, entity_matches, dep_matches, module)
+    alias_module = module
     if module is not None and path.replace("\\", "/").endswith("__init__.py"):
-        module = f"{module}.__init__"
-    aliases = _build_aliases(cfg, source, dep_matches, module)
+        alias_module = f"{module}.__init__"
+    aliases = _build_aliases(cfg, source, dep_matches, alias_module)
+    import_map = dict(aliases)
+    for var, target in _rules.collect_simple_var_aliases(tree.root_node, source):
+        if not var or not target or var in import_map:
+            continue
+        head, _, rest = target.partition(".")
+        if rest and head in import_map:
+            expanded = import_map[head] + "." + rest
+        elif not rest and head in import_map:
+            expanded = import_map[head]
+        else:
+            expanded = target
+        if var and expanded:
+            aliases.append((var, expanded))
+            import_map[var] = expanded
     calls = _build_calls(path, cfg, source, call_matches, decls)
     return decls, aliases, calls
 
 
-def _build_decls(path, cfg, source, entity_matches, dep_matches) -> list[ApiDeclRecord]:
+def _build_decls(path, cfg, source, entity_matches, dep_matches, module=None) -> list[ApiDeclRecord]:
     groups = _merge_matches(entity_matches)
     cands: list[dict] = []
     for node, captures in groups:
@@ -176,7 +191,14 @@ def _build_decls(path, cfg, source, entity_matches, dep_matches) -> list[ApiDecl
         kind = cand["kind"]
         if kind == "function" and stack and stack[-1].kind in _CLASS_LIKE:
             kind = "method"
-        qual = f"{parent}.{cand['name']}" if parent else cand["name"]
+        if parent:
+            qual = f"{parent}.{cand['name']}"
+        elif module and (module == cand["name"] or module.endswith("." + cand["name"])):
+            qual = module
+        elif module:
+            qual = f"{module}.{cand['name']}"
+        else:
+            qual = cand["name"]
         captures = cand["captures"]
         body = _rules.first_node(captures, ".body")
         if body is not None:
@@ -191,6 +213,13 @@ def _build_decls(path, cfg, source, entity_matches, dep_matches) -> list[ApiDecl
             if params_node is not None
             else []
         )
+        param_types = (
+            _rules.param_types_from_params_node(params_node, source)
+            if params_node is not None
+            else []
+        )
+        return_node = _rules.first_node(captures, ".return_type", ".signature.return_type")
+        return_type = _rules.shaped_return(return_node, source)
         bases = _decl_bases(captures, source)
         for start, end, text in dep_spans:
             if node.start_byte <= start and end <= node.end_byte and text not in bases:
@@ -206,6 +235,8 @@ def _build_decls(path, cfg, source, entity_matches, dep_matches) -> list[ApiDecl
                 end_byte=node.end_byte,
                 signature=signature,
                 params=params,
+                param_types=param_types,
+                return_type=return_type,
                 bases=bases,
                 parent=parent,
                 depth=depth,

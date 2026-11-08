@@ -6,15 +6,29 @@ import sqlite3
 from pathlib import Path
 
 _SKIP_DIRS = frozenset(
-    {".git", "__pycache__", "node_modules", "vendor", ".venv", "venv", "target"}
+    {".git", "__pycache__", "node_modules", "vendor", ".venv", "venv", "target",
+     "dist", "build", ".tox", ".eggs", "eggs", ".mypy_cache",
+     ".pytest_cache", ".ruff_cache", "__pypackages__"}
 )
+
+_SKIP_DIR_SUBSTRINGS = ("test", "testing", "__tests__")
 
 
 def _should_skip(rel: str) -> bool:
-    for part in rel.split("/"):
+    lowered = rel.lower()
+    for part in lowered.split("/"):
         if part in _SKIP_DIRS:
             return True
-    if ".min." in rel.lower():
+        if part in _SKIP_DIR_SUBSTRINGS:
+            return True
+    filename = lowered.rsplit("/", 1)[-1]
+    if filename.startswith("test_") or filename.endswith("_test.py"):
+        return True
+    if filename in ("conftest.py", "test.py"):
+        return True
+    if filename.endswith((".g.py", ".pb2.py", ".pb2_grpc.py")):
+        return True
+    if ".min." in lowered:
         return True
     return False
 

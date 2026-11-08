@@ -13,6 +13,7 @@ def resolve_calls(
     file_aliases: dict[str, list[tuple[str, str]]],
     calls: list[RawCall],
     repo: str,
+    commit_sha: str = "",
 ) -> list[CallInstanceRecord]:
     by_file: dict[str, set[str]] = {}
     params_by_qual: dict[str, int] = {}
@@ -27,6 +28,7 @@ def resolve_calls(
         span_by_qual.setdefault(decl.qualified_name, []).append(decl.start_byte)
     declared = set(params_by_qual)
     alias_per_file = {path: dict(items) for path, items in file_aliases.items()}
+    _close_reexports(alias_per_file)
     out: list[CallInstanceRecord] = []
     order_counter: dict[str, int] = {}
     ordered = sorted(calls, key=lambda c: (c.caller_file, c.caller or "", c.start_byte))
@@ -56,6 +58,7 @@ def resolve_calls(
                 call_order=order_counter[scope],
                 confidence=confidence,
                 repo=repo,
+                commit_sha=commit_sha,
             )
         )
     return out
@@ -87,19 +90,56 @@ def resolve_one(
         resolved = alias_map[head] + raw[len(head):]
         if resolved in declared:
             return resolved, "EXTRACTED"
+        suffixed = [q for q in declared if q == resolved or q.endswith("." + resolved)]
+        if len(suffixed) == 1 and suffixed[0] in same_file:
+            return suffixed[0], "EXTRACTED"
         return resolved, "INFERRED"
     candidates = [q for q in declared if q == raw or q.endswith(f".{raw}")]
     if not candidates:
         return raw, "AMBIGUOUS"
-    if raw in same_file:
+    same_hits = [q for q in candidates if q in same_file]
+    if len(same_hits) == 1:
+        return same_hits[0], "EXTRACTED"
+    if len(same_hits) > 1:
+        candidates = same_hits
+    elif raw in same_file:
         return raw, "EXTRACTED"
     picked = _disambiguate(
         candidates, caller, parent_by_qual, params_by_qual, span_by_qual,
         argument_count, call_byte, receiver,
     )
+    if picked is None:
+        return candidates[0] if candidates else raw, "AMBIGUOUS"
     if picked == raw or picked in same_file:
         return picked, "EXTRACTED"
     return picked, "AMBIGUOUS"
+
+
+def _close_reexports(alias_per_file: dict[str, dict[str, str]]) -> None:
+    package_exports: dict[str, str] = {}
+    for path, mapping in alias_per_file.items():
+        norm = path.replace("\\", "/")
+        if norm.endswith("/__init__.py"):
+            package = norm[: -len("/__init__.py")].replace("/", ".")
+        elif norm == "__init__.py":
+            package = ""
+        else:
+            continue
+        for alias, full in list(mapping.items()):
+            key = f"{package}.{alias}" if package else alias
+            if key not in package_exports:
+                package_exports[key] = full
+    if not package_exports:
+        return
+    changed = True
+    while changed:
+        changed = False
+        for mapping in alias_per_file.values():
+            for alias, full in list(mapping.items()):
+                target = package_exports.get(full)
+                if target is not None and target != full:
+                    mapping[alias] = target
+                    changed = True
 
 
 def _disambiguate(
@@ -111,7 +151,7 @@ def _disambiguate(
     argument_count: int | None,
     call_byte: int | None,
     receiver: str | None,
-) -> str:
+) -> str | None:
     if len(candidates) == 1:
         return candidates[0]
     if caller and parent_by_qual:
@@ -135,15 +175,25 @@ def _disambiguate(
         if matched:
             candidates = matched
     if call_byte is not None and span_by_qual:
-        best = min(
+        ranked = sorted(
             candidates,
             key=lambda c: (
                 min(abs(s - call_byte) for s in span_by_qual.get(c, [0])),
                 c,
             ),
         )
-        return best
-    return sorted(candidates)[0]
+        if len(ranked) >= 2:
+            first_key = (
+                min(abs(s - call_byte) for s in span_by_qual.get(ranked[0], [0])),
+            )
+            second_key = (
+                min(abs(s - call_byte) for s in span_by_qual.get(ranked[1], [0])),
+            )
+            if first_key != second_key:
+                return ranked[0]
+            return None
+        return ranked[0]
+    return None
 
 
 def _scope_chain(

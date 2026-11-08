@@ -1,6 +1,12 @@
-"""层级频次聚合与可选剪枝，层级按限定名点分段定义。"""
+"""频次聚合：精确计数供挖掘截断，层级计数仅供展示。"""
 
 from __future__ import annotations
+
+from collections import Counter
+
+
+def exact_counts(names: list[str]) -> dict[str, int]:
+    return dict(Counter(names))
 
 
 def level_counts(names: list[str]) -> dict[str, int]:

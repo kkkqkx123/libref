@@ -616,7 +616,7 @@ def _persist_entities(conn, library_id: int, version_id: int, all_decls) -> tupl
     return len(pending), len(dead)
 
 
-def _persist_calls(conn, library_id: int, version_id: int, resolved) -> tuple[int, int]:
+def _persist_calls(conn, library_id: int, version_id: int, resolved, commit_sha: str = "") -> tuple[int, int]:
     import json as _uid_json
 
     entity_ids = {
@@ -641,19 +641,21 @@ def _persist_calls(conn, library_id: int, version_id: int, resolved) -> tuple[in
             "INSERT INTO call_instances(call_uid, callee_entity_id, callee_name, args,"
             " repo, caller_file, line_start, line_end, confidence,"
             " library_id, version_id, caller, receiver, func, argument_count,"
-            " call_order, start_byte, end_byte)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " call_order, start_byte, end_byte, commit_sha)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(call_uid) DO UPDATE SET callee_entity_id=excluded.callee_entity_id,"
             " callee_name=excluded.callee_name, args=excluded.args,"
             " confidence=excluded.confidence, library_id=excluded.library_id,"
             " version_id=excluded.version_id, caller=excluded.caller,"
             " receiver=excluded.receiver, func=excluded.func,"
             " argument_count=excluded.argument_count, call_order=excluded.call_order,"
-            " start_byte=excluded.start_byte, end_byte=excluded.end_byte",
+            " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
+            " commit_sha=excluded.commit_sha",
             (uid, ent_id, call.callee, args_json, call.repo, call.caller_file,
              call.line_start, call.line_end, call.confidence,
              library_id, version_id, call.caller, call.receiver, call.func,
-             call.argument_count, call.call_order, call.start_byte, call.end_byte),
+             call.argument_count, call.call_order, call.start_byte, call.end_byte,
+             commit_sha or call.commit_sha),
         )
         if call.confidence == "AMBIGUOUS":
             row = conn.execute(
@@ -711,7 +713,14 @@ def index_repo(conn, library: str, version: str, source: str, *, update: bool = 
     )
     manager = RepoManager(settings_dir)
     repo_name = f"{ecosystem}/{library}/{version}"
-    root, _commit = manager.ensure(conn, repo_name, source, update=update)
+    existing = conn.execute(
+        "SELECT url, local_path FROM repos WHERE name=?", (repo_name,)
+    ).fetchone()
+    if existing is not None:
+        old_url, old_path = existing[0], existing[1]
+        if old_url != source and str(source) != str(old_path):
+            raise ValueError(f"version already indexed from different source: {old_url}")
+    root, commit = manager.ensure(conn, repo_name, source, update=update)
     conn.commit()
     files = [r for r in iter_source_files(root, ast_config.all_suffixes())]
     all_decls, file_aliases, all_raw, counts, live = _collect_repo(
@@ -719,9 +728,9 @@ def index_repo(conn, library: str, version: str, source: str, *, update: bool = 
     )
     counts["evicted"] = ast_cache.sweep_repo(conn, repo_name, live)
     conn.commit()
-    resolved = ast_resolution.resolve_calls(all_decls, file_aliases, all_raw, repo_name)
+    resolved = ast_resolution.resolve_calls(all_decls, file_aliases, all_raw, repo_name, commit)
     n_entities, swept_entities = _persist_entities(conn, library_id, version_id, all_decls)
-    n_calls, swept_calls = _persist_calls(conn, library_id, version_id, resolved)
+    n_calls, swept_calls = _persist_calls(conn, library_id, version_id, resolved, commit)
     conn.commit()
     counts["entities"] = n_entities
     counts["calls"] = n_calls
@@ -731,12 +740,12 @@ def index_repo(conn, library: str, version: str, source: str, *, update: bool = 
 
 
 def mine_patterns(conn, library: str, version: str, *, minsup: int = 2,
-                  topn: int | None = None, maxlen: int = 10,
+                  topn: int | None = None, maxlen: int = 10, minlen: int = 2,
                   include_ambiguous: bool = False) -> list[dict]:
     import json as _json
-    from collections import Counter
 
     from libref.mining import PrefixSpan
+    from libref.mining import frequency as _freq
     from libref.mining import normalize as _norm
     from libref.services.search import SearchService
 
@@ -748,10 +757,14 @@ def mine_patterns(conn, library: str, version: str, *, minsup: int = 2,
         " WHERE version_id=?", (version_id,)
     ).fetchall()
     if not rows:
+        conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
+        conn.commit()
         return []
     if not include_ambiguous:
         rows = [r for r in rows if r[4] != "AMBIGUOUS"]
         if not rows:
+            conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
+            conn.commit()
             return []
     groups: dict[str, list[tuple[int, int, int, int, str]]] = {}
     for callee, caller_file, line_start, caller, _conf, order, start, row_id in rows:
@@ -760,21 +773,34 @@ def mine_patterns(conn, library: str, version: str, *, minsup: int = 2,
             (int(line_start), int(start), int(order), int(row_id), str(callee))
         )
     str_seqs = [[name for *_key, name in sorted(items)] for items in groups.values()]
-    str_seqs = [seq for seq in str_seqs if seq]
+    cleaned: list[list[str]] = []
+    for seq in str_seqs:
+        seq = [name for name in seq if name]
+        if len(seq) < 2:
+            continue
+        if len(seq) > 1000:
+            seq = seq[:1000]
+        cleaned.append(seq)
+    str_seqs = cleaned
     if not str_seqs:
+        conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
+        conn.commit()
         return []
     if topn is not None:
-        ranked = Counter(n for seq in str_seqs for n in seq)
-        allowed = {name for name, _ in ranked.most_common(topn)}
+        ranked = _freq.exact_counts([n for seq in str_seqs for n in seq])
+        ordered = sorted(ranked.items(), key=lambda kv: (-kv[1], kv[0]))
+        allowed = {name for name, _ in ordered[:topn]}
         str_seqs = [[n for n in seq if n in allowed] for seq in str_seqs]
         str_seqs = [seq for seq in str_seqs if seq]
         if not str_seqs:
+            conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
+            conn.commit()
             return []
     table = _norm.build_table([n for seq in str_seqs for n in seq])
     reverse = _norm.reverse_table(table)
     db = _norm.encode_sequences(str_seqs, table)
     miner = PrefixSpan(db)
-    miner.minlen = 2
+    miner.minlen = minlen
     miner.maxlen = maxlen
     mined = miner.frequent(minsup, closed=True)
     results: list[dict] = []
@@ -816,6 +842,7 @@ def build_repo_runner(settings, conn, repos_dir=None):
             mine_patterns(conn, p["library"], p["version"],
                           minsup=int(p.get("minsup", 2)),
                           topn=p.get("topn"), maxlen=int(p.get("maxlen", 10)),
+                          minlen=int(p.get("minlen", 2)),
                           include_ambiguous=bool(p.get("include_ambiguous", False)))
         else:
             raise ValueError(f"unsupported job kind: {job.kind}")

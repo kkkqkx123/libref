@@ -32,7 +32,7 @@ def test_extract_call_shape():
     assert "np.array" in by_raw and "np.zeros" in by_raw
     array_call = by_raw["np.array"]
     assert array_call.line_start == 5 and array_call.line_end == 5
-    assert array_call.caller == "load"
+    assert array_call.caller == "a.load"
     assert isinstance(array_call.args, list) and len(array_call.args) == 1
     assert by_raw["np.array"].args == ["[...]"]
     zeros_call = by_raw["np.zeros"]
@@ -46,7 +46,7 @@ def test_two_pass_confidence_levels(tmp_path):
         "d.py", b"def helper():\n    return 1\n\n\ndef use_it():\n    helper()\n"
     )
     resolved = _resolve(decls, {"d.py": aliases}, raw, repo)
-    assert resolved[0].callee == "helper"
+    assert resolved[0].callee == "d.helper"
     assert resolved[0].confidence == "EXTRACTED"
     decls2, aliases2, raw2 = _parse(
         "a.py", b"import numpy as np\n\n\ndef load():\n    np.array([1])\n"
@@ -63,7 +63,7 @@ def test_self_receiver_resolves_to_enclosing_class():
     source = b"class A:\n    def f(self):\n        self.g()\n    def g(self):\n        pass\n"
     decls, aliases, raw = _parse("cls.py", source)
     resolved = _resolve(decls, {"cls.py": aliases}, raw, "r")
-    assert resolved[0].callee == "A.g"
+    assert resolved[0].callee == "cls.A.g"
     assert resolved[0].confidence == "EXTRACTED"
 
 
@@ -191,6 +191,47 @@ def test_cache_encode_decode_roundtrip():
     ]
     assert aliases2 == aliases
     assert [(c.raw_callee, c.args) for c in raw2] == [(c.raw_callee, c.args) for c in raw]
+
+
+def test_param_types_and_return_shape():
+    decls, _, _ = _parse("m.py", b"def f(a: int, b: str) -> bool:\n    pass\n")
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["m.f"].params == ["a", "b"]
+    assert by_qual["m.f"].param_types == ["int", "str"]
+    assert by_qual["m.f"].return_type == "bool"
+
+
+def test_var_alias_resolves_to_declared():
+    decls, aliases, raw = _parse(
+        "m.py", b"class Foo:\n    def bar(self):\n        pass\nobj = Foo()\nobj.bar()\n"
+    )
+    assert ("obj", "Foo") in aliases
+    resolved = _resolve(decls, {"m.py": aliases}, raw, "r", )
+    by_raw = {c.raw_callee: c for c in resolved}
+    assert by_raw["obj.bar"].callee == "m.Foo.bar"
+    assert by_raw["obj.bar"].confidence == "EXTRACTED"
+
+
+def test_tie_without_signal_is_ambiguous():
+    decls_a, _, _ = _parse("a.py", b"def foo():\n    pass\n")
+    decls_b, _, _ = _parse("b.py", b"def foo():\n    pass\n")
+    decls = decls_a + decls_b
+    declared = {d.qualified_name for d in decls}
+    _callee, conf = ast_resolution.resolve_one(
+        "foo", None, "c.call", declared, set(), {},
+        {q: 0 for q in declared}, {q: None for q in declared},
+        {q: [100] for q in declared}, 0, 100,
+    )
+    assert conf == "AMBIGUOUS"
+
+
+def test_reexport_closure_expands_package_alias():
+    mapping = {
+        "pkg/__init__.py": {"start": "pkg.core.start"},
+        "a.py": {"start": "pkg.start"},
+    }
+    ast_resolution._close_reexports(mapping)
+    assert mapping["a.py"]["start"] == "pkg.core.start"
 
 
 def test_cache_sweep_removes_stale(conn):

@@ -201,6 +201,13 @@ CREATE INDEX idx_call_instances_version ON call_instances(version_id, caller_fil
 CREATE INDEX idx_call_instances_repo ON call_instances(repo, caller_file);
 """
 
+# ── 挖掘溯源与查询支撑：提交标识加版本内常用过滤索引 ──
+MINING_PROVENANCE_INDEX_SQL = """
+ALTER TABLE call_instances ADD COLUMN commit_sha TEXT NOT NULL DEFAULT '';
+CREATE INDEX idx_call_instances_version_callee ON call_instances(version_id, callee_name);
+CREATE INDEX idx_call_instances_scope ON call_instances(version_id, caller_file, call_order, start_byte);
+"""
+
 # ── 分段与关系所需字段：声明签名族与调用拆分族 ──
 AST_CHUNK_RELATION_SQL = """
 ALTER TABLE api_entities ADD COLUMN parent TEXT;
