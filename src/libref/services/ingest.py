@@ -163,12 +163,9 @@ def run_scrape_job_sync(
 
 @asynccontextmanager
 async def _client(settings) -> AsyncIterator[httpx.AsyncClient]:
-    async with httpx.AsyncClient(
-        timeout=settings.request_timeout,
-        follow_redirects=True,
-        headers={"User-Agent": getattr(settings, "user_agent", "libref-crawler/0.1")},
-        http2=True,
-    ) as client:
+    from libref.crawler.http import build_async_client
+
+    async with build_async_client(settings) as client:
         yield client
 
 

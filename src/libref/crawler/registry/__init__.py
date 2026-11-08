@@ -20,6 +20,22 @@ from pydantic import BaseModel, Field
 
 SUPPORTED_ECOSYSTEMS = ("pypi", "npm", "maven")
 
+DEFAULT_REGISTRY_BASES = {
+    "pypi": "https://pypi.org/pypi",
+    "npm": "https://registry.npmjs.org",
+    "maven": "https://repo1.maven.org/maven2",
+}
+
+# 具名整组镜像预设；显式 registry_bases 逐键优先于此表。
+REGISTRY_MIRRORS = {
+    "default": dict(DEFAULT_REGISTRY_BASES),
+    "cn": {
+        "pypi": "https://pypi.tuna.tsinghua.edu.cn/pypi",
+        "npm": "https://registry.npmmirror.com",
+        "maven": "https://maven.aliyun.com/repository/public",
+    },
+}
+
 _DOCS_HOST_HINTS = (
     "docs.",
     "readthedocs",
@@ -89,12 +105,23 @@ def normalize_name(ecosystem: str, name: str) -> str:
 
 
 def registry_base_for(ecosystem: str, settings) -> str:
-    """解析生态基址：registry_bases 映射表为唯一来源。"""
-    bases = settings.registry_bases
+    """解析生态基址：显式映射逐键优先，否则落预设同生态条目。"""
+    if ecosystem not in SUPPORTED_ECOSYSTEMS:
+        raise ValueError(f"unsupported ecosystem: {ecosystem}")
+    fields_set = getattr(settings, "model_fields_set", set()) or set()
+    if "registry_bases" in fields_set:
+        bases = dict(getattr(settings, "registry_bases", None) or {})
+        if ecosystem in bases and str(bases[ecosystem]).strip():
+            return str(bases[ecosystem]).rstrip("/")
+    mirror = str(getattr(settings, "registry_mirror", "default") or "default").strip().lower()
     try:
-        return str(bases[ecosystem]).rstrip("/")
+        preset = REGISTRY_MIRRORS[mirror]
     except KeyError:
-        raise ValueError(f"unsupported ecosystem: {ecosystem}") from None
+        available = ", ".join(sorted(REGISTRY_MIRRORS))
+        raise ValueError(f"unknown registry mirror: {mirror!r} (available: {available})") from None
+    if ecosystem in preset:
+        return str(preset[ecosystem]).rstrip("/")
+    return str(DEFAULT_REGISTRY_BASES[ecosystem]).rstrip("/")
 
 
 def _is_private_host(host: str) -> bool:

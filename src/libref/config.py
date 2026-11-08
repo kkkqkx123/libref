@@ -20,6 +20,10 @@ class LibrefSettings(BaseSettings):
     crawl_delay_default: float = 1.0
     robots_cache_ttl_days: float = 7.0
     user_agent: str = "libref-crawler/0.1"
+    # 抓取链路代理：显式值优先于标准环境变量，未设置时沿用 httpx 默认环境识别。
+    # 旁路缺省含本地回环，显式值优先于 NO_PROXY 环境变量。
+    http_proxy: str | None = None
+    no_proxy: str | None = None
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "libref_chunks"
     qdrant_timeout: float = 5.0
@@ -47,12 +51,14 @@ class LibrefSettings(BaseSettings):
     cluster_alpha: float = 0.05
     cluster_threshold: float = 0.15
     cluster_min_size: int = 2
-    # 注册表解析配置：缓存有效期、离线开关、私有放行、生态基址映射、外部覆盖文件。
+    # 注册表解析配置：缓存有效期、离线开关、私有放行、镜像预设、生态基址映射、外部覆盖文件。
     # 密钥型鉴权不在本方案内，镜像地址经此处显式开启后方可使用。
-    # 新增生态时在 registry_bases 追加默认基址并新增 registry_<eco>.py 提供方。
+    # 新增生态时在默认基址与各预设追加条目并新增 registry_<eco>.py 提供方。
     registry_cache_ttl_days: float = 1.0
     registry_offline: bool = False
     registry_allow_private: bool = False
+    # 镜像预设名单，见 crawler.registry.REGISTRY_MIRRORS；显式 registry_bases 逐键优先。
+    registry_mirror: str = "default"
     registry_bases: dict[str, str] = Field(
         default_factory=lambda: {
             "pypi": "https://pypi.org/pypi",

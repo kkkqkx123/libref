@@ -107,15 +107,10 @@ def build_mcp_server(
         version: str | None = None,
     ) -> dict[str, Any]:
         """按生态加名称解析文档源，只读，不触发抓取。"""
-        import httpx
+        from libref.crawler.http import build_async_client
 
         try:
-            async with httpx.AsyncClient(
-                timeout=resolve_settings.request_timeout,
-                follow_redirects=True,
-                headers={"User-Agent": resolve_settings.user_agent},
-                http2=True,
-            ) as client:
+            async with build_async_client(resolve_settings) as client:
                 resolution = await _resolve_package(
                     conn, client, resolve_settings, ecosystem, name, version,
                 )

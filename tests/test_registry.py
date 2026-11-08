@@ -397,6 +397,50 @@ def test_registry_bases_mirror_routes_to_custom_host(conn):
     assert res.docs_url == "https://requests.readthedocs.io/"
 
 
+def test_registry_mirror_cn_routes_to_preset_hosts(conn):
+    settings = make_settings(registry_mirror="cn")
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.url.host}{request.url.path}")
+        return httpx.Response(200, json=NPM_PAYLOAD)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        res = run(resolve_package(conn, client, settings, "npm", "express"))
+    finally:
+        run(client.aclose())
+    assert seen == ["registry.npmmirror.com/express"]
+    assert res.docs_url == "https://expressjs.com/"
+
+
+def test_registry_bases_explicit_wins_over_mirror(conn):
+    settings = make_settings(
+        registry_mirror="cn",
+        registry_bases={"npm": "https://custom.example/npm"},
+    )
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.url.host}{request.url.path}")
+        return httpx.Response(200, json=NPM_PAYLOAD)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        run(resolve_package(conn, client, settings, "npm", "express"))
+    finally:
+        run(client.aclose())
+    assert seen == ["custom.example/npm/express"]
+
+
+def test_unknown_registry_mirror_rejected():
+    from libref.crawler.registry import registry_base_for
+
+    settings = make_settings(registry_mirror="nope")
+    with pytest.raises(ValueError, match="unknown registry mirror"):
+        registry_base_for("npm", settings)
+
+
 def test_file_override_wins_over_builtin(conn, tmp_path, monkeypatch):
     from libref.crawler.registry import overrides as ov
 

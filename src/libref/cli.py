@@ -6,7 +6,7 @@ import argparse
 import sys
 
 from libref.config import LibrefSettings
-from libref.crawler.registry import RegistryError
+from libref.crawler.registry import REGISTRY_MIRRORS, RegistryError
 from libref.db import apply_migrations, open_db
 from libref.llm import LlmGateway
 from libref.services.answer import answer_query
@@ -80,19 +80,11 @@ def _resolve_for_cli(settings, conn, ecosystem, library, requested_version):
     """命令行解析形态：生态加名称解析出地址与版本，失败打印分类错误。"""
     import asyncio
 
-    import httpx
-
+    from libref.crawler.http import build_async_client
     from libref.services.resolver import resolve_package
 
     async def _run():
-        async with httpx.AsyncClient(
-            timeout=settings.request_timeout,
-            follow_redirects=True,
-            headers={
-                "User-Agent": getattr(settings, "user_agent", "libref-crawler/0.1")
-            },
-            http2=True,
-        ) as client:
+        async with build_async_client(settings) as client:
             return await resolve_package(
                 conn,
                 client,
@@ -109,6 +101,8 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     settings = LibrefSettings()
     if getattr(args, "offline", False):
         settings.registry_offline = True
+    if getattr(args, "registry_mirror", None):
+        settings.registry_mirror = args.registry_mirror
     conn = _connect(settings)
     vec_store, embed = _build_vector(settings)
     scope = _scope_from_args(args)
@@ -552,6 +546,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ingest.add_argument("--ecosystem", default=None, help="按名称解析：pypi|npm|maven，java 坐标形如 group:artifact")
     p_ingest.add_argument("--offline", action="store_true", help="只读缓存，不请求网络")
+    p_ingest.add_argument(
+        "--registry-mirror",
+        default=None,
+        help=f"注册表镜像预设（{', '.join(sorted(REGISTRY_MIRRORS))}），缺省读配置",
+    )
     p_ingest.add_argument("--max-pages", type=int, default=None)
     p_ingest.add_argument("--prefilter", action="store_true", help="HEAD 存活预筛")
     p_ingest.add_argument(

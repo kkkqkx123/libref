@@ -20,6 +20,9 @@ def test_defaults(tmp_path, monkeypatch) -> None:
     assert s.registry_bases["pypi"] == "https://pypi.org/pypi"
     assert s.registry_bases["npm"] == "https://registry.npmjs.org"
     assert s.registry_bases["maven"] == "https://repo1.maven.org/maven2"
+    assert s.registry_mirror == "default"
+    assert s.http_proxy is None
+    assert s.no_proxy is None
     assert s.registry_overrides_file is None
 
 
