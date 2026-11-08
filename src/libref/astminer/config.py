@@ -15,28 +15,28 @@ class LanguageConfig:
     name: str
     grammar: str
     file_suffixes: tuple[str, ...]
-    config_version: int = 6
+    config_version: int = 7
 
 
 PYTHON_CONFIG = LanguageConfig(
     name="python",
     grammar="tree_sitter_python",
     file_suffixes=(".py",),
-    config_version=6,
+    config_version=7,
 )
 
 JAVA_CONFIG = LanguageConfig(
     name="java",
     grammar="tree_sitter_java",
     file_suffixes=(".java",),
-    config_version=6,
+    config_version=7,
 )
 
 JAVASCRIPT_CONFIG = LanguageConfig(
     name="javascript",
     grammar="tree_sitter_javascript",
     file_suffixes=(".js", ".mjs", ".cjs"),
-    config_version=6,
+    config_version=7,
 )
 
 LANGUAGE_CONFIGS: dict[str, LanguageConfig] = {

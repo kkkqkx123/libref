@@ -60,24 +60,20 @@ tree-sitter 在 Python 侧由三部分组成，需分别声明：
 
 1. **运行时核心**：`tree-sitter`（py-tree-sitter，Language/Parser/Tree 绑定）。
 2. **各语言 grammar wheel**：`tree-sitter-python`、`tree-sitter-java` 等，每个 wheel 内含编译好的 `.so` 语言库。**按需加语言，只加 wheel 不改引擎**。首个里程碑仅需 Python + Java（课题目标语言）。
-3. **查询**：使用 tree-sitter query（S-expression）或 graphify 式"字段名遍历"皆可；**选 graphify 式 LanguageConfig**，因为 query 语法随 grammar 版本漂移风险大，而 LanguageConfig 只声明 AST 节点类型名，兼容性好、可增量校验。
+3. **查询**：使用 tree-sitter query（S-expression）描述实体、调用、依赖、注释四类模式；语言配置保持最小（语言名、语法包、文件后缀、配置版本），节点类型声明位于查询文本内并纳入联合指纹，查询或语法变化即缓存失效。
 
-### 3.2 LanguageConfig 设计（照搬 graphify 并扩展）
+### 3.2 LanguageConfig 设计（最小配置加表达式查询）
 
 ```python
 @dataclass(frozen=True)
 class LanguageConfig:
-    name: str
+    name: str                          # 语言名，对应查询模块
     grammar: str                       # 对应 wheel 包名，动态 import
-    class_types: tuple[str, ...]       # "class_definition"
-    function_types: tuple[str, ...]    # "function_definition"
-    import_types: tuple[str, ...]
-    call_types: tuple[str, ...]        # "call"
-    call_function_field: str           # call.function
-    accessor_node_types: tuple[str, ...]  # attribute —— 成员调用 a.b()
-    receiver_types: tuple[str, ...]    # 支持接收者类型推导的语言
-    extra_walk_fn: Callable | None = None
+    file_suffixes: tuple[str, ...]     # 文件后缀集合
+    config_version: int                # 配置版本，语义变化时加一
 ```
+
+四类节点类型（类、函数、导入、调用）由各语言查询模块内的表达式文本声明，不在配置中重复。
 
 抽取引擎（`astminer/engine.py`）产出**调用实例记录**，这是超越 graphify 的关键差异点：
 

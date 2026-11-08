@@ -16,17 +16,13 @@ def resolve_calls(
     commit_sha: str = "",
 ) -> list[CallInstanceRecord]:
     by_file: dict[str, set[str]] = {}
-    params_by_qual: dict[str, int] = {}
     parent_by_qual: dict[str, str | None] = {}
-    span_by_qual: dict[str, list[int]] = {}
     for decl in decls:
         if decl.kind not in CALLABLE_DECL_KINDS:
             continue
         by_file.setdefault(decl.file, set()).add(decl.qualified_name)
-        params_by_qual.setdefault(decl.qualified_name, len(decl.params))
         parent_by_qual.setdefault(decl.qualified_name, decl.parent)
-        span_by_qual.setdefault(decl.qualified_name, []).append(decl.start_byte)
-    declared = set(params_by_qual)
+    declared = set(parent_by_qual)
     alias_per_file = {path: dict(items) for path, items in file_aliases.items()}
     _close_reexports(alias_per_file)
     out: list[CallInstanceRecord] = []
@@ -36,8 +32,7 @@ def resolve_calls(
         alias_map = alias_per_file.get(call.caller_file, {})
         same_file = by_file.get(call.caller_file, set())
         resolved, confidence = resolve_one(
-            call.raw_callee, call.receiver, call.caller, declared, same_file, alias_map,
-            params_by_qual, parent_by_qual, span_by_qual, call.argument_count, call.start_byte,
+            call.raw_callee, call.caller, declared, same_file, alias_map, parent_by_qual,
         )
         scope = f"{call.caller_file}::{call.caller}" if call.caller else call.caller_file
         order_counter[scope] = order_counter.get(scope, 0) + 1
@@ -66,16 +61,11 @@ def resolve_calls(
 
 def resolve_one(
     raw: str,
-    receiver: str | None,
     caller: str | None,
     declared: set[str],
     same_file: set[str],
     alias_map: dict[str, str],
-    params_by_qual: dict[str, int] | None = None,
     parent_by_qual: dict[str, str | None] | None = None,
-    span_by_qual: dict[str, list[int]] | None = None,
-    argument_count: int | None = None,
-    call_byte: int | None = None,
 ) -> tuple[str, str]:
     if not raw:
         return raw, "AMBIGUOUS"
@@ -104,12 +94,9 @@ def resolve_one(
         candidates = same_hits
     elif raw in same_file:
         return raw, "EXTRACTED"
-    picked = _disambiguate(
-        candidates, caller, parent_by_qual, params_by_qual, span_by_qual,
-        argument_count, call_byte, receiver,
-    )
+    picked = _disambiguate(candidates, caller, parent_by_qual)
     if picked is None:
-        return candidates[0] if candidates else raw, "AMBIGUOUS"
+        return raw, "AMBIGUOUS"
     if picked == raw or picked in same_file:
         return picked, "EXTRACTED"
     return picked, "AMBIGUOUS"
@@ -146,11 +133,6 @@ def _disambiguate(
     candidates: list[str],
     caller: str | None,
     parent_by_qual: dict[str, str | None] | None,
-    params_by_qual: dict[str, int] | None,
-    span_by_qual: dict[str, list[int]] | None,
-    argument_count: int | None,
-    call_byte: int | None,
-    receiver: str | None,
 ) -> str | None:
     if len(candidates) == 1:
         return candidates[0]
@@ -159,40 +141,6 @@ def _disambiguate(
         scoped = [c for c in candidates if parent_by_qual.get(c) in chain]
         if len(scoped) == 1:
             return scoped[0]
-        if scoped:
-            candidates = scoped
-    if receiver in _SELF_HEADS and caller:
-        base = caller.rpartition(".")[0] if "." in caller else ""
-        prefixed = [c for c in candidates if base and c.startswith(base + ".")]
-        if len(prefixed) == 1:
-            return prefixed[0]
-        if prefixed:
-            candidates = prefixed
-    if argument_count is not None and params_by_qual:
-        matched = [c for c in candidates if params_by_qual.get(c) == argument_count]
-        if len(matched) == 1:
-            return matched[0]
-        if matched:
-            candidates = matched
-    if call_byte is not None and span_by_qual:
-        ranked = sorted(
-            candidates,
-            key=lambda c: (
-                min(abs(s - call_byte) for s in span_by_qual.get(c, [0])),
-                c,
-            ),
-        )
-        if len(ranked) >= 2:
-            first_key = (
-                min(abs(s - call_byte) for s in span_by_qual.get(ranked[0], [0])),
-            )
-            second_key = (
-                min(abs(s - call_byte) for s in span_by_qual.get(ranked[1], [0])),
-            )
-            if first_key != second_key:
-                return ranked[0]
-            return None
-        return ranked[0]
     return None
 
 

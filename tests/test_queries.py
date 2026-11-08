@@ -81,14 +81,14 @@ def test_javascript_class_method_calls():
         b"export function f(a) { return g(a); }\n",
     )
     by_qual = {d.qualified_name: d for d in decls}
-    assert by_qual["A"].bases == ["B"]
-    assert by_qual["A.m"].kind == "method"
-    assert by_qual["A.m"].params == ["x", "y", "rest"]
+    assert by_qual["m.A"].bases == ["B"]
+    assert by_qual["m.A.m"].kind == "method"
+    assert by_qual["m.A.m"].params == ["x", "y", "rest"]
     by_raw = {c.raw_callee: c for c in raw}
-    assert by_raw["this.g"].caller == "A.m"
-    assert by_raw["obj.h().i"].caller == "A.m"
-    assert by_raw["super.s"].caller == "A.m"
-    assert by_raw["g"].caller == "f"
+    assert by_raw["this.g"].caller == "m.A.m"
+    assert by_raw["obj.h().i"].caller == "m.A.m"
+    assert by_raw["super.s"].caller == "m.A.m"
+    assert by_raw["g"].caller == "m.f"
 
 
 def test_javascript_import_require_aliases():
@@ -124,10 +124,10 @@ def test_javascript_arrow_and_object_method():
         b"const o = { k(v) { return v; } };\n",
     )
     by_qual = {d.qualified_name: d for d in decls}
-    assert by_qual["arrow"].kind == "function"
-    assert by_qual["o.k"].kind == "function"
+    assert by_qual["m.arrow"].kind == "function"
+    assert by_qual["m.o.k"].kind == "function"
     by_raw = {c.raw_callee: c for c in raw}
-    assert by_raw["helper"].caller == "arrow"
+    assert by_raw["helper"].caller == "m.arrow"
 
 
 def test_java_extends_implements_and_calls():

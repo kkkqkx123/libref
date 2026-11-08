@@ -8,7 +8,8 @@ from pathlib import Path
 _SKIP_DIRS = frozenset(
     {".git", "__pycache__", "node_modules", "vendor", ".venv", "venv", "target",
      "dist", "build", ".tox", ".eggs", "eggs", ".mypy_cache",
-     ".pytest_cache", ".ruff_cache", "__pypackages__"}
+     ".pytest_cache", ".ruff_cache", "__pypackages__",
+     ".hg", ".svn", ".idea", ".vscode"}
 )
 
 _SKIP_DIR_SUBSTRINGS = ("test", "testing", "__tests__")
@@ -39,6 +40,11 @@ def iter_source_files(
 ):
     found: list[str] = []
     for path in root.rglob("*"):
+        try:
+            if path.is_symlink():
+                continue
+        except OSError:
+            continue
         if not path.is_file():
             continue
         if path.suffix not in suffixes:
@@ -69,12 +75,18 @@ class RepoManager:
         *,
         update: bool = False,
     ) -> tuple[Path, str]:
+        if not source:
+            raise ValueError("empty repo source")
         maybe_local = Path(source)
         if maybe_local.is_dir():
             local = maybe_local.resolve()
             self._record(conn, name, source, "local", str(local))
             return local, "local"
         target = self._base / name
+        base_real = self._base.resolve()
+        target_real = target.resolve()
+        if target_real != base_real and base_real not in target_real.parents:
+            raise ValueError(f"invalid repo name: {name!r}")
         if target.is_dir() and (target / ".git").is_dir():
             if update:
                 self._pull(target)

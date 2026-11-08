@@ -217,11 +217,11 @@ def test_tie_without_signal_is_ambiguous():
     decls_b, _, _ = _parse("b.py", b"def foo():\n    pass\n")
     decls = decls_a + decls_b
     declared = {d.qualified_name for d in decls}
-    _callee, conf = ast_resolution.resolve_one(
-        "foo", None, "c.call", declared, set(), {},
-        {q: 0 for q in declared}, {q: None for q in declared},
-        {q: [100] for q in declared}, 0, 100,
+    parent_map = {d.qualified_name: d.parent for d in decls}
+    callee, conf = ast_resolution.resolve_one(
+        "foo", "c.call", declared, set(), {}, parent_map,
     )
+    assert callee == "foo"
     assert conf == "AMBIGUOUS"
 
 

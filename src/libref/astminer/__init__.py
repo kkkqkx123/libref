@@ -21,7 +21,6 @@ from libref.astminer.config import (
 )
 from libref.astminer.context import (
     determine_module_path,
-    is_internal_import,
     resolve_python_relative,
 )
 from libref.astminer.engine import extract_file
@@ -54,7 +53,6 @@ __all__ = [
     "encode_records",
     "extract_file",
     "grammar_fingerprint",
-    "is_internal_import",
     "lookup",
     "queries",
     "resolve_calls",
