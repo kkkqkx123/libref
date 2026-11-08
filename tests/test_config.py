@@ -17,6 +17,9 @@ def test_defaults(tmp_path, monkeypatch) -> None:
     assert s.embedding_dim == 1024
     assert s.embedding_api_base == "https://api.siliconflow.cn/v1"
     assert s.embedding_api_key is None
+    assert s.registry_bases["pypi"] == "https://pypi.org/pypi"
+    assert s.registry_bases["npm"] == "https://registry.npmjs.org"
+    assert s.registry_overrides_file is None
 
 
 def test_dotenv_file(tmp_path, monkeypatch) -> None:

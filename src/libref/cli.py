@@ -201,7 +201,8 @@ def cmd_mine(args: argparse.Namespace) -> int:
             mgr.recover()
             job_id = mgr.submit(MINE_PATTERNS_JOB_KIND, {"library": args.library,
                 "version": args.version, "minsup": args.minsup,
-                "topn": args.topn, "maxlen": args.maxlen})
+                "topn": args.topn, "maxlen": args.maxlen,
+                "include_ambiguous": bool(args.include_ambiguous)})
             async def _drive():
                 mgr.start_worker(build_repo_runner(settings, conn))
                 try:
@@ -212,7 +213,8 @@ def cmd_mine(args: argparse.Namespace) -> int:
             print(f"job {job.id} {job.status}" + (f" error={job.error}" if job.error else ""))
             return 0 if job.status == "done" else 1
         results = mine_patterns(conn, args.library, args.version,
-                                minsup=args.minsup, topn=args.topn, maxlen=args.maxlen)
+                                minsup=args.minsup, topn=args.topn, maxlen=args.maxlen,
+                                include_ambiguous=bool(args.include_ambiguous))
     finally:
         conn.close()
     for item in results:
@@ -316,7 +318,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_mine.add_argument("library")
     p_mine.add_argument("version")
     p_mine.add_argument("--minsup", type=int, default=2)
-    p_mine.add_argument("--topn", type=int, default=None)
+    p_mine.add_argument("--topn", type=int, default=None,
+                        help="显式剪枝：只保留调用次数前 N 的完整限定名")
+    p_mine.add_argument("--include-ambiguous", action="store_true",
+                        help="将待定调用纳入序列（默认只用显式与推导）")
     p_mine.add_argument("--maxlen", type=int, default=10)
     p_mine.add_argument("--async", dest="run_async", action="store_true",
                         help="经 jobs 队列执行")

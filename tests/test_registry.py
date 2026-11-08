@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
+from datetime import date
 
 import httpx
 import pytest
 
 from libref.config import LibrefSettings
+from libref.crawler.registry import overrides as _overrides_state
 from libref.crawler.registry import RegistryError, normalize_name, sanitize_http_url
 from libref.services.resolver import resolve_package
+
+
+@pytest.fixture(autouse=True)
+def _clean_file_overrides():
+    _overrides_state.clear_file_overrides()
+    yield
+    _overrides_state.clear_file_overrides()
 
 
 def make_settings(**kw) -> LibrefSettings:
@@ -180,7 +190,7 @@ def test_no_docs_returns_hint(conn):
 
 
 def test_override_wins_over_registry(conn, monkeypatch):
-    from libref.crawler import registry_overrides as ov
+    from libref.crawler.registry import overrides as ov
 
     monkeypatch.setitem(
         ov.OVERRIDES,
@@ -358,8 +368,90 @@ def test_best_effort_skips_prerelease_without_stable(conn):
 
 
 def test_overrides_have_verification_dates():
-    from libref.crawler.registry_overrides import OVERRIDES
+    from libref.crawler.registry.overrides import all_overrides
 
-    for key, item in OVERRIDES.items():
+    for key, item in all_overrides().items():
         assert item.get("docs_url"), key
         assert item.get("verified_at"), key
+
+
+def test_registry_bases_mirror_routes_to_custom_host(conn):
+    settings = make_settings(
+        registry_bases={
+            "pypi": "https://mirror.example/pypi",
+            "npm": "https://registry.npmjs.org",
+        }
+    )
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(f"{request.url.host}{request.url.path}")
+        return httpx.Response(200, json=PYPI_PAYLOAD)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    try:
+        res = run(resolve_package(conn, client, settings, "pypi", "requests"))
+    finally:
+        run(client.aclose())
+    assert seen == ["mirror.example/pypi/requests/json"]
+    assert res.docs_url == "https://requests.readthedocs.io/"
+
+
+def test_file_override_wins_over_builtin(conn, tmp_path, monkeypatch):
+    from libref.crawler.registry import overrides as ov
+
+    monkeypatch.setitem(
+        ov.OVERRIDES,
+        ("pypi", "requests"),
+        {"docs_url": "https://builtin.example/docs", "source": "manual", "verified_at": "2026-11-01"},
+    )
+    override_file = tmp_path / "overrides.json"
+    override_file.write_text(
+        json.dumps([
+            {"ecosystem": "pypi", "name": "requests",
+             "docs_url": "https://file.example/docs", "source": "file",
+             "verified_at": "2026-11-02"}
+        ]),
+        encoding="utf-8",
+    )
+    settings = make_settings(registry_overrides_file=override_file)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
+    try:
+        res = run(resolve_package(conn, client, settings, "pypi", "requests"))
+    finally:
+        run(client.aclose())
+    assert res.docs_url == "https://file.example/docs"
+    assert res.source == "override"
+
+
+def test_overrides_file_invalid_rejected(tmp_path):
+    from libref.crawler.registry.overrides import load_overrides_file
+
+    bad = tmp_path / "bad.json"
+    bad.write_text(
+        json.dumps([{"ecosystem": "pypi", "name": "requests",
+                     "docs_url": "ftp://example.com/x", "verified_at": "2026-11-01"}]),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError):
+        load_overrides_file(bad)
+
+
+def test_stale_overrides_gate_lists_expired():
+    from libref.crawler.registry.overrides import (
+        find_stale_overrides,
+        is_override_stale,
+        set_file_overrides,
+    )
+
+    assert is_override_stale("2020-01-01", 180.0, date(2026, 11, 8)) is True
+    assert is_override_stale("2026-11-01", 180.0, date(2026, 11, 8)) is False
+    assert is_override_stale("not-a-date", 180.0, date(2026, 11, 8)) is True
+    set_file_overrides({
+        ("pypi", "old"): {"docs_url": "https://example.com/old",
+                            "source": "file", "verified_at": "2020-01-01"},
+        ("pypi", "fresh"): {"docs_url": "https://example.com/fresh",
+                              "source": "file", "verified_at": "2026-11-01"},
+    })
+    stale = find_stale_overrides(180.0, date(2026, 11, 8))
+    assert [k for k, _ in stale] == [("pypi", "old")]

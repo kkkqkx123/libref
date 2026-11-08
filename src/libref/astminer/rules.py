@@ -259,10 +259,11 @@ def _split_aliased(node: Any, source: bytes) -> tuple[str, str]:
 
 
 def build_aliases(
-    language: str, root: Any, captures: dict[str, list], source: bytes
+    language: str, root: Any, captures: dict[str, list], source: bytes,
+    current_module: str | None = None,
 ) -> list[tuple[str, str]]:
     if language == "python":
-        return _python_aliases(root, captures, source)
+        return _python_aliases(root, captures, source, current_module)
     if language == "java":
         return _java_aliases(root, source)
     if language == "javascript":
@@ -271,7 +272,8 @@ def build_aliases(
 
 
 def _python_aliases(
-    root: Any, captures: dict[str, list], source: bytes
+    root: Any, captures: dict[str, list], source: bytes,
+    current_module: str | None = None,
 ) -> list[tuple[str, str]]:
     if root.type == "import_statement":
         alias_node = first_node(captures, ".alias.name")
@@ -292,13 +294,21 @@ def _python_aliases(
                     found.append((full.split(".")[0], full))
         return found
     if root.type == "import_from_statement":
-        for child in root.children:
-            if child.type == "relative_import":
-                return []
         module = first_node(captures, ".from.module")
         module_text = ""
         if module is not None:
             module_text = generic_dotted(module, source).strip().strip(".")
+        else:
+            relative = first_node(captures, ".relative")
+            if relative is not None:
+                from libref.astminer.context import resolve_python_relative
+
+                resolved = resolve_python_relative(
+                    current_module, slice_text(relative, source).strip()
+                )
+                if resolved is None:
+                    return []
+                module_text = resolved
         if module_text.startswith(".") or ". " in module_text:
             return []
         found: list[tuple[str, str]] = []

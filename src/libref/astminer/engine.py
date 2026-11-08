@@ -9,6 +9,7 @@ from tree_sitter import Parser, Query, QueryCursor
 from libref.astminer import queries as _queries
 from libref.astminer import rules as _rules
 from libref.astminer.config import LanguageConfig, grammar_fingerprint, load_language
+from libref.astminer.context import determine_module_path
 from libref.astminer.models import ApiDeclRecord, RawCall
 
 _parsers: dict[str, tuple[str, Parser]] = {}
@@ -117,7 +118,10 @@ def extract_file(
     call_matches = QueryCursor(compiled["call"]).matches(tree.root_node)
     dep_matches = QueryCursor(compiled["dependency"]).matches(tree.root_node)
     decls = _build_decls(path, cfg, source, entity_matches, dep_matches)
-    aliases = _build_aliases(cfg, source, dep_matches)
+    module = determine_module_path(path, cfg.name)
+    if module is not None and path.replace("\\", "/").endswith("__init__.py"):
+        module = f"{module}.__init__"
+    aliases = _build_aliases(cfg, source, dep_matches, module)
     calls = _build_calls(path, cfg, source, call_matches, decls)
     return decls, aliases, calls
 
@@ -211,10 +215,10 @@ def _build_decls(path, cfg, source, entity_matches, dep_matches) -> list[ApiDecl
     return decls
 
 
-def _build_aliases(cfg, source, dep_matches) -> list[tuple[str, str]]:
+def _build_aliases(cfg, source, dep_matches, module: str | None = None) -> list[tuple[str, str]]:
     aliases: list[tuple[str, str]] = []
     for node, captures in _merge_matches(dep_matches):
-        for alias, full in _rules.build_aliases(cfg.name, node, captures, source):
+        for alias, full in _rules.build_aliases(cfg.name, node, captures, source, module):
             if alias and full:
                 aliases.append((alias, full))
     return aliases

@@ -124,11 +124,19 @@ def test_from_import_list_and_alias():
     assert by_alias.get("c") == "m.b"
 
 
-def test_relative_import_yields_no_alias():
+def test_relative_import_resolves_against_module_path():
     _decls, aliases, _raw = _parse("m.py", b"from . import x\n")
     assert aliases == []
     _decls, aliases, _raw = _parse("m.py", b"from .pkg import mod\n")
-    assert aliases == []
+    assert aliases == [("mod", "pkg.mod")]
+    _decls, aliases, _raw = _parse(
+        "pkg/mod.py", b"from .utils import helper\n"
+    )
+    assert aliases == [("helper", "pkg.utils.helper")]
+    _decls, aliases, _raw = _parse(
+        "pkg/__init__.py", b"from .core import start\n"
+    )
+    assert aliases == [("start", "pkg.core.start")]
 
 
 def test_arg_shapes_preserved():

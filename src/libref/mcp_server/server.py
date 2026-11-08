@@ -57,6 +57,35 @@ def build_mcp_server(
         return search.list_versions(library, ecosystem)
 
     @mcp.tool()
+    def api_usage(
+        library: str | None = None,
+        version: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """统计版本内各接口的调用次数与覆盖作用域数（频次查询）。"""
+        return search.api_usage_counts(library=library, version=version, limit=limit)
+
+    @mcp.tool()
+    def related_apis(
+        api: str,
+        library: str | None = None,
+        version: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """查询与指定接口同作用域共现的接口（共现查询）。"""
+        return search.related_apis(api, library=library, version=version, limit=limit)
+
+    @mcp.tool()
+    def pattern_evidence(
+        pattern: list[str],
+        library: str | None = None,
+        version: str | None = None,
+        limit: int = 5,
+    ) -> list[dict[str, Any]]:
+        """按调用序列模式取来源证据（文件、外围调用者、行范围、实参、置信）。"""
+        return search.pattern_evidence(pattern, library=library, version=version, limit=limit)
+
+    @mcp.tool()
     async def resolve_package(
         ecosystem: str | None,
         name: str,

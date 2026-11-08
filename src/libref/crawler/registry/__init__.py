@@ -1,7 +1,10 @@
-"""注册表客户端：PyPI 与 npm 只读查询加文档地址排序。
+"""注册表子包门面：模型、地址卫生、版本比较、传输加生态分发。
 
-纯网络逻辑，不读写库。网络统一走注入的 httpx.AsyncClient。
+生态专属解析落 pypi 与 npm 提供方，覆盖规则落 overrides，
+本门面只保留分发与通用逻辑，不读写库。
+网络统一走注入的 httpx.AsyncClient。
 跨包边界的结论为 pydantic 模型。
+新增生态时新增 registry/<eco>.py 并在 SUPPORTED_ECOSYSTEMS 追加名称。
 """
 
 from __future__ import annotations
@@ -27,8 +30,6 @@ _DOCS_HOST_HINTS = (
     "doc.",
     "docs-",
 )
-
-_PYPI_DOCS_KEYS = ("documentation", "docs", "doc", "manual", "guide")
 
 _REPO_HOSTS = ("github.com", "gitlab.com", "codeberg.org", "bitbucket.org", "gitee.com")
 _FUNDING_KEY_HINTS = ("fund", "sponsor", "donat")
@@ -70,20 +71,26 @@ class Resolution(BaseModel):
     source: str = "registry"
 
 
-def normalize_pypi_name(name: str) -> str:
-    return re.sub(r"[-_.]+", "-", name.strip()).lower()
-
-
-def normalize_npm_name(name: str) -> str:
-    return name.strip().lower()
-
-
 def normalize_name(ecosystem: str, name: str) -> str:
+    """按生态分发归一化，实现落各提供方模块。"""
     if ecosystem == "pypi":
+        from libref.crawler.registry.pypi import normalize_pypi_name
+
         return normalize_pypi_name(name)
     if ecosystem == "npm":
+        from libref.crawler.registry.npm import normalize_npm_name
+
         return normalize_npm_name(name)
     raise ValueError(f"unsupported ecosystem: {ecosystem}")
+
+
+def registry_base_for(ecosystem: str, settings) -> str:
+    """解析生态基址：registry_bases 映射表为唯一来源。"""
+    bases = settings.registry_bases
+    try:
+        return str(bases[ecosystem]).rstrip("/")
+    except KeyError:
+        raise ValueError(f"unsupported ecosystem: {ecosystem}") from None
 
 
 def _is_private_host(host: str) -> bool:
@@ -137,7 +144,7 @@ def is_docs_like_url(url: str) -> bool:
     return any(h in host for h in _DOCS_HOST_HINTS)
 
 
-def _is_repo_host_url(url: str) -> bool:
+def is_repo_host_url(url: str) -> bool:
     """仓库根地址（含仓库内页）永不直接作为文档候选。"""
     try:
         host = (urlsplit(url).netloc or "").lower()
@@ -196,76 +203,6 @@ def best_effort_stable(versions: list[str]) -> str | None:
     return max(plain or versions, key=_version_key)
 
 
-def rank_pypi_candidates(
-    project_urls: dict[str, str] | None,
-    home_page: str | None,
-    *,
-    allow_private: bool = False,
-) -> list[str]:
-    out: list[str] = []
-    seen: set[str] = set()
-    urls = dict(project_urls or {})
-
-    def push(url: str | None) -> None:
-        clean = sanitize_http_url(url, allow_private=allow_private)
-        if clean and clean not in seen and not _is_repo_host_url(clean):
-            seen.add(clean)
-            out.append(clean)
-
-    lowered = {k.lower(): v for k, v in urls.items()}
-    for key in _PYPI_DOCS_KEYS:
-        for k, v in lowered.items():
-            if key in k:
-                push(v)
-    for k, v in lowered.items():
-        flat = k.replace(" ", "").replace("-", "").replace("_", "")
-        if "changelog" in flat or "changes" in flat or "release" in flat:
-            clean = sanitize_http_url(v, allow_private=allow_private)
-            if clean and clean not in seen and is_docs_like_url(clean):
-                seen.add(clean)
-                out.append(clean)
-    for k, v in lowered.items():
-        if "home" in k or "site" in k or "web" in k:
-            push(v)
-    home = sanitize_http_url(home_page, allow_private=allow_private)
-    if home and home not in seen and is_docs_like_url(home):
-        seen.add(home)
-        out.append(home)
-    return out
-
-
-def parse_pypi_payload(
-    payload: dict[str, Any], *, allow_private: bool = False
-) -> tuple[str | None, list[str], str | None, list[str], str | None]:
-    info = payload.get("info") or {}
-    stable = info.get("version")
-    releases = payload.get("releases") or {}
-    versions = [str(v) for v in releases.keys()]
-    homepage = sanitize_http_url(info.get("home_page"), allow_private=allow_private)
-    candidates = rank_pypi_candidates(
-        info.get("project_urls"), info.get("home_page"), allow_private=allow_private
-    )
-    repo_url = pick_repo_url(info.get("project_urls"), allow_private=allow_private)
-    return stable, versions, homepage, candidates, repo_url
-
-
-def parse_npm_payload(
-    payload: dict[str, Any], *, allow_private: bool = False
-) -> tuple[str | None, list[str], str | None, list[str], str | None]:
-    tags = payload.get("dist-tags") or {}
-    stable = tags.get("latest")
-    versions = [str(v) for v in (payload.get("versions") or {}).keys()]
-    homepage = sanitize_http_url(payload.get("homepage"), allow_private=allow_private)
-    candidates = [homepage] if homepage else []
-    repo_url = None
-    repo = payload.get("repository") or {}
-    if isinstance(repo, dict):
-        repo_url = sanitize_http_url(repo.get("url"), allow_private=allow_private)
-    elif isinstance(repo, str):
-        repo_url = sanitize_http_url(repo, allow_private=allow_private)
-    return stable, versions, homepage, candidates, repo_url
-
-
 async def _get_json(
     client: httpx.AsyncClient, url: str, *, retries: int = 3
 ) -> httpx.Response:
@@ -300,10 +237,12 @@ async def fetch_snapshot(
     name = normalize_name(ecosystem, raw_name)
     if not name:
         raise ValueError("empty package name")
-    allow_private = bool(getattr(settings, "registry_allow_private", False))
+    allow_private = bool(settings.registry_allow_private)
     if ecosystem == "pypi":
-        base = getattr(settings, "registry_pypi_base", "https://pypi.org/pypi").rstrip("/")
-        resp = await _get_json(client, f"{base}/{name}/json")
+        from libref.crawler.registry.pypi import parse_pypi_payload, pypi_snapshot_url
+
+        base = registry_base_for(ecosystem, settings)
+        resp = await _get_json(client, pypi_snapshot_url(base, name))
         if resp.status_code == 404:
             raise RegistryError("not_found", f"package not found: pypi:{name}")
         if resp.status_code >= 400:
@@ -312,8 +251,10 @@ async def fetch_snapshot(
             resp.json(), allow_private=allow_private
         )
     else:
-        base = getattr(settings, "registry_npm_base", "https://registry.npmjs.org").rstrip("/")
-        resp = await _get_json(client, f"{base}/{name}")
+        from libref.crawler.registry.npm import npm_snapshot_url, parse_npm_payload
+
+        base = registry_base_for(ecosystem, settings)
+        resp = await _get_json(client, npm_snapshot_url(base, name))
         if resp.status_code == 404:
             raise RegistryError("not_found", f"package not found: npm:{name}")
         if resp.status_code >= 400:

@@ -18,7 +18,7 @@ from libref.crawler.registry import (
     normalize_name,
     sanitize_http_url,
 )
-from libref.crawler.registry_overrides import get_override
+from libref.crawler.registry.overrides import ensure_overrides_file, get_override
 
 
 def infer_ecosystem(explicit: str | None, name: str) -> str:
@@ -177,6 +177,9 @@ async def resolve_package(
     norm = normalize_name(eco, name)
     if not norm:
         raise ValueError("empty package name")
+    overrides_file = settings.registry_overrides_file
+    if overrides_file is not None:
+        ensure_overrides_file(overrides_file)
     override = get_override(eco, norm)
     override_docs = None
     if override is not None:

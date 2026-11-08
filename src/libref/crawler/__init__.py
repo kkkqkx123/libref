@@ -15,7 +15,7 @@ from libref.crawler.registry import (
     normalize_name,
     sanitize_http_url,
 )
-from libref.crawler.registry_overrides import get_override
+from libref.crawler.registry.overrides import get_override
 from libref.crawler.robots import RobotsChecker, ensure_robots_cache
 from libref.crawler.scope import ScopePolicy, build_scope
 from libref.crawler.url_seeder import SeedResult, UrlSeeder

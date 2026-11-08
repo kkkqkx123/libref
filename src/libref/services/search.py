@@ -7,6 +7,17 @@ import re
 import sqlite3
 from typing import Any
 
+def _is_subsequence(pattern: list[str], names: list[str]) -> bool:
+    pos = 0
+    for want in pattern:
+        while pos < len(names) and names[pos] != want:
+            pos += 1
+        if pos == len(names):
+            return False
+        pos += 1
+    return True
+
+
 _SNIPPET_RADIUS = 60
 
 
@@ -187,6 +198,215 @@ class SearchService:
             }
             for r in rows
         ]
+
+    def _mining_version_ids(
+        self,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+    ) -> list[int]:
+        filters = []
+        params: list[Any] = []
+        if library is not None:
+            filters.append("l.name = ?")
+            params.append(library)
+        if ecosystem is not None:
+            filters.append("l.ecosystem = ?")
+            params.append(ecosystem)
+        if version is not None:
+            filters.append("v.version = ?")
+            params.append(version)
+        where = ("WHERE " + " AND ".join(filters)) if filters else ""
+        rows = self._conn.execute(
+            "SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id "
+            f"{where}",
+            params,
+        ).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def api_usage_counts(
+        self,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+        include_ambiguous: bool = False,
+    ) -> list[dict[str, Any]]:
+        vids = self._mining_version_ids(library, version, ecosystem)
+        if not vids:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        conf = "" if include_ambiguous else "AND confidence != 'AMBIGUOUS'"
+        sql = (
+            "SELECT callee_name, count(*), "
+            "count(DISTINCT caller_file || char(0) || COALESCE(caller, '')) "
+            "FROM call_instances "
+            f"WHERE version_id IN ({placeholders}) {conf} "
+            "GROUP BY callee_name ORDER BY count(*) DESC, callee_name"
+        )
+        params: list[Any] = list(vids)
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        return [
+            {"api": r[0], "calls": r[1], "scopes": r[2]}
+            for r in self._conn.execute(sql, params).fetchall()
+        ]
+
+    def arg_shapes(
+        self,
+        api: str,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 10,
+        include_ambiguous: bool = False,
+    ) -> list[dict[str, Any]]:
+        vids = self._mining_version_ids(library, version, ecosystem)
+        if not vids:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        conf = "" if include_ambiguous else "AND confidence != 'AMBIGUOUS'"
+        rows = self._conn.execute(
+            "SELECT args, count(*) FROM call_instances "
+            f"WHERE version_id IN ({placeholders}) AND callee_name = ? {conf} "
+            "GROUP BY args ORDER BY count(*) DESC LIMIT ?",
+            (*vids, api, limit),
+        ).fetchall()
+        out = []
+        for raw, count in rows:
+            try:
+                parsed = json.loads(raw) if raw else []
+            except ValueError:
+                parsed = [raw]
+            out.append({"args": parsed, "count": count})
+        return out
+
+    def related_apis(
+        self,
+        api: str,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 10,
+        include_ambiguous: bool = False,
+    ) -> list[dict[str, Any]]:
+        vids = self._mining_version_ids(library, version, ecosystem)
+        if not vids:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        conf = "" if include_ambiguous else "AND c.confidence != 'AMBIGUOUS'"
+        tconf = "" if include_ambiguous else "AND confidence != 'AMBIGUOUS'"
+        rows = self._conn.execute(
+            "WITH target(file, caller_key) AS ("
+            " SELECT DISTINCT caller_file, COALESCE(caller, '')"
+            " FROM call_instances"
+            f" WHERE version_id IN ({placeholders}) AND callee_name = ? {tconf})"
+            " SELECT c.callee_name,"
+            " count(DISTINCT c.caller_file || char(0) || COALESCE(c.caller, '')),"
+            " count(*) FROM call_instances c"
+            " JOIN target t ON c.caller_file = t.file"
+            " AND COALESCE(c.caller, '') = t.caller_key"
+            f" WHERE c.version_id IN ({placeholders}) AND c.callee_name != ? {conf}"
+            " GROUP BY c.callee_name"
+            " ORDER BY 2 DESC, 3 DESC, c.callee_name LIMIT ?",
+            (*vids, api, *vids, api, limit),
+        ).fetchall()
+        return [
+            {"api": r[0], "scopes": r[1], "calls": r[2]} for r in rows
+        ]
+
+    def list_patterns(
+        self,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        containing: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        vids = self._mining_version_ids(library, version, ecosystem)
+        if not vids:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        rows = self._conn.execute(
+            "SELECT pattern, support FROM seq_patterns"
+            f" WHERE version_id IN ({placeholders})"
+            " ORDER BY support DESC LIMIT ?",
+            (*vids, limit),
+        ).fetchall()
+        out = []
+        for raw, support in rows:
+            try:
+                names = json.loads(raw)
+            except ValueError:
+                continue
+            if containing and not all(n in names for n in containing):
+                continue
+            out.append({"pattern": names, "support": support})
+        return out
+
+    def pattern_evidence(
+        self,
+        pattern: list[str],
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 5,
+        include_ambiguous: bool = False,
+    ) -> list[dict[str, Any]]:
+        if not pattern:
+            return []
+        vids = self._mining_version_ids(library, version, ecosystem)
+        if not vids:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        conf = "" if include_ambiguous else "AND ci.confidence != 'AMBIGUOUS'"
+        rows = self._conn.execute(
+            "SELECT ci.version_id, l.name, v.version, ci.caller_file, ci.caller,"
+            " ci.callee_name, ci.args, ci.line_start, ci.line_end, ci.confidence,"
+            " ci.call_order, ci.start_byte, ci.id"
+            " FROM call_instances ci"
+            " JOIN versions v ON v.id = ci.version_id"
+            " JOIN libraries l ON l.id = v.library_id"
+            f" WHERE ci.version_id IN ({placeholders}) {conf}"
+            " ORDER BY ci.version_id, ci.caller_file, ci.line_start,"
+            " ci.start_byte, ci.call_order, ci.id",
+            tuple(vids),
+        ).fetchall()
+        groups: dict[tuple, dict[str, Any]] = {}
+        order: list[tuple] = []
+        for vid, lib, ver, path, caller, callee, args, ls, le, cf, _o, _s, _i in rows:
+            key = (vid, path, caller or "")
+            slot = groups.get(key)
+            if slot is None:
+                slot = {
+                    "library": lib,
+                    "version": ver,
+                    "caller_file": path,
+                    "caller": caller,
+                    "calls": [],
+                }
+                groups[key] = slot
+                order.append(key)
+            try:
+                parsed = json.loads(args) if args else []
+            except ValueError:
+                parsed = [args]
+            slot["calls"].append({
+                "callee": callee,
+                "args": parsed,
+                "line_start": ls,
+                "line_end": le,
+                "confidence": cf,
+            })
+        out = []
+        for key in order:
+            names = [c["callee"] for c in groups[key]["calls"]]
+            if _is_subsequence(pattern, names):
+                out.append(groups[key])
+                if len(out) >= limit:
+                    break
+        return out
 
     def ensure_library_version(
         self,

@@ -731,36 +731,42 @@ def index_repo(conn, library: str, version: str, source: str, *, update: bool = 
 
 
 def mine_patterns(conn, library: str, version: str, *, minsup: int = 2,
-                  topn: int | None = None, maxlen: int = 10) -> list[dict]:
+                  topn: int | None = None, maxlen: int = 10,
+                  include_ambiguous: bool = False) -> list[dict]:
     import json as _json
+    from collections import Counter
 
     from libref.mining import PrefixSpan
-    from libref.mining import frequency as _freq
     from libref.mining import normalize as _norm
     from libref.services.search import SearchService
 
     search = SearchService(conn)
     library_id, version_id = search.ensure_library_version(library, version)
     rows = conn.execute(
-        "SELECT callee_name, caller_file, line_start, caller FROM call_instances"
-        " WHERE version_id=? ORDER BY caller_file, line_start", (version_id,)
+        "SELECT callee_name, caller_file, line_start, caller, confidence,"
+        " call_order, start_byte, id FROM call_instances"
+        " WHERE version_id=?", (version_id,)
     ).fetchall()
     if not rows:
         return []
-    groups: dict[str, list[tuple[int, str]]] = {}
-    for callee, caller_file, line_start, caller in rows:
+    if not include_ambiguous:
+        rows = [r for r in rows if r[4] != "AMBIGUOUS"]
+        if not rows:
+            return []
+    groups: dict[str, list[tuple[int, int, int, int, str]]] = {}
+    for callee, caller_file, line_start, caller, _conf, order, start, row_id in rows:
         key = f"{caller_file}::{caller}" if caller else str(caller_file)
-        groups.setdefault(key, []).append((int(line_start), str(callee)))
-    str_seqs = [[name for _, name in sorted(items)] for items in groups.values()]
+        groups.setdefault(key, []).append(
+            (int(line_start), int(start), int(order), int(row_id), str(callee))
+        )
+    str_seqs = [[name for *_key, name in sorted(items)] for items in groups.values()]
     str_seqs = [seq for seq in str_seqs if seq]
     if not str_seqs:
         return []
     if topn is not None:
-        flat = [name for seq in str_seqs for name in seq]
-        counts = _freq.level_counts(flat)
-        kept = _freq.prune_to_top_n(counts, topn)
-        leaf_allowed = {n for seq in str_seqs for n in seq if n in kept}
-        str_seqs = [[n for n in seq if n in leaf_allowed] for seq in str_seqs]
+        ranked = Counter(n for seq in str_seqs for n in seq)
+        allowed = {name for name, _ in ranked.most_common(topn)}
+        str_seqs = [[n for n in seq if n in allowed] for seq in str_seqs]
         str_seqs = [seq for seq in str_seqs if seq]
         if not str_seqs:
             return []
@@ -772,9 +778,11 @@ def mine_patterns(conn, library: str, version: str, *, minsup: int = 2,
     miner.maxlen = maxlen
     mined = miner.frequent(minsup, closed=True)
     results: list[dict] = []
+    wanted: list[str] = []
     for support, pattern in (mined or []):
         names = _norm.decode_pattern(list(pattern), reverse)
         payload = _json.dumps(names, ensure_ascii=False)
+        wanted.append(payload)
         conn.execute(
             "INSERT INTO seq_patterns(library_id, version_id, pattern, support, is_closed)"
             " VALUES(?, ?, ?, ?, 1)"
@@ -783,6 +791,15 @@ def mine_patterns(conn, library: str, version: str, *, minsup: int = 2,
             (library_id, version_id, payload, int(support)),
         )
         results.append({"pattern": names, "support": int(support), "is_closed": 1})
+    if wanted:
+        placeholders = ",".join("?" for _ in wanted)
+        conn.execute(
+            f"DELETE FROM seq_patterns WHERE version_id=?"
+            f" AND pattern NOT IN ({placeholders})",
+            (version_id, *wanted),
+        )
+    else:
+        conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
     conn.commit()
     results.sort(key=lambda r: (-r["support"], r["pattern"]))
     return results
@@ -798,7 +815,8 @@ def build_repo_runner(settings, conn, repos_dir=None):
             p = job.params
             mine_patterns(conn, p["library"], p["version"],
                           minsup=int(p.get("minsup", 2)),
-                          topn=p.get("topn"), maxlen=int(p.get("maxlen", 10)))
+                          topn=p.get("topn"), maxlen=int(p.get("maxlen", 10)),
+                          include_ambiguous=bool(p.get("include_ambiguous", False)))
         else:
             raise ValueError(f"unsupported job kind: {job.kind}")
 

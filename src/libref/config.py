@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,11 +29,17 @@ class LibrefSettings(BaseSettings):
     embedding_dim: int = 1024
     embedding_api_base: str = "https://api.siliconflow.cn/v1"
     embedding_api_key: str | None = None
-    # 注册表解析配置：缓存有效期、离线开关、私有放行、镜像基址。
+    # 注册表解析配置：缓存有效期、离线开关、私有放行、生态基址映射、外部覆盖文件。
     # 密钥型鉴权不在本方案内，镜像地址经此处显式开启后方可使用。
+    # 新增生态时在 registry_bases 追加默认基址并新增 registry_<eco>.py 提供方。
     registry_cache_ttl_days: float = 1.0
     registry_offline: bool = False
     registry_allow_private: bool = False
-    registry_pypi_base: str = "https://pypi.org/pypi"
-    registry_npm_base: str = "https://registry.npmjs.org"
+    registry_bases: dict[str, str] = Field(
+        default_factory=lambda: {
+            "pypi": "https://pypi.org/pypi",
+            "npm": "https://registry.npmjs.org",
+        }
+    )
+    registry_overrides_file: Path | None = None
     registry_override_ttl_days: float = 180.0
