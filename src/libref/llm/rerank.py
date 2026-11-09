@@ -225,6 +225,7 @@ def build_rerank_fn(
         api_key=config.api_key,
         model=config.model,
         timeout=config.timeout,
+        truncate=config.truncate,
     )
     if transport is None:
         return client.score

@@ -52,7 +52,7 @@ def proxy_bypass_mounts(no_proxy_text: str | None) -> dict[str, None]:
 
 def resolve_proxy_url(settings) -> str | None:
     """显式 LIBREF_HTTP_PROXY 优先，否则读标准环境代理。"""
-    explicit = str(getattr(settings, "http_proxy", None) or "").strip()
+    explicit = str(settings.http_proxy or "").strip()
     if explicit:
         return explicit
     proxies = getproxies()
@@ -64,7 +64,7 @@ def resolve_proxy_url(settings) -> str | None:
 
 def resolve_no_proxy_text(settings) -> str:
     """显式 LIBREF_NO_PROXY 优先，否则读环境，否则回环默认。"""
-    explicit = str(getattr(settings, "no_proxy", None) or "").strip()
+    explicit = str(settings.no_proxy or "").strip()
     if explicit:
         return explicit
     env = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or ""
@@ -81,9 +81,9 @@ def proxy_disabled(no_proxy_text: str) -> bool:
 def build_async_client(settings, *, transport: httpx.BaseTransport | None = None) -> httpx.AsyncClient:
     """按配置构造抓取用 AsyncClient，调用方以 async with 管理生命周期。"""
     kwargs: dict = {
-        "timeout": getattr(settings, "request_timeout", 30.0),
+        "timeout": settings.request_timeout,
         "follow_redirects": True,
-        "headers": {"User-Agent": getattr(settings, "user_agent", "libref-crawler/0.1")},
+        "headers": {"User-Agent": settings.user_agent},
         "http2": True,
     }
     if transport is not None:

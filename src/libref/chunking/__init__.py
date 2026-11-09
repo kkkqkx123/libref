@@ -3,6 +3,7 @@
 from libref.chunking.budget import (
     ChunkBudget,
     ChunkPath,
+    budgets_from_settings,
     cost,
     count_terms,
     default_budgets,
@@ -32,6 +33,7 @@ __all__ = [
     "DualChunks",
     "cost",
     "count_terms",
+    "budgets_from_settings",
     "default_budgets",
     "ensure_hard_limit",
     "estimate_tokens",

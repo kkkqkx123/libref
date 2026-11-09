@@ -175,7 +175,7 @@ async def resolve_package(
     explicit_url: str | None = None,
 ) -> Resolution:
     """名称解析唯一入口：显式地址直通，其余走覆盖加缓存加注册表。"""
-    allow_private = bool(getattr(settings, "registry_allow_private", False))
+    allow_private = bool(settings.registry_allow_private)
     if explicit_url is not None:
         if requested_version is None:
             raise ValueError("explicit address requires a version")
@@ -208,8 +208,8 @@ async def resolve_package(
     override_docs, override_repo = _override_addrs(
         override, allow_private=allow_private
     )
-    ttl = float(getattr(settings, "registry_cache_ttl_days", 1.0))
-    offline = bool(getattr(settings, "registry_offline", False))
+    ttl = float(settings.registry_cache_ttl_days)
+    offline = bool(settings.registry_offline)
 
     cached = read_cache(conn, eco, norm)
     override_hit = bool(override_docs or override_repo)
@@ -273,7 +273,7 @@ async def resolve_repo(
 ) -> Resolution:
     from pathlib import Path
 
-    allow_private = bool(getattr(settings, "registry_allow_private", False))
+    allow_private = bool(settings.registry_allow_private)
     if explicit_source is not None:
         text = str(explicit_source).strip()
         if not text:
@@ -315,8 +315,8 @@ async def resolve_repo(
         get_override(eco, norm), allow_private=allow_private
     )
     override_hit = bool(override_repo)
-    ttl = float(getattr(settings, "registry_cache_ttl_days", 1.0))
-    offline = bool(getattr(settings, "registry_offline", False))
+    ttl = float(settings.registry_cache_ttl_days)
+    offline = bool(settings.registry_offline)
     cached = read_cache(conn, eco, norm)
     if offline:
         if cached is None:

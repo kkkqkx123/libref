@@ -36,13 +36,45 @@ class ChunkBudget:
         return max(1, self.hard_limit - reserve)
 
 
-def default_budgets() -> dict[ChunkPath, ChunkBudget]:
+def budgets_from_settings(settings) -> dict[ChunkPath, ChunkBudget]:
+    """按配置构造双路预算，分块与预览的唯一入口。"""
+    reserve = float(settings.chunk_reserve_ratio)
     return {
         ChunkPath.EMBEDDING: ChunkBudget(
-            hard_limit=512, min_limit=150, overlap=50
+            hard_limit=int(settings.chunk_embed_max_tokens),
+            min_limit=int(settings.chunk_embed_min_tokens),
+            overlap=int(settings.chunk_embed_overlap_tokens),
+            reserve_ratio=reserve,
         ),
         ChunkPath.BM25: ChunkBudget(
-            hard_limit=150, min_limit=45, overlap=5
+            hard_limit=int(settings.chunk_bm25_max_terms),
+            min_limit=int(settings.chunk_bm25_min_terms),
+            overlap=int(settings.chunk_bm25_overlap_terms),
+            reserve_ratio=reserve,
+        ),
+    }
+
+
+def default_budgets(settings=None) -> dict[ChunkPath, ChunkBudget]:
+    """默认预算，无配置时按配置类默认值求解，不复制数值。"""
+    if settings is not None:
+        return budgets_from_settings(settings)
+    from libref.config import LibrefSettings
+
+    fields = LibrefSettings.model_fields
+    reserve = float(fields["chunk_reserve_ratio"].default)
+    return {
+        ChunkPath.EMBEDDING: ChunkBudget(
+            hard_limit=int(fields["chunk_embed_max_tokens"].default),
+            min_limit=int(fields["chunk_embed_min_tokens"].default),
+            overlap=int(fields["chunk_embed_overlap_tokens"].default),
+            reserve_ratio=reserve,
+        ),
+        ChunkPath.BM25: ChunkBudget(
+            hard_limit=int(fields["chunk_bm25_max_terms"].default),
+            min_limit=int(fields["chunk_bm25_min_terms"].default),
+            overlap=int(fields["chunk_bm25_overlap_terms"].default),
+            reserve_ratio=reserve,
         ),
     }
 

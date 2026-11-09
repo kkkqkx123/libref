@@ -308,6 +308,7 @@ def build_embed_fn(
         model=config.model,
         dim=config.dim,
         timeout=config.timeout,
+        batch_size=config.batch_size,
         preprocessor=config.preprocessor,
     )
     if transport is None:

@@ -38,13 +38,18 @@ class RobotsChecker:
         self,
         conn: sqlite3.Connection,
         client,  # httpx.AsyncClient
-        ttl_days: float = 7.0,
-        user_agent: str = "libref-crawler/0.1",
+        ttl_days: float | None = None,
+        user_agent: str | None = None,
     ) -> None:
+        from libref.config import LibrefSettings
+
+        fields = LibrefSettings.model_fields
         self._conn = conn
         self._client = client
-        self._ttl = ttl_days * 86400
-        self._ua = user_agent
+        resolved_ttl = fields["robots_cache_ttl_days"].default if ttl_days is None else ttl_days
+        resolved_ua = fields["user_agent"].default if user_agent is None else user_agent
+        self._ttl = resolved_ttl * 86400
+        self._ua = resolved_ua
         ensure_robots_cache(conn)
 
     async def can_fetch(self, url: str) -> bool:

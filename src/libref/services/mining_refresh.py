@@ -6,6 +6,24 @@ from pathlib import Path
 from typing import Any
 
 MINE_PATTERNS_JOB_KIND = "mine_patterns"
+
+DEFAULT_MINSUP = 2
+DEFAULT_MAXLEN = 10
+DEFAULT_MINLEN = 2
+
+
+def _cluster_defaults(threshold: float | None, min_size: int | None) -> tuple[float, int]:
+    """集群参数缺省时按配置类默认值求解，不复制数值。"""
+    if threshold is not None and min_size is not None:
+        return threshold, min_size
+    from libref.config import LibrefSettings
+
+    fields = LibrefSettings.model_fields
+    resolved_threshold = fields["cluster_threshold"].default if threshold is None else threshold
+    resolved_size = fields["cluster_min_size"].default if min_size is None else min_size
+    return float(resolved_threshold), int(resolved_size)
+
+
 def _clear_derived(conn, version_id: int) -> None:
     """清空版本内全部派生挖掘产出，调用为空或序列为空时保持三表一致。"""
     conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
@@ -76,12 +94,14 @@ def refresh_clusters(
     version_id: int,
     *,
     include_ambiguous: bool = False,
-    threshold: float = 0.15,
-    min_size: int = 2,
+    threshold: float | None = None,
+    min_size: int | None = None,
 ) -> int:
     """批量重建接口分组，返回分组数。"""
     from libref.mining import build_scope_sets as _scope_sets
     from libref.mining.cluster import cluster_apis as _cluster_fn
+
+    threshold, min_size = _cluster_defaults(threshold, min_size)
 
     rows = conn.execute(
         "SELECT callee_name, caller_file, caller, confidence FROM call_instances"
@@ -128,13 +148,13 @@ def mine_patterns(
     version: str,
     *,
     ecosystem: str | None = None,
-    minsup: int = 2,
+    minsup: int = DEFAULT_MINSUP,
     topn: int | None = None,
-    maxlen: int = 10,
-    minlen: int = 2,
+    maxlen: int = DEFAULT_MAXLEN,
+    minlen: int = DEFAULT_MINLEN,
     include_ambiguous: bool = False,
-    cluster_threshold: float = 0.15,
-    cluster_min_size: int = 2,
+    cluster_threshold: float | None = None,
+    cluster_min_size: int | None = None,
 ) -> list[dict]:
     import json as _json
 

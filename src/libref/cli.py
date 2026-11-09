@@ -667,9 +667,9 @@ def cmd_clusters(args: argparse.Namespace) -> int:
 def cmd_dump_chunks(args: argparse.Namespace) -> int:
     from pathlib import Path
 
-    from libref.chunking import default_budgets, split_markdown_dual
+    from libref.chunking import budgets_from_settings, split_markdown_dual
 
-    budgets = default_budgets()
+    budgets = budgets_from_settings(_load_settings(args))
     if args.markdown is not None:
         text = Path(args.markdown).read_text(encoding="utf-8")
         url = args.url or "preview://local"

@@ -17,7 +17,7 @@ from typing import Any
 import httpx
 
 from libref.chunking import ChunkPath, ensure_hard_limit, split_markdown_dual
-from libref.chunking.budget import ChunkBudget, default_budgets
+from libref.chunking.budget import ChunkBudget, budgets_from_settings
 from libref.crawler import (
     HttpFetcher,
     RobotsChecker,
@@ -201,21 +201,8 @@ async def _client(settings) -> AsyncIterator[httpx.AsyncClient]:
 
 
 def _doc_budgets(settings) -> dict[ChunkPath, ChunkBudget]:
-    """按配置生成文档分块的双路预算，缺省回退到内置默认值。"""
-    resolved = default_budgets()
-    resolved[ChunkPath.EMBEDDING] = ChunkBudget(
-        hard_limit=int(settings.chunk_embed_max_tokens),
-        min_limit=int(settings.chunk_embed_min_tokens),
-        overlap=int(settings.chunk_embed_overlap_tokens),
-        reserve_ratio=float(settings.chunk_reserve_ratio),
-    )
-    resolved[ChunkPath.BM25] = ChunkBudget(
-        hard_limit=int(settings.chunk_bm25_max_terms),
-        min_limit=int(settings.chunk_bm25_min_terms),
-        overlap=int(settings.chunk_bm25_overlap_terms),
-        reserve_ratio=float(settings.chunk_reserve_ratio),
-    )
-    return resolved
+    """按配置生成文档分块的双路预算，分块预算的唯一装配点。"""
+    return budgets_from_settings(settings)
 
 
 PIPELINE_STEPS = ("discover", "fetch", "clean", "split", "store", "vectors")

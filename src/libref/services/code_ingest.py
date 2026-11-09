@@ -522,7 +522,15 @@ async def index_repo_by_name_async(
 
 def build_repo_runner(settings, conn, repos_dir=None):
     """Build a job runner handling repo indexing and pattern mining."""
-    from libref.services.mining_refresh import mine_patterns as _mine_patterns
+    from libref.config import LibrefSettings
+    from libref.services.mining_refresh import (
+        DEFAULT_MAXLEN,
+        DEFAULT_MINLEN,
+        DEFAULT_MINSUP,
+        mine_patterns as _mine_patterns,
+    )
+
+    _cluster_fields = LibrefSettings.model_fields
 
     resolved_dir = Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir)
 
@@ -548,13 +556,19 @@ def build_repo_runner(settings, conn, repos_dir=None):
                 p["library"],
                 p["version"],
                 ecosystem=p.get("ecosystem"),
-                minsup=int(p.get("minsup", 2)),
+                minsup=int(p.get("minsup", DEFAULT_MINSUP)),
                 topn=p.get("topn"),
-                maxlen=int(p.get("maxlen", 10)),
-                minlen=int(p.get("minlen", 2)),
+                maxlen=int(p.get("maxlen", DEFAULT_MAXLEN)),
+                minlen=int(p.get("minlen", DEFAULT_MINLEN)),
                 include_ambiguous=bool(p.get("include_ambiguous", False)),
-                cluster_threshold=float(p.get("cluster_threshold", 0.15)),
-                cluster_min_size=int(p.get("cluster_min_size", 2)),
+                cluster_threshold=float(p.get(
+                    "cluster_threshold",
+                    _cluster_fields["cluster_threshold"].default,
+                )),
+                cluster_min_size=int(p.get(
+                    "cluster_min_size",
+                    _cluster_fields["cluster_min_size"].default,
+                )),
             )
         else:
             raise ValueError(f"unsupported job kind: {job.kind}")
