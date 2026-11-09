@@ -521,56 +521,24 @@ async def index_repo_by_name_async(
 
 
 def build_repo_runner(settings, conn, repos_dir=None):
-    """Build a job runner handling repo indexing and pattern mining."""
-    from libref.config import LibrefSettings
-    from libref.services.mining_refresh import (
-        DEFAULT_MAXLEN,
-        DEFAULT_MINLEN,
-        DEFAULT_MINSUP,
-        mine_patterns as _mine_patterns,
-    )
-
-    _cluster_fields = LibrefSettings.model_fields
-
+    """Build a job runner handling repo indexing only; mining lives in mining_refresh."""
     resolved_dir = Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir)
 
     async def runner(job):
-        if job.kind == INDEX_REPO_JOB_KIND:
-            p = job.params
-            return index_repo(
-                conn,
-                p["library"],
-                p["version"],
-                p.get("source"),
-                update=bool(p.get("update", False)),
-                repos_dir=resolved_dir,
-                ecosystem=str(p.get("ecosystem", "custom") or "custom"),
-                resolved_from=p.get("resolved_from"),
-                registry_confirmed=bool(p.get("registry_confirmed", True)),
-                repos_quota_mb=int(settings.repos_quota_mb),
-            )
-        elif job.kind == "mine_patterns":
-            p = job.params
-            return _mine_patterns(
-                conn,
-                p["library"],
-                p["version"],
-                ecosystem=p.get("ecosystem"),
-                minsup=int(p.get("minsup", DEFAULT_MINSUP)),
-                topn=p.get("topn"),
-                maxlen=int(p.get("maxlen", DEFAULT_MAXLEN)),
-                minlen=int(p.get("minlen", DEFAULT_MINLEN)),
-                include_ambiguous=bool(p.get("include_ambiguous", False)),
-                cluster_threshold=float(p.get(
-                    "cluster_threshold",
-                    _cluster_fields["cluster_threshold"].default,
-                )),
-                cluster_min_size=int(p.get(
-                    "cluster_min_size",
-                    _cluster_fields["cluster_min_size"].default,
-                )),
-            )
-        else:
+        if job.kind != INDEX_REPO_JOB_KIND:
             raise ValueError(f"unsupported job kind: {job.kind}")
+        p = job.params
+        return index_repo(
+            conn,
+            p["library"],
+            p["version"],
+            p.get("source"),
+            update=bool(p.get("update", False)),
+            repos_dir=resolved_dir,
+            ecosystem=str(p.get("ecosystem", "custom") or "custom"),
+            resolved_from=p.get("resolved_from"),
+            registry_confirmed=bool(p.get("registry_confirmed", True)),
+            repos_quota_mb=int(settings.repos_quota_mb),
+        )
 
     return runner

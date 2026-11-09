@@ -6,8 +6,9 @@ import asyncio
 import json
 from typing import Any
 
+from libref.chunking import ChunkPath, ensure_hard_limit
 from libref.services.libraries import mining_version_ids
-from libref.text.embedding import build_embed_text
+from libref.text.embedding import build_embed_text, is_embeddable_metadata
 
 
 class MaintenanceService:
@@ -60,10 +61,11 @@ class MaintenanceService:
                 meta = json.loads(r[4]) if r[4] else {}
             except ValueError:
                 meta = {}
-            if meta.get("chunk_path", "embedding") == "bm25":
+            if not is_embeddable_metadata(meta):
                 continue
             embeddable.append(r)
         upserted = 0
+        hard = int(settings.chunk_embed_max_tokens)
         for i in range(0, len(embeddable), settings.embed_batch):
             batch = embeddable[i:i + settings.embed_batch]
             texts = []
@@ -72,7 +74,9 @@ class MaintenanceService:
                     meta = json.loads(r[4]) if r[4] else {}
                 except ValueError:
                     meta = {}
-                texts.append(build_embed_text(meta.get("title"), meta.get("path"), r[3]))
+                text = build_embed_text(meta.get("title"), meta.get("path"), r[3])
+                clipped, _ = ensure_hard_limit(text, ChunkPath.EMBEDDING, hard)
+                texts.append(clipped)
             vecs = await fn(texts)
             if len(vecs) != len(batch):
                 raise RuntimeError("embedding count mismatch")

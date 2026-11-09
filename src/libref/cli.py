@@ -33,7 +33,7 @@ from libref.services.jobs import JobManager
 from libref.services.libraries import LibraryService
 from libref.services.maintenance import MaintenanceService
 from libref.services.mining_read import MiningReadService
-from libref.services.mining_refresh import MINE_PATTERNS_JOB_KIND, mine_patterns
+from libref.services.mining_refresh import MINE_PATTERNS_JOB_KIND, build_mine_runner, mine_job_params, mine_patterns
 from libref.services.pages import PageService
 from libref.services.review import ReviewService
 from libref.services.search import SearchService
@@ -461,22 +461,22 @@ def cmd_mine(args: argparse.Namespace) -> int:
             mgr.recover()
             job_id = mgr.submit(
                 MINE_PATTERNS_JOB_KIND,
-                {
-                    "library": args.library,
-                    "version": args.version,
-                    "ecosystem": getattr(args, "ecosystem", None),
-                    "minsup": args.minsup,
-                    "topn": args.topn,
-                    "maxlen": args.maxlen,
-                    "minlen": args.minlen,
-                    "include_ambiguous": bool(args.include_ambiguous),
-                    "cluster_threshold": args.cluster_threshold,
-                    "cluster_min_size": args.cluster_min_size,
-                },
+                mine_job_params(
+                    args.library,
+                    args.version,
+                    ecosystem=getattr(args, "ecosystem", None),
+                    minsup=args.minsup,
+                    topn=args.topn,
+                    maxlen=args.maxlen,
+                    minlen=args.minlen,
+                    include_ambiguous=bool(args.include_ambiguous),
+                    cluster_threshold=args.cluster_threshold,
+                    cluster_min_size=args.cluster_min_size,
+                ),
             )
 
             async def _drive():
-                mgr.start_worker(build_repo_runner(settings, conn))
+                mgr.start_worker(build_mine_runner(settings, conn))
                 try:
                     return await mgr.wait_for(job_id)
                 finally:

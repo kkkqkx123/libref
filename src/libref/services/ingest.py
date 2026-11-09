@@ -31,7 +31,7 @@ from libref.services.jobs import Job, JobManager
 from libref.services.libraries import LibraryService
 from libref.store.document_store import DocumentInput, DocumentStore, StoreResult
 from libref.store.vec_store import QdrantVecStore
-from libref.text.embedding import build_embed_text
+from libref.text.embedding import build_embed_text, is_embeddable_metadata
 from libref.text.normalize import (
     classify_content,
     normalize_markdown,
@@ -223,6 +223,67 @@ def _budget_fingerprint(budgets: dict[ChunkPath, ChunkBudget]) -> str:
 def normalize_text_content(raw: str) -> str:
     """Plain text and Markdown normalization without HTML parsing."""
     return normalize_markdown(raw)
+
+
+def _plan_targets(seed, start_url: str, scope: dict[str, Any] | None, max_pages: int | None):
+    """抓取目标规划：作用域过滤加起始页回退加分页截断，纯决策不碰库。"""
+    policy = build_scope(start_url, scope)
+    candidates = seed.urls + [u for u in seed.cross_site if u not in seed.urls]
+    accepted, rejected = policy.filter(candidates)
+    if not accepted and policy.accept(start_url):
+        accepted = [start_url]
+    ingest_truncated = False
+    if max_pages is not None and len(accepted) > max_pages:
+        accepted = accepted[:max_pages]
+        ingest_truncated = True
+    truncated = bool(seed.truncated or ingest_truncated)
+    return accepted, rejected, truncated
+
+
+def _record_outcome(counts, removed_all, inserted_all, result, empty_dropped, render_skipped, stage_ms) -> None:
+    """单页结局汇总：计数、向量候选、阶段耗时，一处归口。"""
+    counts[result.outcome] = counts.get(result.outcome, 0) + 1
+    counts["chunk_empty_dropped"] += empty_dropped
+    if render_skipped:
+        counts["render_skipped"] += 1
+    counts["chunk_reused"] += len(getattr(result, "reused_ids", []))
+    counts["snapshot_written"] += int(stage_ms.get("snapshot_written", 0))
+    counts["snapshot_quota_skipped"] += int(stage_ms.get("snapshot_quota_skipped", 0))
+    for step in PIPELINE_STEPS:
+        counts[f"{step}_ms"] += int(stage_ms.get(f"{step}_ms", 0))
+    removed_all.extend(result.removed_ids)
+    inserted_all.extend(result.inserted_ids)
+
+
+def _build_doc_inputs(raw_chunks, content_type: str | None, kind: str) -> list[DocumentInput]:
+    """文档块输入组装：排序号与类型回填，落库前唯一成形点。"""
+    for order, chunk in enumerate(raw_chunks):
+        chunk.sort_order = order
+        if not getattr(chunk, "content_type", "") or chunk.content_type == "text/markdown":
+            chunk.content_type = (content_type or "text/markdown").split(";")[0].strip() or kind
+    return [
+        DocumentInput(
+            url=c.url,
+            path=c.path,
+            title=c.title,
+            content=c.content,
+            sort_order=c.sort_order,
+            chunk_path=getattr(c, "chunk_path", "embedding"),
+            source_group_id=getattr(c, "source_group_id", ""),
+            chunk_id=getattr(c, "chunk_id", ""),
+            span_kind=getattr(c, "span_kind", "document_range"),
+            merged_from=list(getattr(c, "merged_from", []) or []),
+            overlap_from=getattr(c, "overlap_from", None),
+            content_hash=getattr(c, "content_hash", ""),
+            keywords=list(getattr(c, "keywords", []) or []),
+            content_type=getattr(c, "content_type", "text/markdown"),
+            start_char=getattr(c, "start_char", -1),
+            end_char=getattr(c, "end_char", -1),
+            prev_chunk_id=getattr(c, "prev_chunk_id", None),
+            next_chunk_id=getattr(c, "next_chunk_id", None),
+        )
+        for c in raw_chunks
+    ]
 
 
 class IngestService:
@@ -485,24 +546,12 @@ class IngestService:
                     start_url, prefilter=prefilter, max_pages=None
                 )
                 counts["discover_ms"] = int((_time.monotonic() - discover_start) * 1000)
-                policy = build_scope(start_url, scope)
-                candidates = seed.urls + [
-                    u for u in seed.cross_site if u not in seed.urls
-                ]
-                accepted, rejected = policy.filter(candidates)
+                accepted, rejected, truncated = _plan_targets(seed, start_url, scope, max_pages)
                 counts["skipped"] += len(rejected)
                 counts["scope_rejected"] += len(rejected)
                 counts["seed_discovered"] += len(seed.urls)
                 if seed.source == "none" and seed.failed:
                     counts["failed"] += 1
-                if not accepted and policy.accept(start_url):
-                    # 无站点地图与 llms.txt 时回退抓起始页本身，覆盖 javadoc 类站点。
-                    accepted = [start_url]
-                ingest_truncated = False
-                if max_pages is not None and len(accepted) > max_pages:
-                    accepted = accepted[:max_pages]
-                    ingest_truncated = True
-                truncated = seed.truncated or ingest_truncated
 
                 store = DocumentStore(self._conn)
                 catalog = LibraryService(self._conn)
@@ -538,17 +587,7 @@ class IngestService:
                         except Exception as exc:  # noqa: BLE001 —— 单页失败记结局，不阻断整批
                             logger.debug("page failed url=%s: %s", url, exc)
                             result, empty_dropped, render_skipped, stage_ms = StoreResult("failed"), 0, False, {}
-                        counts[result.outcome] = counts.get(result.outcome, 0) + 1
-                        counts["chunk_empty_dropped"] += empty_dropped
-                        if render_skipped:
-                            counts["render_skipped"] += 1
-                        counts["chunk_reused"] += len(getattr(result, "reused_ids", []))
-                        counts["snapshot_written"] += int(stage_ms.get("snapshot_written", 0))
-                        counts["snapshot_quota_skipped"] += int(stage_ms.get("snapshot_quota_skipped", 0))
-                        for step in PIPELINE_STEPS:
-                            counts[f"{step}_ms"] += int(stage_ms.get(f"{step}_ms", 0))
-                        removed_all.extend(result.removed_ids)
-                        inserted_all.extend(result.inserted_ids)
+                        _record_outcome(counts, removed_all, inserted_all, result, empty_dropped, render_skipped, stage_ms)
                         _beat()
 
                 await asyncio.gather(*(process(u) for u in accepted))
@@ -611,7 +650,7 @@ class IngestService:
         try:
             docs = [
                 d for d in store.get_documents(inserted)
-                if d["metadata"].get("chunk_path", "embedding") != "bm25"
+                if is_embeddable_metadata(d["metadata"])
             ]
             hard = int(self._settings.chunk_embed_max_tokens)
             texts = []
@@ -812,33 +851,7 @@ class IngestService:
         split_end = _time.monotonic()
         stage_ms["split_ms"] = int((split_end - split_start) * 1000)
         raw_chunks = dual.embedding + dual.bm25
-        for order, chunk in enumerate(raw_chunks):
-            chunk.sort_order = order
-            if not getattr(chunk, "content_type", "") or chunk.content_type == "text/markdown":
-                chunk.content_type = (result.content_type or "text/markdown").split(";")[0].strip() or kind
-        inputs = [
-            DocumentInput(
-                url=c.url,
-                path=c.path,
-                title=c.title,
-                content=c.content,
-                sort_order=c.sort_order,
-                chunk_path=getattr(c, "chunk_path", "embedding"),
-                source_group_id=getattr(c, "source_group_id", ""),
-                chunk_id=getattr(c, "chunk_id", ""),
-                span_kind=getattr(c, "span_kind", "document_range"),
-                merged_from=list(getattr(c, "merged_from", []) or []),
-                overlap_from=getattr(c, "overlap_from", None),
-                content_hash=getattr(c, "content_hash", ""),
-                keywords=list(getattr(c, "keywords", []) or []),
-                content_type=getattr(c, "content_type", "text/markdown"),
-                start_char=getattr(c, "start_char", -1),
-                end_char=getattr(c, "end_char", -1),
-                prev_chunk_id=getattr(c, "prev_chunk_id", None),
-                next_chunk_id=getattr(c, "next_chunk_id", None),
-            )
-            for c in raw_chunks
-        ]
+        inputs = _build_doc_inputs(raw_chunks, result.content_type, kind)
         stored = store.store_page(
             version_id,
             library_id,

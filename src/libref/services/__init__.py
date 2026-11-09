@@ -17,7 +17,7 @@ from libref.services.code_ingest import (
     index_repo_by_name_async,
     lookup_index_source_cached,
 )
-from libref.services.factory import build_search_service
+from libref.services.factory import build_ingest_service, build_maintenance_service, build_search_service
 from libref.services.ingest import (
     SCRAPE_JOB_KIND,
     IngestService,
@@ -33,12 +33,14 @@ from libref.services.maintenance import MaintenanceService
 from libref.services.mining_read import MiningReadService, is_subsequence
 from libref.services.mining_refresh import (
     MINE_PATTERNS_JOB_KIND,
+    build_mine_runner,
+    mine_job_params,
     mine_patterns,
     refresh_clusters,
     refresh_feature_tree,
 )
 from libref.services.pages import PageService
-from libref.services.resolver import infer_ecosystem, resolve_package
+from libref.services.resolver import infer_ecosystem, resolve_package, resolve_repo
 from libref.services.retention import (
     REASON_ABSENT_SWEEP,
     REASON_PURGE,
@@ -70,6 +72,9 @@ __all__ = [
     "build_citations",
     "build_messages",
     "build_repo_runner",
+    "build_ingest_service",
+    "build_maintenance_service",
+    "build_mine_runner",
     "build_scrape_runner",
     "build_search_service",
     "call_uid",
@@ -83,6 +88,7 @@ __all__ = [
     "list_deletions",
     "lookup_index_source_cached",
     "material_block",
+    "mine_job_params",
     "mine_patterns",
     "mining_version_ids",
     "prune_expired_logs",
@@ -90,6 +96,7 @@ __all__ = [
     "refresh_clusters",
     "refresh_feature_tree",
     "resolve_package",
+    "resolve_repo",
     "run_scrape_job_sync",
     "scrape_job_params",
     "start_refresh_job",

@@ -284,3 +284,64 @@ def mine_patterns(
     return results
 
 
+def mine_job_params(
+    library: str,
+    version: str,
+    *,
+    ecosystem: str | None = None,
+    minsup: int = DEFAULT_MINSUP,
+    topn: int | None = None,
+    maxlen: int = DEFAULT_MAXLEN,
+    minlen: int = DEFAULT_MINLEN,
+    include_ambiguous: bool = False,
+    cluster_threshold: float | None = None,
+    cluster_min_size: int | None = None,
+) -> dict[str, Any]:
+    """构造挖掘任务参数，与抓取任务参数对称，保证可重放。"""
+    return {
+        "library": library,
+        "version": version,
+        "ecosystem": ecosystem,
+        "minsup": minsup,
+        "topn": topn,
+        "maxlen": maxlen,
+        "minlen": minlen,
+        "include_ambiguous": include_ambiguous,
+        "cluster_threshold": cluster_threshold,
+        "cluster_min_size": cluster_min_size,
+    }
+
+
+def build_mine_runner(settings, conn):
+    """构造挖掘任务消费函数，只处理 mine_patterns，与源码索引解耦。"""
+    from libref.config import LibrefSettings
+
+    _cluster_fields = LibrefSettings.model_fields
+
+    async def runner(job):
+        if job.kind != MINE_PATTERNS_JOB_KIND:
+            raise ValueError(f"unsupported job kind: {job.kind}")
+        p = job.params
+        return mine_patterns(
+            conn,
+            p["library"],
+            p["version"],
+            ecosystem=p.get("ecosystem"),
+            minsup=int(p.get("minsup", DEFAULT_MINSUP)),
+            topn=p.get("topn"),
+            maxlen=int(p.get("maxlen", DEFAULT_MAXLEN)),
+            minlen=int(p.get("minlen", DEFAULT_MINLEN)),
+            include_ambiguous=bool(p.get("include_ambiguous", False)),
+            cluster_threshold=float(p.get(
+                "cluster_threshold",
+                _cluster_fields["cluster_threshold"].default,
+            )),
+            cluster_min_size=int(p.get(
+                "cluster_min_size",
+                _cluster_fields["cluster_min_size"].default,
+            )),
+        )
+
+    return runner
+
+

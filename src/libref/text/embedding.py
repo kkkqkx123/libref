@@ -54,3 +54,8 @@ def build_embed_text(
     head = " / ".join(p for p in (title, path) if p)
     body = strip_markdown_for_embedding(content)
     return f"{head}\n{body}" if head else body
+
+
+def is_embeddable_metadata(meta: dict | None) -> bool:
+    """派生向量是否收录该块：bm25 块只服务 FTS，不进向量。"""
+    return (meta or {}).get("chunk_path", "embedding") != "bm25"

@@ -52,3 +52,35 @@ def build_search_service(conn, settings, *, gateway=None, vec_store=None, embed=
             rerank_fn = None
     service = SearchService(conn, settings, vec_store=vec, embed=fn, rerank=rerank_fn)
     return service, gw
+
+
+def build_ingest_service(conn, settings, *, gateway=None, vec_store=None, embed=None):
+    """装配文档抓取服务，向量缺失时退化为纯真源落库。"""
+    from libref.services.ingest import IngestService
+
+    gw = gateway if gateway is not None else build_gateway(settings)
+    vec = vec_store
+    fn = embed
+    if vec is None or fn is None:
+        built_vec, built_embed, gw = build_vector(settings, gw)
+        if vec is None:
+            vec = built_vec
+        if fn is None:
+            fn = built_embed
+    return IngestService(settings, conn, vec_store=vec, embed=fn), gw
+
+
+def build_maintenance_service(conn, settings, *, gateway=None, vec_store=None, embed=None):
+    """装配向量重灌服务，调用方不再手配网关与向量。"""
+    from libref.services.maintenance import MaintenanceService
+
+    gw = gateway if gateway is not None else build_gateway(settings)
+    vec = vec_store
+    fn = embed
+    if vec is None or fn is None:
+        built_vec, built_embed, gw = build_vector(settings, gw)
+        if vec is None:
+            vec = built_vec
+        if fn is None:
+            fn = built_embed
+    return MaintenanceService(conn, settings, vec_store=vec, embed=fn), gw
