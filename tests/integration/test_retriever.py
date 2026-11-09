@@ -34,11 +34,17 @@ def _seed(conn) -> dict[str, int]:
     ids: dict[str, int] = {}
     for key, url, body in (
         ("plain", "https://d.example/plain.html", "quetzalhybrid plain body text"),
-        ("pattern", "https://d.example/pattern.html",
-         "quetzalhybrid numpy.array numpy.zeros workflow body"),
+        (
+            "pattern",
+            "https://d.example/pattern.html",
+            "quetzalhybrid numpy.array numpy.zeros workflow body",
+        ),
     ):
         r = store.store_page(
-            1, 1, url, "stored",
+            1,
+            1,
+            url,
+            "stored",
             chunks=[Chunk(url=url, path="G", title="G", content=body, sort_order=0)],
             raw_content=body,
         )
@@ -65,7 +71,9 @@ def test_rrf_missing_road_contributes_zero(conn, tmp_path, monkeypatch) -> None:
     assert r._rrf([1, 2], [2, 3]) == [2, 1, 3]
 
 
-def test_hybrid_marks_sources_and_fused_score_sorted(conn, tmp_path, monkeypatch) -> None:
+def test_hybrid_marks_sources_and_fused_score_sorted(
+    conn, tmp_path, monkeypatch
+) -> None:
     ids = _seed(conn)
     monkeypatch.chdir(tmp_path)
     s = LibrefSettings(freq_alpha=0.0, cluster_alpha=0.0)
@@ -88,8 +96,7 @@ def test_freq_alpha_zero_is_noop(conn, tmp_path, monkeypatch) -> None:
     s = LibrefSettings(freq_alpha=0.0, cluster_alpha=0.0)
     vec = _FakeVec([ids["plain"], ids["pattern"]])
     rec = HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed)
-    rrf_order = rec._rrf([ids["plain"], ids["pattern"]],
-                          [ids["plain"], ids["pattern"]])
+    rrf_order = rec._rrf([ids["plain"], ids["pattern"]], [ids["plain"], ids["pattern"]])
     results, _ = asyncio.run(rec.search_async("quetzalhybrid", limit=8))
     assert [r["id"] for r in results] == rrf_order
 
@@ -104,7 +111,7 @@ def test_freq_bonus_promotes_pattern_doc(conn, tmp_path, monkeypatch) -> None:
             "quetzalhybrid", limit=8
         )
     )
-    assert [r["id"] for r in results][0] == ids["pattern"]
+    assert next(r["id"] for r in results) == ids["pattern"]
 
 
 def test_degraded_on_embed_failure(conn, tmp_path, monkeypatch) -> None:
@@ -140,15 +147,35 @@ def test_precise_attribution_ignores_substring(conn, tmp_path, monkeypatch) -> N
     seed_library_version(conn)
     store = DocumentStore(conn)
     hit = store.store_page(
-        1, 1, "https://d.example/exact.html", "stored",
-        chunks=[Chunk(url="https://d.example/exact.html", path="G", title="G",
-                      content="quetzalgate numpy.array usage", sort_order=0)],
+        1,
+        1,
+        "https://d.example/exact.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/exact.html",
+                path="G",
+                title="G",
+                content="quetzalgate numpy.array usage",
+                sort_order=0,
+            )
+        ],
         raw_content="quetzalgate numpy.array usage",
     )
     miss = store.store_page(
-        1, 1, "https://d.example/sub.html", "stored",
-        chunks=[Chunk(url="https://d.example/sub.html", path="G", title="G",
-                      content="quetzalgate my_numpy.arrayish helper", sort_order=0)],
+        1,
+        1,
+        "https://d.example/sub.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/sub.html",
+                path="G",
+                title="G",
+                content="quetzalgate my_numpy.arrayish helper",
+                sort_order=0,
+            )
+        ],
         raw_content="quetzalgate my_numpy.arrayish helper",
     )
     conn.execute(
@@ -165,7 +192,7 @@ def test_precise_attribution_ignores_substring(conn, tmp_path, monkeypatch) -> N
             "quetzalgate", limit=8
         )
     )
-    first = [r["id"] for r in results][0]
+    first = next(r["id"] for r in results)
     assert first == hit.inserted_ids[0]
 
 
@@ -174,7 +201,9 @@ def test_dual_track_gate_records_both_roads(conn, tmp_path, monkeypatch) -> None
     monkeypatch.chdir(tmp_path)
     s = LibrefSettings(freq_alpha=5.0, cluster_alpha=0.0)
     vec = _FakeVec([ids["pattern"], ids["plain"]])
-    fts_only, _ = asyncio.run(HybridRetriever(conn, s).search_async("quetzalhybrid", limit=8))
+    fts_only, _ = asyncio.run(
+        HybridRetriever(conn, s).search_async("quetzalhybrid", limit=8)
+    )
     hybrid, degraded = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
             "quetzalhybrid", limit=8
@@ -182,11 +211,13 @@ def test_dual_track_gate_records_both_roads(conn, tmp_path, monkeypatch) -> None
     )
     assert degraded is False
     assert len(fts_only) == 2 and len(hybrid) == 2
-    assert [r["id"] for r in hybrid][0] == ids["pattern"]
+    assert next(r["id"] for r in hybrid) == ids["pattern"]
     assert all(isinstance(r["score"], float) for r in hybrid)
 
 
-def _mrr_and_recall(ranked_ids: list[int], relevant: set[int], k: int) -> tuple[float, float]:
+def _mrr_and_recall(
+    ranked_ids: list[int], relevant: set[int], k: int
+) -> tuple[float, float]:
     rank = next((i + 1 for i, doc in enumerate(ranked_ids) if doc in relevant), 0)
     mrr = 1.0 / rank if rank else 0.0
     hits = len(set(ranked_ids[:k]).intersection(relevant))
@@ -206,8 +237,13 @@ def test_quality_gate_mrr_recall_no_regression(conn, tmp_path, monkeypatch) -> N
     ):
         url = f"https://d.example/{key}.html"
         result = store.store_page(
-            1, 1, url, "stored",
-            chunks=[Chunk(url=url, path="Guide", title=key, content=body, sort_order=0)],
+            1,
+            1,
+            url,
+            "stored",
+            chunks=[
+                Chunk(url=url, path="Guide", title=key, content=body, sort_order=0)
+            ],
             raw_content=body,
         )
         ids[key] = result.inserted_ids[0]
@@ -237,9 +273,9 @@ def test_quality_gate_mrr_recall_no_regression(conn, tmp_path, monkeypatch) -> N
     hybrid_recalls: list[float] = []
     for query, relevant in cases:
         results, degraded = asyncio.run(
-            HybridRetriever(conn, settings, vec_store=helpful, embed=_fake_embed).search_async(
-                query, limit=4
-            )
+            HybridRetriever(
+                conn, settings, vec_store=helpful, embed=_fake_embed
+            ).search_async(query, limit=4)
         )
         assert degraded is False
         mrr, recall = _mrr_and_recall([r["id"] for r in results], relevant, 2)

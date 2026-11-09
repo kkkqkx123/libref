@@ -74,13 +74,17 @@ class HttpFetcher:
             if resp.status_code == 304:
                 return FetchOutcome(url=url, status="unchanged")
             if resp.status_code == 404 or resp.status_code == 410:
-                return FetchOutcome(url=url, status="absent", error=f"HTTP {resp.status_code}")
+                return FetchOutcome(
+                    url=url, status="absent", error=f"HTTP {resp.status_code}"
+                )
             if resp.status_code >= 500 or resp.status_code in _RETRYABLE_STATUS:
                 error = f"HTTP {resp.status_code}"
                 await asyncio.sleep(min(0.5 * (2**attempt), _BACKOFF_CAP))
                 continue
             if resp.status_code >= 400:
-                return FetchOutcome(url=url, status="failed", error=f"HTTP {resp.status_code}")
+                return FetchOutcome(
+                    url=url, status="failed", error=f"HTTP {resp.status_code}"
+                )
             return FetchOutcome(
                 url=url,
                 status="ok",

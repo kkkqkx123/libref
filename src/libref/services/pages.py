@@ -55,17 +55,19 @@ class PageService:
                 parsed = json.loads(raw) if raw else {}
             except ValueError:
                 parsed = {}
-            details.append({
-                "content": content,
-                "source_group_id": parsed.get("source_group_id", ""),
-                "chunk_id": parsed.get("chunk_id", ""),
-                "span_kind": parsed.get("span_kind", "document_range"),
-                "merged_from": list(parsed.get("merged_from", []) or []),
-                "overlap_from": parsed.get("overlap_from"),
-                "overlap_text": str(parsed.get("overlap_text", "") or ""),
-                "chunk_index": int(parsed.get("chunk_index", 0) or 0),
-                "total_chunks": max(1, int(parsed.get("total_chunks", 1) or 1)),
-            })
+            details.append(
+                {
+                    "content": content,
+                    "source_group_id": parsed.get("source_group_id", ""),
+                    "chunk_id": parsed.get("chunk_id", ""),
+                    "span_kind": parsed.get("span_kind", "document_range"),
+                    "merged_from": list(parsed.get("merged_from", []) or []),
+                    "overlap_from": parsed.get("overlap_from"),
+                    "overlap_text": str(parsed.get("overlap_text", "") or ""),
+                    "chunk_index": int(parsed.get("chunk_index", 0) or 0),
+                    "total_chunks": max(1, int(parsed.get("total_chunks", 1) or 1)),
+                }
+            )
         return {
             "url": url,
             "library": rows[0][4],
@@ -88,7 +90,9 @@ class PageService:
         ecosystem: str | None = None,
     ) -> dict[str, Any] | None:
         """Fetch neighboring blocks around a sort position for hit expansion."""
-        page = self.read_page(url, library=library, version=version, ecosystem=ecosystem)
+        page = self.read_page(
+            url, library=library, version=version, ecosystem=ecosystem
+        )
         if page is None:
             return None
         filters = ["p.url = ?"]
@@ -111,6 +115,7 @@ class PageService:
         if row is None:
             return None
         from libref.store.document_store import DocumentStore
+
         docs = DocumentStore(self._conn).get_window(int(row[0]), sort_order, radius)
         return {"url": url, "center": sort_order, "radius": radius, "docs": docs}
 
@@ -150,17 +155,19 @@ class PageService:
                 parsed = json.loads(raw) if raw else {}
             except ValueError:
                 parsed = {}
-            details.append({
-                "content": content,
-                "source_group_id": parsed.get("source_group_id", ""),
-                "chunk_id": parsed.get("chunk_id", ""),
-                "span_kind": parsed.get("span_kind", "document_range"),
-                "merged_from": list(parsed.get("merged_from", []) or []),
-                "overlap_from": parsed.get("overlap_from"),
-                "overlap_text": str(parsed.get("overlap_text", "") or ""),
-                "chunk_index": int(parsed.get("chunk_index", 0) or 0),
-                "total_chunks": max(1, int(parsed.get("total_chunks", 1) or 1)),
-            })
+            details.append(
+                {
+                    "content": content,
+                    "source_group_id": parsed.get("source_group_id", ""),
+                    "chunk_id": parsed.get("chunk_id", ""),
+                    "span_kind": parsed.get("span_kind", "document_range"),
+                    "merged_from": list(parsed.get("merged_from", []) or []),
+                    "overlap_from": parsed.get("overlap_from"),
+                    "overlap_text": str(parsed.get("overlap_text", "") or ""),
+                    "chunk_index": int(parsed.get("chunk_index", 0) or 0),
+                    "total_chunks": max(1, int(parsed.get("total_chunks", 1) or 1)),
+                }
+            )
         return {
             "url": url,
             "source_group_id": source_group_id,

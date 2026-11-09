@@ -56,12 +56,16 @@ def classify_content(content_type: str | None, url: str) -> str:
         return "markdown"
     if ctype == "text/plain":
         return "text"
-    if ctype in (
-        "application/javascript",
-        "application/x-python",
-        "text/x-python",
-        "text/x-java",
-        "application/java",
-    ) or "source" in ctype:
+    if (
+        ctype
+        in (
+            "application/javascript",
+            "application/x-python",
+            "text/x-python",
+            "text/x-java",
+            "application/java",
+        )
+        or "source" in ctype
+    ):
         return "source"
     return "html"

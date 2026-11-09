@@ -84,9 +84,7 @@ def build_source_chunks(
     dropped = 0
     for group in groups:
         if group.header_context.strip():
-            _emit_header_context(
-                group, source, resolved, chunks, repo
-            )
+            _emit_header_context(group, source, resolved, chunks, repo)
         members = [q for q in group.member_quals if q in group.member_spans]
         if not members:
             text = _slice(source, *group.header_span)
@@ -96,8 +94,16 @@ def build_source_chunks(
             for chunk_path in ChunkPath:
                 budget = resolved[chunk_path]
                 dropped += _emit_pieces(
-                    group, None, text, group.header_span, chunk_path,
-                    budget, EXACT_ENTITIES, chunks, source, repo,
+                    group,
+                    None,
+                    text,
+                    group.header_span,
+                    chunk_path,
+                    budget,
+                    EXACT_ENTITIES,
+                    chunks,
+                    source,
+                    repo,
                 )
             continue
         for qual in members:
@@ -110,14 +116,25 @@ def build_source_chunks(
                 budget = resolved[chunk_path]
                 before = len(chunks)
                 dropped += _emit_pieces(
-                    group, qual, text, span, chunk_path,
-                    budget, EXACT_ENTITIES, chunks, source, repo,
+                    group,
+                    qual,
+                    text,
+                    span,
+                    chunk_path,
+                    budget,
+                    EXACT_ENTITIES,
+                    chunks,
+                    source,
+                    repo,
                 )
                 if chunk_path == ChunkPath.EMBEDDING:
                     head = _header_for_member(qual, decls_by_qual, path)
                     if head:
                         for fresh in chunks[before:]:
-                            if fresh.qual == qual and fresh.chunk_path == chunk_path.value:
+                            if (
+                                fresh.qual == qual
+                                and fresh.chunk_path == chunk_path.value
+                            ):
                                 fresh.content = f"{head}\n{fresh.content}"
                                 break
     _merge_undersized(groups, resolved, chunks)
@@ -129,13 +146,14 @@ def _slice(source: bytes, start: int, end: int) -> str:
     return source[start:end].decode("utf-8", "replace")
 
 
-def _emit_header_context(group, source: bytes, budgets, chunks: list[SourceChunk], repo: str) -> None:
+def _emit_header_context(
+    group, source: bytes, budgets, chunks: list[SourceChunk], repo: str
+) -> None:
     text = group.header_context.strip()
     if not text:
         return
     first_start = min(
-        [group.header_span[0]]
-        + [span[0] for span in group.member_spans.values()]
+        [group.header_span[0]] + [span[0] for span in group.member_spans.values()]
     )
     for chunk_path in ChunkPath:
         budget = budgets[chunk_path]
@@ -160,9 +178,16 @@ def _emit_header_context(group, source: bytes, budgets, chunks: list[SourceChunk
 
 
 def _emit_pieces(
-    group, qual: str | None, text: str, span: tuple[int, int],
-    chunk_path: ChunkPath, budget: ChunkBudget, span_kind: str,
-    chunks: list[SourceChunk], source: bytes, repo: str,
+    group,
+    qual: str | None,
+    text: str,
+    span: tuple[int, int],
+    chunk_path: ChunkPath,
+    budget: ChunkBudget,
+    span_kind: str,
+    chunks: list[SourceChunk],
+    source: bytes,
+    repo: str,
 ) -> int:
     dropped = 0
     start, end = span
@@ -218,8 +243,10 @@ def _merge_undersized(groups, budgets, chunks: list[SourceChunk]) -> None:
                 cost(left.content, ChunkPath(left.chunk_path)) < budget.min_limit
                 and not docs.get(left.qual or "", False)
                 and not docs.get(right.qual or "", False)
-                and cost(left.content + "\n" + right.content,
-                         ChunkPath(left.chunk_path)) <= budget.body_limit
+                and cost(
+                    left.content + "\n" + right.content, ChunkPath(left.chunk_path)
+                )
+                <= budget.body_limit
             ):
                 left.content = left.content + "\n" + right.content
                 left.end_byte = right.end_byte

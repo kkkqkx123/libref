@@ -132,9 +132,7 @@ class MiningReadService:
             " ORDER BY 2 DESC, 3 DESC, c.callee_name LIMIT ?",
             (*vids, api, *vids, api, limit),
         ).fetchall()
-        return [
-            {"api": r[0], "scopes": r[1], "calls": r[2]} for r in rows
-        ]
+        return [{"api": r[0], "scopes": r[1], "calls": r[2]} for r in rows]
 
     def list_patterns(
         self,
@@ -217,13 +215,15 @@ class MiningReadService:
                 parsed = json.loads(args) if args else []
             except ValueError:
                 parsed = [args]
-            slot["calls"].append({
-                "callee": callee,
-                "args": parsed,
-                "line_start": ls,
-                "line_end": le,
-                "confidence": cf,
-            })
+            slot["calls"].append(
+                {
+                    "callee": callee,
+                    "args": parsed,
+                    "line_start": ls,
+                    "line_end": le,
+                    "confidence": cf,
+                }
+            )
         out = []
         for key in order:
             names = [c["callee"] for c in groups[key]["calls"]]
@@ -249,7 +249,13 @@ class MiningReadService:
         filt = ""
         if prefix:
             filt = " AND (path = ? OR path LIKE ? ESCAPE '\\')"
-            params.extend([prefix, prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + ".%"])
+            params.extend(
+                [
+                    prefix,
+                    prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    + ".%",
+                ]
+            )
         params.append(limit)
         rows = self._conn.execute(
             "SELECT path, parent, depth, kind, calls, scopes FROM feature_nodes"
@@ -258,7 +264,14 @@ class MiningReadService:
             params,
         ).fetchall()
         return [
-            {"path": r[0], "parent": r[1], "depth": r[2], "kind": r[3], "calls": r[4], "scopes": r[5]}
+            {
+                "path": r[0],
+                "parent": r[1],
+                "depth": r[2],
+                "kind": r[3],
+                "calls": r[4],
+                "scopes": r[5],
+            }
             for r in rows
         ]
 
@@ -285,7 +298,12 @@ class MiningReadService:
         for cid, member, size, rep in rows:
             slot = grouped.get(int(cid))
             if slot is None:
-                slot = {"cluster_id": int(cid), "members": [], "size": int(size), "representative": rep}
+                slot = {
+                    "cluster_id": int(cid),
+                    "members": [],
+                    "size": int(size),
+                    "representative": rep,
+                }
                 grouped[int(cid)] = slot
                 order.append(int(cid))
             slot["members"].append(member)

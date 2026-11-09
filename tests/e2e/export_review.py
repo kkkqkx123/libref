@@ -28,8 +28,9 @@ def _line_of(source: bytes, offset: int) -> int:
     return source.count(b"\n", 0, offset) + 1
 
 
-def export_repo(lang: str, root: Path, repo: str, commit: str,
-                sample: list[str] | None = None) -> list[str]:
+def export_repo(
+    lang: str, root: Path, repo: str, commit: str, sample: list[str] | None = None
+) -> list[str]:
     from libref.astminer import config as ast_config
     from libref.astminer import engine as ast_engine
     from libref.astminer import grouping as ast_grouping
@@ -55,7 +56,9 @@ def export_repo(lang: str, root: Path, repo: str, commit: str,
         all_decls.extend(decls)
         file_aliases[rel] = list(aliases)
         all_raw.extend(raw)
-    resolved = ast_resolution.resolve_calls(all_decls, file_aliases, all_raw, repo, commit)
+    resolved = ast_resolution.resolve_calls(
+        all_decls, file_aliases, all_raw, repo, commit
+    )
     by_file_calls: dict[str, list] = {}
     for call in resolved:
         by_file_calls.setdefault(call.caller_file, []).append(call)
@@ -95,8 +98,10 @@ def export_repo(lang: str, root: Path, repo: str, commit: str,
         )
         chunk_lines = [
             f"# File: {rel}",
-            (f"groups: {len(groups)} chunks: {len(split.chunks)} "
-             f"empty_dropped={split.empty_dropped}"),
+            (
+                f"groups: {len(groups)} chunks: {len(split.chunks)} "
+                f"empty_dropped={split.empty_dropped}"
+            ),
             "",
         ]
         for chunk in split.chunks:
@@ -109,8 +114,9 @@ def export_repo(lang: str, root: Path, repo: str, commit: str,
         (out_dir / f"{rel.replace('/', '__')}.chunks.txt").write_text(
             "\n".join(chunk_lines) + "\n", encoding="utf-8"
         )
-        summary.append(f"{rel} decls={len(decls)} calls={len(calls)} "
-                       f"chunks={len(split.chunks)}")
+        summary.append(
+            f"{rel} decls={len(decls)} calls={len(calls)} chunks={len(split.chunks)}"
+        )
     (out_dir / "SUMMARY.txt").write_text("\n".join(summary) + "\n", encoding="utf-8")
     return summary
 
@@ -126,8 +132,9 @@ def main() -> int:
             sample = None
         else:
             sampling = json.loads(
-                (ROOT / "tests" / "fixtures" / "parsing" / "sampling.json")
-                .read_text(encoding="utf-8")
+                (ROOT / "tests" / "fixtures" / "parsing" / "sampling.json").read_text(
+                    encoding="utf-8"
+                )
             )
             root = ROOT / sampling["root"]
             sample = sampling["sample"]

@@ -80,8 +80,13 @@ class DocumentStore:
         ).fetchone()
         if row is None:
             return None
-        return PageRecord(page_id=row[0], url=row[1], etag=row[2],
-                          last_modified=row[3], content_hash=row[4])
+        return PageRecord(
+            page_id=row[0],
+            url=row[1],
+            etag=row[2],
+            last_modified=row[3],
+            content_hash=row[4],
+        )
 
     def list_page_urls(self, version_id: int) -> list[str]:
         """List all URLs of existing pages under this version, for the caller's absent-set difference."""
@@ -108,7 +113,14 @@ class DocumentStore:
             for r in rows
         ]
 
-    def get_window(self, page_id: int, sort_order: int, radius: int = 1, *, chunk_path: str | None = None) -> list[dict[str, Any]]:
+    def get_window(
+        self,
+        page_id: int,
+        sort_order: int,
+        radius: int = 1,
+        *,
+        chunk_path: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Fetch a before/after window by sort order, for expanding retrieval hit context."""
         if radius < 0:
             return []
@@ -222,14 +234,18 @@ class DocumentStore:
                 if stored:
                     digest = stored
                 else:
-                    digest = content_hash(f"{meta.get('title', '')}\0{meta.get('path', '')}\0{row.get('content')}")
+                    digest = content_hash(
+                        f"{meta.get('title', '')}\0{meta.get('path', '')}\0{row.get('content')}"
+                    )
                 by_hash.setdefault(digest, []).append(row)
             inserted: list[int] = []
             reused: list[int] = []
             used_old: set[int] = set()
             pending: list[tuple[DocumentInput, str]] = []
             for chunk in chunks or []:
-                digest = getattr(chunk, "content_hash", "") or content_hash(f"{chunk.title}\0{chunk.path}\0{chunk.content}")
+                digest = getattr(chunk, "content_hash", "") or content_hash(
+                    f"{chunk.title}\0{chunk.path}\0{chunk.content}"
+                )
                 candidates = by_hash.get(digest, [])
                 hit = next((r for r in candidates if r["id"] not in used_old), None)
                 if hit is not None:
@@ -259,8 +275,11 @@ class DocumentStore:
                         "overlap_from": getattr(chunk, "overlap_from", None),
                         "overlap_text": str(getattr(chunk, "overlap_text", "") or ""),
                         "chunk_index": int(getattr(chunk, "chunk_index", 0) or 0),
-                        "total_chunks": max(1, int(getattr(chunk, "total_chunks", 1) or 1)),
-                        "content_hash": getattr(chunk, "content_hash", "") or content_hash(chunk.content),
+                        "total_chunks": max(
+                            1, int(getattr(chunk, "total_chunks", 1) or 1)
+                        ),
+                        "content_hash": getattr(chunk, "content_hash", "")
+                        or content_hash(chunk.content),
                         "keywords": list(getattr(chunk, "keywords", []) or []),
                         "content_type": getattr(chunk, "content_type", "text/markdown"),
                         "start_char": getattr(chunk, "start_char", -1),
@@ -274,18 +293,33 @@ class DocumentStore:
                 if reuse_id:
                     self._conn.execute(
                         "UPDATE documents SET url=?, content=?, metadata=?, sort_order=? WHERE id=?",
-                        (chunk.url, chunk.content, metadata, chunk.sort_order, int(reuse_id)),
+                        (
+                            chunk.url,
+                            chunk.content,
+                            metadata,
+                            chunk.sort_order,
+                            int(reuse_id),
+                        ),
                     )
                 else:
                     cur = self._conn.execute(
                         "INSERT INTO documents(library_id, version_id, page_id, url, content, metadata, sort_order) "
                         "VALUES(?,?,?,?,?,?,?)",
-                        (library_id, version_id, page.page_id, chunk.url,
-                         chunk.content, metadata, chunk.sort_order),
+                        (
+                            library_id,
+                            version_id,
+                            page.page_id,
+                            chunk.url,
+                            chunk.content,
+                            metadata,
+                            chunk.sort_order,
+                        ),
                     )
                     inserted.append(int(cur.lastrowid))
             self._conn.commit()
-            return StoreResult(outcome, removed_ids=leftover, inserted_ids=inserted, reused_ids=reused)
+            return StoreResult(
+                outcome, removed_ids=leftover, inserted_ids=inserted, reused_ids=reused
+            )
         except BaseException:
             self._conn.rollback()
             raise
@@ -329,7 +363,9 @@ class DocumentStore:
             "SELECT id FROM documents WHERE page_id=?", (page.page_id,)
         ).fetchall()
         removed = [r[0] for r in rows]
-        self._conn.execute("DELETE FROM pages WHERE version_id=? AND url=?", (version_id, url))
+        self._conn.execute(
+            "DELETE FROM pages WHERE version_id=? AND url=?", (version_id, url)
+        )
         return removed
 
     def _delete_documents(self, page_id: int) -> list[int]:

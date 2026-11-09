@@ -17,8 +17,20 @@ def seed_lv(conn, library: str = "docs", version: str = "1.0") -> tuple[int, int
 
 def make_chunks(url: str = "https://d.example/a.html") -> list[Chunk]:
     return [
-        Chunk(url=url, path="Guide", title="Guide", content="install libref now", sort_order=0),
-        Chunk(url=url, path="Guide / Usage", title="Usage", content="import libref", sort_order=1),
+        Chunk(
+            url=url,
+            path="Guide",
+            title="Guide",
+            content="install libref now",
+            sort_order=0,
+        ),
+        Chunk(
+            url=url,
+            path="Guide / Usage",
+            title="Usage",
+            content="import libref",
+            sort_order=1,
+        ),
     ]
 
 
@@ -26,8 +38,12 @@ def test_stored_creates_page_documents_and_fts(conn):
     seed_lv(conn)
     store = DocumentStore(conn)
     result = store.store_page(
-        version_id=1, library_id=1, url="https://d.example/a.html",
-        outcome="stored", chunks=make_chunks(), raw_content="# Guide\ninstall libref now",
+        version_id=1,
+        library_id=1,
+        url="https://d.example/a.html",
+        outcome="stored",
+        chunks=make_chunks(),
+        raw_content="# Guide\ninstall libref now",
     )
     assert result.outcome == "stored"
     assert result.removed_ids == []
@@ -43,8 +59,14 @@ def test_stored_creates_page_documents_and_fts(conn):
 def test_unchanged_keeps_documents(conn):
     seed_lv(conn)
     store = DocumentStore(conn)
-    store.store_page(1, 1, "https://d.example/a.html", "stored",
-                     chunks=make_chunks(), raw_content="v1 body")
+    store.store_page(
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=make_chunks(),
+        raw_content="v1 body",
+    )
     before = conn.execute("SELECT count(*) FROM documents").fetchone()[0]
     # storing the same content again hits the short-circuit check
     outcome = store.ensure_changed(1, "https://d.example/a.html", "v1 body")
@@ -59,8 +81,14 @@ def test_unchanged_keeps_documents(conn):
 def test_unchanged_updates_fetched_at_only(conn):
     seed_lv(conn)
     store = DocumentStore(conn)
-    store.store_page(1, 1, "https://d.example/a.html", "stored",
-                     chunks=make_chunks(), raw_content="body")
+    store.store_page(
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=make_chunks(),
+        raw_content="body",
+    )
     result = store.store_page(1, 1, "https://d.example/a.html", "unchanged")
     assert result.outcome == "unchanged"
 
@@ -68,8 +96,14 @@ def test_unchanged_updates_fetched_at_only(conn):
 def test_absent_deletes_page_and_documents(conn):
     seed_lv(conn)
     store = DocumentStore(conn)
-    first = store.store_page(1, 1, "https://d.example/a.html", "stored",
-                             chunks=make_chunks(), raw_content="b")
+    first = store.store_page(
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=make_chunks(),
+        raw_content="b",
+    )
     result = store.store_page(1, 1, "https://d.example/a.html", "absent")
     assert result.outcome == "absent"
     assert sorted(result.removed_ids) == sorted(first.inserted_ids)
@@ -85,12 +119,28 @@ def test_absent_deletes_page_and_documents(conn):
 def test_restored_reports_replaced_ids(conn):
     seed_lv(conn)
     store = DocumentStore(conn)
-    first = store.store_page(1, 1, "https://d.example/a.html", "stored",
-                             chunks=make_chunks(), raw_content="v1")
+    first = store.store_page(
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=make_chunks(),
+        raw_content="v1",
+    )
     second = store.store_page(
-        1, 1, "https://d.example/a.html", "stored",
-        chunks=[Chunk(url="https://d.example/a.html", path="G", title="G",
-                      content="brand new body", sort_order=0)],
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/a.html",
+                path="G",
+                title="G",
+                content="brand new body",
+                sort_order=0,
+            )
+        ],
         raw_content="v2",
     )
     assert second.outcome == "stored"
@@ -102,8 +152,14 @@ def test_restored_reports_replaced_ids(conn):
 def test_empty_keeps_page_without_documents(conn):
     seed_lv(conn)
     store = DocumentStore(conn)
-    first = store.store_page(1, 1, "https://d.example/a.html", "stored",
-                             chunks=make_chunks(), raw_content="b")
+    first = store.store_page(
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=make_chunks(),
+        raw_content="b",
+    )
     result = store.store_page(1, 1, "https://d.example/a.html", "empty", raw_content="")
     assert result.outcome == "empty"
     assert sorted(result.removed_ids) == sorted(first.inserted_ids)
@@ -122,6 +178,7 @@ def test_skipped_and_failed_are_noop_writes(conn):
 
 def test_unknown_outcome_rejected(conn):
     import pytest
+
     seed_lv(conn)
     store = DocumentStore(conn)
     with pytest.raises(ValueError):
@@ -131,8 +188,14 @@ def test_unknown_outcome_rejected(conn):
 def test_get_documents_batch_roundtrip(conn):
     seed_lv(conn)
     store = DocumentStore(conn)
-    result = store.store_page(1, 1, "https://d.example/a.html", "stored",
-                              chunks=make_chunks(), raw_content="b")
+    result = store.store_page(
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=make_chunks(),
+        raw_content="b",
+    )
     docs = store.get_documents(list(reversed(result.inserted_ids)) + [999999])
     assert [d["id"] for d in docs] == list(reversed(result.inserted_ids))
     assert docs[0]["content"] == "import libref"

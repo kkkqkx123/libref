@@ -6,8 +6,8 @@ import asyncio
 import contextlib
 import shutil
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import httpx
 import pytest
@@ -39,7 +39,9 @@ def seed_library_version(
 ) -> tuple[int, int]:
     """Library and version FK rows for tests, fixed to ids 1."""
     conn.execute("INSERT INTO libraries(id, name) VALUES(1, ?)", (library,))
-    conn.execute("INSERT INTO versions(id, library_id, version) VALUES(1, 1, ?)", (version,))
+    conn.execute(
+        "INSERT INTO versions(id, library_id, version) VALUES(1, 1, ?)", (version,)
+    )
     conn.commit()
     return 1, 1
 

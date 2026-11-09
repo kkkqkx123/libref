@@ -17,7 +17,11 @@ from libref.services.code_ingest import (
     index_repo_by_name_async,
     lookup_index_source_cached,
 )
-from libref.services.factory import build_ingest_service, build_maintenance_service, build_search_service
+from libref.services.factory import (
+    build_ingest_service,
+    build_maintenance_service,
+    build_search_service,
+)
 from libref.services.ingest import (
     SCRAPE_JOB_KIND,
     IngestService,
@@ -70,11 +74,11 @@ __all__ = [
     "answer_query",
     "answer_query_async",
     "build_citations",
-    "build_messages",
-    "build_repo_runner",
     "build_ingest_service",
     "build_maintenance_service",
+    "build_messages",
     "build_mine_runner",
+    "build_repo_runner",
     "build_scrape_runner",
     "build_search_service",
     "call_uid",

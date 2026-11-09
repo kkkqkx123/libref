@@ -157,10 +157,7 @@ def test_random_against_bruteforce():
 
     rng = random.Random(42)
     items = list(range(5))
-    db = [
-        [rng.choice(items) for _ in range(rng.randint(2, 8))]
-        for _ in range(8)
-    ]
+    db = [[rng.choice(items) for _ in range(rng.randint(2, 8))] for _ in range(8)]
 
     ps = PrefixSpan(db)
     ps.minlen, ps.maxlen = 1, 4

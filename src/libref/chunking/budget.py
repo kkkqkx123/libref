@@ -130,9 +130,7 @@ def truncate_to_cost(text: str, path: ChunkPath, limit: int) -> str:
     return "".join(chars[:lo])
 
 
-def split_lines_by_cost(
-    text: str, path: ChunkPath, limit: int
-) -> list[str]:
+def split_lines_by_cost(text: str, path: ChunkPath, limit: int) -> list[str]:
     """Sole fallback for greedy line-based assembly; oversized single lines are hard-split by character budget."""
     if not text:
         return []
@@ -149,11 +147,11 @@ def split_lines_by_cost(
         if not cur and line_cost > limit:
             head = truncate_to_cost(line, path, limit)
             parts.append(head if head else line[:1])
-            rest = line[len(head):] if head else line[1:]
+            rest = line[len(head) :] if head else line[1:]
             while rest:
                 head = truncate_to_cost(rest, path, limit)
                 parts.append(head if head else rest[:1])
-                rest = rest[len(head):] if head else rest[1:]
+                rest = rest[len(head) :] if head else rest[1:]
             continue
         cur.append(line)
         cur_cost += line_cost

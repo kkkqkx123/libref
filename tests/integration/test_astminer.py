@@ -133,13 +133,9 @@ def test_relative_import_resolves_against_module_path():
     assert aliases == []
     _decls, aliases, _raw = _parse("m.py", b"from .pkg import mod\n")
     assert aliases == [("mod", "pkg.mod")]
-    _decls, aliases, _raw = _parse(
-        "pkg/mod.py", b"from .utils import helper\n"
-    )
+    _decls, aliases, _raw = _parse("pkg/mod.py", b"from .utils import helper\n")
     assert aliases == [("helper", "pkg.utils.helper")]
-    _decls, aliases, _raw = _parse(
-        "pkg/__init__.py", b"from .core import start\n"
-    )
+    _decls, aliases, _raw = _parse("pkg/__init__.py", b"from .core import start\n")
     assert aliases == [("start", "pkg.core.start")]
 
 
@@ -152,8 +148,12 @@ def test_arg_shapes_preserved():
 
 
 def test_alias_is_file_scoped():
-    decls_a, aliases_a, raw_a = _parse("a.py", b"import numpy as np\ndef f():\n    np.array(1)\n")
-    decls_b, aliases_b, raw_b = _parse("b.py", b"import networkx as np\ndef g():\n    np.graph(1)\n")
+    decls_a, aliases_a, raw_a = _parse(
+        "a.py", b"import numpy as np\ndef f():\n    np.array(1)\n"
+    )
+    decls_b, aliases_b, raw_b = _parse(
+        "b.py", b"import networkx as np\ndef g():\n    np.graph(1)\n"
+    )
     resolved = ast_resolution.resolve_calls(
         decls_a + decls_b,
         {"a.py": aliases_a, "b.py": aliases_b},
@@ -194,7 +194,9 @@ def test_cache_encode_decode_roundtrip():
         (d.qualified_name, d.kind) for d in decls
     ]
     assert aliases2 == aliases
-    assert [(c.raw_callee, c.args) for c in raw2] == [(c.raw_callee, c.args) for c in raw]
+    assert [(c.raw_callee, c.args) for c in raw2] == [
+        (c.raw_callee, c.args) for c in raw
+    ]
 
 
 def test_param_types_and_return_shape():
@@ -207,10 +209,16 @@ def test_param_types_and_return_shape():
 
 def test_var_alias_resolves_to_declared():
     decls, aliases, raw = _parse(
-        "m.py", b"class Foo:\n    def bar(self):\n        pass\nobj = Foo()\nobj.bar()\n"
+        "m.py",
+        b"class Foo:\n    def bar(self):\n        pass\nobj = Foo()\nobj.bar()\n",
     )
     assert ("obj", "Foo") in aliases
-    resolved = _resolve(decls, {"m.py": aliases}, raw, "r", )
+    resolved = _resolve(
+        decls,
+        {"m.py": aliases},
+        raw,
+        "r",
+    )
     by_raw = {c.raw_callee: c for c in resolved}
     assert by_raw["obj.bar"].callee == "m.Foo.bar"
     assert by_raw["obj.bar"].confidence == "EXTRACTED"
@@ -223,7 +231,12 @@ def test_tie_without_signal_is_ambiguous():
     declared = {d.qualified_name for d in decls}
     parent_map = {d.qualified_name: d.parent for d in decls}
     callee, conf = ast_resolution.resolve_one(
-        "foo", "c.call", declared, set(), {}, parent_map,
+        "foo",
+        "c.call",
+        declared,
+        set(),
+        {},
+        parent_map,
     )
     assert callee == "foo"
     assert conf == "AMBIGUOUS"

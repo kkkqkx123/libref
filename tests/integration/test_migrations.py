@@ -16,8 +16,7 @@ EXT_TABLES = {"api_entities", "call_instances", "seq_patterns", "review_status"}
 
 def _user_tables(conn: sqlite3.Connection) -> set[str]:
     return {
-        r[0]
-        for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
     }
 
 

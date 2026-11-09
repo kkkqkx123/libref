@@ -380,17 +380,18 @@ def test_chat_invalid_message_rejected() -> None:
 
 
 def test_config_bridge_gating(monkeypatch, tmp_path) -> None:
-    assert EmbeddingConfig.from_settings(
-        _isolated_settings(monkeypatch, tmp_path)
-    ) is None
-    assert RerankConfig.from_settings(
-        _isolated_settings(
-            monkeypatch, tmp_path, embedding_api_key="k", rerank_enabled=False
+    assert (
+        EmbeddingConfig.from_settings(_isolated_settings(monkeypatch, tmp_path)) is None
+    )
+    assert (
+        RerankConfig.from_settings(
+            _isolated_settings(
+                monkeypatch, tmp_path, embedding_api_key="k", rerank_enabled=False
+            )
         )
-    ) is None
-    assert ChatConfig.from_settings(
-        _isolated_settings(monkeypatch, tmp_path)
-    ) is None
+        is None
+    )
+    assert ChatConfig.from_settings(_isolated_settings(monkeypatch, tmp_path)) is None
     on = _isolated_settings(
         monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True
     )
@@ -515,7 +516,9 @@ def test_image_input_rejected_without_network() -> None:
 
     c = EmbeddingClient(base="https://b", api_key="k", model="m", dim=2)
     with pytest.raises(LlmInvalidRequestError, match="image"):
-        asyncio.run(c.encode_inputs([ImageRef("https://img/x.png")], client=_client(boom)))
+        asyncio.run(
+            c.encode_inputs([ImageRef("https://img/x.png")], client=_client(boom))
+        )
 
 
 def test_embedding_usage_sums_batches() -> None:
@@ -525,16 +528,12 @@ def test_embedding_usage_sums_batches() -> None:
         return httpx.Response(
             200,
             json={
-                "data": [
-                    {"index": i, "embedding": [1.0, 0.0]} for i in range(n)
-                ],
+                "data": [{"index": i, "embedding": [1.0, 0.0]} for i in range(n)],
                 "usage": {"prompt_tokens": 5, "total_tokens": 7},
             },
         )
 
-    c = EmbeddingClient(
-        base="https://b", api_key="k", model="m", dim=2, batch_size=1
-    )
+    c = EmbeddingClient(base="https://b", api_key="k", model="m", dim=2, batch_size=1)
     result = asyncio.run(c.encode_with_usage(["a", "b"], client=_client(handler)))
     assert isinstance(result, EmbeddingResult)
     assert len(result.vectors) == 2
@@ -578,7 +577,11 @@ def test_chat_result_tools_and_usage() -> None:
     assert isinstance(result, ChatResult)
     assert result.text == "done"
     assert result.tool_calls == [ToolCall("t1", "lookup", {"q": "x"})]
-    assert result.usage == {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4}
+    assert result.usage == {
+        "prompt_tokens": 3,
+        "completion_tokens": 1,
+        "total_tokens": 4,
+    }
 
 
 def test_chat_bad_tool_arguments_rejected() -> None:

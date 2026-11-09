@@ -23,7 +23,9 @@ class ConfigError(Exception):
 class LibrefSettings(BaseSettings):
     """Global settings; shared by exit and services layers, the db layer does not depend on this module."""
 
-    model_config = SettingsConfigDict(env_prefix="LIBREF_", env_file=".env", frozen=True)
+    model_config = SettingsConfigDict(
+        env_prefix="LIBREF_", env_file=".env", frozen=True
+    )
 
     db_path: Path = Field(
         default_factory=lambda: Path.home() / ".local/share/libref/libref.db"
@@ -147,7 +149,12 @@ class LibrefSettings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_logging(self) -> LibrefSettings:
-        if str(self.log_level or "").upper() not in ("DEBUG", "INFO", "WARNING", "ERROR"):
+        if str(self.log_level or "").upper() not in (
+            "DEBUG",
+            "INFO",
+            "WARNING",
+            "ERROR",
+        ):
             raise ValueError("log_level must be one of DEBUG/INFO/WARNING/ERROR")
         if str(self.log_format or "").lower() not in ("text", "json"):
             raise ValueError("log_format must be one of text/json")
@@ -160,9 +167,13 @@ class LibrefSettings(BaseSettings):
         if self.rerank_top_n > self.rerank_candidate_limit:
             raise ValueError("rerank_top_n must not exceed rerank_candidate_limit")
         if self.chunk_embed_min_tokens > self.chunk_embed_max_tokens:
-            raise ValueError("chunk_embed_min_tokens must not exceed chunk_embed_max_tokens")
+            raise ValueError(
+                "chunk_embed_min_tokens must not exceed chunk_embed_max_tokens"
+            )
         if self.chunk_bm25_min_terms > self.chunk_bm25_max_terms:
-            raise ValueError("chunk_bm25_min_terms must not exceed chunk_bm25_max_terms")
+            raise ValueError(
+                "chunk_bm25_min_terms must not exceed chunk_bm25_max_terms"
+            )
         return self
 
 
@@ -174,6 +185,7 @@ def setting_or_default(settings: LibrefSettings | None, name: str):
     if settings is not None:
         return getattr(settings, name)
     return LibrefSettings.model_fields[name].default
+
 
 CONFIG_FILE_NAME = "libref.toml"
 
@@ -206,10 +218,22 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
         }
     ),
     "embeddings": frozenset(
-        {"embedding_model", "embedding_dim", "embedding_api_base", "embedding_api_key", "embed_batch"}
+        {
+            "embedding_model",
+            "embedding_dim",
+            "embedding_api_base",
+            "embedding_api_key",
+            "embed_batch",
+        }
     ),
     "rerank": frozenset(
-        {"rerank_model", "rerank_enabled", "rerank_candidate_limit", "rerank_top_n", "rerank_truncate"}
+        {
+            "rerank_model",
+            "rerank_enabled",
+            "rerank_candidate_limit",
+            "rerank_top_n",
+            "rerank_truncate",
+        }
     ),
     "retrieval": frozenset(
         {
@@ -274,7 +298,9 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
 
 RESERVED_SECTIONS = frozenset()
 
-PATH_FIELDS = frozenset({"db_path", "registry_overrides_file", "snapshot_dir", "repos_dir", "log_file"})
+PATH_FIELDS = frozenset(
+    {"db_path", "registry_overrides_file", "snapshot_dir", "repos_dir", "log_file"}
+)
 
 MASKED_VALUE = "***"
 
@@ -307,7 +333,9 @@ def _flatten_document(path: Path, document: Mapping[str, Any]) -> dict[str, Any]
                 if isinstance(item, dict) and nested in SECTION_FIELDS:
                     for sub, sub_item in item.items():
                         if sub not in SECTION_FIELDS[nested]:
-                            raise ConfigError(f"unknown config key '{nested}.{sub}' in {path}")
+                            raise ConfigError(
+                                f"unknown config key '{nested}.{sub}' in {path}"
+                            )
                         _reject_secret(path, sub)
                         flat[sub] = sub_item
                     continue
@@ -357,7 +385,10 @@ def _env_covered_fields() -> set[str]:
 
     fields = set(LibrefSettings.model_fields)
     covered: set[str] = set()
-    for source in (EnvSettingsSource(LibrefSettings), DotEnvSettingsSource(LibrefSettings)):
+    for source in (
+        EnvSettingsSource(LibrefSettings),
+        DotEnvSettingsSource(LibrefSettings),
+    ):
         for name in source.env_vars:
             if name.startswith("libref_") and name[7:] in fields:
                 covered.add(name[7:])
@@ -381,7 +412,9 @@ def load_settings(
             raise ConfigError(f"config file is not readable: {path}: {exc}") from exc
         if not isinstance(document, dict):
             raise ConfigError(f"config file must hold tables: {path}")
-        file_values = _resolve_relative_paths(_flatten_document(path, document), path.parent)
+        file_values = _resolve_relative_paths(
+            _flatten_document(path, document), path.parent
+        )
         covered = _env_covered_fields()
         file_values = {k: v for k, v in file_values.items() if k not in covered}
     merged: dict[str, Any] = dict(file_values)

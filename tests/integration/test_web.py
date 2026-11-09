@@ -29,9 +29,19 @@ def _seed(conn) -> None:
     conn.commit()
     store = DocumentStore(conn)
     store.store_page(
-        1, 1, "https://d.example/w.html", "stored",
-        chunks=[Chunk(url="https://d.example/w.html", path="G", title="Guide",
-                      content="quetzalweb guide body", sort_order=0)],
+        1,
+        1,
+        "https://d.example/w.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/w.html",
+                path="G",
+                title="Guide",
+                content="quetzalweb guide body",
+                sort_order=0,
+            )
+        ],
         raw_content="quetzalweb guide body",
     )
 
@@ -69,7 +79,9 @@ def test_review_flow(tmp_path, monkeypatch) -> None:
     conn = _open(tmp_path, "review.db")
     try:
         conn.execute("INSERT INTO libraries(id, name) VALUES(1, 'docs')")
-        conn.execute("INSERT INTO versions(id, library_id, version) VALUES(1, 1, '1.0')")
+        conn.execute(
+            "INSERT INTO versions(id, library_id, version) VALUES(1, 1, '1.0')"
+        )
         cur = conn.execute(
             "INSERT INTO call_instances(call_uid, callee_name, args, repo, caller_file,"
             " line_start, line_end, confidence, library_id, version_id)"
@@ -86,7 +98,9 @@ def test_review_flow(tmp_path, monkeypatch) -> None:
         client = _client(conn)
         pending = client.get("/review/pending").json()
         assert pending["count"] == 1
-        assert client.post("/review", json={"entity_id": call_id, "action": "approve"}).json() == {"ok": True}
+        assert client.post(
+            "/review", json={"entity_id": call_id, "action": "approve"}
+        ).json() == {"ok": True}
         assert client.get("/review/pending").json()["count"] == 0
     finally:
         conn.close()
@@ -99,6 +113,11 @@ def test_unauthorized_when_token_set(tmp_path, monkeypatch) -> None:
         _seed(conn)
         client = _client(conn, mcp_token="tok-secret")
         assert client.get("/libraries").status_code == 401
-        assert client.get("/libraries", headers={"Authorization": "Bearer tok-secret"}).status_code == 200
+        assert (
+            client.get(
+                "/libraries", headers={"Authorization": "Bearer tok-secret"}
+            ).status_code
+            == 200
+        )
     finally:
         conn.close()

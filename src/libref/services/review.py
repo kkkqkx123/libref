@@ -66,7 +66,9 @@ class ReviewService:
         """Pending to approved; non-pending is rejected."""
         self._transition(entity_id, "approved", entity_type=entity_type)
 
-    def mark_conflict(self, entity_id: int, *, entity_type: str = "call_instance") -> None:
+    def mark_conflict(
+        self, entity_id: int, *, entity_type: str = "call_instance"
+    ) -> None:
         """Pending to conflict; non-pending is rejected."""
         self._transition(entity_id, "conflict", entity_type=entity_type)
 
@@ -83,9 +85,7 @@ class ReviewService:
         if cur.rowcount == 0:
             raise ValueError(f"cannot reopen review row: {entity_id}")
 
-    def _transition(
-        self, entity_id: int, target: str, *, entity_type: str
-    ) -> None:
+    def _transition(self, entity_id: int, target: str, *, entity_type: str) -> None:
         if entity_type != "call_instance":
             raise ValueError(f"unsupported entity_type: {entity_type}")
         cur = self._conn.execute(

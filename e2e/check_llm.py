@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import math
-import sys
 
-from libref.config import LibrefSettings
 from libref.store.chat import build_chat_fn
 from libref.store.embeddings import build_embed_fn
 from libref.store.rerank import build_rerank_fn
+
+from libref.config import LibrefSettings
 
 
 def _check_vectors(vecs: list[list[float]], dim: int) -> None:
@@ -48,8 +48,10 @@ async def _main() -> int:
     texts = ["Hello, world!", "libref 使用 uv 做依赖管理"]
     vecs = await embed(texts)
     _check_vectors(vecs, settings.embedding_dim)
-    print(f"embed ok: model={settings.embedding_model} "
-          f"count={len(vecs)} dim={len(vecs[0])}")
+    print(
+        f"embed ok: model={settings.embedding_model} "
+        f"count={len(vecs)} dim={len(vecs[0])}"
+    )
 
     rerank = build_rerank_fn(settings)
     assert rerank is not None, "rerank builder returned None despite key present"
@@ -70,7 +72,7 @@ async def _main() -> int:
 def main() -> int:
     try:
         return asyncio.run(_main())
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — the script itself reports and exits non-zero
         print(f"FAIL: {type(exc).__name__}: {exc}")
         return 1
 

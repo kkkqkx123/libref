@@ -181,7 +181,7 @@ class _VersionGuard:
                     (self._key, self._owner),
                 )
                 self._conn.commit()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — best-effort lock cleanup; release follows regardless
                 pass
             self._mem.release()
         return False
@@ -199,13 +199,14 @@ class _VersionGuard:
                 )
                 self._conn.commit()
                 return
-            except Exception:
+            except Exception:  # noqa: BLE001 — lock contention is expected; retry via the loop below
                 try:
                     self._conn.rollback()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110 — nothing left to roll back
                     pass
             row = self._conn.execute(
-                "SELECT owner, heartbeat_at FROM version_locks WHERE version_key=?", (self._key,)
+                "SELECT owner, heartbeat_at FROM version_locks WHERE version_key=?",
+                (self._key,),
             ).fetchone()
             if row is None:
                 continue
@@ -234,7 +235,7 @@ class _VersionGuard:
                         (_time.time(), self._key, self._owner),
                     )
                     self._conn.commit()
-                except Exception:
+                except Exception:  # noqa: BLE001, S112 — heartbeat failure retries on the next tick
                     continue
         except asyncio.CancelledError:
             return
@@ -283,7 +284,9 @@ def run_scrape_job_sync(
 
     async def _drive() -> Job:
         mgr.start_worker(
-            build_scrape_runner(settings, conn, vec_store=vec_store, embed=embed, mgr=mgr)
+            build_scrape_runner(
+                settings, conn, vec_store=vec_store, embed=embed, mgr=mgr
+            )
         )
         try:
             return await mgr.wait_for(job_id, timeout=timeout)
@@ -326,7 +329,9 @@ def normalize_text_content(raw: str) -> str:
     return normalize_markdown(raw)
 
 
-def _plan_targets(seed, start_url: str, scope: dict[str, Any] | None, max_pages: int | None):
+def _plan_targets(
+    seed, start_url: str, scope: dict[str, Any] | None, max_pages: int | None
+):
     """Scrape target planning: scope filter plus start-page fallback plus pagination truncation; pure decisions, no DB access."""
     policy = build_scope(start_url, scope)
     candidates = seed.urls + [u for u in seed.cross_site if u not in seed.urls]
@@ -341,7 +346,9 @@ def _plan_targets(seed, start_url: str, scope: dict[str, Any] | None, max_pages:
     return accepted, rejected, truncated
 
 
-def _record_outcome(counts, removed_all, inserted_all, result, empty_dropped, render_skipped, stage_ms) -> None:
+def _record_outcome(
+    counts, removed_all, inserted_all, result, empty_dropped, render_skipped, stage_ms
+) -> None:
     """Per-page outcome summary: counts, vector candidates, stage timings; one funnel."""
     counts[result.outcome] = counts.get(result.outcome, 0) + 1
     counts["chunk_empty_dropped"] += empty_dropped
@@ -356,12 +363,19 @@ def _record_outcome(counts, removed_all, inserted_all, result, empty_dropped, re
     inserted_all.extend(result.inserted_ids)
 
 
-def _build_doc_inputs(raw_chunks, content_type: str | None, kind: str) -> list[DocumentInput]:
+def _build_doc_inputs(
+    raw_chunks, content_type: str | None, kind: str
+) -> list[DocumentInput]:
     """Document chunk input assembly: sort order and type backfill; the single shaping point before storing."""
     for order, chunk in enumerate(raw_chunks):
         chunk.sort_order = order
-        if not getattr(chunk, "content_type", "") or chunk.content_type == "text/markdown":
-            chunk.content_type = (content_type or "text/markdown").split(";")[0].strip() or kind
+        if (
+            not getattr(chunk, "content_type", "")
+            or chunk.content_type == "text/markdown"
+        ):
+            chunk.content_type = (content_type or "text/markdown").split(";")[
+                0
+            ].strip() or kind
     return [
         DocumentInput(
             url=c.url,
@@ -409,6 +423,7 @@ class IngestService:
         self._snapshots = None
         if bool(settings.snapshot_enabled):
             from libref.store.snapshots import SnapshotStore
+
             self._snapshots = SnapshotStore(
                 Path(settings.snapshot_dir),
                 quota_mb=int(settings.snapshot_quota_mb),
@@ -494,9 +509,16 @@ class IngestService:
     ) -> dict[str, int]:
         """Refresh-intent entry: reuses the scrape path's incremental semantics, only expressing refresh intent."""
         return self.scrape_docs(
-            library, version, start_url, max_pages=max_pages, prefilter=prefilter,
-            scope=scope, ecosystem=ecosystem, resolved_from="refresh",
-            registry_confirmed=True, heartbeat=heartbeat,
+            library,
+            version,
+            start_url,
+            max_pages=max_pages,
+            prefilter=prefilter,
+            scope=scope,
+            ecosystem=ecosystem,
+            resolved_from="refresh",
+            registry_confirmed=True,
+            heartbeat=heartbeat,
         )
 
     async def refresh_version_async(
@@ -513,9 +535,16 @@ class IngestService:
     ) -> dict[str, int]:
         """Refresh async entry, for job reuse."""
         return await self.scrape_docs_async(
-            library, version, start_url, max_pages=max_pages, prefilter=prefilter,
-            scope=scope, ecosystem=ecosystem, resolved_from="refresh",
-            registry_confirmed=True, heartbeat=heartbeat,
+            library,
+            version,
+            start_url,
+            max_pages=max_pages,
+            prefilter=prefilter,
+            scope=scope,
+            ecosystem=ecosystem,
+            resolved_from="refresh",
+            registry_confirmed=True,
+            heartbeat=heartbeat,
         )
 
     def scrape_by_name(
@@ -594,6 +623,7 @@ class IngestService:
         heartbeat=None,
     ) -> dict[str, int]:
         import time as _time
+
         started = _time.monotonic()
 
         def _beat() -> None:
@@ -603,7 +633,7 @@ class IngestService:
                 maybe = heartbeat()
                 if asyncio.iscoroutine(maybe):
                     asyncio.get_running_loop().create_task(maybe)
-            except Exception:  # noqa: BLE001 — heartbeat only aims to renew
+            except Exception:  # noqa: BLE001, S110 — heartbeat only aims to renew
                 pass
 
         counts = {
@@ -650,7 +680,9 @@ class IngestService:
                     start_url, prefilter=prefilter, max_pages=None
                 )
                 counts["discover_ms"] = int((_time.monotonic() - discover_start) * 1000)
-                accepted, rejected, truncated = _plan_targets(seed, start_url, scope, max_pages)
+                accepted, rejected, truncated = _plan_targets(
+                    seed, start_url, scope, max_pages
+                )
                 counts["skipped"] += len(rejected)
                 counts["scope_rejected"] += len(rejected)
                 counts["seed_discovered"] += len(seed.urls)
@@ -677,7 +709,12 @@ class IngestService:
                     async with sem:
                         try:
                             page = store.get_page(version_id, url)
-                            result, empty_dropped, render_skipped, stage_ms = await self._fetch_and_store(
+                            (
+                                result,
+                                empty_dropped,
+                                render_skipped,
+                                stage_ms,
+                            ) = await self._fetch_and_store(
                                 fetcher,
                                 robots,
                                 store,
@@ -690,8 +727,21 @@ class IngestService:
                             )
                         except Exception as exc:  # noqa: BLE001 — a single page's failure is recorded as an outcome and does not block the batch
                             logger.debug("page failed url=%s: %s", url, exc)
-                            result, empty_dropped, render_skipped, stage_ms = StoreResult("failed"), 0, False, {}
-                        _record_outcome(counts, removed_all, inserted_all, result, empty_dropped, render_skipped, stage_ms)
+                            result, empty_dropped, render_skipped, stage_ms = (
+                                StoreResult("failed"),
+                                0,
+                                False,
+                                {},
+                            )
+                        _record_outcome(
+                            counts,
+                            removed_all,
+                            inserted_all,
+                            result,
+                            empty_dropped,
+                            render_skipped,
+                            stage_ms,
+                        )
                         _beat()
 
                 await asyncio.gather(*(process(u) for u in accepted))
@@ -712,10 +762,14 @@ class IngestService:
                 counts["vectors_ms"] = int((_time.monotonic() - vectors_start) * 1000)
                 _beat()
             import time as _time2
+
             counts["seed_truncated"] = 1 if truncated else 0
             counts["elapsed_ms"] = int((_time2.monotonic() - started) * 1000)
             if counts.get("render_skipped", 0) > 0:
-                scope_render = bool((scope or {}).get("render_js", False) or bool(self._settings.render_js_default))
+                scope_render = bool(
+                    (scope or {}).get("render_js", False)
+                    or bool(self._settings.render_js_default)
+                )
                 if not scope_render:
                     logger.warning(
                         "render candidates skipped=%d without browser fallback; enable render_js to rescan",
@@ -723,9 +777,14 @@ class IngestService:
                     )
             logger.info(
                 "scrape done %s:%s %s stored=%d unchanged=%d absent=%d failed=%d skipped=%d",
-                ecosystem, library, version, counts.get("stored", 0),
-                counts.get("unchanged", 0), counts.get("absent", 0),
-                counts.get("failed", 0), counts.get("skipped", 0),
+                ecosystem,
+                library,
+                version,
+                counts.get("stored", 0),
+                counts.get("unchanged", 0),
+                counts.get("absent", 0),
+                counts.get("failed", 0),
+                counts.get("skipped", 0),
             )
             return counts
 
@@ -739,8 +798,14 @@ class IngestService:
         from libref.services.maintenance import sync_vectors_for_docs
 
         await sync_vectors_for_docs(
-            self._conn, self._settings, self._vec, self._embed,
-            store, counts, removed, inserted,
+            self._conn,
+            self._settings,
+            self._vec,
+            self._embed,
+            store,
+            counts,
+            removed,
+            inserted,
         )
 
     def _sweep_absent(
@@ -773,6 +838,7 @@ class IngestService:
         if removed_urls and snapshot_ctx is not None:
             try:
                 from libref.services.retention import REASON_ABSENT_SWEEP, log_deletion
+
                 ecosystem, library, version = snapshot_ctx
                 log_deletion(
                     self._conn,
@@ -786,8 +852,14 @@ class IngestService:
                         "removed_docs": len(removed),
                     },
                 )
-                logger.info("absent sweep %s:%s %s urls=%d docs=%d",
-                            ecosystem, library, version, len(removed_urls), len(removed))
+                logger.info(
+                    "absent sweep %s:%s %s urls=%d docs=%d",
+                    ecosystem,
+                    library,
+                    version,
+                    len(removed_urls),
+                    len(removed),
+                )
             except Exception as exc:  # noqa: BLE001 — deletion-log failure does not overturn the source-of-truth deletion
                 logger.debug("absent log failed: %s", exc)
         return removed
@@ -795,6 +867,7 @@ class IngestService:
     def _clean_with_cache(self, kind: str, raw: str, url: str) -> str:
         """Cleaning cache: same content and same budget fingerprint hit reuses directly; evict the oldest entry over the cap."""
         import hashlib as _hashlib
+
         digest = _hashlib.sha1(
             f"{kind}\0{self._clean_fingerprint}\0{raw}".encode("utf-8", "ignore")
         ).hexdigest()
@@ -830,6 +903,7 @@ class IngestService:
         snapshot_ctx: tuple[str, str, str] | None = None,
     ) -> tuple[StoreResult, int, bool, dict[str, int]]:
         import time as _time
+
         stage_ms: dict[str, int] = {f"{step}_ms": 0 for step in PIPELINE_STEPS}
         stage_ms["snapshot_written"] = 0
         stage_ms["snapshot_quota_skipped"] = 0
@@ -845,18 +919,36 @@ class IngestService:
         )
         if result.status == "unchanged":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)
-            return store.store_page(version_id, library_id, url, "unchanged"), 0, False, stage_ms
+            return (
+                store.store_page(version_id, library_id, url, "unchanged"),
+                0,
+                False,
+                stage_ms,
+            )
         if result.status == "absent":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)
-            return store.store_page(version_id, library_id, url, "absent"), 0, False, stage_ms
+            return (
+                store.store_page(version_id, library_id, url, "absent"),
+                0,
+                False,
+                stage_ms,
+            )
         if result.status == "failed":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)
-            return store.store_page(version_id, library_id, url, "failed"), 0, False, stage_ms
+            return (
+                store.store_page(version_id, library_id, url, "failed"),
+                0,
+                False,
+                stage_ms,
+            )
         if self._snapshots is not None and snapshot_ctx is not None and result.content:
             try:
                 ecosystem, library, version = snapshot_ctx
                 _, written = self._snapshots.put(
-                    ecosystem, library, version, url,
+                    ecosystem,
+                    library,
+                    version,
+                    url,
                     result.content.encode("utf-8", errors="ignore"),
                     result.content_type,
                 )
@@ -864,7 +956,7 @@ class IngestService:
                     stage_ms["snapshot_written"] = 1
                 else:
                     stage_ms["snapshot_quota_skipped"] = 1
-            except Exception:  # noqa: BLE001
+            except Exception:  # noqa: BLE001, S110 — snapshot quota bookkeeping must not abort ingestion
                 pass
 
         raw_body = result.content or ""
@@ -875,14 +967,22 @@ class IngestService:
         if not markdown:
             if looks_like_js_rendered(raw_body, markdown):
                 render_attempted = True
-                want_render = bool((scope or {}).get("render_js", False) or self._settings.render_js_default)
+                want_render = bool(
+                    (scope or {}).get("render_js", False)
+                    or self._settings.render_js_default
+                )
                 if want_render:
                     try:
                         from libref.crawler.browser import (
                             is_playwright_available,
                             render_html,
                         )
-                        rendered = await render_html(url) if is_playwright_available() else None
+
+                        rendered = (
+                            await render_html(url)
+                            if is_playwright_available()
+                            else None
+                        )
                     except Exception:  # noqa: BLE001
                         rendered = None
                     if rendered:
@@ -893,15 +993,20 @@ class IngestService:
                     return StoreResult("skipped"), 0, render_attempted, stage_ms
             stage_ms["fetch_ms"] = int((clean_start - fetch_start) * 1000)
             stage_ms["clean_ms"] = int((_time.monotonic() - clean_start) * 1000)
-            return store.store_page(
-                version_id,
-                library_id,
-                url,
-                "empty",
-                raw_content=result.content,
-                etag=result.etag,
-                last_modified=result.last_modified,
-            ), 0, render_attempted, stage_ms
+            return (
+                store.store_page(
+                    version_id,
+                    library_id,
+                    url,
+                    "empty",
+                    raw_content=result.content,
+                    etag=result.etag,
+                    last_modified=result.last_modified,
+                ),
+                0,
+                render_attempted,
+                stage_ms,
+            )
         stage_ms["fetch_ms"] = int((clean_start - fetch_start) * 1000)
         clean_end = _time.monotonic()
         stage_ms["clean_ms"] = int((clean_end - clean_start) * 1000)
@@ -909,7 +1014,12 @@ class IngestService:
         outcome = store.ensure_changed(version_id, url, markdown)
         if outcome == "unchanged":
             stage_ms["store_ms"] = int((_time.monotonic() - store_start) * 1000)
-            return store.store_page(version_id, library_id, url, "unchanged"), 0, render_attempted, stage_ms
+            return (
+                store.store_page(version_id, library_id, url, "unchanged"),
+                0,
+                render_attempted,
+                stage_ms,
+            )
         split_start = _time.monotonic()
         dual = split_markdown_dual(markdown, url, budgets=self._budgets)
         split_end = _time.monotonic()
@@ -928,5 +1038,3 @@ class IngestService:
         )
         stage_ms["store_ms"] = int((_time.monotonic() - split_end) * 1000)
         return stored, dual.empty_dropped, render_attempted, stage_ms
-
-

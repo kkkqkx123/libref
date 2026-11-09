@@ -12,12 +12,16 @@ logger = logging.getLogger(__name__)
 
 
 def _safe_segment(text: str) -> str:
-    cleaned = "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in text.strip())
+    cleaned = "".join(
+        c if c.isalnum() or c in ("-", "_", ".") else "_" for c in text.strip()
+    )
     return cleaned[:64] or "default"
 
 
 def version_key(ecosystem: str, library: str, version: str) -> str:
-    return f"{_safe_segment(ecosystem)}/{_safe_segment(library)}/{_safe_segment(version)}"
+    return (
+        f"{_safe_segment(ecosystem)}/{_safe_segment(library)}/{_safe_segment(version)}"
+    )
 
 
 def dir_size_bytes(root: Path) -> int:
@@ -54,7 +58,10 @@ class SnapshotStore:
         digest = hashlib.sha1(url.encode("utf-8")).hexdigest()
         target_dir = self._root / version_key(ecosystem, library, version)
         try:
-            if self._quota_bytes > 0 and dir_size_bytes(self._root) + len(raw) > self._quota_bytes:
+            if (
+                self._quota_bytes > 0
+                and dir_size_bytes(self._root) + len(raw) > self._quota_bytes
+            ):
                 logger.debug("snapshot quota skip url=%s", url)
                 return "", False
             target_dir.mkdir(parents=True, exist_ok=True)
@@ -62,7 +69,9 @@ class SnapshotStore:
             meta = target_dir / f"{digest}.meta"
             target.write_bytes(gzip.compress(raw))
             fetched_at = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
-            meta.write_text(url + "\n" + fetched_at + "\n" + (content_type or ""), encoding="utf-8")
+            meta.write_text(
+                url + "\n" + fetched_at + "\n" + (content_type or ""), encoding="utf-8"
+            )
             logger.debug("snapshot written url=%s", url)
             return str(target), True
         except OSError as exc:
@@ -78,8 +87,14 @@ class SnapshotStore:
         except OSError:
             return []
 
-    def version_snapshots(self, ecosystem: str, library: str, version: str) -> list[Path]:
-        return [p for p in self.version_files(ecosystem, library, version) if p.suffix == ".gz"]
+    def version_snapshots(
+        self, ecosystem: str, library: str, version: str
+    ) -> list[Path]:
+        return [
+            p
+            for p in self.version_files(ecosystem, library, version)
+            if p.suffix == ".gz"
+        ]
 
     def drop_version(self, ecosystem: str, library: str, version: str) -> int:
         removed = 0
@@ -95,5 +110,7 @@ class SnapshotStore:
             target_dir.rmdir()
         except OSError:
             pass
-        logger.info("snapshot drop %s:%s %s removed=%d", ecosystem, library, version, removed)
+        logger.info(
+            "snapshot drop %s:%s %s removed=%d", ecosystem, library, version, removed
+        )
         return removed

@@ -77,19 +77,29 @@ def build_web_app(
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         params = SearchQuery(
-            query=query, library=library, version=version,
-            ecosystem=ecosystem, limit=limit, hybrid=hybrid,
+            query=query,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            limit=limit,
+            hybrid=hybrid,
         )
         if params.hybrid:
             results, degraded = await svc.search_hybrid_async(
-                params.query, library=params.library, version=params.version,
-                ecosystem=params.ecosystem, limit=params.limit,
+                params.query,
+                library=params.library,
+                version=params.version,
+                ecosystem=params.ecosystem,
+                limit=params.limit,
             )
             return envelope(results, degraded=degraded)
         return envelope(
             svc.search_docs(
-                params.query, library=params.library, version=params.version,
-                ecosystem=params.ecosystem, limit=params.limit,
+                params.query,
+                library=params.library,
+                version=params.version,
+                ecosystem=params.ecosystem,
+                limit=params.limit,
             )
         )
 
@@ -101,9 +111,13 @@ def build_web_app(
         ecosystem: str | None = None,
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
-        params = ReadPageQuery(url=url, library=library, version=version, ecosystem=ecosystem)
+        params = ReadPageQuery(
+            url=url, library=library, version=version, ecosystem=ecosystem
+        )
         page = pages.read_page(
-            params.url, library=params.library, version=params.version,
+            params.url,
+            library=params.library,
+            version=params.version,
             ecosystem=params.ecosystem,
         )
         if page is None:
@@ -121,12 +135,20 @@ def build_web_app(
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         params = ReadWindowQuery(
-            url=url, sort_order=sort_order, radius=radius,
-            library=library, version=version, ecosystem=ecosystem,
+            url=url,
+            sort_order=sort_order,
+            radius=radius,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
         )
         page = pages.read_window(
-            params.url, params.sort_order, radius=params.radius,
-            library=params.library, version=params.version, ecosystem=params.ecosystem,
+            params.url,
+            params.sort_order,
+            radius=params.radius,
+            library=params.library,
+            version=params.version,
+            ecosystem=params.ecosystem,
         )
         if page is None:
             raise HTTPException(status_code=404, detail="window not found")
@@ -142,12 +164,18 @@ def build_web_app(
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         params = ReadSectionQuery(
-            url=url, source_group_id=source_group_id,
-            library=library, version=version, ecosystem=ecosystem,
+            url=url,
+            source_group_id=source_group_id,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
         )
         page = pages.read_section(
-            params.url, params.source_group_id,
-            library=params.library, version=params.version, ecosystem=params.ecosystem,
+            params.url,
+            params.source_group_id,
+            library=params.library,
+            version=params.version,
+            ecosystem=params.ecosystem,
         )
         if page is None:
             raise HTTPException(status_code=404, detail="section not found")
@@ -164,8 +192,11 @@ def build_web_app(
     ) -> dict[str, Any]:
         return envelope(
             mining.feature_tree(
-                library=library, version=version, ecosystem=ecosystem,
-                prefix=prefix, limit=limit,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                prefix=prefix,
+                limit=limit,
             )
         )
 
@@ -181,8 +212,11 @@ def build_web_app(
         names = containing.split(",") if containing else None
         return envelope(
             mining.api_clusters(
-                library=library, version=version, ecosystem=ecosystem,
-                containing=names, limit=limit,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                containing=names,
+                limit=limit,
             )
         )
 
@@ -207,19 +241,29 @@ def build_web_app(
     def scrape(body: ScrapeRequest, _: None = Depends(_guard)) -> dict[str, Any]:
         service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
         counts = service.scrape_docs(
-            body.library, body.version, body.start_url,
-            max_pages=body.max_pages, ecosystem=body.ecosystem,
+            body.library,
+            body.version,
+            body.start_url,
+            max_pages=body.max_pages,
+            ecosystem=body.ecosystem,
         )
         return {"counts": counts}
 
     @app.get("/jobs")
     def jobs(limit: int = 20, _: None = Depends(_guard)) -> dict[str, Any]:
         mgr = JobManager(conn)
-        return envelope([
-            {"id": j.id, "kind": j.kind, "status": j.status,
-             "finished_at": j.finished_at, "error": j.error}
-            for j in mgr.list_recent(limit=limit)
-        ])
+        return envelope(
+            [
+                {
+                    "id": j.id,
+                    "kind": j.kind,
+                    "status": j.status,
+                    "finished_at": j.finished_at,
+                    "error": j.error,
+                }
+                for j in mgr.list_recent(limit=limit)
+            ]
+        )
 
     @app.get("/jobs/{job_id}")
     def job_detail(job_id: int, _: None = Depends(_guard)) -> dict[str, Any]:
@@ -227,8 +271,13 @@ def build_web_app(
         job = mgr.get(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="job not found")
-        return {"id": job.id, "kind": job.kind, "status": job.status,
-                "error": job.error, "result": job.result,
-                "finished_at": job.finished_at}
+        return {
+            "id": job.id,
+            "kind": job.kind,
+            "status": job.status,
+            "error": job.error,
+            "result": job.result,
+            "finished_at": job.finished_at,
+        }
 
     return app

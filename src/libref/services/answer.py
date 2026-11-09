@@ -42,15 +42,20 @@ async def answer_query_async(
         conn, settings, vec_store=vec_store, embed=embed, rerank=rerank
     )
     results, degraded = await search.search_hybrid_async(
-        query, library=library, version=version, ecosystem=ecosystem, limit=limit,
-        expand_window=expand_window, window_radius=window_radius,
+        query,
+        library=library,
+        version=version,
+        ecosystem=ecosystem,
+        limit=limit,
+        expand_window=expand_window,
+        window_radius=window_radius,
     )
     if not results:
         return {"answer": "", "citations": [], "degraded": degraded, "model": ""}
     try:
         rows = DocumentStore(conn).get_documents([int(r["id"]) for r in results])
         full_by_id = {int(r["id"]): str(r.get("content") or "") for r in rows}
-    except Exception:
+    except Exception:  # noqa: BLE001 — missing full content degrades gracefully to empty materials
         full_by_id = {}
     cap = settings.material_limit if material_limit is None else material_limit
     messages = build_messages(query, results, full_by_id, cap)

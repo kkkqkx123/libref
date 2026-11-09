@@ -36,8 +36,10 @@ def _cleaned_text(raw: str, url: str, content_type: str | None) -> str:
     from libref.crawler.extract import extract_to_markdown
     from libref.text.normalize import (
         classify_content,
-        normalize_markdown as normalize_text_content,
         wrap_source_content,
+    )
+    from libref.text.normalize import (
+        normalize_markdown as normalize_text_content,
     )
 
     kind = classify_content(content_type, url)
@@ -167,7 +169,9 @@ def main() -> int:
                 started = time.time()
                 try:
                     counts = service.scrape_docs(
-                        library, entry["version"], entry["url"],
+                        library,
+                        entry["version"],
+                        entry["url"],
                         max_pages=args.max_pages or entry.get("max_pages"),
                     )
                 except Exception as exc:  # noqa: BLE001

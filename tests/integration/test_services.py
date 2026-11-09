@@ -32,15 +32,35 @@ def seed_docs(conn: sqlite3.Connection) -> None:
     seed_lv(conn)
     store = DocumentStore(conn)
     store.store_page(
-        1, 1, "https://d.example/a.html", "stored",
-        chunks=[Chunk(url="https://d.example/a.html", path="Guide", title="Guide",
-                      content="libref uses uv for dependency management", sort_order=0)],
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/a.html",
+                path="Guide",
+                title="Guide",
+                content="libref uses uv for dependency management",
+                sort_order=0,
+            )
+        ],
         raw_content="body",
     )
     store.store_page(
-        1, 1, "https://d.example/b.html", "stored",
-        chunks=[Chunk(url="https://d.example/b.html", path="API", title="API",
-                      content="unrelated pineapple text", sort_order=0)],
+        1,
+        1,
+        "https://d.example/b.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/b.html",
+                path="API",
+                title="API",
+                content="unrelated pineapple text",
+                sort_order=0,
+            )
+        ],
         raw_content="body2",
     )
 
@@ -66,11 +86,31 @@ def test_search_docs_library_version_filter(conn):
 def test_read_page_reassembles(conn):
     seed_lv(conn)
     store = DocumentStore(conn)
-    store.store_page(1, 1, "https://d.example/p.html", "stored", chunks=[
-        Chunk(url="https://d.example/p.html", path="A", title="A", content="part one", sort_order=0),
-        Chunk(url="https://d.example/p.html", path="A / B", title="B", content="part two", sort_order=1),
-    ], raw_content="x")
+    store.store_page(
+        1,
+        1,
+        "https://d.example/p.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/p.html",
+                path="A",
+                title="A",
+                content="part one",
+                sort_order=0,
+            ),
+            Chunk(
+                url="https://d.example/p.html",
+                path="A / B",
+                title="B",
+                content="part two",
+                sort_order=1,
+            ),
+        ],
+        raw_content="x",
+    )
     from libref.services.pages import PageService
+
     page = PageService(conn).read_page("https://d.example/p.html")
     assert page is not None
     assert page["content"] == "part one\n\npart two"
@@ -79,6 +119,7 @@ def test_read_page_reassembles(conn):
 
 def test_list_libraries_and_versions(conn):
     from libref.services.libraries import LibraryService
+
     svc = LibraryService(conn)
     svc.ensure_library_version("docs", "1.0")
     svc.ensure_library_version("docs", "2.0")
@@ -111,7 +152,9 @@ def test_jobs_submit_run_and_recover(conn):
     assert mgr.get(job_id).status == "done"
 
     # stale recovery: forge a running job with an expired heartbeat
-    conn.execute("UPDATE jobs SET status='running', heartbeat_at=0 WHERE id=?", (job_id,))
+    conn.execute(
+        "UPDATE jobs SET status='running', heartbeat_at=0 WHERE id=?", (job_id,)
+    )
     conn.commit()
     stale = mgr.recover()
     assert stale == [job_id]
@@ -151,10 +194,13 @@ def test_scrape_docs_end_to_end_with_mock(conn, tmp_path):
         if p == "/robots.txt":
             return httpx.Response(200, text="")
         if p == "/llms.txt":
-            return httpx.Response(200, text=(
-                f"- [Install](https://{host}/install.html)\n"
-                f"- [Missing](https://{host}/gone.html)\n"
-            ))
+            return httpx.Response(
+                200,
+                text=(
+                    f"- [Install](https://{host}/install.html)\n"
+                    f"- [Missing](https://{host}/gone.html)\n"
+                ),
+            )
         if p == "/install.html":
             return httpx.Response(200, text=page_html)
         if p == "/gone.html":
@@ -162,7 +208,9 @@ def test_scrape_docs_end_to_end_with_mock(conn, tmp_path):
         raise AssertionError(request.url.path)
 
     settings = LibrefSettings(
-        request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
+        request_timeout=5.0,
+        fetch_concurrency=2,
+        crawl_delay_default=0.0,
         robots_cache_ttl_days=1.0,
     )
     service = IngestService(settings, conn)
@@ -182,10 +230,15 @@ def test_scrape_sweeps_pages_missing_from_seed_to_absent(conn):
     store = DocumentStore(conn)
     keep_url = "https://d.example/keep.html"
     stale_url = "https://d.example/stale.html"
-    for url, body in ((keep_url, "keep body quetzalkeep"),
-                      (stale_url, "stale body quetzalstale")):
+    for url, body in (
+        (keep_url, "keep body quetzalkeep"),
+        (stale_url, "stale body quetzalstale"),
+    ):
         store.store_page(
-            1, 1, url, "stored",
+            1,
+            1,
+            url,
+            "stored",
             chunks=[Chunk(url=url, path="G", title="G", content=body, sort_order=0)],
             raw_content=body,
         )
@@ -197,15 +250,21 @@ def test_scrape_sweeps_pages_missing_from_seed_to_absent(conn):
             return httpx.Response(200, text=f"- [Keep]({keep_url})\n")
         if request.url.path == "/keep.html":
             return httpx.Response(
-                200, text="<html><body><main><p>keep body quetzalkeep</p></main></body></html>")
+                200,
+                text="<html><body><main><p>keep body quetzalkeep</p></main></body></html>",
+            )
         raise AssertionError(request.url.path)
 
     settings = LibrefSettings(
-        request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
+        request_timeout=5.0,
+        fetch_concurrency=2,
+        crawl_delay_default=0.0,
         robots_cache_ttl_days=1.0,
     )
     with mock_ingest(handler):
-        counts = IngestService(settings, conn).scrape_docs("docs", "1.0", "https://d.example/")
+        counts = IngestService(settings, conn).scrape_docs(
+            "docs", "1.0", "https://d.example/"
+        )
 
     assert counts["absent"] == 1
     assert store.get_page(1, stale_url) is None
@@ -218,8 +277,15 @@ def test_scrape_skips_sweep_when_seed_truncated(conn):
     store = DocumentStore(conn)
     other_url = "https://d.example/other.html"
     store.store_page(
-        1, 1, other_url, "stored",
-        chunks=[Chunk(url=other_url, path="G", title="G", content="other body", sort_order=0)],
+        1,
+        1,
+        other_url,
+        "stored",
+        chunks=[
+            Chunk(
+                url=other_url, path="G", title="G", content="other body", sort_order=0
+            )
+        ],
         raw_content="other body",
     )
 
@@ -227,23 +293,29 @@ def test_scrape_skips_sweep_when_seed_truncated(conn):
         if request.url.path == "/robots.txt":
             return httpx.Response(200, text="")
         if request.url.path == "/llms.txt":
-            return httpx.Response(200, text=(
-                "- [A](https://d.example/a.html)\n"
-                "- [B](https://d.example/b.html)\n"
-            ))
+            return httpx.Response(
+                200,
+                text=(
+                    "- [A](https://d.example/a.html)\n- [B](https://d.example/b.html)\n"
+                ),
+            )
         if request.url.path in ("/a.html", "/b.html"):
             return httpx.Response(
-                200, text="<html><body><main><p>page body</p></main></body></html>")
+                200, text="<html><body><main><p>page body</p></main></body></html>"
+            )
         raise AssertionError(request.url.path)
 
     settings = LibrefSettings(
-        request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
+        request_timeout=5.0,
+        fetch_concurrency=2,
+        crawl_delay_default=0.0,
         robots_cache_ttl_days=1.0,
     )
     with mock_ingest(handler):
         # max_pages=1 truncates the discovery set: absent-page cleanup must be skipped to avoid deleting uncovered pages
         IngestService(settings, conn).scrape_docs(
-            "docs", "1.0", "https://d.example/", max_pages=1)
+            "docs", "1.0", "https://d.example/", max_pages=1
+        )
 
     assert store.get_page(1, other_url) is not None
 
@@ -254,16 +326,21 @@ def test_scrape_falls_back_to_start_url_without_seed(conn):
             return httpx.Response(200, text="")
         if request.url.path == "/javadoc/index.html":
             return httpx.Response(
-                200, text="<html><body><main><p>javadoc fallback body</p></main></body></html>")
+                200,
+                text="<html><body><main><p>javadoc fallback body</p></main></body></html>",
+            )
         return httpx.Response(404)
 
     settings = LibrefSettings(
-        request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
+        request_timeout=5.0,
+        fetch_concurrency=2,
+        crawl_delay_default=0.0,
         robots_cache_ttl_days=1.0,
     )
     with mock_ingest(handler):
         counts = IngestService(settings, conn).scrape_docs(
-            "docs", "1.0", "https://d.example/javadoc/index.html")
+            "docs", "1.0", "https://d.example/javadoc/index.html"
+        )
     assert counts["stored"] == 1
     assert SearchService(conn).search_docs("javadoc") != []
 
@@ -273,14 +350,20 @@ def test_start_scrape_job_runs_through_queue(conn):
         if request.url.path == "/robots.txt":
             return httpx.Response(200, text="")
         if request.url.path == "/llms.txt":
-            return httpx.Response(200, text="- [Install](https://d.example/install.html)\n")
+            return httpx.Response(
+                200, text="- [Install](https://d.example/install.html)\n"
+            )
         if request.url.path == "/install.html":
             return httpx.Response(
-                200, text="<html><body><main><p>use uv to install libref</p></main></body></html>")
+                200,
+                text="<html><body><main><p>use uv to install libref</p></main></body></html>",
+            )
         raise AssertionError(request.url.path)
 
     settings = LibrefSettings(
-        request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
+        request_timeout=5.0,
+        fetch_concurrency=2,
+        crawl_delay_default=0.0,
         robots_cache_ttl_days=1.0,
     )
     mgr = JobManager(conn)

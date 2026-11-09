@@ -34,7 +34,9 @@ def _clear_proxy_env(monkeypatch) -> None:
 
 def test_bypass_mounts_cover_loopback_and_suffix(monkeypatch) -> None:
     _clear_proxy_env(monkeypatch)
-    mounts = proxy_bypass_mounts("localhost, 127.0.0.1, ::1, example.com, https://direct.example/x")
+    mounts = proxy_bypass_mounts(
+        "localhost, 127.0.0.1, ::1, example.com, https://direct.example/x"
+    )
     assert mounts["all://localhost"] is None
     assert mounts["all://127.0.0.1"] is None
     assert mounts["all://[::1]"] is None

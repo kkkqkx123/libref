@@ -27,8 +27,8 @@ _MAX_SITEMAP_URLS = 20000
 
 
 def _clean_link_token(token: str) -> str:
-    cleaned = token.strip().strip('<"\'([')
-    cleaned = cleaned.rstrip('.,;:!?"\'`)]}>')
+    cleaned = token.strip().strip("<\"'([")
+    cleaned = cleaned.rstrip(".,;:!?\"'`)]}>")
     if cleaned.endswith(")") and "(" not in cleaned:
         cleaned = cleaned[:-1]
     return cleaned.strip()
@@ -157,7 +157,9 @@ class UrlSeeder:
                     )
                 errors[candidate] = "no urls"
         return SeedResult(
-            attempted=attempted, errors=errors, failed=transient_seen,
+            attempted=attempted,
+            errors=errors,
+            failed=transient_seen,
         )
 
     def _parse_llms_body(
@@ -239,7 +241,11 @@ class UrlSeeder:
                 continue
             text = payload.decode("utf-8", errors="replace")
             urls, child_truncated = await self._expand_sitemap_text(
-                text, candidate, depth, attempted, errors,
+                text,
+                candidate,
+                depth,
+                attempted,
+                errors,
             )
             truncated = truncated or child_truncated
             if urls:
@@ -253,8 +259,10 @@ class UrlSeeder:
                 )
             errors[candidate] = "no urls"
         return SeedResult(
-            attempted=attempted, errors=errors,
-            truncated=truncated, failed=transient_seen,
+            attempted=attempted,
+            errors=errors,
+            truncated=truncated,
+            failed=transient_seen,
         )
 
     async def _sitemap_candidates(self, start_url: str) -> list[str]:
@@ -313,7 +321,11 @@ class UrlSeeder:
             child_text = payload.decode("utf-8", errors="replace")
             if "<sitemapindex" in child_text:
                 deeper, _ = await self._expand_sitemap_text(
-                    child_text, child_url, depth + 1, attempted, errors,
+                    child_text,
+                    child_url,
+                    depth + 1,
+                    attempted,
+                    errors,
                 )
                 nested.extend(deeper)
             else:

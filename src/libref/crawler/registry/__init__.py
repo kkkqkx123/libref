@@ -51,15 +51,25 @@ _DOCS_HOST_HINTS = (
 _REPO_HOSTS = ("github.com", "gitlab.com", "codeberg.org", "bitbucket.org", "gitee.com")
 _FUNDING_KEY_HINTS = ("fund", "sponsor", "donat")
 _PRERELEASE_HINTS = (
-    "canary", "experimental", "dev", "alpha", "beta", "preview",
-    "pre", "rc", "snapshot", "nightly",
+    "canary",
+    "experimental",
+    "dev",
+    "alpha",
+    "beta",
+    "preview",
+    "pre",
+    "rc",
+    "snapshot",
+    "nightly",
 )
 
 
 class RegistryError(Exception):
     """Classified registry query failure: not_found / retryable / no_docs."""
 
-    def __init__(self, kind: str, message: str, hint: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self, kind: str, message: str, hint: dict[str, Any] | None = None
+    ) -> None:
         super().__init__(message)
         self.kind = kind
         self.hint = hint or {}
@@ -114,12 +124,18 @@ def registry_base_for(ecosystem: str, settings) -> str:
         bases = dict(getattr(settings, "registry_bases", None) or {})
         if ecosystem in bases and str(bases[ecosystem]).strip():
             return str(bases[ecosystem]).rstrip("/")
-    mirror = str(getattr(settings, "registry_mirror", "default") or "default").strip().lower()
+    mirror = (
+        str(getattr(settings, "registry_mirror", "default") or "default")
+        .strip()
+        .lower()
+    )
     try:
         preset = REGISTRY_MIRRORS[mirror]
     except KeyError:
         available = ", ".join(sorted(REGISTRY_MIRRORS))
-        raise ValueError(f"unknown registry mirror: {mirror!r} (available: {available})") from None
+        raise ValueError(
+            f"unknown registry mirror: {mirror!r} (available: {available})"
+        ) from None
     if ecosystem in preset:
         return str(preset[ecosystem]).rstrip("/")
     return str(DEFAULT_REGISTRY_BASES[ecosystem]).rstrip("/")
@@ -142,7 +158,7 @@ def _is_private_host(host: str) -> bool:
             second = int(h.split(".")[1])
             if 16 <= second <= 31:
                 return True
-        except (IndexError, ValueError):
+        except IndexError, ValueError:
             pass
     return False
 
@@ -153,7 +169,7 @@ def sanitize_http_url(url: str | None, *, allow_private: bool = False) -> str | 
     text = url.strip().strip("<>\"'")
     text = text.removeprefix("git+")
     if text.startswith("git://"):
-        text = "https://" + text[len("git://"):]
+        text = "https://" + text[len("git://") :]
     try:
         parts = urlsplit(text)
     except ValueError:
@@ -227,10 +243,7 @@ def best_effort_stable(versions: list[str]) -> str | None:
     """Fallback when no stable release exists: filter pre-release suffixes, then take the max by version comparison."""
     if not versions:
         return None
-    plain = [
-        v for v in versions
-        if not any(h in v.lower() for h in _PRERELEASE_HINTS)
-    ]
+    plain = [v for v in versions if not any(h in v.lower() for h in _PRERELEASE_HINTS)]
     return max(plain or versions, key=_version_key)
 
 
@@ -266,7 +279,9 @@ async def _get_text(
     error: str | None = None
     for attempt in range(retries + 1):
         try:
-            resp = await client.get(url, headers={"Accept": "text/xml, application/xml, */*"})
+            resp = await client.get(
+                url, headers={"Accept": "text/xml, application/xml, */*"}
+            )
         except (httpx.HTTPError, OSError, TimeoutError) as exc:
             error = f"{type(exc).__name__}: {exc}"
             await asyncio.sleep(min(0.05 * (2**attempt), 0.4))
@@ -334,7 +349,9 @@ async def fetch_snapshot(
         if not versions:
             raise RegistryError("not_found", f"package not found: maven:{name}")
         pom_version = stable or best_effort_stable(versions) or versions[0]
-        pom_resp = await _get_text(client, maven_pom_url(base, group, artifact, pom_version))
+        pom_resp = await _get_text(
+            client, maven_pom_url(base, group, artifact, pom_version)
+        )
         if pom_resp.status_code >= 400:
             homepage, candidates, repo_url = None, [], None
         else:

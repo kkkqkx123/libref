@@ -37,7 +37,13 @@ def log_deletion(
     cur = conn.execute(
         "INSERT INTO deletion_log(library, version, ecosystem, reason, detail)"
         " VALUES(?,?,?,?,?)",
-        (library, version, ecosystem, reason, json.dumps(detail or {}, ensure_ascii=False)),
+        (
+            library,
+            version,
+            ecosystem,
+            reason,
+            json.dumps(detail or {}, ensure_ascii=False),
+        ),
     )
     conn.commit()
     return int(cur.lastrowid)
@@ -89,8 +95,12 @@ def check_quota(root: Path, quota_mb: int, label: str) -> None:
         return
     used = dir_size_bytes(root)
     if used > quota_bytes:
-        logger.warning("%s over quota: %s uses %d bytes, limit %dMB", label, root, used, quota_mb)
-        raise ValueError(f"{label} over quota: {root} exceeds {quota_mb}MB, purge first")
+        logger.warning(
+            "%s over quota: %s uses %d bytes, limit %dMB", label, root, used, quota_mb
+        )
+        raise ValueError(
+            f"{label} over quota: {root} exceeds {quota_mb}MB, purge first"
+        )
 
 
 def purge_version(
@@ -134,11 +144,15 @@ def purge_version(
         try:
             vec_store.delete_docs(removed_doc_ids)
         except Exception as exc:  # noqa: BLE001 — whole-version purge proceeds with source-of-truth deletion; warn only
-            logger.warning("purge vector docs failed for version %d: %s", version_id, exc)
+            logger.warning(
+                "purge vector docs failed for version %d: %s", version_id, exc
+            )
         try:
             vec_store.delete_version(version_id)
         except Exception as exc:  # noqa: BLE001 — same as above
-            logger.warning("purge vector version failed for version %d: %s", version_id, exc)
+            logger.warning(
+                "purge vector version failed for version %d: %s", version_id, exc
+            )
     conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM api_clusters WHERE version_id=?", (version_id,))
@@ -157,11 +171,15 @@ def purge_version(
     conn.execute("DELETE FROM ast_cache WHERE repo=?", (f"{eco}/{library}/{version}",))
     snapshot_removed = 0
     if snapshot_root is not None:
-        snapshot_removed = SnapshotStore(snapshot_root, quota_mb=0).drop_version(eco, library, version)
+        snapshot_removed = SnapshotStore(snapshot_root, quota_mb=0).drop_version(
+            eco, library, version
+        )
     repos_removed = 0
     if repos_dir is not None:
         repo_name = f"{eco}/{library}/{version}"
-        row = conn.execute("SELECT local_path FROM repos WHERE name=?", (repo_name,)).fetchone()
+        row = conn.execute(
+            "SELECT local_path FROM repos WHERE name=?", (repo_name,)
+        ).fetchone()
         conn.execute("DELETE FROM repos WHERE name=?", (repo_name,))
         if row is not None and row[0]:
             import shutil
@@ -172,11 +190,18 @@ def purge_version(
                 if candidate != base and base in candidate.parents:
                     shutil.rmtree(candidate, ignore_errors=True)
                     repos_removed = 1
-            except Exception:
+            except Exception:  # noqa: BLE001 — repo dir removal failure must not abort the purge
                 repos_removed = 0
     conn.commit()
-    logger.info("purge done %s:%s %s removed_docs=%d snapshots=%d repos=%d",
-                eco, library, version, removed_docs, snapshot_removed, repos_removed)
+    logger.info(
+        "purge done %s:%s %s removed_docs=%d snapshots=%d repos=%d",
+        eco,
+        library,
+        version,
+        removed_docs,
+        snapshot_removed,
+        repos_removed,
+    )
     log_deletion(
         conn,
         library=library,

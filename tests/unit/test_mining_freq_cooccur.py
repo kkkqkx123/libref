@@ -41,4 +41,7 @@ def test_normalize_roundtrip_sorted_ids():
     assert table == {"numpy.array": 0, "numpy.zeros": 1}
     encoded = encode_sequences([["numpy.array", "numpy.zeros"]], table)
     assert encoded == [[0, 1]]
-    assert decode_pattern([0, 1], reverse_table(table)) == ["numpy.array", "numpy.zeros"]
+    assert decode_pattern([0, 1], reverse_table(table)) == [
+        "numpy.array",
+        "numpy.zeros",
+    ]

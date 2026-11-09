@@ -87,7 +87,11 @@ class Resilience:
             self.breaker.record_success()
 
     def after_failure(self, exc: BaseException) -> None:
-        if self.breaker is not None and isinstance(exc, LlmError) and exc.is_network_failure():
+        if (
+            self.breaker is not None
+            and isinstance(exc, LlmError)
+            and exc.is_network_failure()
+        ):
             self.breaker.record_failure()
 
 

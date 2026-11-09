@@ -10,10 +10,9 @@ from libref.mining.cluster import cluster_apis
 from libref.mining.cooccur import build_scope_sets
 from libref.mining.feature_tree import build_feature_tree
 from libref.services.code_ingest import index_repo
-from libref.services.mining_refresh import mine_patterns
 from libref.services.libraries import LibraryService
 from libref.services.mining_read import MiningReadService
-from libref.services.search import SearchService
+from libref.services.mining_refresh import mine_patterns
 from tests.conftest import copy_mini_repo
 
 pytestmark = pytest.mark.integration
@@ -26,7 +25,10 @@ def test_feature_tree_hand_computed():
         ("a.c", "f1"),
         ("a.b", "f2"),
     ]
-    nodes = {n["path"]: n for n in build_feature_tree(calls, {"a.b": "function", "a.c": "function"})}
+    nodes = {
+        n["path"]: n
+        for n in build_feature_tree(calls, {"a.b": "function", "a.c": "function"})
+    }
     assert nodes["a"]["calls"] == 4
     assert nodes["a"]["scopes"] == 2
     assert nodes["a.b"]["calls"] == 3
@@ -62,7 +64,8 @@ def test_mine_persists_tree_and_clusters(conn, tmp_path):
     clusters = svc.api_clusters("demo", "0.1")
     assert clusters
     assert any(
-        "numpy.array" in g["members"] and "numpy.zeros" in g["members"] for g in clusters
+        "numpy.array" in g["members"] and "numpy.zeros" in g["members"]
+        for g in clusters
     )
     evidence = svc.pattern_evidence(["numpy.array", "numpy.zeros"], "demo", "0.1")
     assert len(evidence) >= 2
@@ -75,8 +78,21 @@ def test_mine_clears_derived_when_calls_gone(conn):
         " caller_file, line_start, line_end, confidence,"
         " library_id, version_id, caller, call_order, start_byte)"
         " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ("uid-1", "a.b", json.dumps([]), "r", "f.py", 1, 1, "INFERRED",
-         library_id, version_id, "g", 1, 10),
+        (
+            "uid-1",
+            "a.b",
+            json.dumps([]),
+            "r",
+            "f.py",
+            1,
+            1,
+            "INFERRED",
+            library_id,
+            version_id,
+            "g",
+            1,
+            10,
+        ),
     )
     conn.commit()
     mine_patterns(conn, "demo", "t", minsup=1, minlen=1)

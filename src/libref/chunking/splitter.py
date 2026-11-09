@@ -101,9 +101,12 @@ def split_markdown_dual(
     _rechain(kept_bm25)
     _attach_prev_overlap(kept_bm25, resolved[ChunkPath.BM25])
     _attach_prev_overlap(embedding, resolved[ChunkPath.EMBEDDING])
-    return DualChunks(bm25=kept_bm25, embedding=embedding,
-                      empty_dropped=bm25_dropped + embed_dropped,
-                      deduped=len(bm25) - len(kept_bm25))
+    return DualChunks(
+        bm25=kept_bm25,
+        embedding=embedding,
+        empty_dropped=bm25_dropped + embed_dropped,
+        deduped=len(bm25) - len(kept_bm25),
+    )
 
 
 @dataclass
@@ -133,8 +136,11 @@ def _split_by_headings(md_text: str) -> list[_Section]:
             if m:
                 if buf:
                     sections.append(
-                        _Section(path=cur_path, title=cur_title,
-                                 content="\n".join(buf).strip())
+                        _Section(
+                            path=cur_path,
+                            title=cur_title,
+                            content="\n".join(buf).strip(),
+                        )
                     )
                     buf = []
                 level = len(m.group(1))
@@ -149,8 +155,9 @@ def _split_by_headings(md_text: str) -> list[_Section]:
         buf.append(line)
 
     if buf:
-        sections.append(_Section(path=cur_path, title=cur_title,
-                                 content="\n".join(buf).strip()))
+        sections.append(
+            _Section(path=cur_path, title=cur_title, content="\n".join(buf).strip())
+        )
     for sec in sections:
         sec.merged_from = [sec.title or sec.path]
     return sections
@@ -193,7 +200,9 @@ def _split_path(
                     merged_from=sec.merged_from.copy(),
                     chunk_index=part_index,
                     total_chunks=total,
-                    content_hash=chunk_content_hash(f"{sec.title}\0{sec.path}\0{index_part}"),
+                    content_hash=chunk_content_hash(
+                        f"{sec.title}\0{sec.path}\0{index_part}"
+                    ),
                     keywords=extract_keywords(index_part),
                 )
             )
@@ -269,14 +278,15 @@ def _embed_head_cost(sec: _Section, path: ChunkPath) -> int:
     return cost(head + "\n", path)
 
 
-def _repair_embed_parts(sec: _Section, parts: list[str], budget: ChunkBudget) -> list[str]:
+def _repair_embed_parts(
+    sec: _Section, parts: list[str], budget: ChunkBudget
+) -> list[str]:
     """Decoration re-check: if head plus body exceeds the hard limit, tighten the body and re-split to avoid truncation at sync points."""
     if budget.hard_limit <= 0:
         return parts
     head_cost = _embed_head_cost(sec, ChunkPath.EMBEDDING)
     room = budget.hard_limit - head_cost - 1
-    if room < 1:
-        room = 1
+    room = max(room, 1)
     out: list[str] = []
     for part in parts:
         if cost(part, ChunkPath.EMBEDDING) + head_cost + 1 <= budget.hard_limit:
@@ -310,20 +320,22 @@ def _rechain(chunks: list[Chunk]) -> None:
     for order, chunk in enumerate(chunks):
         chunk.sort_order = order
         chunk.prev_chunk_id = chunks[order - 1].chunk_id if order > 0 else None
-        chunk.next_chunk_id = chunks[order + 1].chunk_id if order + 1 < len(chunks) else None
+        chunk.next_chunk_id = (
+            chunks[order + 1].chunk_id if order + 1 < len(chunks) else None
+        )
         chunk.overlap_from = None
         chunk.overlap_text = ""
 
 
-def _attach_prev_overlap(
-    chunks: list[Chunk], budget: ChunkBudget
-) -> None:
+def _attach_prev_overlap(chunks: list[Chunk], budget: ChunkBudget) -> None:
     """Record only the forward predecessor source and metered tail text per this path's convention; no body duplication."""
     if budget.overlap <= 0:
         return
     for prev, cur in itertools.pairwise(chunks):
         cur.overlap_from = prev.chunk_id
-        cur.overlap_text = _overlap_suffix(prev.content, ChunkPath(cur.chunk_path), budget.overlap)
+        cur.overlap_text = _overlap_suffix(
+            prev.content, ChunkPath(cur.chunk_path), budget.overlap
+        )
 
 
 def _fences_balanced(text: str) -> bool:
@@ -340,10 +352,91 @@ def chunk_content_hash(content: str) -> str:
 
 
 _STOPWORDS = frozenset(
-    "the a an and or of to in on for with as by at from is are was were be been "
-    "this that these those it its you we they he she him her them his our your their "
-    "not no yes if else when then than so such can will just into over under out up "
-    "的 了 在 是 和 与 或 有 个 上 下 中 大 小 不 也 就 都 而 及 等 于 为 来 用 对".split()
+    [
+        "the",
+        "a",
+        "an",
+        "and",
+        "or",
+        "of",
+        "to",
+        "in",
+        "on",
+        "for",
+        "with",
+        "as",
+        "by",
+        "at",
+        "from",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "this",
+        "that",
+        "these",
+        "those",
+        "it",
+        "its",
+        "you",
+        "we",
+        "they",
+        "he",
+        "she",
+        "him",
+        "her",
+        "them",
+        "his",
+        "our",
+        "your",
+        "their",
+        "not",
+        "no",
+        "yes",
+        "if",
+        "else",
+        "when",
+        "then",
+        "than",
+        "so",
+        "such",
+        "can",
+        "will",
+        "just",
+        "into",
+        "over",
+        "under",
+        "out",
+        "up",
+        "的",
+        "了",
+        "在",
+        "是",
+        "和",
+        "与",
+        "或",
+        "有",
+        "个",
+        "上",
+        "下",
+        "中",
+        "大",
+        "小",
+        "不",
+        "也",
+        "就",
+        "都",
+        "而",
+        "及",
+        "等",
+        "于",
+        "为",
+        "来",
+        "用",
+        "对",
+    ]
 )
 
 
@@ -364,9 +457,14 @@ def extract_keywords(text: str, limit: int = 5) -> list[str]:
         if token not in expanded:
             expanded.append(token)
         snake = ident_snake_form(token)
-        if snake and snake != token and snake not in _STOPWORDS and snake not in expanded:
-            if len(expanded) < limit:
-                expanded.append(snake)
+        if (
+            snake
+            and snake != token
+            and snake not in _STOPWORDS
+            and snake not in expanded
+            and len(expanded) < limit
+        ):
+            expanded.append(snake)
     return expanded[:limit]
 
 
@@ -386,7 +484,9 @@ def _assign_relations(chunks: list[Chunk], *, md_source: str = "") -> None:
     cursor = 0
     for index, chunk in enumerate(chunks):
         chunk.prev_chunk_id = chunks[index - 1].chunk_id if index > 0 else None
-        chunk.next_chunk_id = chunks[index + 1].chunk_id if index + 1 < len(chunks) else None
+        chunk.next_chunk_id = (
+            chunks[index + 1].chunk_id if index + 1 < len(chunks) else None
+        )
         if md_source:
             found = md_source.find(chunk.content, cursor)
             if found >= 0:
@@ -395,9 +495,7 @@ def _assign_relations(chunks: list[Chunk], *, md_source: str = "") -> None:
                 cursor = found + 1
 
 
-def ensure_hard_limit(
-    text: str, path: ChunkPath, hard_limit: int
-) -> tuple[str, bool]:
+def ensure_hard_limit(text: str, path: ChunkPath, hard_limit: int) -> tuple[str, bool]:
     """Final validation after decoration appends: truncate when over the limit and return whether truncated; the caller logs the warning."""
     if hard_limit == 0 or cost(text, path) <= hard_limit:
         return text, False

@@ -47,11 +47,13 @@ class ScopePolicy:
         object.__setattr__(self, "exclude_patterns", tuple(exclude_patterns or ()))
         object.__setattr__(self, "max_depth", max_depth)
         object.__setattr__(
-            self, "_include_res",
+            self,
+            "_include_res",
             tuple(re.compile(p) for p in (include_patterns or ())),
         )
         object.__setattr__(
-            self, "_exclude_res",
+            self,
+            "_exclude_res",
             tuple(re.compile(p) for p in (exclude_patterns or ())),
         )
 
@@ -64,11 +66,15 @@ class ScopePolicy:
             return False
         base = urlsplit(self.start_url)
         if not self.allow_cross_site and not _host_ok(
-            parts.netloc.lower(), base.netloc.lower(), self.allow_subdomains,
+            parts.netloc.lower(),
+            base.netloc.lower(),
+            self.allow_subdomains,
         ):
             return False
         path = parts.path or "/"
-        if self.path_prefixes and not any(path.startswith(p) for p in self.path_prefixes):
+        if self.path_prefixes and not any(
+            path.startswith(p) for p in self.path_prefixes
+        ):
             return False
         if self.path_suffixes and not any(path.endswith(s) for s in self.path_suffixes):
             return False
@@ -105,9 +111,7 @@ def build_scope(start_url: str, opts: dict | None) -> ScopePolicy:
 
 
 def _host_ok(host: str, base_host: str, allow_subdomains: bool) -> bool:
-    return host == base_host or (
-        allow_subdomains and host.endswith("." + base_host)
-    )
+    return host == base_host or (allow_subdomains and host.endswith("." + base_host))
 
 
 def _base_dir_segments(start_url: str) -> list[str]:

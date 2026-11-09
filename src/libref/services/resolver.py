@@ -79,10 +79,15 @@ def write_cache(
         "homepage=excluded.homepage, repo_url=excluded.repo_url, "
         "fetched_at=excluded.fetched_at",
         (
-            ecosystem, name, docs_url,
+            ecosystem,
+            name,
+            docs_url,
             json.dumps(candidates, ensure_ascii=False),
             json.dumps(versions, ensure_ascii=False),
-            stable, homepage, repo_url, fetched_at,
+            stable,
+            homepage,
+            repo_url,
+            fetched_at,
         ),
     )
     conn.commit()
@@ -152,12 +157,8 @@ def _override_addrs(
 ) -> tuple[str | None, str | None]:
     if override is None:
         return None, None
-    docs = sanitize_http_url(
-        override.get("docs_url"), allow_private=allow_private
-    )
-    repo = sanitize_http_url(
-        override.get("repo_url"), allow_private=allow_private
-    )
+    docs = sanitize_http_url(override.get("docs_url"), allow_private=allow_private)
+    repo = sanitize_http_url(override.get("repo_url"), allow_private=allow_private)
     if repo is None and override.get("repo_url"):
         raw = str(override.get("repo_url", "")).strip().removeprefix("git+")
         repo = sanitize_http_url(raw, allow_private=allow_private)
@@ -186,10 +187,16 @@ def _registry_context(conn, settings, ecosystem: str | None, name: str):
 def _store_snapshot(conn, eco: str, norm: str, snap) -> None:
     """Store the registry snapshot in cache; shared by both the docs and repo paths."""
     write_cache(
-        conn, ecosystem=eco, name=norm,
+        conn,
+        ecosystem=eco,
+        name=norm,
         docs_url=snap.doc_candidates[0] if snap.doc_candidates else None,
-        candidates=snap.doc_candidates, versions=snap.versions, stable=snap.stable,
-        homepage=snap.homepage, repo_url=snap.repo_url, fetched_at=time.time(),
+        candidates=snap.doc_candidates,
+        versions=snap.versions,
+        stable=snap.stable,
+        homepage=snap.homepage,
+        repo_url=snap.repo_url,
+        fetched_at=time.time(),
     )
 
 
@@ -248,7 +255,7 @@ async def resolve_package(
         clean = sanitize_http_url(explicit_url, allow_private=allow_private)
         if clean is None:
             raise ValueError(f"invalid documentation address: {explicit_url}")
-        eco = (ecosystem.strip().lower() if ecosystem else "custom")
+        eco = ecosystem.strip().lower() if ecosystem else "custom"
         label = name.strip()
         if eco in ("pypi", "npm", "maven"):
             label = normalize_name(eco, name)
@@ -271,31 +278,48 @@ async def resolve_package(
         if cached is None:
             raise RegistryError("retryable", "offline cache miss")
         return _build_resolution(
-            ecosystem=eco, name=norm, requested=requested_version,
-            versions=cached["versions"], stable=cached["stable"],
-            homepage=cached["homepage"], repo_url=cached["repo_url"],
-            override_docs=override_docs, override_repo=override_repo,
+            ecosystem=eco,
+            name=norm,
+            requested=requested_version,
+            versions=cached["versions"],
+            stable=cached["stable"],
+            homepage=cached["homepage"],
+            repo_url=cached["repo_url"],
+            override_docs=override_docs,
+            override_repo=override_repo,
             registry_docs=cached["docs_url"],
-            candidates=cached["candidates"], source="override" if override_hit else "registry",
+            candidates=cached["candidates"],
+            source="override" if override_hit else "registry",
         )
     if cached is not None and _is_fresh(cached["fetched_at"], ttl):
         return _build_resolution(
-            ecosystem=eco, name=norm, requested=requested_version,
-            versions=cached["versions"], stable=cached["stable"],
-            homepage=cached["homepage"], repo_url=cached["repo_url"],
-            override_docs=override_docs, override_repo=override_repo,
+            ecosystem=eco,
+            name=norm,
+            requested=requested_version,
+            versions=cached["versions"],
+            stable=cached["stable"],
+            homepage=cached["homepage"],
+            repo_url=cached["repo_url"],
+            override_docs=override_docs,
+            override_repo=override_repo,
             registry_docs=cached["docs_url"],
-            candidates=cached["candidates"], source="override" if override_hit else "registry",
+            candidates=cached["candidates"],
+            source="override" if override_hit else "registry",
         )
     try:
         snap = await fetch_snapshot(eco, norm, client, settings)
     except RegistryError as exc:
         if exc.kind == "retryable" and cached is not None:
             return _build_resolution(
-                ecosystem=eco, name=norm, requested=requested_version,
-                versions=cached["versions"], stable=cached["stable"],
-                homepage=cached["homepage"], repo_url=cached["repo_url"],
-                override_docs=override_docs, override_repo=override_repo,
+                ecosystem=eco,
+                name=norm,
+                requested=requested_version,
+                versions=cached["versions"],
+                stable=cached["stable"],
+                homepage=cached["homepage"],
+                repo_url=cached["repo_url"],
+                override_docs=override_docs,
+                override_repo=override_repo,
                 registry_docs=cached["docs_url"],
                 candidates=cached["candidates"],
                 source="override" if override_hit else "registry-stale",
@@ -303,12 +327,18 @@ async def resolve_package(
         raise
     _store_snapshot(conn, eco, norm, snap)
     return _build_resolution(
-        ecosystem=eco, name=norm, requested=requested_version,
-        versions=snap.versions, stable=snap.stable,
-        homepage=snap.homepage, repo_url=snap.repo_url,
-        override_docs=override_docs, override_repo=override_repo,
+        ecosystem=eco,
+        name=norm,
+        requested=requested_version,
+        versions=snap.versions,
+        stable=snap.stable,
+        homepage=snap.homepage,
+        repo_url=snap.repo_url,
+        override_docs=override_docs,
+        override_repo=override_repo,
         registry_docs=snap.doc_candidates[0] if snap.doc_candidates else None,
-        candidates=snap.doc_candidates, source="override" if override_hit else "registry",
+        candidates=snap.doc_candidates,
+        source="override" if override_hit else "registry",
     )
 
 
@@ -339,7 +369,7 @@ async def resolve_repo(
             text = cleaned
         if requested_version is None:
             raise ValueError("explicit repo source requires a version")
-        eco = (ecosystem.strip().lower() if ecosystem else "custom")
+        eco = ecosystem.strip().lower() if ecosystem else "custom"
         label = name.strip()
         if eco in ("pypi", "npm", "maven"):
             label = normalize_name(eco, name)
@@ -362,21 +392,32 @@ async def resolve_repo(
         if cached is None:
             raise RegistryError("retryable", "offline cache miss")
         return _build_repo_resolution(
-            ecosystem=eco, name=norm, requested=requested_version,
-            versions=cached["versions"], stable=cached["stable"],
-            homepage=cached["homepage"], repo_url=cached["repo_url"],
-            override_docs=override_docs, override_repo=override_repo,
+            ecosystem=eco,
+            name=norm,
+            requested=requested_version,
+            versions=cached["versions"],
+            stable=cached["stable"],
+            homepage=cached["homepage"],
+            repo_url=cached["repo_url"],
+            override_docs=override_docs,
+            override_repo=override_repo,
             registry_docs=cached["docs_url"],
-            candidates=cached["candidates"], source="override" if override_hit else "registry",
+            candidates=cached["candidates"],
+            source="override" if override_hit else "registry",
         )
     if cached is not None and _is_fresh(cached["fetched_at"], ttl):
         repo_url = override_repo or cached["repo_url"]
         if repo_url is not None:
             return _build_repo_resolution(
-                ecosystem=eco, name=norm, requested=requested_version,
-                versions=cached["versions"], stable=cached["stable"],
-                homepage=cached["homepage"], repo_url=cached["repo_url"],
-                override_docs=override_docs, override_repo=override_repo,
+                ecosystem=eco,
+                name=norm,
+                requested=requested_version,
+                versions=cached["versions"],
+                stable=cached["stable"],
+                homepage=cached["homepage"],
+                repo_url=cached["repo_url"],
+                override_docs=override_docs,
+                override_repo=override_repo,
                 registry_docs=cached["docs_url"],
                 candidates=cached["candidates"],
                 source="override" if override_hit else "registry",
@@ -393,10 +434,15 @@ async def resolve_repo(
                     hint={"homepage": cached["homepage"]},
                 ) from None
             return _build_repo_resolution(
-                ecosystem=eco, name=norm, requested=requested_version,
-                versions=cached["versions"], stable=cached["stable"],
-                homepage=cached["homepage"], repo_url=cached["repo_url"],
-                override_docs=override_docs, override_repo=override_repo,
+                ecosystem=eco,
+                name=norm,
+                requested=requested_version,
+                versions=cached["versions"],
+                stable=cached["stable"],
+                homepage=cached["homepage"],
+                repo_url=cached["repo_url"],
+                override_docs=override_docs,
+                override_repo=override_repo,
                 registry_docs=cached["docs_url"],
                 candidates=cached["candidates"],
                 source="override" if override_hit else "registry-stale",
@@ -404,10 +450,15 @@ async def resolve_repo(
         raise
     _store_snapshot(conn, eco, norm, snap)
     return _build_repo_resolution(
-        ecosystem=eco, name=norm, requested=requested_version,
-        versions=snap.versions, stable=snap.stable,
-        homepage=snap.homepage, repo_url=snap.repo_url,
-        override_docs=override_docs, override_repo=override_repo,
+        ecosystem=eco,
+        name=norm,
+        requested=requested_version,
+        versions=snap.versions,
+        stable=snap.stable,
+        homepage=snap.homepage,
+        repo_url=snap.repo_url,
+        override_docs=override_docs,
+        override_repo=override_repo,
         registry_docs=snap.doc_candidates[0] if snap.doc_candidates else None,
         candidates=list(snap.doc_candidates),
         source="override" if override_hit else "registry",

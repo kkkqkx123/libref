@@ -111,7 +111,9 @@ def ensure_overrides_file(path: str | Path) -> None:
     load_overrides_file(resolved)
 
 
-def is_override_stale(verified_at: str, ttl_days: float, now: date | None = None) -> bool:
+def is_override_stale(
+    verified_at: str, ttl_days: float, now: date | None = None
+) -> bool:
     """Treat an entry as stale if the verification date is past TTL or malformed, prompting re-verification."""
     try:
         verified = datetime.strptime(verified_at.strip(), "%Y-%m-%d").date()

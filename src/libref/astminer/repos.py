@@ -6,10 +6,28 @@ import sqlite3
 from pathlib import Path
 
 _SKIP_DIRS = frozenset(
-    {".git", "__pycache__", "node_modules", "vendor", ".venv", "venv", "target",
-     "dist", "build", ".tox", ".eggs", "eggs", ".mypy_cache",
-     ".pytest_cache", ".ruff_cache", "__pypackages__",
-     ".hg", ".svn", ".idea", ".vscode"}
+    {
+        ".git",
+        "__pycache__",
+        "node_modules",
+        "vendor",
+        ".venv",
+        "venv",
+        "target",
+        "dist",
+        "build",
+        ".tox",
+        ".eggs",
+        "eggs",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        "__pypackages__",
+        ".hg",
+        ".svn",
+        ".idea",
+        ".vscode",
+    }
 )
 
 _SKIP_DIR_SUBSTRINGS = ("test", "testing", "__tests__")
@@ -120,8 +138,12 @@ class RepoManager:
             repo.close()
 
     def _record(
-        self, conn: sqlite3.Connection, name: str, url: str,
-        commit: str, local_path: str,
+        self,
+        conn: sqlite3.Connection,
+        name: str,
+        url: str,
+        commit: str,
+        local_path: str,
     ) -> None:
         conn.execute(
             "INSERT INTO repos(name, url, commit_sha, local_path)"

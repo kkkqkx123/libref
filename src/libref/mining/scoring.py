@@ -26,7 +26,9 @@ def name_hit(name: str, full: set[str], toks: set[str]) -> bool:
     return short in toks
 
 
-def support_for_entities(entities: list[str], plist: list[tuple[list[str], int]]) -> float:
+def support_for_entities(
+    entities: list[str], plist: list[tuple[list[str], int]]
+) -> float:
     if not entities or not plist:
         return 0.0
     ceiling = max(s for _, s in plist)

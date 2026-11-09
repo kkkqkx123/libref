@@ -7,7 +7,11 @@ duplicating string transforms.
 
 from libref.text.bm25 import clean_text_for_bm25
 from libref.text.cjk import CJK_RUN_RE, expand_cjk_run
-from libref.text.embedding import build_embed_text, is_embeddable_metadata, strip_markdown_for_embedding
+from libref.text.embedding import (
+    build_embed_text,
+    is_embeddable_metadata,
+    strip_markdown_for_embedding,
+)
 from libref.text.ident import ident_snake_form, snake_variant
 from libref.text.normalize import (
     classify_content,
@@ -18,13 +22,13 @@ from libref.text.query import safe_fts_query
 from libref.text.snippet import make_snippet, truncate_material
 
 __all__ = [
-    "build_embed_text",
-    "is_embeddable_metadata",
-    "classify_content",
     "CJK_RUN_RE",
+    "build_embed_text",
+    "classify_content",
     "clean_text_for_bm25",
     "expand_cjk_run",
     "ident_snake_form",
+    "is_embeddable_metadata",
     "make_snippet",
     "normalize_markdown",
     "safe_fts_query",

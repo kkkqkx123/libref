@@ -63,9 +63,7 @@ def test_answer_grounds_in_retrieved_material(conn, monkeypatch, tmp_path) -> No
 
     out = answer_query(conn, s, "uv", chat=_chat_fn(s, handler))
     assert out["answer"] == "用 uv 管理依赖"
-    assert out["citations"] == [
-        {"url": "https://d.example/a.html", "title": "G"}
-    ]
+    assert out["citations"] == [{"url": "https://d.example/a.html", "title": "G"}]
     assert out["degraded"] is False
     assert out["model"] == s.chat_model
     assert "Materials" in seen["user"]
@@ -81,9 +79,7 @@ def test_answer_empty_without_evidence(conn, monkeypatch, tmp_path) -> None:
     def boom(request: httpx.Request) -> httpx.Response:
         raise AssertionError("must not call chat without evidence")
 
-    out = answer_query(
-        conn, s, "pineapplezzzqqq", chat=_chat_fn(s, boom)
-    )
+    out = answer_query(conn, s, "pineapplezzzqqq", chat=_chat_fn(s, boom))
     assert out == {"answer": "", "citations": [], "degraded": False, "model": ""}
 
 

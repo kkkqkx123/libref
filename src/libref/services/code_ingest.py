@@ -5,19 +5,17 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
 import httpx
 
 INDEX_REPO_JOB_KIND = "index_repo"
+
 
 async def _client(settings) -> AsyncIterator[httpx.AsyncClient]:
     from libref.crawler.http import build_async_client
 
     async with build_async_client(settings) as client:
         yield client
-
-
 
 
 def entity_uid(version_id: int, qualified_name: str, kind: str) -> str:
@@ -172,7 +170,10 @@ def _store_source_chunks(
             for c in raw_chunks
         ]
         result = store.store_page(
-            version_id, library_id, page_url, "stored",
+            version_id,
+            library_id,
+            page_url,
+            "stored",
             chunks=inputs,
             raw_content=data.decode("utf-8", "replace"),
         )
@@ -344,7 +345,9 @@ def _persist_calls(
     return len(resolved), len(dead_rows)
 
 
-def lookup_index_source_cached(conn, ecosystem: str, library: str, version: str) -> tuple[str, str] | None:
+def lookup_index_source_cached(
+    conn, ecosystem: str, library: str, version: str
+) -> tuple[str, str] | None:
     from pathlib import Path
 
     repo_name = f"{ecosystem}/{library}/{version}"
@@ -423,6 +426,7 @@ async def index_repo_async(
     )
     if repos_quota_mb is not None:
         from libref.services.retention import check_quota
+
         check_quota(settings_dir, int(repos_quota_mb), "repos")
     manager = RepoManager(settings_dir)
     repo_name = f"{ecosystem}/{library}/{version}"
@@ -472,8 +476,14 @@ async def index_repo_async(
         from libref.store.document_store import DocumentStore
 
         await sync_vectors_for_docs(
-            conn, settings, vec_store, embed,
-            DocumentStore(conn), counts, removed_ids, inserted_ids,
+            conn,
+            settings,
+            vec_store,
+            embed,
+            DocumentStore(conn),
+            counts,
+            removed_ids,
+            inserted_ids,
         )
     return counts
 
@@ -494,13 +504,23 @@ def index_repo(
     vec_store=None,
     embed=None,
 ) -> dict[str, int]:
-    return asyncio.run(index_repo_async(
-        conn, library, version, source,
-        update=update, repos_dir=repos_dir, ecosystem=ecosystem,
-        resolved_from=resolved_from, registry_confirmed=registry_confirmed,
-        repos_quota_mb=repos_quota_mb,
-        settings=settings, vec_store=vec_store, embed=embed,
-    ))
+    return asyncio.run(
+        index_repo_async(
+            conn,
+            library,
+            version,
+            source,
+            update=update,
+            repos_dir=repos_dir,
+            ecosystem=ecosystem,
+            resolved_from=resolved_from,
+            registry_confirmed=registry_confirmed,
+            repos_quota_mb=repos_quota_mb,
+            settings=settings,
+            vec_store=vec_store,
+            embed=embed,
+        )
+    )
 
 
 def index_repo_by_name(
@@ -516,8 +536,13 @@ def index_repo_by_name(
 ) -> dict[str, int]:
     return asyncio.run(
         index_repo_by_name_async(
-            conn, settings, ecosystem, library, version,
-            update=update, repos_dir=repos_dir,
+            conn,
+            settings,
+            ecosystem,
+            library,
+            version,
+            update=update,
+            repos_dir=repos_dir,
             explicit_source=explicit_source,
         )
     )
@@ -534,31 +559,44 @@ async def index_repo_by_name_async(
     repos_dir=None,
     explicit_source: str | None = None,
 ) -> dict[str, int]:
-    from libref.services.resolver import infer_ecosystem, resolve_repo
+    from libref.services.resolver import resolve_repo
 
     if explicit_source is not None:
         if version is None:
             raise ValueError("explicit repo source requires a version")
-        eco = (ecosystem.strip().lower() if ecosystem else "custom")
+        eco = ecosystem.strip().lower() if ecosystem else "custom"
         vec_store = None
         embed = None
         try:
             from libref.services.factory import build_vector as _build_vector
 
             vec_store, embed, _ = _build_vector(settings)
-        except Exception:
+        except Exception:  # noqa: BLE001 — vector stack is optional; indexing continues without it
             vec_store, embed = None, None
         return await index_repo_async(
-            conn, library.strip(), version, explicit_source,
+            conn,
+            library.strip(),
+            version,
+            explicit_source,
             update=update,
-            repos_dir=Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir),
+            repos_dir=Path(repos_dir)
+            if repos_dir is not None
+            else Path(settings.repos_dir),
             ecosystem=eco,
-            resolved_from="explicit", registry_confirmed=True,
-            settings=settings, vec_store=vec_store, embed=embed,
+            resolved_from="explicit",
+            registry_confirmed=True,
+            settings=settings,
+            vec_store=vec_store,
+            embed=embed,
         )
     async with _client(settings) as client:
         resolution = await resolve_repo(
-            conn, client, settings, ecosystem, library, version,
+            conn,
+            client,
+            settings,
+            ecosystem,
+            library,
+            version,
         )
     assert resolution.repo_url is not None
     vec_store = None
@@ -567,23 +605,31 @@ async def index_repo_by_name_async(
         from libref.services.factory import build_vector as _build_vector
 
         vec_store, embed, _ = _build_vector(settings)
-    except Exception:
+    except Exception:  # noqa: BLE001 — vector stack is optional; indexing continues without it
         vec_store, embed = None, None
     return await index_repo_async(
-        conn, resolution.name, resolution.version, resolution.repo_url,
+        conn,
+        resolution.name,
+        resolution.version,
+        resolution.repo_url,
         update=update,
-        repos_dir=Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir),
+        repos_dir=Path(repos_dir)
+        if repos_dir is not None
+        else Path(settings.repos_dir),
         ecosystem=resolution.ecosystem,
         resolved_from=resolution.source,
         registry_confirmed=resolution.registry_confirmed,
-        settings=settings, vec_store=vec_store, embed=embed,
+        settings=settings,
+        vec_store=vec_store,
+        embed=embed,
     )
-
 
 
 def build_repo_runner(settings, conn, repos_dir=None, vec_store=None, embed=None):
     """Build a job runner handling repo indexing only; mining lives in mining_refresh."""
-    resolved_dir = Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir)
+    resolved_dir = (
+        Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir)
+    )
 
     async def runner(job):
         if job.kind != INDEX_REPO_JOB_KIND:
@@ -599,7 +645,7 @@ def build_repo_runner(settings, conn, repos_dir=None, vec_store=None, embed=None
                     local_vec = built_vec
                 if local_embed is None:
                     local_embed = built_embed
-            except Exception:
+            except Exception:  # noqa: BLE001, S110 — vector stack is optional; indexing continues without it
                 pass
         return await index_repo_async(
             conn,
@@ -612,7 +658,9 @@ def build_repo_runner(settings, conn, repos_dir=None, vec_store=None, embed=None
             resolved_from=p.get("resolved_from"),
             registry_confirmed=bool(p.get("registry_confirmed", True)),
             repos_quota_mb=int(settings.repos_quota_mb),
-            settings=settings, vec_store=local_vec, embed=local_embed,
+            settings=settings,
+            vec_store=local_vec,
+            embed=local_embed,
         )
 
     return runner

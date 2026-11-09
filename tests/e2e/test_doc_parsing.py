@@ -54,7 +54,9 @@ def test_e2e_doc_index_invariants(tmp_path, conn):
         library = f"e2e-docs-{site}"
         try:
             counts = service.scrape_docs(
-                library, entry["version"], entry["url"],
+                library,
+                entry["version"],
+                entry["url"],
                 max_pages=entry.get("max_pages"),
             )
         except Exception as exc:  # noqa: BLE001
@@ -63,7 +65,9 @@ def test_e2e_doc_index_invariants(tmp_path, conn):
         stored = counts.get("stored", 0)
         stored_total += stored
         second = service.scrape_docs(
-            library, entry["version"], entry["url"],
+            library,
+            entry["version"],
+            entry["url"],
             max_pages=entry.get("max_pages"),
         )
         assert second.get("failed", 0) == 0
@@ -72,8 +76,11 @@ def test_e2e_doc_index_invariants(tmp_path, conn):
     baseline = manifest["baseline"]
     assert _stored_total(conn, "e2e-docs-baseline", baseline["version"]) >= 1
     assert stored_total >= 1
-    snapshots = list((SNAPSHOT_ROOT / "custom" / "e2e-docs-baseline"
-                        / baseline["version"]).glob("*.gz"))
+    snapshots = list(
+        (SNAPSHOT_ROOT / "custom" / "e2e-docs-baseline" / baseline["version"]).glob(
+            "*.gz"
+        )
+    )
     assert snapshots, "baseline raw snapshots missing for manual review"
     report = tmp_path / "e2e-doc-report.txt"
     report.write_text("\n".join(report_lines) + "\n", encoding="utf-8")

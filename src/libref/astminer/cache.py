@@ -39,7 +39,14 @@ def store(
         " VALUES(?, ?, ?, ?, ?, ?)"
         " ON CONFLICT(repo, path, fp, cfg_version)"
         " DO UPDATE SET file_sha1=excluded.file_sha1, records=excluded.records",
-        (repo, path, file_sha1, fp, cfg_version, json.dumps(records, ensure_ascii=False)),
+        (
+            repo,
+            path,
+            file_sha1,
+            fp,
+            cfg_version,
+            json.dumps(records, ensure_ascii=False),
+        ),
     )
 
 
@@ -136,7 +143,9 @@ def decode_records(
                     end_byte=int(item.get("end_byte", 0)),
                     receiver=item.get("receiver"),
                     func=str(item.get("func", "") or item["raw"].rpartition(".")[2]),
-                    argument_count=int(item.get("argument_count", len(item.get("args", [])))),
+                    argument_count=int(
+                        item.get("argument_count", len(item.get("args", [])))
+                    ),
                 )
             )
     return decls, aliases, calls

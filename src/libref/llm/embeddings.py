@@ -224,7 +224,9 @@ class EmbeddingClient:
             vecs_all.extend(vecs)
             prompt += usage.get("prompt_tokens", 0)
             total += usage.get("total_tokens", 0)
-        return EmbeddingResult(vecs_all, {"prompt_tokens": prompt, "total_tokens": total})
+        return EmbeddingResult(
+            vecs_all, {"prompt_tokens": prompt, "total_tokens": total}
+        )
 
     async def _encode_batch_with_usage(
         self, client: httpx.AsyncClient, texts: list[str]

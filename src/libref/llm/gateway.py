@@ -82,7 +82,9 @@ class LlmGateway:
 
         return embed
 
-    def rerank_fn(self, transport: httpx.BaseTransport | None = None) -> RerankFn | None:
+    def rerank_fn(
+        self, transport: httpx.BaseTransport | None = None
+    ) -> RerankFn | None:
         """Rerank function; returns None when not enabled, no model, or no key."""
         config = RerankConfig.from_settings(self._settings)
         if config is None:

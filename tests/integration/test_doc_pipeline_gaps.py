@@ -10,10 +10,10 @@ import pytest
 from libref.chunking import split_markdown_dual
 from libref.config import LibrefSettings
 from libref.services.ingest import IngestService
-from libref.text.normalize import classify_content
 from libref.services.jobs import JobManager
 from libref.services.pages import PageService
 from libref.services.search import SearchService
+from libref.text.normalize import classify_content
 from tests.conftest import mock_ingest
 
 pytestmark = pytest.mark.integration
@@ -29,7 +29,9 @@ def test_classify_content_dispatch() -> None:
 
 
 def test_chunk_relations_keywords_offsets() -> None:
-    dual = split_markdown_dual("# A\n\nfirst body here\n\n# B\n\nsecond body here\n", "u")
+    dual = split_markdown_dual(
+        "# A\n\nfirst body here\n\n# B\n\nsecond body here\n", "u"
+    )
     assert dual.embedding, "embedding stream is empty"
     first = dual.embedding[0]
     assert first.content_hash, "chunk hash is empty"
@@ -49,13 +51,19 @@ def test_scrape_mime_markdown_and_observability(conn) -> None:
             return httpx.Response(200, text="")
         if path == "/sitemap.xml":
             host = request.url.host
-            return httpx.Response(200, text=(
-                '<?xml version="1.0"?><urlset>'
-                f'<url><loc>https://{host}/b.md</loc></url></urlset>'
-            ))
+            return httpx.Response(
+                200,
+                text=(
+                    '<?xml version="1.0"?><urlset>'
+                    f"<url><loc>https://{host}/b.md</loc></url></urlset>"
+                ),
+            )
         if path == "/b.md":
-            return httpx.Response(200, text="# G\n\nsmoke markdown body\n",
-                                  headers={"Content-Type": "text/markdown"})
+            return httpx.Response(
+                200,
+                text="# G\n\nsmoke markdown body\n",
+                headers={"Content-Type": "text/markdown"},
+            )
         if "sitemap" in path:
             return httpx.Response(404)
         raise AssertionError(path)
@@ -63,10 +71,17 @@ def test_scrape_mime_markdown_and_observability(conn) -> None:
     settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=2)
     with mock_ingest(handler):
         counts = IngestService(settings, conn).scrape_docs(
-            "docs", "1.0", "https://d.example/sitemap.xml")
+            "docs", "1.0", "https://d.example/sitemap.xml"
+        )
     assert counts["stored"] == 1
-    for key in ("seed_discovered", "scope_rejected", "seed_truncated",
-                "elapsed_ms", "chunk_reused", "render_skipped"):
+    for key in (
+        "seed_discovered",
+        "scope_rejected",
+        "seed_truncated",
+        "elapsed_ms",
+        "chunk_reused",
+        "render_skipped",
+    ):
         assert key in counts, key
     hits = SearchService(conn).search_docs("smoke")
     assert hits and hits[0]["url"].endswith("/b.md")
@@ -81,13 +96,21 @@ def test_refresh_alias_and_window(conn) -> None:
             return httpx.Response(200, text="")
         if path in ("/", "/sitemap.xml"):
             host = request.url.host
-            return httpx.Response(200, text=(
-                '<?xml version="1.0"?><urlset>'
-                f'<url><loc>https://{host}/a.html</loc></url></urlset>'))
+            return httpx.Response(
+                200,
+                text=(
+                    '<?xml version="1.0"?><urlset>'
+                    f"<url><loc>https://{host}/a.html</loc></url></urlset>"
+                ),
+            )
         if path == "/a.html":
-            return httpx.Response(200, text=(
-                "<html><body><main><h1>T</h1><p>refresh body one</p>"
-                "<p>refresh body two</p></main></body></html>"))
+            return httpx.Response(
+                200,
+                text=(
+                    "<html><body><main><h1>T</h1><p>refresh body one</p>"
+                    "<p>refresh body two</p></main></body></html>"
+                ),
+            )
         if "sitemap" in path:
             return httpx.Response(404)
         raise AssertionError(path)
@@ -97,12 +120,12 @@ def test_refresh_alias_and_window(conn) -> None:
         service = IngestService(settings, conn)
         counts = service.refresh_version("docs", "1.0", "https://d.example/")
     assert counts["stored"] == 1
-    window = PageService(conn).read_window(
-        "https://d.example/a.html", 0, radius=1)
+    window = PageService(conn).read_window("https://d.example/a.html", 0, radius=1)
     assert window is not None and window["docs"]
     section = PageService(conn).read_section(
         "https://d.example/a.html",
-        window["docs"][0]["metadata"].get("source_group_id", ""))
+        window["docs"][0]["metadata"].get("source_group_id", ""),
+    )
     assert section is None or section["chunks"] >= 1
 
 
@@ -111,6 +134,7 @@ def test_job_heartbeat_ticks(conn) -> None:
 
     async def runner(job):
         import time as _time
+
         for _ in range(5):
             await asyncio.sleep(0.05)
             seen.append(_time.time())
@@ -143,13 +167,21 @@ def test_render_skipped_counted(conn) -> None:
             return httpx.Response(200, text="")
         if path in ("/", "/sitemap.xml"):
             host = request.url.host
-            return httpx.Response(200, text=(
-                '<?xml version="1.0"?><urlset>'
-                f'<url><loc>https://{host}/app.html</loc></url></urlset>'))
+            return httpx.Response(
+                200,
+                text=(
+                    '<?xml version="1.0"?><urlset>'
+                    f"<url><loc>https://{host}/app.html</loc></url></urlset>"
+                ),
+            )
         if path == "/app.html":
-            return httpx.Response(200, text=(
-                '<html><body><div id="root"></div>'
-                '<script>var x=1;</script></body></html>'))
+            return httpx.Response(
+                200,
+                text=(
+                    '<html><body><div id="root"></div>'
+                    "<script>var x=1;</script></body></html>"
+                ),
+            )
         if "sitemap" in path:
             return httpx.Response(404)
         raise AssertionError(path)
@@ -157,6 +189,7 @@ def test_render_skipped_counted(conn) -> None:
     settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=1)
     with mock_ingest(handler):
         counts = IngestService(settings, conn).scrape_docs(
-            "docs", "1.0", "https://d.example/")
+            "docs", "1.0", "https://d.example/"
+        )
     assert counts["skipped"] >= 1
     assert counts["render_skipped"] >= 1

@@ -71,7 +71,10 @@ def _merge_matches(matches: list) -> list[tuple[Any, dict[str, list]]]:
         key = (node.start_byte, node.end_byte)
         slot = merged.get(key)
         if slot is None:
-            merged[key] = (node, {name: list(nodes) for name, nodes in captures.items()})
+            merged[key] = (
+                node,
+                {name: list(nodes) for name, nodes in captures.items()},
+            )
         else:
             _, existing = slot
             for name, nodes in captures.items():
@@ -99,9 +102,7 @@ def _entity_name(captures: dict[str, list], roots: set[str], source: bytes) -> s
     return ""
 
 
-def _decl_bases(
-    captures: dict[str, list], source: bytes
-) -> list[str]:
+def _decl_bases(captures: dict[str, list], source: bytes) -> list[str]:
     bases: list[str] = []
     for text in _rules.all_texts(captures, source, ".signature.base", ".base"):
         if text not in bases:
@@ -122,8 +123,14 @@ def extract_file(
     module = determine_module_path(path, cfg.name)
     doc_nodes, line_nodes = _comment_spans(comment_matches)
     decls = _build_decls(
-        path, cfg, source, entity_matches, dep_matches, module,
-        doc_nodes=doc_nodes, line_nodes=line_nodes,
+        path,
+        cfg,
+        source,
+        entity_matches,
+        dep_matches,
+        module,
+        doc_nodes=doc_nodes,
+        line_nodes=line_nodes,
     )
     alias_module = module
     if module is not None and path.replace("\\", "/").endswith("__init__.py"):
@@ -147,7 +154,9 @@ def extract_file(
     return decls, aliases, calls
 
 
-def _comment_spans(comment_matches) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
+def _comment_spans(
+    comment_matches,
+) -> tuple[list[tuple[int, int]], list[tuple[int, int]]]:
     doc: list[tuple[int, int]] = []
     line: list[tuple[int, int]] = []
     for _, captures in comment_matches:
@@ -177,7 +186,9 @@ def _body_opens_with_string(body, source: bytes) -> bool:
 
 
 def _has_doc(
-    node, body, source: bytes,
+    node,
+    body,
+    source: bytes,
     doc_nodes: list[tuple[int, int]],
     line_nodes: list[tuple[int, int]],
 ) -> bool:
@@ -201,7 +212,16 @@ def _has_doc(
     return False
 
 
-def _build_decls(path, cfg, source, entity_matches, dep_matches, module=None, doc_nodes=None, line_nodes=None) -> list[ApiDeclRecord]:
+def _build_decls(
+    path,
+    cfg,
+    source,
+    entity_matches,
+    dep_matches,
+    module=None,
+    doc_nodes=None,
+    line_nodes=None,
+) -> list[ApiDeclRecord]:
     doc_spans = list(doc_nodes or [])
     line_spans = list(line_nodes or [])
     groups = _merge_matches(entity_matches)
@@ -223,9 +243,7 @@ def _build_decls(path, cfg, source, entity_matches, dep_matches, module=None, do
         name = _entity_name(captures, roots, source)
         if not name:
             continue
-        cands.append(
-            {"node": node, "kind": kind, "name": name, "captures": captures}
-        )
+        cands.append({"node": node, "kind": kind, "name": name, "captures": captures})
     cands.sort(key=lambda c: (c["node"].start_byte, -c["node"].end_byte))
     dep_spans: list[tuple[int, int, str]] = []
     for node, captures in _merge_matches(dep_matches):
@@ -264,9 +282,11 @@ def _build_decls(path, cfg, source, entity_matches, dep_matches, module=None, do
         captures = cand["captures"]
         body = _rules.first_node(captures, ".body")
         if body is not None:
-            signature = source[node.start_byte : body.start_byte].decode(
-                "utf-8", "replace"
-            ).strip()
+            signature = (
+                source[node.start_byte : body.start_byte]
+                .decode("utf-8", "replace")
+                .strip()
+            )
         else:
             signature = _rules.slice_text(node, source).strip()
         params_node = _rules.first_node(captures, ".params", ".signature.params")
@@ -280,7 +300,9 @@ def _build_decls(path, cfg, source, entity_matches, dep_matches, module=None, do
             if params_node is not None
             else []
         )
-        return_node = _rules.first_node(captures, ".return_type", ".signature.return_type")
+        return_node = _rules.first_node(
+            captures, ".return_type", ".signature.return_type"
+        )
         return_type = _rules.shaped_return(return_node, source)
         bases = _decl_bases(captures, source)
         for start, end, text in dep_spans:
@@ -309,10 +331,14 @@ def _build_decls(path, cfg, source, entity_matches, dep_matches, module=None, do
     return decls
 
 
-def _build_aliases(cfg, source, dep_matches, module: str | None = None) -> list[tuple[str, str]]:
+def _build_aliases(
+    cfg, source, dep_matches, module: str | None = None
+) -> list[tuple[str, str]]:
     aliases: list[tuple[str, str]] = []
     for node, captures in _merge_matches(dep_matches):
-        for alias, full in _rules.build_aliases(cfg.name, node, captures, source, module):
+        for alias, full in _rules.build_aliases(
+            cfg.name, node, captures, source, module
+        ):
             if alias and full:
                 aliases.append((alias, full))
     return aliases
@@ -406,7 +432,9 @@ def _is_module_loader(node, source: bytes) -> bool:
         return False
     if fn.type == "import":
         return True
-    return fn.type == "identifier" and _rules.slice_text(fn, source).strip() == "require"
+    return (
+        fn.type == "identifier" and _rules.slice_text(fn, source).strip() == "require"
+    )
 
 
 def _caller_for(node, decls: list[ApiDeclRecord]) -> str | None:

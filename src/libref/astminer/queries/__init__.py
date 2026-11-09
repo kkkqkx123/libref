@@ -29,7 +29,5 @@ def texts(language: str) -> dict[str, str]:
 
 
 def fingerprint_fragment(language: str) -> str:
-    blob = "\x00".join(
-        [str(QUERY_VERSION)] + [texts(language)[kind] for kind in KINDS]
-    )
+    blob = "\x00".join([str(QUERY_VERSION)] + [texts(language)[kind] for kind in KINDS])
     return hashlib.sha1(blob.encode()).hexdigest()

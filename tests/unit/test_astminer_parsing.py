@@ -71,7 +71,9 @@ def test_python_sampling_matches_stdlib():
         if not path.is_file():
             continue
         data = path.read_bytes()
-        _decls, _aliases, raw = ast_engine.extract_file(rel, ast_config.PYTHON_CONFIG, data)
+        _decls, _aliases, raw = ast_engine.extract_file(
+            rel, ast_config.PYTHON_CONFIG, data
+        )
         assert _simple_calls(raw) == _dotted_calls(data)
 
 

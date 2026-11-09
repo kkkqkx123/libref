@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 MINE_PATTERNS_JOB_KIND = "mine_patterns"
@@ -12,14 +11,18 @@ DEFAULT_MAXLEN = 10
 DEFAULT_MINLEN = 2
 
 
-def _cluster_defaults(threshold: float | None, min_size: int | None) -> tuple[float, int]:
+def _cluster_defaults(
+    threshold: float | None, min_size: int | None
+) -> tuple[float, int]:
     """When cluster params are missing, resolve from the settings-class defaults instead of copying numbers."""
     if threshold is not None and min_size is not None:
         return threshold, min_size
     from libref.config import LibrefSettings
 
     fields = LibrefSettings.model_fields
-    resolved_threshold = fields["cluster_threshold"].default if threshold is None else threshold
+    resolved_threshold = (
+        fields["cluster_threshold"].default if threshold is None else threshold
+    )
     resolved_size = fields["cluster_min_size"].default if min_size is None else min_size
     return float(resolved_threshold), int(resolved_size)
 
@@ -36,7 +39,7 @@ def _review_map(conn, version_id: int) -> dict[int, str]:
         from libref.services.review import ReviewService
 
         return ReviewService(conn).review_map_for_version(version_id)
-    except Exception:
+    except Exception:  # noqa: BLE001 — review map is advisory; mining proceeds unfiltered
         return {}
 
 
@@ -63,7 +66,11 @@ def refresh_feature_tree(
         (version_id,),
     ).fetchall()
     review = _review_map(conn, version_id)
-    rows = [r for r in rows if _keep_call(str(r[3]), review.get(int(r[4])), include_ambiguous)]
+    rows = [
+        r
+        for r in rows
+        if _keep_call(str(r[3]), review.get(int(r[4])), include_ambiguous)
+    ]
     calls = [(str(r[0]), _scope_key(str(r[1]), r[2])) for r in rows if r[0]]
     if not calls:
         conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
@@ -128,7 +135,11 @@ def refresh_clusters(
         (version_id,),
     ).fetchall()
     review = _review_map(conn, version_id)
-    rows = [r for r in rows if _keep_call(str(r[3]), review.get(int(r[4])), include_ambiguous)]
+    rows = [
+        r
+        for r in rows
+        if _keep_call(str(r[3]), review.get(int(r[4])), include_ambiguous)
+    ]
     triplets = [(str(r[0]), str(r[1]), r[2]) for r in rows if r[0]]
     sets = _scope_sets(triplets)
     groups = _cluster_fn(sets, threshold=threshold, min_size=min_size)
@@ -201,7 +212,11 @@ def mine_patterns(
         conn.commit()
         return []
     review = _review_map(conn, version_id)
-    rows = [r for r in rows if _keep_call(str(r[4]), review.get(int(r[7])), include_ambiguous)]
+    rows = [
+        r
+        for r in rows
+        if _keep_call(str(r[4]), review.get(int(r[7])), include_ambiguous)
+    ]
     if not rows:
         _clear_derived(conn, version_id)
         conn.commit()
@@ -351,16 +366,18 @@ def build_mine_runner(settings, conn):
             maxlen=int(p.get("maxlen", DEFAULT_MAXLEN)),
             minlen=int(p.get("minlen", DEFAULT_MINLEN)),
             include_ambiguous=bool(p.get("include_ambiguous", False)),
-            cluster_threshold=float(p.get(
-                "cluster_threshold",
-                _cluster_fields["cluster_threshold"].default,
-            )),
-            cluster_min_size=int(p.get(
-                "cluster_min_size",
-                _cluster_fields["cluster_min_size"].default,
-            )),
+            cluster_threshold=float(
+                p.get(
+                    "cluster_threshold",
+                    _cluster_fields["cluster_threshold"].default,
+                )
+            ),
+            cluster_min_size=int(
+                p.get(
+                    "cluster_min_size",
+                    _cluster_fields["cluster_min_size"].default,
+                )
+            ),
         )
 
     return runner
-
-

@@ -16,7 +16,8 @@ def _extract(path: str, source: bytes):
 
 def test_python_docstring_marks_has_doc():
     decls, _aliases, _raw = _extract(
-        "m.py", b'def bare():\n    pass\n\n\ndef documented():\n    """Do things."""\n    return 1\n'
+        "m.py",
+        b'def bare():\n    pass\n\n\ndef documented():\n    """Do things."""\n    return 1\n',
     )
     by_qual = {d.qualified_name: d for d in decls}
     assert by_qual["m.bare"].has_doc is False
@@ -24,9 +25,7 @@ def test_python_docstring_marks_has_doc():
 
 
 def test_leading_comment_marks_has_doc():
-    decls, _aliases, _raw = _extract(
-        "m.py", b"# leading note\ndef f():\n    pass\n"
-    )
+    decls, _aliases, _raw = _extract("m.py", b"# leading note\ndef f():\n    pass\n")
     by_qual = {d.qualified_name: d for d in decls}
     assert by_qual["m.f"].has_doc is True
 
@@ -73,9 +72,7 @@ def test_blank_member_source_skipped_and_counted():
     decls, _aliases, _raw = _extract("m.py", b"def f():\n    pass\n")
     groups = ast_grouping.build_groups(decls, b"", "m.py")
     by_qual = {d.qualified_name: d for d in decls}
-    split = ast_source_chunk.build_source_chunks(
-        groups, by_qual, b"", "m.py", repo="r"
-    )
+    split = ast_source_chunk.build_source_chunks(groups, by_qual, b"", "m.py", repo="r")
     assert split.chunks == []
     assert split.empty_dropped >= 1
 
@@ -100,9 +97,7 @@ def test_source_chunks_share_group_across_paths():
     assert any(paths == {"bm25", "embedding"} for paths in by_group.values())
     kinds = {c.span_kind for c in split.chunks}
     assert kinds <= {"exact_entities", "enclosing_entity", "group_fallback"}
-    assert all(
-        c.chunk_id.startswith(f"{c.group_id}::") for c in split.chunks
-    )
+    assert all(c.chunk_id.startswith(f"{c.group_id}::") for c in split.chunks)
 
 
 def test_source_chunk_converts_to_document_chunk():

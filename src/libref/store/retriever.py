@@ -10,9 +10,14 @@ import json
 import sqlite3
 from typing import Any
 
-from libref.mining.scoring import cluster_hit, cluster_hit_exact, support_for_content, support_for_entities
-from libref.text.query import safe_fts_query
+from libref.mining.scoring import (
+    cluster_hit,
+    cluster_hit_exact,
+    support_for_content,
+    support_for_entities,
+)
 from libref.text.embedding import strip_markdown_for_embedding
+from libref.text.query import safe_fts_query
 from libref.text.snippet import make_snippet
 
 
@@ -35,8 +40,7 @@ def _version_ids(
         params.append(version)
     where = ("WHERE " + " AND ".join(filters)) if filters else ""
     rows = conn.execute(
-        "SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id "
-        f"{where}",
+        f"SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id {where}",
         params,
     ).fetchall()
     return [int(r[0]) for r in rows]
@@ -80,12 +84,13 @@ def _fts_candidates(
     return [int(r[0]) for r in rows]
 
 
-
-
-
 def _fetch_details(
-    conn: sqlite3.Connection, doc_ids: list[int], query: str,
-    *, snippet_radius: int, snippet_cap: int,
+    conn: sqlite3.Connection,
+    doc_ids: list[int],
+    query: str,
+    *,
+    snippet_radius: int,
+    snippet_cap: int,
 ) -> dict[int, dict[str, Any]]:
     if not doc_ids:
         return {}
@@ -109,7 +114,12 @@ def _fetch_details(
         out[int(r[0])] = {
             "id": int(r[0]),
             "url": r[1],
-            "snippet": make_snippet(strip_markdown_for_embedding(r[2]), query, radius=snippet_radius, cap=snippet_cap),
+            "snippet": make_snippet(
+                strip_markdown_for_embedding(r[2]),
+                query,
+                radius=snippet_radius,
+                cap=snippet_cap,
+            ),
             "title": r[3],
             "path": r[4],
             "library": r[5],
@@ -151,9 +161,7 @@ def alignment_key(meta: dict[str, Any] | None, url: str | None, doc_id: int) -> 
     return f"c:{doc_id}"
 
 
-def _collapse_by_group(
-    conn: sqlite3.Connection, fused: list[int]
-) -> list[int]:
+def _collapse_by_group(conn: sqlite3.Connection, fused: list[int]) -> list[int]:
     """Keep only the highest-ranked chunk per source group, merging twin chunks from both paths into one hit."""
     if len(fused) < 2:
         return fused
@@ -251,7 +259,9 @@ class HybridRetriever:
         if limit <= 0:
             raise ValueError("limit must be positive")
         degraded = False
-        candidate_floor = int(setting_or_default(self._settings, "rerank_candidate_limit"))
+        candidate_floor = int(
+            setting_or_default(self._settings, "rerank_candidate_limit")
+        )
         candidate_mult = int(setting_or_default(self._settings, "candidate_multiplier"))
         need = max(candidate_mult * limit, candidate_floor)
         weights = (
@@ -303,24 +313,37 @@ class HybridRetriever:
         assemble_mult = int(setting_or_default(self._settings, "assemble_multiplier"))
         assemble_min = int(setting_or_default(self._settings, "assemble_min"))
         fused_reranked, degraded, rerank_scores = await self._apply_rerank(
-            query, fused, limit, degraded,
+            query,
+            fused,
+            limit,
+            degraded,
             window=max(assemble_mult * limit, assemble_min),
             top_n=int(setting_or_default(self._settings, "rerank_top_n")),
         )
         fused = fused_reranked
         window_f = max(assemble_mult * limit, assemble_min)
-        expand = setting_or_default(self._settings, "retriever_expand_window") if expand_window is None else expand_window
-        radius = setting_or_default(self._settings, "retriever_window_radius") if window_radius is None else window_radius
+        expand = (
+            setting_or_default(self._settings, "retriever_expand_window")
+            if expand_window is None
+            else expand_window
+        )
+        radius = (
+            setting_or_default(self._settings, "retriever_window_radius")
+            if window_radius is None
+            else window_radius
+        )
         results = self._postprocess(
-            query, fused[:window_f], fts_ids, vec_ids,
-            expand_window=bool(expand), window_radius=int(radius),
+            query,
+            fused[:window_f],
+            fts_ids,
+            vec_ids,
+            expand_window=bool(expand),
+            window_radius=int(radius),
             rerank_scores=rerank_scores,
         )
         return results[:limit], degraded
 
-    def _rrf_scores(
-        self, fts_ids: list[int], vec_ids: list[int]
-    ) -> dict[int, float]:
+    def _rrf_scores(self, fts_ids: list[int], vec_ids: list[int]) -> dict[int, float]:
         from libref.config import setting_or_default
 
         k = int(setting_or_default(self._settings, "rrf_k"))
@@ -343,8 +366,14 @@ class HybridRetriever:
         return sorted(scored, key=lambda d: scored[d], reverse=True)
 
     async def _apply_rerank(
-        self, query: str, fused: list[int], limit: int, degraded: bool,
-        *, window: int, top_n: int | None,
+        self,
+        query: str,
+        fused: list[int],
+        limit: int,
+        degraded: bool,
+        *,
+        window: int,
+        top_n: int | None,
     ) -> tuple[list[int], bool, dict[int, float]]:
         from libref.config import setting_or_default
 
@@ -357,7 +386,9 @@ class HybridRetriever:
             return fused, degraded, {}
         radius = int(setting_or_default(self._settings, "snippet_radius"))
         cap = int(setting_or_default(self._settings, "snippet_cap"))
-        details = _fetch_details(self._conn, head, query, snippet_radius=radius, snippet_cap=cap)
+        details = _fetch_details(
+            self._conn, head, query, snippet_radius=radius, snippet_cap=cap
+        )
         texts = [details[d]["content"] for d in head if d in details]
         if len(texts) != len(head):
             return fused, degraded, {}
@@ -367,21 +398,28 @@ class HybridRetriever:
             return fused, True, {}
         order = sorted(scored, key=lambda kv: kv[1], reverse=True)
         pos_of = {idx: rank for rank, (idx, _) in enumerate(order)}
-        head_sorted = sorted(
-            range(len(head)), key=lambda i: pos_of.get(i, len(order))
-        )
-        rerank_scores = {head[idx]: float(score) for idx, score in scored if 0 <= idx < len(head)}
+        head_sorted = sorted(range(len(head)), key=lambda i: pos_of.get(i, len(order)))
+        rerank_scores = {
+            head[idx]: float(score) for idx, score in scored if 0 <= idx < len(head)
+        }
         return [head[i] for i in head_sorted] + tail, degraded, rerank_scores
 
     def _assemble(
-        self, query: str, fused: list[int], fts_ids: list[int], vec_ids: list[int],
-        *, rerank_scores: dict[int, float] | None = None,
+        self,
+        query: str,
+        fused: list[int],
+        fts_ids: list[int],
+        vec_ids: list[int],
+        *,
+        rerank_scores: dict[int, float] | None = None,
     ) -> list[dict[str, Any]]:
         from libref.config import setting_or_default
 
         radius = int(setting_or_default(self._settings, "snippet_radius"))
         cap = int(setting_or_default(self._settings, "snippet_cap"))
-        details = _fetch_details(self._conn, fused, query, snippet_radius=radius, snippet_cap=cap)
+        details = _fetch_details(
+            self._conn, fused, query, snippet_radius=radius, snippet_cap=cap
+        )
         fts_set, vec_set = set(fts_ids), set(vec_ids)
         alpha = float(setting_or_default(self._settings, "freq_alpha"))
         cluster_alpha = float(setting_or_default(self._settings, "cluster_alpha"))
@@ -403,7 +441,9 @@ class HybridRetriever:
             if have_entities and alpha > 0:
                 bonus = support_for_entities(have_entities, plist)
             else:
-                bonus = support_for_content(info["content"], plist) if alpha > 0 else 0.0
+                bonus = (
+                    support_for_content(info["content"], plist) if alpha > 0 else 0.0
+                )
             cluster_bonus = 0.0
             clist = clusters.get(info["version_id"], [])
             if clist and cluster_alpha > 0:
@@ -458,13 +498,28 @@ class HybridRetriever:
             )
         return out
 
-    def _postprocess(self, query: str, fused: list[int], fts_ids: list[int], vec_ids: list[int], *, expand_window: bool, window_radius: int, rerank_scores: dict[int, float] | None = None) -> list[dict[str, Any]]:
+    def _postprocess(
+        self,
+        query: str,
+        fused: list[int],
+        fts_ids: list[int],
+        vec_ids: list[int],
+        *,
+        expand_window: bool,
+        window_radius: int,
+        rerank_scores: dict[int, float] | None = None,
+    ) -> list[dict[str, Any]]:
         """Post-processing chain: assembly runs in order; on window-expansion failure the assembled order is kept."""
-        results = self._assemble(query, fused, fts_ids, vec_ids, rerank_scores=rerank_scores)
-        return self._expand_windows(results, enabled=expand_window, radius=window_radius)
+        results = self._assemble(
+            query, fused, fts_ids, vec_ids, rerank_scores=rerank_scores
+        )
+        return self._expand_windows(
+            results, enabled=expand_window, radius=window_radius
+        )
 
-
-    def _expand_windows(self, results: list[dict[str, Any]], *, enabled: bool, radius: int) -> list[dict[str, Any]]:
+    def _expand_windows(
+        self, results: list[dict[str, Any]], *, enabled: bool, radius: int
+    ) -> list[dict[str, Any]]:
         """Window-expansion post-processing: prepend/append neighboring chunks by the configured radius; on failure keep the original order."""
         from libref.config import setting_or_default
 
@@ -476,11 +531,15 @@ class HybridRetriever:
         preview_cap = int(setting_or_default(self._settings, "window_preview_cap"))
         try:
             from libref.store.document_store import DocumentStore
+
             store = DocumentStore(self._conn)
-            by_id = {int(r["id"]): r for r in self._conn.execute(
-                "SELECT id, page_id, sort_order FROM documents WHERE id IN (%s)" % ",".join("?" for _ in results),
-                [r["id"] for r in results],
-            ).fetchall()}
+            by_id = {
+                int(r["id"]): r
+                for r in self._conn.execute(
+                    f"SELECT id, page_id, sort_order FROM documents WHERE id IN ({','.join('?' for _ in results)})",
+                    [r["id"] for r in results],
+                ).fetchall()
+            }
             expanded: list[dict[str, Any]] = []
             for item in results:
                 loc = by_id.get(int(item["id"]))
@@ -488,11 +547,19 @@ class HybridRetriever:
                     expanded.append(item)
                     continue
                 hit_path = str(item.get("chunk_path", "embedding") or "embedding")
-                window = store.get_window(int(loc[1]), int(loc[2]), radius, chunk_path=hit_path)
+                window = store.get_window(
+                    int(loc[1]), int(loc[2]), radius, chunk_path=hit_path
+                )
                 if len(window) > 1:
                     item = dict(item)
                     item["window"] = [
-                        {"id": w["id"], "sort_order": w["sort_order"], "content": strip_markdown_for_embedding(w["content"])[:preview_cap]}
+                        {
+                            "id": w["id"],
+                            "sort_order": w["sort_order"],
+                            "content": strip_markdown_for_embedding(w["content"])[
+                                :preview_cap
+                            ],
+                        }
                         for w in window
                     ]
                 expanded.append(item)
@@ -503,5 +570,6 @@ class HybridRetriever:
 
 def build_retriever(settings, conn, *, vec_store=None, embed=None, rerank=None):
     """Build a hybrid retriever from settings; degrades to FTS-only when vectors are missing."""
-    return HybridRetriever(conn, settings, vec_store=vec_store,
-                           embed=embed, rerank=rerank)
+    return HybridRetriever(
+        conn, settings, vec_store=vec_store, embed=embed, rerank=rerank
+    )

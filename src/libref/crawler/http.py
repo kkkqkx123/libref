@@ -79,7 +79,9 @@ def proxy_disabled(no_proxy_text: str) -> bool:
     return any(raw.strip() == "*" for raw in (no_proxy_text or "").split(","))
 
 
-def build_async_client(settings, *, transport: httpx.BaseTransport | None = None) -> httpx.AsyncClient:
+def build_async_client(
+    settings, *, transport: httpx.BaseTransport | None = None
+) -> httpx.AsyncClient:
     """Build a fetch AsyncClient from settings; callers manage its lifetime with async with."""
     kwargs: dict = {
         "timeout": settings.request_timeout,

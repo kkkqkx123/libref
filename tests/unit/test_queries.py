@@ -96,13 +96,13 @@ def test_javascript_import_require_aliases():
     _decls, aliases, raw = ast_engine.extract_file(
         "m.js",
         cfg,
-        b"import def, {a as b, c} from \"mod/x\";\n"
-        b"import * as ns from \"lib\";\n"
-        b"import \"side\";\n"
-        b"const d = require(\"r\");\n"
-        b"const {e, f: g} = require(\"r2\");\n"
-        b"export {a} from \"m2\";\n"
-        b"const p2 = import(\"dyn\");\n",
+        b'import def, {a as b, c} from "mod/x";\n'
+        b'import * as ns from "lib";\n'
+        b'import "side";\n'
+        b'const d = require("r");\n'
+        b'const {e, f: g} = require("r2");\n'
+        b'export {a} from "m2";\n'
+        b'const p2 = import("dyn");\n',
     )
     assert ("def", "mod/x") in aliases
     assert ("b", "mod/x.a") in aliases
@@ -120,8 +120,7 @@ def test_javascript_arrow_and_object_method():
     decls, _aliases, raw = ast_engine.extract_file(
         "m.js",
         cfg,
-        b"const arrow = async (p) => helper(p);\n"
-        b"const o = { k(v) { return v; } };\n",
+        b"const arrow = async (p) => helper(p);\nconst o = { k(v) { return v; } };\n",
     )
     by_qual = {d.qualified_name: d for d in decls}
     assert by_qual["m.arrow"].kind == "function"

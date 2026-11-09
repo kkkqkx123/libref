@@ -14,8 +14,12 @@ _configured_fingerprint: str | None = None
 
 def _normalize_level(raw: object) -> int:
     name = str(raw or "WARNING").upper()
-    return {"DEBUG": logging.DEBUG, "INFO": logging.INFO,
-            "WARNING": logging.WARNING, "ERROR": logging.ERROR}.get(name, logging.WARNING)
+    return {
+        "DEBUG": logging.DEBUG,
+        "INFO": logging.INFO,
+        "WARNING": logging.WARNING,
+        "ERROR": logging.ERROR,
+    }.get(name, logging.WARNING)
 
 
 def _text_formatter() -> logging.Formatter:
@@ -32,10 +36,15 @@ class _JsonFormatter(logging.Formatter):
         }
         try:
             return json.dumps(payload, ensure_ascii=False)
-        except (TypeError, ValueError):
-            return json.dumps({"time": payload["time"], "level": payload["level"],
-                               "logger": payload["logger"],
-                               "message": str(record.msg)[:500]})
+        except TypeError, ValueError:
+            return json.dumps(
+                {
+                    "time": payload["time"],
+                    "level": payload["level"],
+                    "logger": payload["logger"],
+                    "message": str(record.msg)[:500],
+                }
+            )
 
 
 def _our_handlers() -> list[logging.Handler]:
@@ -47,7 +56,9 @@ def setup_logging(settings) -> None:
     global _configured_fingerprint
     try:
         level = _normalize_level(getattr(settings, "log_level", "WARNING"))
-        use_json = str(getattr(settings, "log_format", "text") or "text").lower() == "json"
+        use_json = (
+            str(getattr(settings, "log_format", "text") or "text").lower() == "json"
+        )
         log_file = getattr(settings, "log_file", None)
         fingerprint = f"{level}|{use_json}|{log_file}"
         if fingerprint == _configured_fingerprint:
@@ -56,9 +67,11 @@ def setup_logging(settings) -> None:
             try:
                 logging.root.removeHandler(handler)
                 handler.close()
-            except Exception:  # noqa: BLE001 — failing to clean up old output does not block
+            except Exception:  # noqa: BLE001, S112 — failing to clean up old output does not block
                 continue
-        formatter: logging.Formatter = _JsonFormatter() if use_json else _text_formatter()
+        formatter: logging.Formatter = (
+            _JsonFormatter() if use_json else _text_formatter()
+        )
         stream = logging.StreamHandler(sys.stderr)
         stream.setFormatter(formatter)
         stream.libref_managed = True  # type: ignore[attr-defined]
@@ -70,7 +83,8 @@ def setup_logging(settings) -> None:
                     path = Path.cwd() / path
                 path.parent.mkdir(parents=True, exist_ok=True)
                 file_handler = logging.handlers.RotatingFileHandler(
-                    path, maxBytes=5 * 1024 * 1024, backupCount=1, encoding="utf-8")
+                    path, maxBytes=5 * 1024 * 1024, backupCount=1, encoding="utf-8"
+                )
                 file_handler.setFormatter(formatter)
                 file_handler.libref_managed = True  # type: ignore[attr-defined]
                 logging.root.addHandler(file_handler)
@@ -78,5 +92,5 @@ def setup_logging(settings) -> None:
                 logging.getLogger(__name__).warning("log file unavailable, stderr only")
         logging.root.setLevel(level)
         _configured_fingerprint = fingerprint
-    except Exception:  # noqa: BLE001 — logging assembly never blocks business
+    except Exception:  # noqa: BLE001, S110 — logging assembly never blocks business
         pass

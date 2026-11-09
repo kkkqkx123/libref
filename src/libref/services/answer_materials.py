@@ -13,14 +13,18 @@ SYSTEM_PROMPT = (
 )
 
 
-def material_block(index: int, item: dict[str, Any], full: str | None, limit: int) -> str:
+def material_block(
+    index: int, item: dict[str, Any], full: str | None, limit: int
+) -> str:
     """Render one numbered material with title, url, and truncated body."""
     title = item.get("title") or item.get("url")
     body = truncate_material(full, limit) if full else (item.get("snippet") or "")
     return f"[{index}] {title}\n{item.get('url')}\n{body}"
 
 
-def build_messages(query: str, results: list[dict[str, Any]], full_by_id: dict[int, str], limit: int) -> list[dict[str, str]]:
+def build_messages(
+    query: str, results: list[dict[str, Any]], full_by_id: dict[int, str], limit: int
+) -> list[dict[str, str]]:
     """Build chat messages with numbered materials appended to the query."""
     materials = "\n\n".join(
         material_block(i + 1, item, full_by_id.get(int(item["id"])), limit)

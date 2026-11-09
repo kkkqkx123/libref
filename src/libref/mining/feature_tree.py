@@ -33,12 +33,14 @@ def build_feature_tree(
             path = ".".join(parts[:depth])
             slot = nodes.get(path)
             if slot is None:
-                parent = ".".join(parts[:depth - 1])
+                parent = ".".join(parts[: depth - 1])
                 slot = {
                     "path": path,
                     "parent": parent,
                     "depth": depth,
-                    "kind": kinds.get(path, "package") if depth < len(parts) else kinds.get(path, "function"),
+                    "kind": kinds.get(path, "package")
+                    if depth < len(parts)
+                    else kinds.get(path, "function"),
                     "calls": 0,
                     "scopes": set(),
                 }
@@ -48,12 +50,14 @@ def build_feature_tree(
     out = []
     for path in sorted(nodes):
         slot = nodes[path]
-        out.append({
-            "path": slot["path"],
-            "parent": slot["parent"],
-            "depth": slot["depth"],
-            "kind": slot["kind"],
-            "calls": slot["calls"],
-            "scopes": len(slot["scopes"]),
-        })
+        out.append(
+            {
+                "path": slot["path"],
+                "parent": slot["parent"],
+                "depth": slot["depth"],
+                "kind": slot["kind"],
+                "calls": slot["calls"],
+                "scopes": len(slot["scopes"]),
+            }
+        )
     return out

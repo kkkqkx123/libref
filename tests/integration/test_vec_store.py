@@ -25,7 +25,11 @@ def _server_up() -> bool:
         return False
 
 
-pytestmark = [pytest.mark.integration, pytest.mark.requires_qdrant, pytest.mark.skipif(not _server_up(), reason="Qdrant server unreachable")]
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.requires_qdrant,
+    pytest.mark.skipif(not _server_up(), reason="Qdrant server unreachable"),
+]
 
 
 @pytest.fixture()
@@ -39,7 +43,9 @@ def conn(tmp_path) -> sqlite3.Connection:
 @pytest.fixture()
 def store(conn) -> QdrantVecStore:
     s = QdrantVecStore(URL, COLLECTION)
-    s.client.delete_collection(COLLECTION) if s.client.collection_exists(COLLECTION) else None
+    s.client.delete_collection(COLLECTION) if s.client.collection_exists(
+        COLLECTION
+    ) else None
     yield s
     if s.client.collection_exists(COLLECTION):
         s.client.delete_collection(COLLECTION)
@@ -60,11 +66,13 @@ def test_ensure_collection_and_meta(store: QdrantVecStore, conn) -> None:
 
 def test_upsert_search_version_filter(store: QdrantVecStore, conn) -> None:
     store.ensure_collection(conn, "m", 4)
-    store.upsert_batch([
-        (1, 1, 10, [1.0, 0.0, 0.0, 0.0]),   # exact match, highest score
-        (2, 1, 10, [0.9, 0.1, 0.0, 0.0]),
-        (3, 1, 20, [0.0, 0.0, 0.0, 1.0]),   # other version, should be filtered
-    ])
+    store.upsert_batch(
+        [
+            (1, 1, 10, [1.0, 0.0, 0.0, 0.0]),  # exact match, highest score
+            (2, 1, 10, [0.9, 0.1, 0.0, 0.0]),
+            (3, 1, 20, [0.0, 0.0, 0.0, 1.0]),  # other version, should be filtered
+        ]
+    )
     results = store.search([1.0, 0.0, 0.0, 0.0], k=10, version_id=10)
     assert [r[0] for r in results][:1] == [1]
     assert all(results[i][1] >= results[i + 1][1] for i in range(len(results) - 1))
@@ -73,11 +81,13 @@ def test_upsert_search_version_filter(store: QdrantVecStore, conn) -> None:
 
 def test_delete_docs_and_version(store: QdrantVecStore, conn) -> None:
     store.ensure_collection(conn, "m", 4)
-    store.upsert_batch([
-        (1, 1, 10, [1.0, 0.0, 0.0, 0.0]),
-        (2, 1, 10, [0.0, 1.0, 0.0, 0.0]),
-        (3, 1, 20, [0.0, 0.0, 1.0, 0.0]),
-    ])
+    store.upsert_batch(
+        [
+            (1, 1, 10, [1.0, 0.0, 0.0, 0.0]),
+            (2, 1, 10, [0.0, 1.0, 0.0, 0.0]),
+            (3, 1, 20, [0.0, 0.0, 1.0, 0.0]),
+        ]
+    )
     store.delete_docs([1])
     assert store.count(10) == 1
     store.delete_version(10)

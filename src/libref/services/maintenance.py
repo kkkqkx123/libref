@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
 
 from libref.chunking import ChunkPath, ensure_hard_limit
 from libref.services.libraries import mining_version_ids
 from libref.text.embedding import build_embed_text, is_embeddable_metadata
 
 
-async def sync_vectors_for_docs(conn, settings, vec_store, embed, store, counts, removed, inserted) -> None:
+async def sync_vectors_for_docs(
+    conn, settings, vec_store, embed, store, counts, removed, inserted
+) -> None:
     import logging
 
     from libref.chunking import ChunkPath, ensure_hard_limit
@@ -28,19 +29,24 @@ async def sync_vectors_for_docs(conn, settings, vec_store, embed, store, counts,
             settings.embedding_model,
             settings.embedding_dim,
         )
-    except Exception as exc:
-        counts["vector_failed"] = counts.get("vector_failed", 0) + len(removed) + len(inserted)
+    except Exception as exc:  # noqa: BLE001 — vector failures are recorded, not fatal
+        counts["vector_failed"] = (
+            counts.get("vector_failed", 0) + len(removed) + len(inserted)
+        )
         logger.warning("vector ensure collection failed: %s", exc)
         return
     try:
         vec_store.delete_docs(removed)
-    except Exception as exc:
-        counts["vector_failed"] = counts.get("vector_failed", 0) + len(removed) + len(inserted)
+    except Exception as exc:  # noqa: BLE001 — vector failures are recorded, not fatal
+        counts["vector_failed"] = (
+            counts.get("vector_failed", 0) + len(removed) + len(inserted)
+        )
         logger.warning("vector delete failed: %s", exc)
         return
     try:
         docs = [
-            d for d in store.get_documents(inserted)
+            d
+            for d in store.get_documents(inserted)
             if is_embeddable_metadata(d["metadata"])
         ]
         hard = int(settings.chunk_embed_max_tokens)
@@ -51,13 +57,20 @@ async def sync_vectors_for_docs(conn, settings, vec_store, embed, store, counts,
             clipped, was_clipped = ensure_hard_limit(text, ChunkPath.EMBEDDING, hard)
             if was_clipped:
                 counts["chunk_truncated"] = counts.get("chunk_truncated", 0) + 1
-                logger.warning("embedding text clipped to %d tokens for doc %d", hard, d["id"])
+                logger.warning(
+                    "embedding text clipped to %d tokens for doc %d", hard, d["id"]
+                )
             texts.append(clipped)
         vecs = await embed(texts) if texts else []
         if len(vecs) != len(docs):
             raise RuntimeError("embedding count mismatch")
-        vec_store.upsert_batch([(d["id"], d["library_id"], d["version_id"], vec) for d, vec in zip(docs, vecs)])
-    except Exception as exc:
+        vec_store.upsert_batch(
+            [
+                (d["id"], d["library_id"], d["version_id"], vec)
+                for d, vec in zip(docs, vecs)
+            ]
+        )
+    except Exception as exc:  # noqa: BLE001 — vector failures are recorded, not fatal
         counts["vector_failed"] = counts.get("vector_failed", 0) + len(inserted)
         logger.warning("vector upsert failed: %s", exc)
 
@@ -118,7 +131,7 @@ class MaintenanceService:
         upserted = 0
         hard = int(settings.chunk_embed_max_tokens)
         for i in range(0, len(embeddable), settings.embed_batch):
-            batch = embeddable[i:i + settings.embed_batch]
+            batch = embeddable[i : i + settings.embed_batch]
             texts = []
             for r in batch:
                 try:
@@ -131,9 +144,7 @@ class MaintenanceService:
             vecs = await fn(texts)
             if len(vecs) != len(batch):
                 raise RuntimeError("embedding count mismatch")
-            vec.upsert_batch([
-                (r[0], r[1], r[2], v) for r, v in zip(batch, vecs)
-            ])
+            vec.upsert_batch([(r[0], r[1], r[2], v) for r, v in zip(batch, vecs)])
             upserted += len(batch)
         return {"docs": len(rows), "upserted": upserted}
 
@@ -148,7 +159,13 @@ class MaintenanceService:
         embed=None,
     ) -> dict[str, int]:
         """Synchronous entry for command-line use."""
-        return asyncio.run(self.reembed_library_async(
-            library, version, ecosystem,
-            settings=settings, vec_store=vec_store, embed=embed,
-        ))
+        return asyncio.run(
+            self.reembed_library_async(
+                library,
+                version,
+                ecosystem,
+                settings=settings,
+                vec_store=vec_store,
+                embed=embed,
+            )
+        )

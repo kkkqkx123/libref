@@ -64,7 +64,9 @@ NPM_PAYLOAD = {
 def pypi_handler(payload=None, status=200):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/pypi/requests/json":
-            return httpx.Response(status, json=payload if payload is not None else PYPI_PAYLOAD)
+            return httpx.Response(
+                status, json=payload if payload is not None else PYPI_PAYLOAD
+            )
         raise AssertionError(request.url.path)
 
     return handler
@@ -152,7 +154,9 @@ def test_requested_version_unconfirmed_still_resolves(conn):
     settings = make_settings()
     client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
     try:
-        res = run(resolve_package(conn, client, settings, "pypi", "requests", "9.9.9-custom"))
+        res = run(
+            resolve_package(conn, client, settings, "pypi", "requests", "9.9.9-custom")
+        )
     finally:
         run(client.aclose())
     assert res.version == "9.9.9-custom"
@@ -197,7 +201,11 @@ def test_override_wins_over_registry(conn, monkeypatch):
     monkeypatch.setitem(
         ov.OVERRIDES,
         ("pypi", "requests"),
-        {"docs_url": "https://override.example/docs", "source": "manual", "verified_at": "2026-11-01"},
+        {
+            "docs_url": "https://override.example/docs",
+            "source": "manual",
+            "verified_at": "2026-11-01",
+        },
     )
     settings = make_settings()
     client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
@@ -236,8 +244,10 @@ def test_stale_falls_back_with_stale_source(conn):
         run(resolve_package(conn, client, settings, "pypi", "requests"))
     finally:
         run(client.aclose())
-    conn.execute("UPDATE registry_cache SET fetched_at=? WHERE ecosystem='pypi' AND name='requests'",
-                 (time.time() - 10 * 86400,))
+    conn.execute(
+        "UPDATE registry_cache SET fetched_at=? WHERE ecosystem='pypi' AND name='requests'",
+        (time.time() - 10 * 86400,),
+    )
     conn.commit()
 
     def failing(request: httpx.Request) -> httpx.Response:
@@ -285,8 +295,13 @@ def test_explicit_address_bypasses_network(conn):
     try:
         res = run(
             resolve_package(
-                conn, client, settings, "pypi", "requests",
-                "9.9.9", "https://docs.example/custom/",
+                conn,
+                client,
+                settings,
+                "pypi",
+                "requests",
+                "9.9.9",
+                "https://docs.example/custom/",
             )
         )
     finally:
@@ -449,15 +464,25 @@ def test_file_override_wins_over_builtin(conn, tmp_path, monkeypatch):
     monkeypatch.setitem(
         ov.OVERRIDES,
         ("pypi", "requests"),
-        {"docs_url": "https://builtin.example/docs", "source": "manual", "verified_at": "2026-11-01"},
+        {
+            "docs_url": "https://builtin.example/docs",
+            "source": "manual",
+            "verified_at": "2026-11-01",
+        },
     )
     override_file = tmp_path / "overrides.json"
     override_file.write_text(
-        json.dumps([
-            {"ecosystem": "pypi", "name": "requests",
-             "docs_url": "https://file.example/docs", "source": "file",
-             "verified_at": "2026-11-02"}
-        ]),
+        json.dumps(
+            [
+                {
+                    "ecosystem": "pypi",
+                    "name": "requests",
+                    "docs_url": "https://file.example/docs",
+                    "source": "file",
+                    "verified_at": "2026-11-02",
+                }
+            ]
+        ),
         encoding="utf-8",
     )
     settings = make_settings(registry_overrides_file=override_file)
@@ -475,8 +500,16 @@ def test_overrides_file_invalid_rejected(tmp_path):
 
     bad = tmp_path / "bad.json"
     bad.write_text(
-        json.dumps([{"ecosystem": "pypi", "name": "requests",
-                     "docs_url": "ftp://example.com/x", "verified_at": "2026-11-01"}]),
+        json.dumps(
+            [
+                {
+                    "ecosystem": "pypi",
+                    "name": "requests",
+                    "docs_url": "ftp://example.com/x",
+                    "verified_at": "2026-11-01",
+                }
+            ]
+        ),
         encoding="utf-8",
     )
     with pytest.raises(ValueError):
@@ -493,12 +526,20 @@ def test_stale_overrides_gate_lists_expired():
     assert is_override_stale("2020-01-01", 180.0, date(2026, 11, 8)) is True
     assert is_override_stale("2026-11-01", 180.0, date(2026, 11, 8)) is False
     assert is_override_stale("not-a-date", 180.0, date(2026, 11, 8)) is True
-    set_file_overrides({
-        ("pypi", "old"): {"docs_url": "https://example.com/old",
-                            "source": "file", "verified_at": "2020-01-01"},
-        ("pypi", "fresh"): {"docs_url": "https://example.com/fresh",
-                              "source": "file", "verified_at": "2026-11-01"},
-    })
+    set_file_overrides(
+        {
+            ("pypi", "old"): {
+                "docs_url": "https://example.com/old",
+                "source": "file",
+                "verified_at": "2020-01-01",
+            },
+            ("pypi", "fresh"): {
+                "docs_url": "https://example.com/fresh",
+                "source": "file",
+                "verified_at": "2026-11-01",
+            },
+        }
+    )
     stale = find_stale_overrides(180.0, date(2026, 11, 8))
     assert [k for k, _ in stale] == [("pypi", "old")]
 
@@ -528,7 +569,11 @@ def test_maven_resolves_docs_and_versions(conn):
     settings = make_settings()
     client = httpx.AsyncClient(transport=httpx.MockTransport(maven_handler))
     try:
-        res = run(resolve_package(conn, client, settings, "maven", "org.springframework:spring-core"))
+        res = run(
+            resolve_package(
+                conn, client, settings, "maven", "org.springframework:spring-core"
+            )
+        )
     finally:
         run(client.aclose())
     assert res.ecosystem == "maven"
@@ -542,7 +587,11 @@ def test_maven_infers_from_colon_and_rejects_bare(conn):
     settings = make_settings()
     client = httpx.AsyncClient(transport=httpx.MockTransport(maven_handler))
     try:
-        res = run(resolve_package(conn, client, settings, None, "org.springframework:spring-core"))
+        res = run(
+            resolve_package(
+                conn, client, settings, None, "org.springframework:spring-core"
+            )
+        )
     finally:
         run(client.aclose())
     assert res.ecosystem == "maven"
@@ -554,12 +603,15 @@ def test_npm_repo_homepage_excluded_from_candidates(conn):
     settings = make_settings()
 
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={
-            "dist-tags": {"latest": "1.0.0"},
-            "versions": {"1.0.0": {}},
-            "homepage": "https://github.com/org/repo",
-            "repository": {"url": "git+https://github.com/org/repo.git"},
-        })
+        return httpx.Response(
+            200,
+            json={
+                "dist-tags": {"latest": "1.0.0"},
+                "versions": {"1.0.0": {}},
+                "homepage": "https://github.com/org/repo",
+                "repository": {"url": "git+https://github.com/org/repo.git"},
+            },
+        )
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     try:

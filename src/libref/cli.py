@@ -22,7 +22,7 @@ from libref.services.code_ingest import (
     build_repo_runner,
     index_repo,
 )
-from libref.services.factory import build_search_service, build_vector
+from libref.services.factory import build_vector
 from libref.services.ingest import (
     IngestService,
     run_scrape_job_sync,
@@ -30,14 +30,17 @@ from libref.services.ingest import (
     start_scrape_job,
 )
 from libref.services.jobs import JobManager
-from libref.services.libraries import LibraryService
 from libref.services.maintenance import MaintenanceService
 from libref.services.mining_read import MiningReadService
-from libref.services.mining_refresh import MINE_PATTERNS_JOB_KIND, build_mine_runner, mine_job_params, mine_patterns
+from libref.services.mining_refresh import (
+    MINE_PATTERNS_JOB_KIND,
+    build_mine_runner,
+    mine_job_params,
+    mine_patterns,
+)
 from libref.services.pages import PageService
 from libref.services.review import ReviewService
 from libref.services.search import SearchService
-
 
 _config_parent = argparse.ArgumentParser(add_help=False)
 _config_parent.add_argument(
@@ -146,9 +149,13 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             mgr.recover()
             job_id = start_refresh_job(
                 mgr,
-                args.library, args.version, args.start_url,
-                max_pages=args.max_pages, prefilter=args.prefilter,
-                scope=scope, ecosystem=getattr(args, "ecosystem", None) or "custom",
+                args.library,
+                args.version,
+                args.start_url,
+                max_pages=args.max_pages,
+                prefilter=args.prefilter,
+                scope=scope,
+                ecosystem=getattr(args, "ecosystem", None) or "custom",
             )
             job = run_scrape_job_sync(
                 mgr, settings, conn, job_id, vec_store=vec_store, embed=embed
@@ -157,9 +164,13 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             return 0 if job.status == "done" else 1
         service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
         counts = service.refresh_version(
-            args.library, args.version, args.start_url,
-            max_pages=args.max_pages, prefilter=args.prefilter,
-            scope=scope, ecosystem=getattr(args, "ecosystem", None) or "custom",
+            args.library,
+            args.version,
+            args.start_url,
+            max_pages=args.max_pages,
+            prefilter=args.prefilter,
+            scope=scope,
+            ecosystem=getattr(args, "ecosystem", None) or "custom",
         )
     finally:
         conn.close()
@@ -171,20 +182,21 @@ def cmd_refresh(args: argparse.Namespace) -> int:
 def cmd_smoke(args: argparse.Namespace) -> int:
     """Local smoke test: spin up a temporary HTTP site to validate the full chain from discovery to storage, no external network needed."""
     import threading
-    from functools import partial
     from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-    from pathlib import Path
-    import tempfile
 
     pages = {
         "/sitemap.xml": (
-            "<?xml version=\"1.0\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
-            "<url><loc>PLACE/a.html</loc></url><url><loc>PLACE/b.md</loc></url></urlset>",
+            (
+                '<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                "<url><loc>PLACE/a.html</loc></url><url><loc>PLACE/b.md</loc></url></urlset>"
+            ),
             "application/xml",
         ),
         "/a.html": (
-            "<html><head><title>A</title></head><body><main><h1>Guide</h1>"
-            "<p>smoke install libref here</p></main></body></html>",
+            (
+                "<html><head><title>A</title></head><body><main><h1>Guide</h1>"
+                "<p>smoke install libref here</p></main></body></html>"
+            ),
             "text/html",
         ),
         "/b.md": ("# Guide\n\nsmoke markdown body\n", "text/markdown"),
@@ -200,7 +212,9 @@ def cmd_smoke(args: argparse.Namespace) -> int:
                 self.send_response(404)
                 self.end_headers()
                 return
-            data = body.replace("PLACE", f"http://127.0.0.1:{self.server.server_port}").encode()
+            data = body.replace(
+                "PLACE", f"http://127.0.0.1:{self.server.server_port}"
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(data)))
@@ -356,7 +370,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 def cmd_index_repo(args: argparse.Namespace) -> int:
     import asyncio
 
-    from libref.crawler.registry import REGISTRY_MIRRORS, RegistryError
+    from libref.crawler.registry import RegistryError
 
     settings = _load_settings(args, _registry_overrides(args))
     conn = _connect(settings)
@@ -367,7 +381,11 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
             if args.version is None:
                 print("explicit mode requires library version source", file=sys.stderr)
                 return 2
-            if args.ecosystem is not None and args.ecosystem.strip().lower() in ("pypi", "npm", "maven"):
+            if args.ecosystem is not None and args.ecosystem.strip().lower() in (
+                "pypi",
+                "npm",
+                "maven",
+            ):
                 from libref.crawler.registry import normalize_name
 
                 library = normalize_name(args.ecosystem.strip().lower(), args.library)
@@ -378,15 +396,21 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
             resolved_from, registry_confirmed = "explicit", True
         else:
             try:
+
                 async def _resolve():
                     from libref.crawler.http import build_async_client
                     from libref.services.resolver import resolve_repo
 
                     async with build_async_client(settings) as client:
                         return await resolve_repo(
-                            conn, client, settings,
-                            args.ecosystem, args.library, args.version,
+                            conn,
+                            client,
+                            settings,
+                            args.ecosystem,
+                            args.library,
+                            args.version,
                         )
+
                 resolution = asyncio.run(_resolve())
             except ValueError as exc:
                 print(f"invalid: {exc}", file=sys.stderr)
@@ -396,11 +420,17 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                 print(f"resolve failed [{exc.kind}]: {exc}{hint}", file=sys.stderr)
                 return 1
             assert resolution.repo_url is not None
-            library, version, source = resolution.name, resolution.version, resolution.repo_url
+            library, version, source = (
+                resolution.name,
+                resolution.version,
+                resolution.repo_url,
+            )
             ecosystem = resolution.ecosystem
             resolved_from = resolution.source
             registry_confirmed = resolution.registry_confirmed
-            print(f"resolved {ecosystem}:{library} {version} -> {source} [{resolved_from}]")
+            print(
+                f"resolved {ecosystem}:{library} {version} -> {source} [{resolved_from}]"
+            )
         if args.run_async:
             mgr = JobManager(conn)
             mgr.recover()
@@ -418,7 +448,9 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
             )
 
             async def _drive():
-                mgr.start_worker(build_repo_runner(settings, conn, repos_dir, vec_store, embed))
+                mgr.start_worker(
+                    build_repo_runner(settings, conn, repos_dir, vec_store, embed)
+                )
                 try:
                     return await mgr.wait_for(job_id)
                 finally:
@@ -439,7 +471,9 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                 resolved_from=resolved_from,
                 registry_confirmed=registry_confirmed,
                 repos_quota_mb=int(settings.repos_quota_mb),
-                settings=settings, vec_store=vec_store, embed=embed,
+                settings=settings,
+                vec_store=vec_store,
+                embed=embed,
             )
         except ValueError as exc:
             print(f"invalid: {exc}", file=sys.stderr)
@@ -510,6 +544,7 @@ def cmd_mine(args: argparse.Namespace) -> int:
 def cmd_search(args: argparse.Namespace) -> int:
     import asyncio as _asyncio
     import json as _json
+
     settings = _load_settings(args, _window_overrides(args))
     conn = _connect(settings)
     try:
@@ -525,12 +560,14 @@ def cmd_search(args: argparse.Namespace) -> int:
         else:
             vec_store, embed = _build_vector(settings)
             service = SearchService(conn, settings, vec_store=vec_store, embed=embed)
-            results, degraded = _asyncio.run(service.search_hybrid_async(
-                args.query,
-                library=args.library,
-                version=args.version,
-                limit=args.limit,
-            ))
+            results, degraded = _asyncio.run(
+                service.search_hybrid_async(
+                    args.query,
+                    library=args.library,
+                    version=args.version,
+                    limit=args.limit,
+                )
+            )
             if degraded:
                 print("(degraded: partial retrieval)", file=sys.stderr)
     finally:
@@ -581,11 +618,15 @@ def cmd_answer(args: argparse.Namespace) -> int:
 
 def cmd_read_window(args: argparse.Namespace) -> int:
     import json as _json
+
     conn = _connect(_load_settings(args))
     try:
         page = PageService(conn).read_window(
-            args.url, args.sort_order, radius=args.radius,
-            library=args.library, version=args.version,
+            args.url,
+            args.sort_order,
+            radius=args.radius,
+            library=args.library,
+            version=args.version,
         )
     finally:
         conn.close()
@@ -598,16 +639,21 @@ def cmd_read_window(args: argparse.Namespace) -> int:
 
 def cmd_read_section(args: argparse.Namespace) -> int:
     import json as _json
+
     conn = _connect(_load_settings(args))
     try:
         page = PageService(conn).read_section(
-            args.url, args.source_group_id,
-            library=args.library, version=args.version,
+            args.url,
+            args.source_group_id,
+            library=args.library,
+            version=args.version,
         )
     finally:
         conn.close()
     if page is None:
-        print(f"(section not found: {args.url} {args.source_group_id})", file=sys.stderr)
+        print(
+            f"(section not found: {args.url} {args.source_group_id})", file=sys.stderr
+        )
         return 1
     print(_json.dumps(page, ensure_ascii=False))
     return 0
@@ -729,8 +775,12 @@ def cmd_reembed(args: argparse.Namespace) -> int:
         if vec_store is None or embed is None:
             print("embedding is not configured (missing key)", file=sys.stderr)
             return 1
-        out = MaintenanceService(conn, settings, vec_store=vec_store, embed=embed).reembed_library(
-            args.library, args.version, ecosystem=args.ecosystem,
+        out = MaintenanceService(
+            conn, settings, vec_store=vec_store, embed=embed
+        ).reembed_library(
+            args.library,
+            args.version,
+            ecosystem=args.ecosystem,
         )
     finally:
         conn.close()
@@ -769,13 +819,11 @@ def cmd_review(args: argparse.Namespace) -> int:
 
 
 def _print_job(job) -> None:
-    print(
-        f"job {job.id} {job.status}"
-        + (f" error={job.error}" if job.error else "")
-    )
+    print(f"job {job.id} {job.status}" + (f" error={job.error}" if job.error else ""))
     result = getattr(job, "result", None)
     if result:
         import json as _json
+
         print(f"result: {_json.dumps(result, ensure_ascii=False)[:2000]}")
     if getattr(job, "finished_at", None):
         print(f"finished_at: {job.finished_at}")
@@ -783,6 +831,7 @@ def _print_job(job) -> None:
 
 def cmd_job_show(args: argparse.Namespace) -> int:
     import json as _json
+
     conn = _connect(_load_settings(args))
     try:
         mgr = JobManager(conn)
@@ -804,6 +853,7 @@ def cmd_job_show(args: argparse.Namespace) -> int:
 
 def cmd_purge(args: argparse.Namespace) -> int:
     from libref.services.retention import purge_version
+
     settings = _load_settings(args)
     conn = _connect(settings)
     try:
@@ -829,7 +879,9 @@ def cmd_purge(args: argparse.Namespace) -> int:
 
 def cmd_deletions(args: argparse.Namespace) -> int:
     import json as _json
+
     from libref.services.retention import list_deletions, prune_expired_logs
+
     settings = _load_settings(args)
     conn = _connect(settings)
     try:
@@ -845,7 +897,9 @@ def cmd_deletions(args: argparse.Namespace) -> int:
             print("(no deletions)")
             return 0
         for row in rows:
-            print(f"{row['id']} {row['ecosystem']}:{row['library']} {row['version']} {row['reason']} {row['created_at']}")
+            print(
+                f"{row['id']} {row['ecosystem']}:{row['library']} {row['version']} {row['reason']} {row['created_at']}"
+            )
             if getattr(args, "full", False):
                 print(f"    {_json.dumps(row['detail'], ensure_ascii=False)[:1000]}")
         return 0
@@ -855,13 +909,21 @@ def cmd_deletions(args: argparse.Namespace) -> int:
 
 def cmd_config_show(args: argparse.Namespace) -> int:
     import json as _json
+
     settings = _load_settings(args)
     path = resolve_config_file(getattr(args, "config", None))
-    print(_json.dumps({
-        "file": str(path) if path is not None else "",
-        "fingerprint": settings_fingerprint(settings),
-        "settings": redacted_dict(settings),
-    }, ensure_ascii=False, indent=2, sort_keys=True))
+    print(
+        _json.dumps(
+            {
+                "file": str(path) if path is not None else "",
+                "fingerprint": settings_fingerprint(settings),
+                "settings": redacted_dict(settings),
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+    )
     return 0
 
 
@@ -887,8 +949,9 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
         host = args.host or settings.mcp_host
         port = args.port or settings.mcp_port
         path = args.path or settings.mcp_path
-        mcp.run("streamable-http", host=host, port=port,
-                streamable_http_path=path)  # blocks until the process exits
+        mcp.run(
+            "streamable-http", host=host, port=port, streamable_http_path=path
+        )  # blocks until the process exits
     else:
         mcp.run("stdio")  # blocks until stdio closes
     conn.close()
@@ -919,38 +982,76 @@ def cmd_serve_web(args: argparse.Namespace) -> int:
 
     gateway = build_gateway(settings)
     vec_store, embed = _build_vector(settings, gateway)
-    app = build_web_app(conn, settings, vec_store=vec_store, embed=embed,
-                        rerank=gateway.rerank_fn(), chat=gateway.chat_fn())
+    app = build_web_app(
+        conn,
+        settings,
+        vec_store=vec_store,
+        embed=embed,
+        rerank=gateway.rerank_fn(),
+        chat=gateway.chat_fn(),
+    )
     uvicorn.run(app, host=host, port=port, log_level="warning")
     conn.close()
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="libref", description="libref documentation knowledge base", parents=[_config_parent])
+    parser = argparse.ArgumentParser(
+        prog="libref",
+        description="libref documentation knowledge base",
+        parents=[_config_parent],
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init-db", help="Initialize the database (apply migrations)", parents=[_config_parent]).set_defaults(
-        func=cmd_init_db
-    )
+    sub.add_parser(
+        "init-db",
+        help="Initialize the database (apply migrations)",
+        parents=[_config_parent],
+    ).set_defaults(func=cmd_init_db)
 
-    p_ingest = sub.add_parser("ingest", help="Crawl a documentation site and store it", parents=[_config_parent])
-    p_ingest.add_argument("library", nargs="?", help="Library name in explicit form, package name in resolved form")
-    p_ingest.add_argument(
-        "version", nargs="?", default=None, help="Required in explicit form; defaults to the stable version in resolved form"
+    p_ingest = sub.add_parser(
+        "ingest",
+        help="Crawl a documentation site and store it",
+        parents=[_config_parent],
     )
     p_ingest.add_argument(
-        "start_url", nargs="?", default=None, help="Required in explicit form; mutually exclusive with --ecosystem"
+        "library",
+        nargs="?",
+        help="Library name in explicit form, package name in resolved form",
     )
-    p_ingest.add_argument("--ecosystem", default=None, help="Resolve by name: pypi|npm|maven; Java coordinates look like group:artifact")
-    p_ingest.add_argument("--offline", action="store_true", help="Read cache only; do not touch the network")
+    p_ingest.add_argument(
+        "version",
+        nargs="?",
+        default=None,
+        help="Required in explicit form; defaults to the stable version in resolved form",
+    )
+    p_ingest.add_argument(
+        "start_url",
+        nargs="?",
+        default=None,
+        help="Required in explicit form; mutually exclusive with --ecosystem",
+    )
+    p_ingest.add_argument(
+        "--ecosystem",
+        default=None,
+        help="Resolve by name: pypi|npm|maven; Java coordinates look like group:artifact",
+    )
+    p_ingest.add_argument(
+        "--offline",
+        action="store_true",
+        help="Read cache only; do not touch the network",
+    )
     p_ingest.add_argument(
         "--registry-mirror",
         default=None,
         help=f"Registry mirror preset ({', '.join(sorted(REGISTRY_MIRRORS))}); defaults to the config value",
     )
     p_ingest.add_argument("--max-pages", type=int, default=None)
-    p_ingest.add_argument("--prefilter", action="store_true", help="Prefilter URLs with a liveness HEAD check")
+    p_ingest.add_argument(
+        "--prefilter",
+        action="store_true",
+        help="Prefilter URLs with a liveness HEAD check",
+    )
     p_ingest.add_argument(
         "--async",
         dest="run_async",
@@ -964,26 +1065,47 @@ def build_parser() -> argparse.ArgumentParser:
         "--allow-subdomains", action="store_true", help="Allow same-domain subdomains"
     )
     p_ingest.add_argument(
-        "--path-prefix", action="append", default=None, help="Accept only paths under this prefix; repeatable"
+        "--path-prefix",
+        action="append",
+        default=None,
+        help="Accept only paths under this prefix; repeatable",
     )
     p_ingest.add_argument(
-        "--path-suffix", action="append", default=None, help="Accept only paths with this suffix; repeatable"
+        "--path-suffix",
+        action="append",
+        default=None,
+        help="Accept only paths with this suffix; repeatable",
     )
     p_ingest.add_argument(
-        "--include-pattern", action="append", default=None, help="Regex allowlist; repeatable"
+        "--include-pattern",
+        action="append",
+        default=None,
+        help="Regex allowlist; repeatable",
     )
     p_ingest.add_argument(
-        "--exclude-pattern", action="append", default=None, help="Regex denylist; repeatable"
+        "--exclude-pattern",
+        action="append",
+        default=None,
+        help="Regex denylist; repeatable",
     )
     p_ingest.add_argument(
-        "--max-depth", type=int, default=None, help="Maximum depth relative to the start URL"
+        "--max-depth",
+        type=int,
+        default=None,
+        help="Maximum depth relative to the start URL",
     )
     p_ingest.add_argument(
-        "--render-js", action="store_true", help="Fall back to the browser for pages that look JS-rendered"
+        "--render-js",
+        action="store_true",
+        help="Fall back to the browser for pages that look JS-rendered",
     )
     p_ingest.set_defaults(func=cmd_ingest)
 
-    p_refresh = sub.add_parser("refresh", help="Refresh a version's docs and store them", parents=[_config_parent])
+    p_refresh = sub.add_parser(
+        "refresh",
+        help="Refresh a version's docs and store them",
+        parents=[_config_parent],
+    )
     p_refresh.add_argument("library")
     p_refresh.add_argument("version")
     p_refresh.add_argument("start_url")
@@ -996,35 +1118,66 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_refresh.set_defaults(func=cmd_refresh)
 
-    sub.add_parser("smoke-local", help="Local smoke test: full chain against a temporary HTTP site", parents=[_config_parent]).set_defaults(func=cmd_smoke)
+    sub.add_parser(
+        "smoke-local",
+        help="Local smoke test: full chain against a temporary HTTP site",
+        parents=[_config_parent],
+    ).set_defaults(func=cmd_smoke)
 
-    p_search = sub.add_parser("search", help="Default hybrid retrieval", parents=[_config_parent])
+    p_search = sub.add_parser(
+        "search", help="Default hybrid retrieval", parents=[_config_parent]
+    )
     p_search.add_argument("query")
     p_search.add_argument("--library", default=None)
     p_search.add_argument("--version", default=None)
     p_search.add_argument("--limit", type=int, default=8)
-    p_search.add_argument("--precise", action="store_true", help="Use the full-text path only")
-    p_search.add_argument("--expand-window", action="store_true", help="Expand the surrounding window on hits")
+    p_search.add_argument(
+        "--precise", action="store_true", help="Use the full-text path only"
+    )
+    p_search.add_argument(
+        "--expand-window",
+        action="store_true",
+        help="Expand the surrounding window on hits",
+    )
     p_search.add_argument("--window-radius", type=int, default=None)
     p_search.set_defaults(func=cmd_search)
 
-    p_answer = sub.add_parser("answer", help="Hybrid retrieval plus grounded answer generation", parents=[_config_parent])
+    p_answer = sub.add_parser(
+        "answer",
+        help="Hybrid retrieval plus grounded answer generation",
+        parents=[_config_parent],
+    )
     p_answer.add_argument("query")
     p_answer.add_argument("--library", default=None)
     p_answer.add_argument("--version", default=None)
     p_answer.add_argument("--limit", type=int, default=5)
-    p_answer.add_argument("--expand-window", action="store_true", help="Expand the surrounding window on hits")
+    p_answer.add_argument(
+        "--expand-window",
+        action="store_true",
+        help="Expand the surrounding window on hits",
+    )
     p_answer.add_argument("--window-radius", type=int, default=None)
-    p_answer.add_argument("--material-limit", type=int, default=None, help="Answer material truncation length; defaults to the config value")
+    p_answer.add_argument(
+        "--material-limit",
+        type=int,
+        default=None,
+        help="Answer material truncation length; defaults to the config value",
+    )
     p_answer.set_defaults(func=cmd_answer)
 
-    p_read = sub.add_parser("read-page", help="Read a full document page by URL", parents=[_config_parent])
+    p_read = sub.add_parser(
+        "read-page", help="Read a full document page by URL", parents=[_config_parent]
+    )
     p_read.add_argument("url")
     p_read.add_argument("--library", default=None)
     p_read.add_argument("--version", default=None)
     p_read.set_defaults(func=cmd_read_page)
 
-    p_window = sub.add_parser("read-window", help="Read the surrounding window by sort order", parents=[_config_parent])
+    p_window = sub.add_parser(
+        "read-window",
+        help="Read the surrounding window by sort order",
+        parents=[_config_parent],
+    )
     p_window.add_argument("url")
     p_window.add_argument("sort_order", type=int)
     p_window.add_argument("--radius", type=int, default=1)
@@ -1032,47 +1185,96 @@ def build_parser() -> argparse.ArgumentParser:
     p_window.add_argument("--version", default=None)
     p_window.set_defaults(func=cmd_read_window)
 
-    p_section = sub.add_parser("read-section", help="Read a whole section by source group", parents=[_config_parent])
+    p_section = sub.add_parser(
+        "read-section",
+        help="Read a whole section by source group",
+        parents=[_config_parent],
+    )
     p_section.add_argument("url")
     p_section.add_argument("source_group_id")
     p_section.add_argument("--library", default=None)
     p_section.add_argument("--version", default=None)
     p_section.set_defaults(func=cmd_read_section)
 
-    p_mcp = sub.add_parser("serve-mcp", help="Start the MCP server (stdio by default)", parents=[_config_parent])
-    p_mcp.add_argument("--http", action="store_true",
-                       help="Use the Streamable HTTP transport instead (binds loopback only by default)")
+    p_mcp = sub.add_parser(
+        "serve-mcp",
+        help="Start the MCP server (stdio by default)",
+        parents=[_config_parent],
+    )
+    p_mcp.add_argument(
+        "--http",
+        action="store_true",
+        help="Use the Streamable HTTP transport instead (binds loopback only by default)",
+    )
     p_mcp.add_argument("--host", default=None, help="HTTP listen address")
     p_mcp.add_argument("--port", type=int, default=None, help="HTTP listen port")
     p_mcp.add_argument("--path", default=None, help="HTTP endpoint path")
     p_mcp.set_defaults(func=cmd_serve_mcp)
 
-    p_web = sub.add_parser("serve-web", help="Start the Web server (binds loopback only by default)", parents=[_config_parent])
+    p_web = sub.add_parser(
+        "serve-web",
+        help="Start the Web server (binds loopback only by default)",
+        parents=[_config_parent],
+    )
     p_web.add_argument("--host", default=None, help="HTTP listen address")
     p_web.add_argument("--port", type=int, default=None, help="HTTP listen port")
     p_web.set_defaults(func=cmd_serve_web)
 
-    p_repo = sub.add_parser("index-repo", help="Index a source repo and persist call instances", parents=[_config_parent])
-    p_repo.add_argument("library", help="Library name in explicit form, package name in resolved form")
-    p_repo.add_argument("version", nargs="?", default=None, help="Required in explicit form; defaults to the stable version in resolved form")
-    p_repo.add_argument("source", nargs="?", default=None, help="Remote URL or local path in explicit form; resolved by name by default")
-    p_repo.add_argument("--ecosystem", default=None, help="Resolve by name: pypi|npm|maven; defaults to explicit custom")
-    p_repo.add_argument("--offline", action="store_true", help="Read cache only; do not touch the network")
+    p_repo = sub.add_parser(
+        "index-repo",
+        help="Index a source repo and persist call instances",
+        parents=[_config_parent],
+    )
+    p_repo.add_argument(
+        "library", help="Library name in explicit form, package name in resolved form"
+    )
+    p_repo.add_argument(
+        "version",
+        nargs="?",
+        default=None,
+        help="Required in explicit form; defaults to the stable version in resolved form",
+    )
+    p_repo.add_argument(
+        "source",
+        nargs="?",
+        default=None,
+        help="Remote URL or local path in explicit form; resolved by name by default",
+    )
+    p_repo.add_argument(
+        "--ecosystem",
+        default=None,
+        help="Resolve by name: pypi|npm|maven; defaults to explicit custom",
+    )
+    p_repo.add_argument(
+        "--offline",
+        action="store_true",
+        help="Read cache only; do not touch the network",
+    )
     p_repo.add_argument(
         "--registry-mirror",
         default=None,
         help="Registry mirror preset; defaults to the config value",
     )
-    p_repo.add_argument("--update", action="store_true", help="Pull updates when the repo already exists")
+    p_repo.add_argument(
+        "--update",
+        action="store_true",
+        help="Pull updates when the repo already exists",
+    )
     p_repo.add_argument(
         "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
     )
     p_repo.set_defaults(func=cmd_index_repo)
 
-    p_mine = sub.add_parser("mine", help="Mine closed call-sequence patterns", parents=[_config_parent])
+    p_mine = sub.add_parser(
+        "mine", help="Mine closed call-sequence patterns", parents=[_config_parent]
+    )
     p_mine.add_argument("library")
     p_mine.add_argument("version")
-    p_mine.add_argument("--ecosystem", default=None, help="Ecosystem of the library; by default resolved across ecosystems")
+    p_mine.add_argument(
+        "--ecosystem",
+        default=None,
+        help="Ecosystem of the library; by default resolved across ecosystems",
+    )
     p_mine.add_argument("--minsup", type=int, default=2)
     p_mine.add_argument(
         "--topn",
@@ -1094,64 +1296,109 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_mine.set_defaults(func=cmd_mine)
 
-    p_tree = sub.add_parser("feature-tree", help="Browse hierarchical features by prefix", parents=[_config_parent])
+    p_tree = sub.add_parser(
+        "feature-tree",
+        help="Browse hierarchical features by prefix",
+        parents=[_config_parent],
+    )
     p_tree.add_argument("library")
     p_tree.add_argument("version")
     p_tree.add_argument("--prefix", default=None)
     p_tree.add_argument("--limit", type=int, default=100)
     p_tree.set_defaults(func=cmd_feature_tree)
 
-    p_clusters = sub.add_parser("clusters", help="Browse interface clusters", parents=[_config_parent])
+    p_clusters = sub.add_parser(
+        "clusters", help="Browse interface clusters", parents=[_config_parent]
+    )
     p_clusters.add_argument("library")
     p_clusters.add_argument("version")
-    p_clusters.add_argument("--containing", default=None, help="Comma-separated APIs that must all be present")
+    p_clusters.add_argument(
+        "--containing",
+        default=None,
+        help="Comma-separated APIs that must all be present",
+    )
     p_clusters.add_argument("--limit", type=int, default=50)
     p_clusters.set_defaults(func=cmd_clusters)
 
-    p_dump = sub.add_parser("dump-chunks", help="Preview chunking: line ranges, byte offsets, and headings per file", parents=[_config_parent])
+    p_dump = sub.add_parser(
+        "dump-chunks",
+        help="Preview chunking: line ranges, byte offsets, and headings per file",
+        parents=[_config_parent],
+    )
     group = p_dump.add_mutually_exclusive_group(required=True)
     group.add_argument("--markdown", default=None, help="Markdown document path")
     group.add_argument("--source", default=None, help="Source file path")
-    p_dump.add_argument("--url", default=None, help="URL annotation for document chunks")
+    p_dump.add_argument(
+        "--url", default=None, help="URL annotation for document chunks"
+    )
     p_dump.set_defaults(func=cmd_dump_chunks)
 
-    p_reembed = sub.add_parser("reembed", help="Fully re-embed a version's vectors from the source of truth", parents=[_config_parent])
+    p_reembed = sub.add_parser(
+        "reembed",
+        help="Fully re-embed a version's vectors from the source of truth",
+        parents=[_config_parent],
+    )
     p_reembed.add_argument("library")
     p_reembed.add_argument("version")
     p_reembed.add_argument("--ecosystem", default=None)
     p_reembed.set_defaults(func=cmd_reembed)
 
-    p_review = sub.add_parser("review", help="Review pending call instances", parents=[_config_parent])
+    p_review = sub.add_parser(
+        "review", help="Review pending call instances", parents=[_config_parent]
+    )
     review_sub = p_review.add_subparsers(dest="review_action", required=True)
     review_sub.add_parser("list", help="List pending items").add_argument(
-        "--limit", type=int, default=50,
+        "--limit",
+        type=int,
+        default=50,
     )
     for _name in ("approve", "conflict", "reopen"):
         _p = review_sub.add_parser(_name)
         _p.add_argument("entity_id", type=int)
     p_review.set_defaults(func=cmd_review)
 
-    p_job = sub.add_parser("job-show", help="Inspect job audit outcomes", parents=[_config_parent])
+    p_job = sub.add_parser(
+        "job-show", help="Inspect job audit outcomes", parents=[_config_parent]
+    )
     p_job.add_argument("job_id", type=int, nargs="?", default=None)
     p_job.add_argument("--list", action="store_true", help="List recent jobs")
     p_job.add_argument("--limit", type=int, default=20)
     p_job.add_argument("--full", action="store_true", help="Print the full outcome")
     p_job.set_defaults(func=cmd_job_show)
 
-    p_config = sub.add_parser("config-show", help="Print the effective configuration, redacted", parents=[_config_parent])
+    p_config = sub.add_parser(
+        "config-show",
+        help="Print the effective configuration, redacted",
+        parents=[_config_parent],
+    )
     p_config.set_defaults(func=cmd_config_show)
 
-    p_purge = sub.add_parser("purge", help="Delete a whole version and log it", parents=[_config_parent])
+    p_purge = sub.add_parser(
+        "purge", help="Delete a whole version and log it", parents=[_config_parent]
+    )
     p_purge.add_argument("library")
     p_purge.add_argument("version")
     p_purge.add_argument("--ecosystem", default=None)
     p_purge.set_defaults(func=cmd_purge)
 
-    p_del = sub.add_parser("deletions", help="View deletion logs / prune expired records", parents=[_config_parent])
+    p_del = sub.add_parser(
+        "deletions",
+        help="View deletion logs / prune expired records",
+        parents=[_config_parent],
+    )
     p_del.add_argument("--limit", type=int, default=50)
     p_del.add_argument("--full", action="store_true", help="Print full details")
-    p_del.add_argument("--prune", action="store_true", help="Prune expired records per the retention period")
-    p_del.add_argument("--ttl-days", type=float, default=None, help="Defaults to the config value deletion_log_ttl_days")
+    p_del.add_argument(
+        "--prune",
+        action="store_true",
+        help="Prune expired records per the retention period",
+    )
+    p_del.add_argument(
+        "--ttl-days",
+        type=float,
+        default=None,
+        help="Defaults to the config value deletion_log_ttl_days",
+    )
     p_del.set_defaults(func=cmd_deletions)
     return parser
 

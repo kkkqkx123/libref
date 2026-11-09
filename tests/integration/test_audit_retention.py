@@ -74,8 +74,12 @@ def test_repo_runner_persists_counts(conn, tmp_path) -> None:
     mgr = JobManager(conn)
     job_id = mgr.submit(
         INDEX_REPO_JOB_KIND,
-        {"library": "demo", "version": "0.1", "source": str(repo),
-         "ecosystem": "custom"},
+        {
+            "library": "demo",
+            "version": "0.1",
+            "source": str(repo),
+            "ecosystem": "custom",
+        },
     )
 
     async def scenario():
@@ -122,7 +126,7 @@ def test_snapshot_disabled_by_default(conn) -> None:
 def test_absent_sweep_logs_deletion(conn) -> None:
     settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=2)
     with mock_ingest(_handler):
-        from libref.services.ingest import IngestService  # noqa
+        from libref.services.ingest import IngestService
 
         first = IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/sitemap.xml"
@@ -154,7 +158,7 @@ def test_absent_sweep_logs_deletion(conn) -> None:
         raise AssertionError(path)
 
     with mock_ingest(_gone):
-        from libref.services.ingest import IngestService  # noqa
+        from libref.services.ingest import IngestService
 
         second = IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/sitemap.xml"
@@ -169,7 +173,9 @@ def test_purge_version_clears_and_logs(conn, tmp_path) -> None:
     counts = index_repo(conn, "demo", "0.1", str(repo), repos_dir=tmp_path / "repos")
     assert counts["calls"] >= 1
     out = purge_version(
-        conn, "demo", "0.1",
+        conn,
+        "demo",
+        "0.1",
         repos_dir=tmp_path / "repos",
         snapshot_root=tmp_path / "snaps",
     )

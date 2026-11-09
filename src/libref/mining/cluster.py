@@ -59,11 +59,13 @@ def cluster_apis(
             continue
         members = sorted(members)
         representative = min(members, key=lambda n: (-occ[n], n))
-        out.append({
-            "members": members,
-            "representative": representative,
-            "size": len(members),
-        })
+        out.append(
+            {
+                "members": members,
+                "representative": representative,
+                "size": len(members),
+            }
+        )
     out.sort(key=lambda g: (-g["size"], g["members"]))
     for index, group in enumerate(out):
         group["cluster_id"] = index

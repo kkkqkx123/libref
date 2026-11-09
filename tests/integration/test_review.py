@@ -23,8 +23,18 @@ def _seed_call(conn, callee: str, confidence: str) -> int:
         "INSERT INTO call_instances(call_uid, callee_name, args, repo, caller_file,"
         " line_start, line_end, confidence, library_id, version_id)"
         " VALUES(?,?,?,?,?,?,?,?,?,?)",
-        (f"uid-{callee}-{confidence}-{n}", callee, "[]", "r", "f.py",
-         1, 2, confidence, 1, 1),
+        (
+            f"uid-{callee}-{confidence}-{n}",
+            callee,
+            "[]",
+            "r",
+            "f.py",
+            1,
+            2,
+            confidence,
+            1,
+            1,
+        ),
     )
     call_id = int(cur.lastrowid)
     conn.execute(
@@ -37,13 +47,12 @@ def _seed_call(conn, callee: str, confidence: str) -> int:
 
 
 def test_pending_orders_ambiguous_first(conn) -> None:
-    ids = {
-        c: _seed_call(conn, c, c)
-        for c in ("EXTRACTED", "INFERRED", "AMBIGUOUS")
-    }
+    ids = {c: _seed_call(conn, c, c) for c in ("EXTRACTED", "INFERRED", "AMBIGUOUS")}
     rows = ReviewService(conn).list_pending()
     assert [r["entity_id"] for r in rows] == [
-        ids["AMBIGUOUS"], ids["INFERRED"], ids["EXTRACTED"],
+        ids["AMBIGUOUS"],
+        ids["INFERRED"],
+        ids["EXTRACTED"],
     ]
     assert all(r["status"] == "pending" for r in rows)
 

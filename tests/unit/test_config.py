@@ -133,9 +133,7 @@ def test_invalid_value_reports_source(monkeypatch, tmp_path) -> None:
 def test_secret_in_file_rejected(monkeypatch, tmp_path) -> None:
     _isolated_env(monkeypatch, tmp_path)
     conf = tmp_path / "libref.toml"
-    conf.write_text(
-        '[embeddings]\nembedding_api_key = "sk-test"\n', encoding="utf-8"
-    )
+    conf.write_text('[embeddings]\nembedding_api_key = "sk-test"\n', encoding="utf-8")
     with pytest.raises(ConfigError, match="embedding_api_key"):
         load_settings(conf)
 
@@ -155,7 +153,7 @@ def test_unknown_section_and_key_rejected(monkeypatch, tmp_path) -> None:
 def test_reserved_sections_now_enabled(monkeypatch, tmp_path) -> None:
     _isolated_env(monkeypatch, tmp_path)
     filled = tmp_path / "a.toml"
-    filled.write_text('[mcp.auth]\nmcp_require_auth = true\n', encoding="utf-8")
+    filled.write_text("[mcp.auth]\nmcp_require_auth = true\n", encoding="utf-8")
     assert load_settings(filled).mcp_require_auth is True
     web_conf = tmp_path / "b.toml"
     web_conf.write_text("[web]\nweb_port = 8100\n", encoding="utf-8")

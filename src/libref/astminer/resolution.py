@@ -32,9 +32,16 @@ def resolve_calls(
         alias_map = alias_per_file.get(call.caller_file, {})
         same_file = by_file.get(call.caller_file, set())
         resolved, confidence = resolve_one(
-            call.raw_callee, call.caller, declared, same_file, alias_map, parent_by_qual,
+            call.raw_callee,
+            call.caller,
+            declared,
+            same_file,
+            alias_map,
+            parent_by_qual,
         )
-        scope = f"{call.caller_file}::{call.caller}" if call.caller else call.caller_file
+        scope = (
+            f"{call.caller_file}::{call.caller}" if call.caller else call.caller_file
+        )
         order_counter[scope] = order_counter.get(scope, 0) + 1
         out.append(
             CallInstanceRecord(
@@ -72,12 +79,12 @@ def resolve_one(
     head, _, _rest = raw.partition(".")
     if head in _SELF_HEADS and caller:
         base = caller.rpartition(".")[0] if "." in caller else caller
-        resolved = (base + raw[len(head):]) if base else raw
+        resolved = (base + raw[len(head) :]) if base else raw
         if resolved in declared:
             return resolved, "EXTRACTED"
         return resolved, "AMBIGUOUS"
     if head in alias_map:
-        resolved = alias_map[head] + raw[len(head):]
+        resolved = alias_map[head] + raw[len(head) :]
         if resolved in declared:
             return resolved, "EXTRACTED"
         suffixed = [q for q in declared if q == resolved or q.endswith("." + resolved)]
@@ -144,9 +151,7 @@ def _disambiguate(
     return None
 
 
-def _scope_chain(
-    caller: str, parent_by_qual: dict[str, str | None]
-) -> set[str | None]:
+def _scope_chain(caller: str, parent_by_qual: dict[str, str | None]) -> set[str | None]:
     chain: set[str | None] = set()
     current: str | None = caller
     while current is not None:

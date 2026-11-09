@@ -45,7 +45,7 @@ def determine_module_path(rel_path: str, language: str) -> str | None:
         path = path[: -len(".java")]
         for root in _JAVA_SOURCE_ROOTS:
             if path.startswith(root):
-                path = path[len(root):]
+                path = path[len(root) :]
                 break
         return path.replace("/", ".") or None
     if language == "javascript":

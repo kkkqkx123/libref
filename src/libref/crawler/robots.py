@@ -14,6 +14,7 @@ import time
 import urllib.robotparser
 from urllib.parse import urlsplit
 
+
 def ensure_robots_cache(conn: sqlite3.Connection) -> None:
     from libref.db.schema import GOVERNANCE_SQL
 
@@ -40,7 +41,9 @@ class RobotsChecker:
         fields = LibrefSettings.model_fields
         self._conn = conn
         self._client = client
-        resolved_ttl = fields["robots_cache_ttl_days"].default if ttl_days is None else ttl_days
+        resolved_ttl = (
+            fields["robots_cache_ttl_days"].default if ttl_days is None else ttl_days
+        )
         resolved_ua = fields["user_agent"].default if user_agent is None else user_agent
         self._ttl = resolved_ttl * 86400
         self._ua = resolved_ua

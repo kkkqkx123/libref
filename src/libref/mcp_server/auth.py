@@ -18,19 +18,19 @@ def is_loopback_host(host: str) -> bool:
 
 def auth_required(host: str, *, require_auth: bool, has_token: bool) -> bool:
     """Auth is required when externally exposed or explicitly enabled; loopback without a token is allowed."""
-    if require_auth or not is_loopback_host(host):
-        return True
-    return False
+    return bool(require_auth or not is_loopback_host(host))
 
 
 def check_startup(host: str, *, require_auth: bool, token: str | None) -> None:
     """Pre-start hardening check: refuse to start when auth is required but no token is set, never fall back to no auth."""
-    if auth_required(host, require_auth=require_auth, has_token=bool(token)):
-        if not token:
-            raise ValueError(
-                f"refusing to expose on {host} without a token: "
-                "set LIBREF_MCP_TOKEN or keep the loopback default"
-            )
+    if (
+        auth_required(host, require_auth=require_auth, has_token=bool(token))
+        and not token
+    ):
+        raise ValueError(
+            f"refusing to expose on {host} without a token: "
+            "set LIBREF_MCP_TOKEN or keep the loopback default"
+        )
 
 
 def verify_bearer(authorization: str | None, token: str | None) -> bool:

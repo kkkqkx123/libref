@@ -28,8 +28,6 @@ __all__ = [
     "RegistryError",
     "RegistrySnapshot",
     "Resolution",
-    "is_playwright_available",
-    "render_html",
     "RobotsChecker",
     "ScopePolicy",
     "SeedResult",
@@ -39,7 +37,9 @@ __all__ = [
     "extract_to_markdown",
     "fetch_snapshot",
     "get_override",
+    "is_playwright_available",
     "looks_like_js_rendered",
     "normalize_name",
+    "render_html",
     "sanitize_http_url",
 ]

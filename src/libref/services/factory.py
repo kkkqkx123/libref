@@ -31,7 +31,9 @@ def build_vector(settings, gateway=None):
     return vec, embed, gw
 
 
-def build_search_service(conn, settings, *, gateway=None, vec_store=None, embed=None, rerank=None):
+def build_search_service(
+    conn, settings, *, gateway=None, vec_store=None, embed=None, rerank=None
+):
     """Wire a SearchService with vectors when keys are present, else pure FTS."""
     from libref.services.search import SearchService
 
@@ -48,7 +50,7 @@ def build_search_service(conn, settings, *, gateway=None, vec_store=None, embed=
     if rerank_fn is None:
         try:
             rerank_fn = gw.rerank_fn()
-        except Exception:
+        except Exception:  # noqa: BLE001 — rerank is optional; search runs without it
             rerank_fn = None
     service = SearchService(conn, settings, vec_store=vec, embed=fn, rerank=rerank_fn)
     return service, gw
@@ -70,7 +72,9 @@ def build_ingest_service(conn, settings, *, gateway=None, vec_store=None, embed=
     return IngestService(settings, conn, vec_store=vec, embed=fn), gw
 
 
-def build_maintenance_service(conn, settings, *, gateway=None, vec_store=None, embed=None):
+def build_maintenance_service(
+    conn, settings, *, gateway=None, vec_store=None, embed=None
+):
     """Assemble the vector re-ingest service; callers no longer hand-wire the gateway and vectors."""
     from libref.services.maintenance import MaintenanceService
 

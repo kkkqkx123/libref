@@ -25,8 +25,7 @@ def mining_version_ids(
         params.append(version)
     where = ("WHERE " + " AND ".join(filters)) if filters else ""
     rows = conn.execute(
-        "SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id "
-        f"{where}",
+        f"SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id {where}",
         params,
     ).fetchall()
     return [int(r[0]) for r in rows]
@@ -107,10 +106,16 @@ class LibraryService:
             (ecosystem, library),
         )
         row = self._conn.execute(
-            "SELECT id FROM libraries WHERE ecosystem=? AND name=?", (ecosystem, library)
+            "SELECT id FROM libraries WHERE ecosystem=? AND name=?",
+            (ecosystem, library),
         ).fetchone()
         library_id = int(row[0])
-        if homepage is not None or docs_url is not None or repo_url is not None or resolved_from is not None:
+        if (
+            homepage is not None
+            or docs_url is not None
+            or repo_url is not None
+            or resolved_from is not None
+        ):
             self._conn.execute(
                 "UPDATE libraries SET homepage=COALESCE(?, homepage), docs_url=COALESCE(?, docs_url), "
                 "repo_url=COALESCE(?, repo_url), resolved_from=COALESCE(?, resolved_from), "
@@ -127,7 +132,8 @@ class LibraryService:
             (1 if registry_confirmed else 0, library_id, version),
         )
         row = self._conn.execute(
-            "SELECT id FROM versions WHERE library_id=? AND version=?", (library_id, version)
+            "SELECT id FROM versions WHERE library_id=? AND version=?",
+            (library_id, version),
         ).fetchone()
         self._conn.commit()
         return library_id, int(row[0])

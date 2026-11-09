@@ -15,13 +15,43 @@ from selectolax.lexbor import LexborHTMLParser as HTMLParser
 from libref.text.normalize import normalize_markdown
 
 # Noise tags stripped outright
-_STRIP_TAGS = ("script", "style", "noscript", "nav", "footer", "aside", "form", "header")
+_STRIP_TAGS = (
+    "script",
+    "style",
+    "noscript",
+    "nav",
+    "footer",
+    "aside",
+    "form",
+    "header",
+)
 # Common main-content containers, picked by priority
 _MAIN_CANDIDATES = ("main", "article")
 # Preserved wholesale during pruning: table structure, code blocks, and img self-count as non-empty
-_PRESERVE_TAGS = ("pre", "code", "table", "tbody", "thead", "tfoot", "tr", "td", "th", "img", "br", "hr")
+_PRESERVE_TAGS = (
+    "pre",
+    "code",
+    "table",
+    "tbody",
+    "thead",
+    "tfoot",
+    "tr",
+    "td",
+    "th",
+    "img",
+    "br",
+    "hr",
+)
 # Suspected client-side rendering markers: static fetch yields no content and a hit counts as a skip, not a failure
-_JS_MARKERS = ("id=\"root\"", "id=\"app\"", "__NEXT_DATA__", "__NUXT__", "ng-app", "data-reactroot", "__INITIAL_STATE__")
+_JS_MARKERS = (
+    'id="root"',
+    'id="app"',
+    "__NEXT_DATA__",
+    "__NUXT__",
+    "ng-app",
+    "data-reactroot",
+    "__INITIAL_STATE__",
+)
 
 
 def extract_to_markdown(html: str, base_url: str | None = None) -> str:
@@ -46,7 +76,9 @@ def extract_to_markdown(html: str, base_url: str | None = None) -> str:
 def _absolutize_links(tree: HTMLParser, base_url: str) -> None:
     for node in tree.css("a[href]"):
         href = node.attributes.get("href", "")
-        if href and not href.startswith(("http://", "https://", "mailto:", "#", "data:")):
+        if href and not href.startswith(
+            ("http://", "https://", "mailto:", "#", "data:")
+        ):
             node.attributes["href"] = urljoin(base_url, href)
     for node in tree.css("img[src]"):
         src = node.attributes.get("src", "")
@@ -106,6 +138,3 @@ def _prune_empty_nodes(root) -> None:
             doomed.append(node)
     for node in doomed:
         node.decompose()
-
-
-

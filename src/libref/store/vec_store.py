@@ -36,7 +36,9 @@ class QdrantVecStore:
         client: Any | None = None,
     ) -> None:
         self.collection = collection
-        self.client = client if client is not None else QdrantClient(url=url, timeout=timeout)
+        self.client = (
+            client if client is not None else QdrantClient(url=url, timeout=timeout)
+        )
 
     # ── Collection governance ──
 

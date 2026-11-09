@@ -31,6 +31,7 @@ class _ShapeClient:
 
     def get_collection(self, name: str):
         from types import SimpleNamespace
+
         return SimpleNamespace(
             config=SimpleNamespace(params=SimpleNamespace(vectors=self._vectors))
         )
@@ -100,28 +101,35 @@ def _handler(body: str):
         if request.url.path == "/robots.txt":
             return httpx.Response(200, text="")
         if request.url.path == "/llms.txt":
-            return httpx.Response(200, text="- [Install](https://d.example/install.html)\n")
+            return httpx.Response(
+                200, text="- [Install](https://d.example/install.html)\n"
+            )
         if request.url.path == "/install.html":
             return httpx.Response(200, text=body)
         raise AssertionError(request.url.path)
+
     return handle
 
 
 def _settings():
     return LibrefSettings(
-        request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
+        request_timeout=5.0,
+        fetch_concurrency=2,
+        crawl_delay_default=0.0,
         robots_cache_ttl_days=1.0,
     )
 
 
 def test_scrape_syncs_vectors(conn):
-    body = ("<html><body><main><h1>Install</h1>"
-            "<p>use uv to install libref quetzalvec</p></main></body></html>")
+    body = (
+        "<html><body><main><h1>Install</h1>"
+        "<p>use uv to install libref quetzalvec</p></main></body></html>"
+    )
     vec = _FakeVec()
     with mock_ingest(_handler(body)):
-        counts = IngestService(_settings(), conn, vec_store=vec,
-                               embed=_fake_embed).scrape_docs(
-            "docs", "1.0", "https://d.example/", max_pages=5)
+        counts = IngestService(
+            _settings(), conn, vec_store=vec, embed=_fake_embed
+        ).scrape_docs("docs", "1.0", "https://d.example/", max_pages=5)
     assert counts["stored"] == 1
     assert counts["vector_failed"] == 0
     assert vec.ensured and vec.deleted == []
@@ -131,8 +139,8 @@ def test_scrape_syncs_vectors(conn):
 
 
 def test_rescrape_replaces_vectors(conn):
-    first = ("<html><body><main><p>first body quetzalre</p></main></body></html>")
-    second = ("<html><body><main><p>second body quetzalre</p></main></body></html>")
+    first = "<html><body><main><p>first body quetzalre</p></main></body></html>"
+    second = "<html><body><main><p>second body quetzalre</p></main></body></html>"
     current = [first]
 
     def dynamic(request: httpx.Request) -> httpx.Response:
@@ -150,7 +158,8 @@ def test_rescrape_replaces_vectors(conn):
     assert counts["vector_failed"] == 0
     assert sorted(vec.deleted) == sorted(p[0] for p in old_points)
     assert vec.upserted and {p[0] for p in vec.upserted}.isdisjoint(
-        {p[0] for p in old_points})
+        {p[0] for p in old_points}
+    )
 
 
 def test_embed_failure_counts_without_losing_truth(conn):
@@ -158,10 +167,12 @@ def test_embed_failure_counts_without_losing_truth(conn):
         raise RuntimeError("encoder down")
 
     vec = _FakeVec()
-    with mock_ingest(_handler("<html><body><main><p>truth body quetzalboom</p></main></body></html>")):
-        counts = IngestService(_settings(), conn, vec_store=vec,
-                               embed=boom).scrape_docs(
-            "docs", "1.0", "https://d.example/", max_pages=5)
+    with mock_ingest(
+        _handler("<html><body><main><p>truth body quetzalboom</p></main></body></html>")
+    ):
+        counts = IngestService(
+            _settings(), conn, vec_store=vec, embed=boom
+        ).scrape_docs("docs", "1.0", "https://d.example/", max_pages=5)
     assert counts["stored"] == 1
     assert counts["vector_failed"] == 1
     assert SearchService(conn).search_docs("quetzalboom")
@@ -171,9 +182,19 @@ def test_search_results_carry_row_id(conn):
     _seed_lv(conn)
     store = DocumentStore(conn)
     result = store.store_page(
-        1, 1, "https://d.example/a.html", "stored",
-        chunks=[Chunk(url="https://d.example/a.html", path="G", title="G",
-                      content="quetzalid body", sort_order=0)],
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/a.html",
+                path="G",
+                title="G",
+                content="quetzalid body",
+                sort_order=0,
+            )
+        ],
         raw_content="b",
     )
     hits = SearchService(conn).search_docs("quetzalid")
@@ -185,15 +206,35 @@ def test_title_match_outranks_content_only(conn):
     _seed_lv(conn)
     store = DocumentStore(conn)
     store.store_page(
-        1, 1, "https://d.example/a.html", "stored",
-        chunks=[Chunk(url="https://d.example/a.html", path="Guide", title="Install Guide",
-                      content="unrelated pineapple text", sort_order=0)],
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/a.html",
+                path="Guide",
+                title="Install Guide",
+                content="unrelated pineapple text",
+                sort_order=0,
+            )
+        ],
         raw_content="a",
     )
     store.store_page(
-        1, 1, "https://d.example/b.html", "stored",
-        chunks=[Chunk(url="https://d.example/b.html", path="Other", title="Other",
-                      content="install libref now", sort_order=0)],
+        1,
+        1,
+        "https://d.example/b.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/b.html",
+                path="Other",
+                title="Other",
+                content="install libref now",
+                sort_order=0,
+            )
+        ],
         raw_content="b",
     )
     hits = SearchService(conn).search_docs("install")

@@ -13,7 +13,9 @@ from libref.text.snippet import make_snippet
 class SearchService:
     """Thin retrieval orchestration; page and mining reads live elsewhere."""
 
-    def __init__(self, conn, settings=None, *, vec_store=None, embed=None, rerank=None) -> None:
+    def __init__(
+        self, conn, settings=None, *, vec_store=None, embed=None, rerank=None
+    ) -> None:
         self._conn = conn
         self._settings = settings
         self._vec = vec_store if embed is not None else None
@@ -72,6 +74,7 @@ class SearchService:
         rows = self._conn.execute(sql, params).fetchall()
         out = []
         from libref.store.retriever import alignment_key
+
         seen: set[str] = set()
         for r in rows:
             try:
@@ -87,7 +90,12 @@ class SearchService:
                     "id": r[0],
                     "url": r[1],
                     "score": r[2],
-                    "snippet": make_snippet(strip_markdown_for_embedding(r[3]), query, radius=radius, cap=cap),
+                    "snippet": make_snippet(
+                        strip_markdown_for_embedding(r[3]),
+                        query,
+                        radius=radius,
+                        cap=cap,
+                    ),
                     "title": r[4],
                     "path": r[5],
                     "library": r[6],
@@ -134,7 +142,11 @@ class SearchService:
             rerank=rerank if rerank is not None else self._rerank,
         )
         return await retriever.search_async(
-            query, library=library, version=version,
-            ecosystem=ecosystem, limit=limit,
-            expand_window=expand_window, window_radius=window_radius,
+            query,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            limit=limit,
+            expand_window=expand_window,
+            window_radius=window_radius,
         )

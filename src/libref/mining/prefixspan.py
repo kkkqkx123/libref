@@ -14,7 +14,9 @@ from heapq import heappush, heappushpop
 __all__ = ["PrefixSpan"]
 
 DB = list[list[int]]
-Matches = list[tuple[int, int]]  # (sequence id, last matched position of the pattern within that sequence)
+Matches = list[
+    tuple[int, int]
+]  # (sequence id, last matched position of the pattern within that sequence)
 Occurs = dict[int, Matches]
 Pattern = list[int]
 Results = list[tuple[int, Pattern]]
@@ -127,7 +129,11 @@ class PrefixSpan:
         def rec(patt: Pattern, matches: Matches) -> None:
             if len(patt) >= self.minlen:
                 sup = key(patt, matches)
-                if not canpass(sup) and (filter_fn is None or filter_fn(patt, matches)) and verify_extra(patt, matches):
+                if (
+                    not canpass(sup)
+                    and (filter_fn is None or filter_fn(patt, matches))
+                    and verify_extra(patt, matches)
+                ):
                     if callback is not None:
                         callback(patt, matches)
                     else:
@@ -158,7 +164,8 @@ class PrefixSpan:
         closed: bool = False,
         key: Key | None = None,
         bound: Key | None = None,
-        filter: Filter | None = None,  # aligns with the ref/PrefixSpan-py API; shadows the builtin intentionally
+        filter: Filter
+        | None = None,  # aligns with the ref/PrefixSpan-py API; shadows the builtin intentionally
         callback: Callback | None = None,
     ) -> Results | None:
         """Mine frequent patterns with support >= minsup; only closed patterns when closed=True."""
@@ -172,8 +179,14 @@ class PrefixSpan:
             return not closed or _is_closed(self.db, patt, matches)
 
         return self._mine(
-            lambda p, m: None, key, bound, canpass, verify_extra,
-            closed, filter, callback,
+            lambda p, m: None,
+            key,
+            bound,
+            canpass,
+            verify_extra,
+            closed,
+            filter,
+            callback,
         )
 
     def topk(
@@ -183,7 +196,8 @@ class PrefixSpan:
         closed: bool = False,
         key: Key | None = None,
         bound: Key | None = None,
-        filter: Filter | None = None,  # aligns with the ref/PrefixSpan-py API; shadows the builtin intentionally
+        filter: Filter
+        | None = None,  # aligns with the ref/PrefixSpan-py API; shadows the builtin intentionally
         callback: Callback | None = None,
     ) -> Results | None:
         """Mine the k patterns with the highest support (based on topk.py: heap + dynamic threshold + upper-bound break)."""
@@ -197,8 +211,10 @@ class PrefixSpan:
         def rec(patt: Pattern, matches: Matches) -> None:
             if len(patt) >= self.minlen:
                 sup = key(patt, matches)
-                if not canpass(sup) and (filter is None or filter(patt, matches)) and (
-                    not closed or _is_closed(self.db, patt, matches)
+                if (
+                    not canpass(sup)
+                    and (filter is None or filter(patt, matches))
+                    and (not closed or _is_closed(self.db, patt, matches))
                 ):
                     if len(heap) < k:
                         heappush(heap, (sup, patt, matches))
@@ -224,7 +240,9 @@ class PrefixSpan:
 
         rec([], [(i, -1) for i in range(len(self.db))])
 
-        results = sorted(((sup, patt) for sup, patt, _ in heap), key=lambda x: (-x[0], x[1]))
+        results = sorted(
+            ((sup, patt) for sup, patt, _ in heap), key=lambda x: (-x[0], x[1])
+        )
         if callback is not None:
             for sup, patt in results:
                 callback(patt, [m for m in self._matches_of(patt)])

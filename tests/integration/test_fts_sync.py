@@ -32,15 +32,22 @@ def _insert_doc(conn: sqlite3.Connection, page_id: int, content: str) -> int:
     cur = conn.execute(
         "INSERT INTO documents(library_id, version_id, page_id, url, content, metadata, sort_order)"
         " VALUES(1, 1, ?, 'https://example.com/a', ?, ?, 0)",
-        (page_id, content, json.dumps({"title": "Getting Started", "path": "docs/start"})),
+        (
+            page_id,
+            content,
+            json.dumps({"title": "Getting Started", "path": "docs/start"}),
+        ),
     )
     return cur.lastrowid
 
 
 def _match(conn: sqlite3.Connection, query: str) -> list[int]:
-    return [r[0] for r in conn.execute(
-        "SELECT rowid FROM documents_fts WHERE documents_fts MATCH ?", (query,)
-    )]
+    return [
+        r[0]
+        for r in conn.execute(
+            "SELECT rowid FROM documents_fts WHERE documents_fts MATCH ?", (query,)
+        )
+    ]
 
 
 def test_insert_visible_in_fts(conn: sqlite3.Connection) -> None:
@@ -89,8 +96,7 @@ def test_fts_vocab_consistency(conn: sqlite3.Connection) -> None:
         "CREATE VIRTUAL TABLE temp_fts_v USING fts5vocab('documents_fts', 'col')"
     )
     vocab = {
-        r[0]
-        for r in conn.execute("SELECT term FROM temp_fts_v WHERE col='content'")
+        r[0] for r in conn.execute("SELECT term FROM temp_fts_v WHERE col='content'")
     }
     conn.execute("DROP TABLE temp_fts_v")
     assert vocab == {"alpha", "beta"}

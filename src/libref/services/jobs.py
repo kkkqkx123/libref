@@ -63,7 +63,9 @@ class Job:
 class JobManager:
     """In-process queue; submit writes the jobs table, the worker consumes and writes back status, recover handles stale."""
 
-    def __init__(self, conn: sqlite3.Connection, *, stale_after: float = _STALE_AFTER) -> None:
+    def __init__(
+        self, conn: sqlite3.Connection, *, stale_after: float = _STALE_AFTER
+    ) -> None:
         self._conn = conn
         self._stale_after = stale_after
         self._queue: asyncio.Queue[int] = asyncio.Queue()
@@ -86,7 +88,8 @@ class JobManager:
     def get(self, job_id: int) -> Job | None:
         row = self._conn.execute(
             "SELECT id, kind, params, status, error, result, finished_at"
-            " FROM jobs WHERE id=?", (job_id,)
+            " FROM jobs WHERE id=?",
+            (job_id,),
         ).fetchone()
         if row is None:
             return None
@@ -94,14 +97,21 @@ class JobManager:
             result = json.loads(row[5]) if row[5] else {}
         except ValueError:
             result = {}
-        return Job(id=row[0], kind=row[1], params=json.loads(row[2]),
-                   status=row[3], error=row[4], result=result,
-                   finished_at=row[6])
+        return Job(
+            id=row[0],
+            kind=row[1],
+            params=json.loads(row[2]),
+            status=row[3],
+            error=row[4],
+            result=result,
+            finished_at=row[6],
+        )
 
     def list_recent(self, limit: int = 20) -> list[Job]:
         rows = self._conn.execute(
             "SELECT id, kind, params, status, error, result, finished_at"
-            " FROM jobs ORDER BY id DESC LIMIT ?", (limit,)
+            " FROM jobs ORDER BY id DESC LIMIT ?",
+            (limit,),
         ).fetchall()
         out: list[Job] = []
         for row in rows:
@@ -109,9 +119,17 @@ class JobManager:
                 result = json.loads(row[5]) if row[5] else {}
             except ValueError:
                 result = {}
-            out.append(Job(id=row[0], kind=row[1], params=json.loads(row[2]),
-                           status=row[3], error=row[4], result=result,
-                           finished_at=row[6]))
+            out.append(
+                Job(
+                    id=row[0],
+                    kind=row[1],
+                    params=json.loads(row[2]),
+                    status=row[3],
+                    error=row[4],
+                    result=result,
+                    finished_at=row[6],
+                )
+            )
         return out
 
     # ── worker ──
@@ -138,16 +156,28 @@ class JobManager:
                 if asyncio.iscoroutine(produced):
                     produced = await produced
                 payload = json.dumps(summarize_result(produced), ensure_ascii=False)
-                self._update(job_id, status="done", heartbeat_at=time.time(),
-                             result=payload,
-                             finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
+                self._update(
+                    job_id,
+                    status="done",
+                    heartbeat_at=time.time(),
+                    result=payload,
+                    finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+                )
                 logger.info("job done id=%d kind=%s", job_id, job.kind)
             except BaseException as exc:  # noqa: BLE001
-                self._update(job_id, status="failed",
-                             error=f"{type(exc).__name__}: {exc}",
-                             finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
-                logger.warning("job failed id=%d kind=%s error=%s: %s",
-                               job_id, job.kind, type(exc).__name__, exc)
+                self._update(
+                    job_id,
+                    status="failed",
+                    error=f"{type(exc).__name__}: {exc}",
+                    finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+                )
+                logger.warning(
+                    "job failed id=%d kind=%s error=%s: %s",
+                    job_id,
+                    job.kind,
+                    type(exc).__name__,
+                    exc,
+                )
             finally:
                 beat.cancel()
                 self._queue.task_done()
@@ -157,13 +187,13 @@ class JobManager:
             interval = 5.0
             try:
                 interval = max(1.0, float(self._stale_after) / 6.0)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pass
             while True:
                 await asyncio.sleep(min(interval, 5.0))
                 try:
                     job = self.get(job_id)
-                except Exception:  # noqa: BLE001
+                except Exception:  # noqa: BLE001, S112 — a transient read failure retries on the next tick
                     continue
                 if job is None or job.status != "running":
                     return
@@ -176,8 +206,9 @@ class JobManager:
             self._worker.cancel()
             self._worker = None
 
-    async def wait_for(self, job_id: int, *, timeout: float = 300.0,
-                       poll: float = 0.02) -> Job:
+    async def wait_for(
+        self, job_id: int, *, timeout: float = 300.0, poll: float = 0.02
+    ) -> Job:
         """Wait for the job to settle (done/failed); raises TimeoutError on timeout."""
         deadline = time.monotonic() + timeout
         while True:
@@ -202,8 +233,12 @@ class JobManager:
             )
         ]
         for job_id in stale_ids:
-            self._update(job_id, status="failed", error="stale: heartbeat timeout",
-                         finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
+            self._update(
+                job_id,
+                status="failed",
+                error="stale: heartbeat timeout",
+                finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+            )
         if stale_ids:
             logger.warning("job stale recovered ids=%s", stale_ids)
         return stale_ids
@@ -212,5 +247,7 @@ class JobManager:
 
     def _update(self, job_id: int, **fields: Any) -> None:
         sets = ", ".join(f"{k}=?" for k in fields)
-        self._conn.execute(f"UPDATE jobs SET {sets} WHERE id=?", (*fields.values(), job_id))
+        self._conn.execute(
+            f"UPDATE jobs SET {sets} WHERE id=?", (*fields.values(), job_id)
+        )
         self._conn.commit()

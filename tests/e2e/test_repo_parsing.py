@@ -45,7 +45,10 @@ def test_e2e_repo_index_invariants(tmp_path, conn):
         library = f"e2e-{lang}"
         try:
             counts = index_repo(
-                conn, library, entry["tag"], entry["url"],
+                conn,
+                library,
+                entry["tag"],
+                entry["url"],
                 repos_dir=PERSISTENT_REPOS,
             )
         except Exception as exc:  # noqa: BLE001
@@ -61,7 +64,10 @@ def test_e2e_repo_index_invariants(tmp_path, conn):
         bound = {"javascript": 0.4, "java": 0.75}[lang]
         assert amb_ratio < bound
         second = index_repo(
-            conn, library, entry["tag"], entry["url"],
+            conn,
+            library,
+            entry["tag"],
+            entry["url"],
             repos_dir=PERSISTENT_REPOS,
         )
         assert second["cached"] > 0 and second["parsed"] == 0

@@ -260,7 +260,11 @@ def type_text_of_param(pnode: Any, source: bytes) -> str:
     for child in pnode.children:
         if not child.is_named:
             continue
-        if child.type in ("identifier", "list_splat_pattern", "dictionary_splat_pattern"):
+        if child.type in (
+            "identifier",
+            "list_splat_pattern",
+            "dictionary_splat_pattern",
+        ):
             continue
         text = type_text_of_param(child, source)
         if text:
@@ -317,8 +321,12 @@ def collect_simple_var_aliases(root: Any, source: bytes) -> list[tuple[str, str]
 
 
 def _call_target_name(node: Any, source: bytes) -> str:
-    if node.type not in ("call", "call_expression", "new_expression",
-                         "object_creation_expression"):
+    if node.type not in (
+        "call",
+        "call_expression",
+        "new_expression",
+        "object_creation_expression",
+    ):
         return ""
     fn = node.child_by_field_name("function")
     if fn is None:
@@ -329,8 +337,13 @@ def _call_target_name(node: Any, source: bytes) -> str:
         fn = node.child_by_field_name("type")
     if fn is None:
         for child in node.children:
-            if child.type in ("identifier", "attribute", "dotted_name",
-                              "scoped_identifier", "type_identifier"):
+            if child.type in (
+                "identifier",
+                "attribute",
+                "dotted_name",
+                "scoped_identifier",
+                "type_identifier",
+            ):
                 fn = child
                 break
     if fn is None:
@@ -342,7 +355,10 @@ def _split_aliased(node: Any, source: bytes) -> tuple[str, str]:
     original = ""
     alias = ""
     for sub in node.children:
-        if sub.type in ("dotted_name", "scoped_identifier", "identifier") and not original:
+        if (
+            sub.type in ("dotted_name", "scoped_identifier", "identifier")
+            and not original
+        ):
             original = generic_dotted(sub, source).strip()
         elif sub.type == "identifier" and original:
             alias = slice_text(sub, source).strip()
@@ -350,7 +366,10 @@ def _split_aliased(node: Any, source: bytes) -> tuple[str, str]:
 
 
 def build_aliases(
-    language: str, root: Any, captures: dict[str, list], source: bytes,
+    language: str,
+    root: Any,
+    captures: dict[str, list],
+    source: bytes,
     current_module: str | None = None,
 ) -> list[tuple[str, str]]:
     if language == "python":
@@ -363,7 +382,9 @@ def build_aliases(
 
 
 def _python_aliases(
-    root: Any, captures: dict[str, list], source: bytes,
+    root: Any,
+    captures: dict[str, list],
+    source: bytes,
     current_module: str | None = None,
 ) -> list[tuple[str, str]]:
     if root.type == "import_statement":
@@ -447,8 +468,16 @@ def _javascript_aliases(
             for spec in nodes:
                 orig_node = spec.child_by_field_name("name")
                 alias_node = spec.child_by_field_name("alias")
-                original = slice_text(orig_node, source).strip() if orig_node is not None else ""
-                alias = slice_text(alias_node, source).strip() if alias_node is not None else ""
+                original = (
+                    slice_text(orig_node, source).strip()
+                    if orig_node is not None
+                    else ""
+                )
+                alias = (
+                    slice_text(alias_node, source).strip()
+                    if alias_node is not None
+                    else ""
+                )
                 if original:
                     full = f"{mod}.{original}" if mod else original
                     found.append((alias or original, full))
@@ -477,7 +506,10 @@ def _javascript_aliases(
             return []
         found = []
         for child in destruct.children:
-            if child.type in ("shorthand_property_identifier", "shorthand_property_identifier_pattern"):
+            if child.type in (
+                "shorthand_property_identifier",
+                "shorthand_property_identifier_pattern",
+            ):
                 prop = slice_text(child, source).strip()
                 if prop:
                     found.append((prop, f"{mod}.{prop}"))
