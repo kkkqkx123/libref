@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 from libref.config import LibrefSettings, settings_fingerprint
+from libref.crawler.registry import RegistryError
 from libref.mcp_server.auth import verify_bearer
 from libref.services.ingest import IngestService
 from libref.services.jobs import JobManager
@@ -17,14 +18,26 @@ from libref.services.pages import PageService
 from libref.services.review import ReviewService
 from libref.services.search import SearchService
 from libref.web.api import (
-    ReadPageQuery,
-    ReadSectionQuery,
-    ReadWindowQuery,
+    AnswerQuery,
+    ApiInsightQuery,
+    JobQuery,
+    PatternInsightQuery,
+    ReadQuery,
+    ResolveQuery,
     ReviewAction,
+    ReviewQuery,
     ScrapeRequest,
     SearchQuery,
     envelope,
 )
+
+
+def _split_list(raw: str | None) -> list[str] | None:
+    if raw is None:
+        return None
+    items = [part.strip() for part in raw.split(",")]
+    items = [part for part in items if part]
+    return items or None
 
 
 def build_web_app(
@@ -56,15 +69,13 @@ def build_web_app(
     def health() -> dict[str, Any]:
         return {"ok": True, "fingerprint": settings_fingerprint(settings)}
 
-    @app.get("/libraries")
-    def libraries(_: None = Depends(_guard)) -> dict[str, Any]:
-        return envelope(catalog.list_libraries())
-
-    @app.get("/versions")
-    def versions(
-        library: str, ecosystem: str | None = None, _: None = Depends(_guard)
+    @app.get("/catalog")
+    def catalog_route(
+        library: str | None = None,
+        ecosystem: str | None = None,
+        _: None = Depends(_guard),
     ) -> dict[str, Any]:
-        return envelope(catalog.list_versions(library, ecosystem))
+        return envelope(catalog.catalog(library, ecosystem))
 
     @app.get("/search")
     async def search(
@@ -73,7 +84,9 @@ def build_web_app(
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 8,
-        hybrid: bool = True,
+        mode: Literal["hybrid", "precise"] = "hybrid",
+        expand_window: bool = False,
+        window_radius: int | None = None,
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         params = SearchQuery(
@@ -82,160 +95,200 @@ def build_web_app(
             version=version,
             ecosystem=ecosystem,
             limit=limit,
-            hybrid=hybrid,
+            mode=mode,
+            expand_window=expand_window,
+            window_radius=window_radius,
         )
-        if params.hybrid:
-            results, degraded = await svc.search_hybrid_async(
+        try:
+            results, degraded = await svc.search_with_mode(
                 params.query,
+                params.mode,
                 library=params.library,
                 version=params.version,
                 ecosystem=params.ecosystem,
                 limit=params.limit,
+                expand_window=params.expand_window or None,
+                window_radius=params.window_radius,
             )
-            return envelope(results, degraded=degraded)
-        return envelope(
-            svc.search_docs(
-                params.query,
-                library=params.library,
-                version=params.version,
-                ecosystem=params.ecosystem,
-                limit=params.limit,
-            )
-        )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return envelope(results, degraded=degraded)
 
-    @app.get("/read/page")
-    def read_page(
-        url: str,
+    @app.get("/answer")
+    async def answer(
+        query: str,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        limit: int = 5,
+        expand_window: bool = False,
+        window_radius: int | None = None,
+        material_limit: int | None = None,
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
-        params = ReadPageQuery(
-            url=url, library=library, version=version, ecosystem=ecosystem
-        )
-        page = pages.read_page(
-            params.url,
-            library=params.library,
-            version=params.version,
-            ecosystem=params.ecosystem,
-        )
-        if page is None:
-            raise HTTPException(status_code=404, detail="page not found")
-        return page
+        from libref.services.answer import answer_query_async
 
-    @app.get("/read/window")
-    def read_window(
-        url: str,
-        sort_order: int,
-        radius: int = 1,
-        library: str | None = None,
-        version: str | None = None,
-        ecosystem: str | None = None,
-        _: None = Depends(_guard),
-    ) -> dict[str, Any]:
-        params = ReadWindowQuery(
-            url=url,
-            sort_order=sort_order,
-            radius=radius,
+        params = AnswerQuery(
+            query=query,
             library=library,
             version=version,
             ecosystem=ecosystem,
+            limit=limit,
+            expand_window=expand_window,
+            window_radius=window_radius,
+            material_limit=material_limit,
         )
-        page = pages.read_window(
-            params.url,
-            params.sort_order,
-            radius=params.radius,
-            library=params.library,
-            version=params.version,
-            ecosystem=params.ecosystem,
-        )
-        if page is None:
-            raise HTTPException(status_code=404, detail="window not found")
-        return page
+        try:
+            return await answer_query_async(
+                conn,
+                settings,
+                params.query,
+                library=params.library,
+                version=params.version,
+                ecosystem=params.ecosystem,
+                limit=params.limit,
+                vec_store=vec_store,
+                embed=embed,
+                rerank=rerank,
+                chat=chat,
+                expand_window=params.expand_window or None,
+                window_radius=params.window_radius,
+                material_limit=params.material_limit,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/read/section")
-    def read_section(
+    @app.get("/read")
+    def read(
         url: str,
-        source_group_id: str,
+        mode: Literal["page", "window", "section"] = "page",
+        sort_order: int | None = None,
+        radius: int = 1,
+        source_group_id: str | None = None,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
-        params = ReadSectionQuery(
+        params = ReadQuery(
             url=url,
+            mode=mode,
+            sort_order=sort_order,
+            radius=radius,
             source_group_id=source_group_id,
             library=library,
             version=version,
             ecosystem=ecosystem,
         )
-        page = pages.read_section(
-            params.url,
-            params.source_group_id,
-            library=params.library,
-            version=params.version,
-            ecosystem=params.ecosystem,
-        )
+        try:
+            page = pages.read_doc(
+                params.url,
+                params.mode,
+                sort_order=params.sort_order,
+                radius=params.radius,
+                source_group_id=params.source_group_id,
+                library=params.library,
+                version=params.version,
+                ecosystem=params.ecosystem,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if page is None:
-            raise HTTPException(status_code=404, detail="section not found")
+            raise HTTPException(status_code=404, detail="page not found")
         return page
 
-    @app.get("/feature-tree")
-    def feature_tree(
+    @app.get("/api-insight")
+    def api_insight(
+        view: Literal["usage", "related", "args"],
+        api: str | None = None,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
-        prefix: str | None = None,
-        limit: int = 100,
+        limit: int | None = None,
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
-        return envelope(
-            mining.feature_tree(
-                library=library,
-                version=version,
-                ecosystem=ecosystem,
-                prefix=prefix,
-                limit=limit,
-            )
+        params = ApiInsightQuery(
+            view=view,
+            api=api,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            limit=limit,
         )
+        try:
+            return envelope(
+                mining.api_insight(
+                    params.view,
+                    params.api,
+                    library=params.library,
+                    version=params.version,
+                    ecosystem=params.ecosystem,
+                    limit=params.limit,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/clusters")
-    def clusters(
+    @app.get("/pattern-insight")
+    def pattern_insight(
+        view: Literal["patterns", "evidence", "tree", "clusters"],
+        pattern: str | None = None,
+        containing: str | None = None,
+        prefix: str | None = None,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
-        containing: str | None = None,
+        limit: int | None = None,
+        _: None = Depends(_guard),
+    ) -> dict[str, Any]:
+        params = PatternInsightQuery(
+            view=view,
+            pattern=pattern,
+            containing=containing,
+            prefix=prefix,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            limit=limit,
+        )
+        try:
+            return envelope(
+                mining.pattern_insight(
+                    params.view,
+                    pattern=_split_list(params.pattern),
+                    containing=_split_list(params.containing),
+                    prefix=params.prefix,
+                    library=params.library,
+                    version=params.version,
+                    ecosystem=params.ecosystem,
+                    limit=params.limit,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/review")
+    def review_list(
+        action: Literal["list"] = "list",
         limit: int = 50,
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
-        names = containing.split(",") if containing else None
-        return envelope(
-            mining.api_clusters(
-                library=library,
-                version=version,
-                ecosystem=ecosystem,
-                containing=names,
-                limit=limit,
-            )
-        )
-
-    @app.get("/review/pending")
-    def review_pending(limit: int = 50, _: None = Depends(_guard)) -> dict[str, Any]:
-        return envelope(review.list_pending(limit=limit))
+        params = ReviewQuery(action=action, limit=limit)
+        try:
+            items = review.apply(params.action, None, params.limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return envelope(items)
 
     @app.post("/review")
     def review_apply(body: ReviewAction, _: None = Depends(_guard)) -> dict[str, Any]:
         try:
-            if body.action == "approve":
-                review.approve(body.entity_id)
-            elif body.action == "conflict":
-                review.mark_conflict(body.entity_id)
-            else:
-                review.reopen(body.entity_id)
+            result = review.apply(body.action, body.entity_id, body.limit)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-        return {"ok": True}
+        if isinstance(result, list):
+            return envelope(result)
+        return result
 
     @app.post("/scrape")
     def scrape(body: ScrapeRequest, _: None = Depends(_guard)) -> dict[str, Any]:
@@ -250,34 +303,57 @@ def build_web_app(
         return {"counts": counts}
 
     @app.get("/jobs")
-    def jobs(limit: int = 20, _: None = Depends(_guard)) -> dict[str, Any]:
+    def jobs(
+        job_id: int | None = None,
+        limit: int = 20,
+        _: None = Depends(_guard),
+    ) -> dict[str, Any]:
+        params = JobQuery(job_id=job_id, limit=limit)
         mgr = JobManager(conn)
-        return envelope(
-            [
-                {
-                    "id": j.id,
-                    "kind": j.kind,
-                    "status": j.status,
-                    "finished_at": j.finished_at,
-                    "error": j.error,
-                }
-                for j in mgr.list_recent(limit=limit)
-            ]
-        )
+        out = mgr.show(params.job_id, params.limit)
+        if "error" in out and "id" not in out:
+            raise HTTPException(status_code=404, detail="job not found")
+        return out
 
     @app.get("/jobs/{job_id}")
     def job_detail(job_id: int, _: None = Depends(_guard)) -> dict[str, Any]:
         mgr = JobManager(conn)
-        job = mgr.get(job_id)
-        if job is None:
+        out = mgr.show(job_id)
+        if "error" in out and "id" not in out:
             raise HTTPException(status_code=404, detail="job not found")
-        return {
-            "id": job.id,
-            "kind": job.kind,
-            "status": job.status,
-            "error": job.error,
-            "result": job.result,
-            "finished_at": job.finished_at,
-        }
+        return out
+
+    @app.get("/resolve")
+    async def resolve_route(
+        name: str,
+        ecosystem: str | None = None,
+        version: str | None = None,
+        target: Literal["docs", "repo"] = "docs",
+        _: None = Depends(_guard),
+    ) -> dict[str, Any]:
+        from libref.crawler.http import build_async_client
+        from libref.services.resolver import resolve as _resolve
+
+        params = ResolveQuery(
+            ecosystem=ecosystem, name=name, version=version, target=target
+        )
+        try:
+            async with build_async_client(settings) as client:
+                resolution = await _resolve(
+                    conn,
+                    client,
+                    settings,
+                    params.ecosystem,
+                    params.name,
+                    params.version,
+                    params.target,
+                )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RegistryError as exc:
+            if exc.kind == "no_docs":
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return resolution.model_dump()
 
     return app

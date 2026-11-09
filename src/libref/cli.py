@@ -22,7 +22,12 @@ from libref.services.code_ingest import (
     build_repo_runner,
     index_repo,
 )
-from libref.services.factory import build_vector
+from libref.services.factory import (
+    build_ingest_service,
+    build_maintenance_service,
+    build_search_service,
+    build_vector,
+)
 from libref.services.ingest import (
     IngestService,
     run_scrape_job_sync,
@@ -30,7 +35,6 @@ from libref.services.ingest import (
     start_scrape_job,
 )
 from libref.services.jobs import JobManager
-from libref.services.maintenance import MaintenanceService
 from libref.services.mining_read import MiningReadService
 from libref.services.mining_refresh import (
     MINE_PATTERNS_JOB_KIND,
@@ -40,7 +44,6 @@ from libref.services.mining_refresh import (
 )
 from libref.services.pages import PageService
 from libref.services.review import ReviewService
-from libref.services.search import SearchService
 
 _config_parent = argparse.ArgumentParser(add_help=False)
 _config_parent.add_argument(
@@ -162,7 +165,9 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             )
             _print_job(job)
             return 0 if job.status == "done" else 1
-        service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
+        service, _gw = build_ingest_service(
+            conn, settings, vec_store=vec_store, embed=embed
+        )
         counts = service.refresh_version(
             args.library,
             args.version,
@@ -256,17 +261,18 @@ def _resolve_for_cli(settings, conn, ecosystem, library, requested_version):
     import asyncio
 
     from libref.crawler.http import build_async_client
-    from libref.services.resolver import resolve_package
+    from libref.services.resolver import resolve
 
     async def _run():
         async with build_async_client(settings) as client:
-            return await resolve_package(
+            return await resolve(
                 conn,
                 client,
                 settings,
                 ecosystem,
                 library,
                 requested_version,
+                "docs",
             )
 
     return asyncio.run(_run())
@@ -346,7 +352,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             )
             _print_job(job)
             return 0 if job.status == "done" else 1
-        service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
+        service, _gw = build_ingest_service(
+            conn, settings, vec_store=vec_store, embed=embed
+        )
         counts = service.scrape_docs(
             library,
             version,
@@ -399,16 +407,17 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
 
                 async def _resolve():
                     from libref.crawler.http import build_async_client
-                    from libref.services.resolver import resolve_repo
+                    from libref.services.resolver import resolve
 
                     async with build_async_client(settings) as client:
-                        return await resolve_repo(
+                        return await resolve(
                             conn,
                             client,
                             settings,
                             args.ecosystem,
                             args.library,
                             args.version,
+                            "repo",
                         )
 
                 resolution = asyncio.run(_resolve())
@@ -548,12 +557,8 @@ def cmd_search(args: argparse.Namespace) -> int:
     settings = _load_settings(args, _window_overrides(args))
     conn = _connect(settings)
     try:
+        service, _gw = build_search_service(conn, settings)
         mode = getattr(args, "mode", "hybrid")
-        if mode == "precise":
-            service = SearchService(conn)
-        else:
-            vec_store, embed = _build_vector(settings)
-            service = SearchService(conn, settings, vec_store=vec_store, embed=embed)
         results, degraded = _asyncio.run(
             service.search_with_mode(
                 args.query,
@@ -816,9 +821,10 @@ def cmd_reembed(args: argparse.Namespace) -> int:
         if vec_store is None or embed is None:
             print("embedding is not configured (missing key)", file=sys.stderr)
             return 1
-        out = MaintenanceService(
+        svc, _gw = build_maintenance_service(
             conn, settings, vec_store=vec_store, embed=embed
-        ).reembed_library(
+        )
+        out = svc.reembed_library(
             args.library,
             args.version,
             ecosystem=args.ecosystem,

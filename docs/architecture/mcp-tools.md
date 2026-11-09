@@ -1,7 +1,7 @@
 # MCP 工具面整理
 
-> 依据：`src/libref/mcp_server/server.py`（当前 9 工具实现）、`docs/plan/mcp-tools-consolidation.md`（23→9 合并过程）。
-> 定位：MCP 出口是只做参数校验与服务调用的参数薄层，业务逻辑全部在 `services/` 层；向量索引仅 `store/vec_store` 可达。
+> 依据：`src/libref/mcp_server/server.py`（当前 9 工具实现）。
+> 定位：MCP 出口是只做参数校验与服务调用的参数薄层，业务逻辑全部在 `services/` 层；向量索引仅 `store/vec_store` 可达。三出口（MCP/CLI/Web）共用同一组统一入口，保证行为一致。
 
 ## 1. 工具总览
 
@@ -55,4 +55,4 @@
 
 ## 7. 与服务层的对应
 
-出口到服务为一一对应，不存在出口直连存储：检索问答对应检索与问答编排，阅读目录对应页面与库表服务，源码用法对应挖掘只读服务，审核对应审核服务，任务对应任务管理，解析对应解析编排。新增过滤或排序语义时改服务层，出口只做参数透传。
+出口到服务为一一对应，不存在出口直连存储：分支逻辑只在服务层实现一次，三出口直接调用统一入口。检索对应 `SearchService.search_with_mode`，阅读对应 `PageService.read_doc`，目录对应 `LibraryService.catalog`，源码用法对应 `MiningReadService.api_insight/pattern_insight`，审核对应 `ReviewService.apply`，任务对应 `JobManager.show`，解析对应 `resolver.resolve`。CLI 的 `read/catalog/api-insight/pattern-insight/review/job-show/resolve/search --mode` 与 Web 的 `/read/catalog/search/answer/api-insight/pattern-insight/review/jobs/resolve` 均为同一语义的换皮。新增过滤或排序语义时改服务层，出口只做参数透传。

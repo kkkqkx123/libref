@@ -66,10 +66,38 @@ def test_health_and_search_and_read(tmp_path, monkeypatch) -> None:
         res = client.get("/search", params={"query": "quetzalweb"})
         assert res.status_code == 200
         assert res.json()["count"] == 1
-        page = client.get("/read/page", params={"url": "https://d.example/w.html"})
+        precise = client.get(
+            "/search", params={"query": "quetzalweb", "mode": "precise"}
+        )
+        assert precise.status_code == 200
+        assert precise.json()["count"] == 1
+        catalog = client.get("/catalog")
+        assert catalog.status_code == 200
+        assert catalog.json()["count"] == 1
+        page = client.get("/read", params={"url": "https://d.example/w.html"})
         assert page.status_code == 200
         assert "quetzalweb" in page.json()["content"]
         assert page.json()["chunk_details"][0]["source_group_id"] == ""
+        window_missing = client.get(
+            "/read",
+            params={"url": "https://d.example/w.html", "mode": "window"},
+        )
+        assert window_missing.status_code == 400
+        window = client.get(
+            "/read",
+            params={
+                "url": "https://d.example/w.html",
+                "mode": "window",
+                "sort_order": 0,
+            },
+        )
+        assert window.status_code == 200
+        usage = client.get("/api-insight", params={"view": "usage"})
+        assert usage.status_code == 200
+        tree = client.get("/pattern-insight", params={"view": "tree"})
+        assert tree.status_code == 200
+        jobs = client.get("/jobs")
+        assert jobs.status_code == 200
     finally:
         conn.close()
 
@@ -96,12 +124,12 @@ def test_review_flow(tmp_path, monkeypatch) -> None:
         )
         conn.commit()
         client = _client(conn)
-        pending = client.get("/review/pending").json()
+        pending = client.get("/review", params={"action": "list"}).json()
         assert pending["count"] == 1
         assert client.post(
             "/review", json={"entity_id": call_id, "action": "approve"}
         ).json() == {"ok": True}
-        assert client.get("/review/pending").json()["count"] == 0
+        assert client.get("/review", params={"action": "list"}).json()["count"] == 0
     finally:
         conn.close()
 
@@ -112,10 +140,10 @@ def test_unauthorized_when_token_set(tmp_path, monkeypatch) -> None:
     try:
         _seed(conn)
         client = _client(conn, mcp_token="tok-secret")
-        assert client.get("/libraries").status_code == 401
+        assert client.get("/catalog").status_code == 401
         assert (
             client.get(
-                "/libraries", headers={"Authorization": "Bearer tok-secret"}
+                "/catalog", headers={"Authorization": "Bearer tok-secret"}
             ).status_code
             == 200
         )
