@@ -137,3 +137,11 @@ class LibraryService:
         ).fetchone()
         self._conn.commit()
         return library_id, int(row[0])
+
+    def catalog(
+        self, library: str | None = None, ecosystem: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Unified catalog: libraries when no name is given, versions otherwise."""
+        if library is None:
+            return self.list_libraries()
+        return self.list_versions(library, ecosystem)

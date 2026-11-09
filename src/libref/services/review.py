@@ -96,3 +96,19 @@ class ReviewService:
         self._conn.commit()
         if cur.rowcount == 0:
             raise ValueError(f"cannot transition review row to {target}: {entity_id}")
+
+    def apply(self, action: str, entity_id: int | None = None, limit: int = 50) -> Any:
+        """Unified review: list pending items or transition one item."""
+        if action == "list":
+            return self.list_pending(limit=limit)
+        if entity_id is None:
+            raise ValueError(f"{action} requires entity_id")
+        if action == "approve":
+            self.approve(entity_id)
+        elif action == "conflict":
+            self.mark_conflict(entity_id)
+        elif action == "reopen":
+            self.reopen(entity_id)
+        else:
+            raise ValueError(f"unsupported review action: {action}")
+        return {"ok": True}

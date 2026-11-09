@@ -150,3 +150,39 @@ class SearchService:
             expand_window=expand_window,
             window_radius=window_radius,
         )
+
+    async def search_with_mode(
+        self,
+        query: str,
+        mode: str = "hybrid",
+        *,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 8,
+        expand_window: bool | None = None,
+        window_radius: int | None = None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Unified retrieval: hybrid fused recall by default, exact full-text when precise."""
+        if mode == "precise":
+            return (
+                self.search_docs(
+                    query,
+                    library=library,
+                    version=version,
+                    ecosystem=ecosystem,
+                    limit=limit,
+                ),
+                False,
+            )
+        if mode == "hybrid":
+            return await self.search_hybrid_async(
+                query,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit,
+                expand_window=expand_window,
+                window_radius=window_radius,
+            )
+        raise ValueError(f"unsupported search mode: {mode}")

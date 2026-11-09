@@ -132,6 +132,33 @@ class JobManager:
             )
         return out
 
+    def show(self, job_id: int | None = None, limit: int = 20) -> dict[str, Any]:
+        """Unified job view: list recent jobs when no id is given, detail otherwise."""
+        if job_id is None:
+            return {
+                "jobs": [
+                    {
+                        "id": j.id,
+                        "kind": j.kind,
+                        "status": j.status,
+                        "finished_at": j.finished_at,
+                        "error": j.error,
+                    }
+                    for j in self.list_recent(limit=limit)
+                ]
+            }
+        job = self.get(job_id)
+        if job is None:
+            return {"error": "not_found", "message": f"unknown job: {job_id}"}
+        return {
+            "id": job.id,
+            "kind": job.kind,
+            "status": job.status,
+            "error": job.error,
+            "result": job.result,
+            "finished_at": job.finished_at,
+        }
+
     # ── worker ──
 
     def heartbeat(self, job_id: int) -> None:

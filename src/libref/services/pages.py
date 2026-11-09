@@ -175,3 +175,43 @@ class PageService:
             "chunks": len(rows),
             "chunk_details": details,
         }
+
+    def read_doc(
+        self,
+        url: str,
+        mode: str = "page",
+        sort_order: int | None = None,
+        radius: int = 1,
+        source_group_id: str | None = None,
+        *,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Unified read: full page, neighboring window, or whole section by mode."""
+        if mode == "page":
+            return self.read_page(
+                url, library=library, version=version, ecosystem=ecosystem
+            )
+        if mode == "window":
+            if sort_order is None:
+                raise ValueError("window mode requires sort_order")
+            return self.read_window(
+                url,
+                sort_order,
+                radius,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+            )
+        if mode == "section":
+            if not source_group_id:
+                raise ValueError("section mode requires source_group_id")
+            return self.read_section(
+                url,
+                source_group_id,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+            )
+        raise ValueError(f"unsupported read mode: {mode}")

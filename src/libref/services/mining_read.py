@@ -311,3 +311,92 @@ class MiningReadService:
         if containing:
             out = [g for g in out if all(n in g["members"] for n in containing)]
         return out[:limit]
+
+    def api_insight(
+        self,
+        view: str,
+        api: str | None = None,
+        *,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Unified API view: frequency ranking, co-occurring APIs, argument shapes."""
+        if view == "usage":
+            return self.api_usage_counts(
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit if limit is not None else 20,
+            )
+        if view == "related":
+            if not api:
+                raise ValueError("related view requires api")
+            return self.related_apis(
+                api,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit if limit is not None else 10,
+            )
+        if view == "args":
+            if not api:
+                raise ValueError("args view requires api")
+            return self.arg_shapes(
+                api,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit if limit is not None else 10,
+            )
+        raise ValueError(f"unsupported api view: {view}")
+
+    def pattern_insight(
+        self,
+        view: str,
+        pattern: list[str] | None = None,
+        containing: list[str] | None = None,
+        prefix: str | None = None,
+        *,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Unified pattern view: patterns, evidence, feature tree, clusters."""
+        if view == "patterns":
+            return self.list_patterns(
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                containing=containing,
+                limit=limit if limit is not None else 50,
+            )
+        if view == "evidence":
+            if not pattern:
+                raise ValueError("evidence view requires a non-empty pattern")
+            return self.pattern_evidence(
+                pattern,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit if limit is not None else 5,
+            )
+        if view == "tree":
+            return self.feature_tree(
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                prefix=prefix,
+                limit=limit if limit is not None else 100,
+            )
+        if view == "clusters":
+            return self.api_clusters(
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                containing=containing,
+                limit=limit if limit is not None else 50,
+            )
+        raise ValueError(f"unsupported pattern view: {view}")

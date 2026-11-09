@@ -548,28 +548,24 @@ def cmd_search(args: argparse.Namespace) -> int:
     settings = _load_settings(args, _window_overrides(args))
     conn = _connect(settings)
     try:
-        if getattr(args, "precise", False):
+        mode = getattr(args, "mode", "hybrid")
+        if mode == "precise":
             service = SearchService(conn)
-            results = service.search_docs(
-                args.query,
-                library=args.library,
-                version=args.version,
-                limit=args.limit,
-            )
-            degraded = False
         else:
             vec_store, embed = _build_vector(settings)
             service = SearchService(conn, settings, vec_store=vec_store, embed=embed)
-            results, degraded = _asyncio.run(
-                service.search_hybrid_async(
-                    args.query,
-                    library=args.library,
-                    version=args.version,
-                    limit=args.limit,
-                )
+        results, degraded = _asyncio.run(
+            service.search_with_mode(
+                args.query,
+                mode,
+                library=args.library,
+                version=args.version,
+                ecosystem=getattr(args, "ecosystem", None),
+                limit=args.limit,
             )
-            if degraded:
-                print("(degraded: partial retrieval)", file=sys.stderr)
+        )
+        if degraded:
+            print("(degraded: partial retrieval)", file=sys.stderr)
     finally:
         conn.close()
     if not results:
@@ -597,6 +593,7 @@ def cmd_answer(args: argparse.Namespace) -> int:
             args.query,
             library=args.library,
             version=args.version,
+            ecosystem=getattr(args, "ecosystem", None),
             limit=args.limit,
             vec_store=vec_store,
             embed=embed,
@@ -616,76 +613,47 @@ def cmd_answer(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_read_window(args: argparse.Namespace) -> int:
+def cmd_read(args: argparse.Namespace) -> int:
     import json as _json
 
     conn = _connect(_load_settings(args))
     try:
-        page = PageService(conn).read_window(
-            args.url,
-            args.sort_order,
-            radius=args.radius,
-            library=args.library,
-            version=args.version,
-        )
+        try:
+            page = PageService(conn).read_doc(
+                args.url,
+                args.mode,
+                sort_order=args.sort_order,
+                radius=args.radius,
+                source_group_id=args.source_group_id,
+                library=args.library,
+                version=args.version,
+                ecosystem=getattr(args, "ecosystem", None),
+            )
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 2
     finally:
         conn.close()
     if page is None:
-        print(f"(window not found: {args.url} @{args.sort_order})", file=sys.stderr)
+        print(f"(not found: {args.url})", file=sys.stderr)
         return 1
-    print(_json.dumps(page, ensure_ascii=False))
+    if args.mode == "page":
+        print(page["content"])
+    else:
+        print(_json.dumps(page, ensure_ascii=False))
     return 0
 
 
-def cmd_read_section(args: argparse.Namespace) -> int:
-    import json as _json
-
-    conn = _connect(_load_settings(args))
-    try:
-        page = PageService(conn).read_section(
-            args.url,
-            args.source_group_id,
-            library=args.library,
-            version=args.version,
-        )
-    finally:
-        conn.close()
-    if page is None:
-        print(
-            f"(section not found: {args.url} {args.source_group_id})", file=sys.stderr
-        )
-        return 1
-    print(_json.dumps(page, ensure_ascii=False))
-    return 0
-
-
-def cmd_read_page(args: argparse.Namespace) -> int:
-    conn = _connect(_load_settings(args))
-    try:
-        page = PageService(conn).read_page(
-            args.url,
-            library=args.library,
-            version=args.version,
-        )
-    finally:
-        conn.close()
-    if page is None:
-        print(f"(page not found: {args.url})", file=sys.stderr)
-        return 1
-    print(page["content"])
-    return 0
-
-
-def cmd_feature_tree(args: argparse.Namespace) -> int:
+def cmd_catalog(args: argparse.Namespace) -> int:
     import json
 
+    from libref.services.libraries import LibraryService
+
     conn = _connect(_load_settings(args))
     try:
-        rows = MiningReadService(conn).feature_tree(
-            args.library,
-            args.version,
-            prefix=args.prefix,
-            limit=args.limit,
+        rows = LibraryService(conn).catalog(
+            getattr(args, "library", None),
+            getattr(args, "ecosystem", None),
         )
     finally:
         conn.close()
@@ -694,22 +662,95 @@ def cmd_feature_tree(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_clusters(args: argparse.Namespace) -> int:
+def cmd_api_insight(args: argparse.Namespace) -> int:
     import json
 
     conn = _connect(_load_settings(args))
     try:
-        containing = args.containing.split(",") if args.containing else None
-        rows = MiningReadService(conn).api_clusters(
-            args.library,
-            args.version,
-            containing=containing,
-            limit=args.limit,
-        )
+        try:
+            rows = MiningReadService(conn).api_insight(
+                args.view,
+                getattr(args, "api", None),
+                library=args.library,
+                version=args.version,
+                ecosystem=getattr(args, "ecosystem", None),
+                limit=args.limit,
+            )
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 2
     finally:
         conn.close()
     for r in rows:
         print(json.dumps(r, ensure_ascii=False))
+    return 0
+
+
+def cmd_pattern_insight(args: argparse.Namespace) -> int:
+    import json
+
+    conn = _connect(_load_settings(args))
+    try:
+        containing = (
+            args.containing.split(",") if getattr(args, "containing", None) else None
+        )
+        pattern = args.pattern.split(",") if getattr(args, "pattern", None) else None
+        try:
+            rows = MiningReadService(conn).pattern_insight(
+                args.view,
+                pattern=pattern,
+                containing=containing,
+                prefix=getattr(args, "prefix", None),
+                library=args.library,
+                version=args.version,
+                ecosystem=getattr(args, "ecosystem", None),
+                limit=args.limit,
+            )
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 2
+    finally:
+        conn.close()
+    for r in rows:
+        print(json.dumps(r, ensure_ascii=False))
+    return 0
+
+
+def cmd_resolve(args: argparse.Namespace) -> int:
+    import asyncio
+    import json as _json
+
+    from libref.crawler.http import build_async_client
+    from libref.services.resolver import resolve
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+
+        async def _run():
+            async with build_async_client(settings) as client:
+                return await resolve(
+                    conn,
+                    client,
+                    settings,
+                    args.ecosystem,
+                    args.name,
+                    getattr(args, "version", None),
+                    getattr(args, "target", "docs"),
+                )
+
+        try:
+            resolution = asyncio.run(_run())
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 2
+        except RegistryError as exc:
+            hint = f" hint={exc.hint}" if exc.hint else ""
+            print(f"resolve failed [{exc.kind}]: {exc}{hint}", file=sys.stderr)
+            return 1
+    finally:
+        conn.close()
+    print(_json.dumps(resolution.model_dump(), ensure_ascii=False))
     return 0
 
 
@@ -793,25 +834,21 @@ def cmd_review(args: argparse.Namespace) -> int:
     try:
         svc = ReviewService(conn)
         action = args.review_action
+        try:
+            if action == "list":
+                result = svc.apply(action, limit=args.limit)
+            else:
+                result = svc.apply(action, args.entity_id)
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 1
         if action == "list":
-            for r in svc.list_pending(limit=args.limit):
+            for r in result:
                 print(
                     f"{r['entity_id']} {r['confidence']} {r['callee']} "
                     f"{r['caller_file']}:{r['line_start']}-{r['line_end']}"
                 )
             return 0
-        if action == "approve":
-            svc.approve(args.entity_id)
-        elif action == "conflict":
-            svc.mark_conflict(args.entity_id)
-        elif action == "reopen":
-            svc.reopen(args.entity_id)
-        else:
-            print(f"unknown review action: {action}", file=sys.stderr)
-            return 2
-    except ValueError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return 1
     finally:
         conn.close()
     print("ok")
@@ -836,16 +873,26 @@ def cmd_job_show(args: argparse.Namespace) -> int:
     try:
         mgr = JobManager(conn)
         if getattr(args, "list", False) or getattr(args, "job_id", None) is None:
-            for job in mgr.list_recent(limit=args.limit):
-                print(f"{job.id} {job.kind} {job.status} {job.finished_at or ''}")
+            out = mgr.show(None, limit=args.limit)
+            for job in out["jobs"]:
+                print(
+                    f"{job['id']} {job['kind']} {job['status']} {job['finished_at'] or ''}"
+                )
             return 0
-        job = mgr.get(args.job_id)
-        if job is None:
+        out = mgr.show(args.job_id)
+        if "error" in out and "id" not in out:
             print(f"(unknown job: {args.job_id})", file=sys.stderr)
             return 1
-        _print_job(job)
-        if args.full and job.result:
-            print(_json.dumps(job.result, ensure_ascii=False))
+        print(
+            f"job {out['id']} {out['status']}"
+            + (f" error={out['error']}" if out.get("error") else "")
+        )
+        if out.get("result"):
+            print(f"result: {_json.dumps(out['result'], ensure_ascii=False)[:2000]}")
+            if args.full:
+                print(_json.dumps(out["result"], ensure_ascii=False))
+        if out.get("finished_at"):
+            print(f"finished_at: {out['finished_at']}")
         return 0
     finally:
         conn.close()
@@ -1130,9 +1177,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("query")
     p_search.add_argument("--library", default=None)
     p_search.add_argument("--version", default=None)
+    p_search.add_argument("--ecosystem", default=None)
     p_search.add_argument("--limit", type=int, default=8)
     p_search.add_argument(
-        "--precise", action="store_true", help="Use the full-text path only"
+        "--mode",
+        default="hybrid",
+        choices=["hybrid", "precise"],
+        help="hybrid fused recall by default, precise for exact full-text",
     )
     p_search.add_argument(
         "--expand-window",
@@ -1150,6 +1201,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_answer.add_argument("query")
     p_answer.add_argument("--library", default=None)
     p_answer.add_argument("--version", default=None)
+    p_answer.add_argument("--ecosystem", default=None)
     p_answer.add_argument("--limit", type=int, default=5)
     p_answer.add_argument(
         "--expand-window",
@@ -1166,35 +1218,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_answer.set_defaults(func=cmd_answer)
 
     p_read = sub.add_parser(
-        "read-page", help="Read a full document page by URL", parents=[_config_parent]
+        "read", help="Read a document by URL", parents=[_config_parent]
     )
     p_read.add_argument("url")
+    p_read.add_argument(
+        "--mode",
+        default="page",
+        choices=["page", "window", "section"],
+        help="page for full content, window for neighbors, section for whole group",
+    )
+    p_read.add_argument("--sort-order", type=int, default=None)
+    p_read.add_argument("--radius", type=int, default=1)
+    p_read.add_argument("--source-group-id", default=None)
     p_read.add_argument("--library", default=None)
     p_read.add_argument("--version", default=None)
-    p_read.set_defaults(func=cmd_read_page)
-
-    p_window = sub.add_parser(
-        "read-window",
-        help="Read the surrounding window by sort order",
-        parents=[_config_parent],
-    )
-    p_window.add_argument("url")
-    p_window.add_argument("sort_order", type=int)
-    p_window.add_argument("--radius", type=int, default=1)
-    p_window.add_argument("--library", default=None)
-    p_window.add_argument("--version", default=None)
-    p_window.set_defaults(func=cmd_read_window)
-
-    p_section = sub.add_parser(
-        "read-section",
-        help="Read a whole section by source group",
-        parents=[_config_parent],
-    )
-    p_section.add_argument("url")
-    p_section.add_argument("source_group_id")
-    p_section.add_argument("--library", default=None)
-    p_section.add_argument("--version", default=None)
-    p_section.set_defaults(func=cmd_read_section)
+    p_read.add_argument("--ecosystem", default=None)
+    p_read.set_defaults(func=cmd_read)
 
     p_mcp = sub.add_parser(
         "serve-mcp",
@@ -1296,29 +1335,57 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_mine.set_defaults(func=cmd_mine)
 
-    p_tree = sub.add_parser(
-        "feature-tree",
-        help="Browse hierarchical features by prefix",
-        parents=[_config_parent],
+    p_catalog = sub.add_parser(
+        "catalog", help="Browse libraries and versions", parents=[_config_parent]
     )
-    p_tree.add_argument("library")
-    p_tree.add_argument("version")
-    p_tree.add_argument("--prefix", default=None)
-    p_tree.add_argument("--limit", type=int, default=100)
-    p_tree.set_defaults(func=cmd_feature_tree)
+    p_catalog.add_argument("library", nargs="?", default=None)
+    p_catalog.add_argument("--ecosystem", default=None)
+    p_catalog.set_defaults(func=cmd_catalog)
 
-    p_clusters = sub.add_parser(
-        "clusters", help="Browse interface clusters", parents=[_config_parent]
+    p_api = sub.add_parser(
+        "api-insight", help="API usage views", parents=[_config_parent]
     )
-    p_clusters.add_argument("library")
-    p_clusters.add_argument("version")
-    p_clusters.add_argument(
+    p_api.add_argument("view", choices=["usage", "related", "args"])
+    p_api.add_argument("--api", default=None)
+    p_api.add_argument("--library", default=None)
+    p_api.add_argument("--version", default=None)
+    p_api.add_argument("--ecosystem", default=None)
+    p_api.add_argument("--limit", type=int, default=None)
+    p_api.set_defaults(func=cmd_api_insight)
+
+    p_pattern = sub.add_parser(
+        "pattern-insight", help="Sequence and structure views", parents=[_config_parent]
+    )
+    p_pattern.add_argument("view", choices=["patterns", "evidence", "tree", "clusters"])
+    p_pattern.add_argument(
+        "--pattern",
+        default=None,
+        help="Comma-separated sequence for evidence view",
+    )
+    p_pattern.add_argument(
         "--containing",
         default=None,
         help="Comma-separated APIs that must all be present",
     )
-    p_clusters.add_argument("--limit", type=int, default=50)
-    p_clusters.set_defaults(func=cmd_clusters)
+    p_pattern.add_argument("--prefix", default=None)
+    p_pattern.add_argument("--library", default=None)
+    p_pattern.add_argument("--version", default=None)
+    p_pattern.add_argument("--ecosystem", default=None)
+    p_pattern.add_argument("--limit", type=int, default=None)
+    p_pattern.set_defaults(func=cmd_pattern_insight)
+
+    p_resolve = sub.add_parser(
+        "resolve", help="Resolve a package address", parents=[_config_parent]
+    )
+    p_resolve.add_argument("name")
+    p_resolve.add_argument("--ecosystem", default=None)
+    p_resolve.add_argument("--version", default=None)
+    p_resolve.add_argument(
+        "--target",
+        default="docs",
+        choices=["docs", "repo"],
+    )
+    p_resolve.set_defaults(func=cmd_resolve)
 
     p_dump = sub.add_parser(
         "dump-chunks",

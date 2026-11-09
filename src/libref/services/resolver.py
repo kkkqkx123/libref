@@ -463,3 +463,24 @@ async def resolve_repo(
         candidates=list(snap.doc_candidates),
         source="override" if override_hit else "registry",
     )
+
+
+async def resolve(
+    conn: sqlite3.Connection,
+    client,
+    settings,
+    ecosystem: str | None,
+    name: str,
+    requested_version: str | None = None,
+    target: str = "docs",
+) -> Resolution:
+    """Unified resolve: documentation address by default, repository address when requested."""
+    if target == "docs":
+        return await resolve_package(
+            conn, client, settings, ecosystem, name, requested_version
+        )
+    if target == "repo":
+        return await resolve_repo(
+            conn, client, settings, ecosystem, name, requested_version
+        )
+    raise ValueError(f"unsupported resolve target: {target}")
