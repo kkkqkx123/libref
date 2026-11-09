@@ -1,9 +1,9 @@
-"""端到端仓库解析：固定标签拉取加全量索引，只断言不变量。
+"""End-to-end repo parsing: pull fixed tags, full indexing, assert invariants only.
 
-蓝本 docs/tests/parsing-verification.md。
-默认跳过，需 LIBREF_RUN_E2E=1 显式开启。
-网络失败标记环境不可用，不视为回归。
-报告落盘为可读文本，不入库。
+Blueprint: docs/tests/parsing-verification.md.
+Skipped by default; requires LIBREF_RUN_E2E=1 to enable.
+A network failure marks the environment unavailable; not treated as a regression.
+Reports are written to disk as human-readable text, not persisted to the DB.
 """
 
 from __future__ import annotations

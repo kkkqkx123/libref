@@ -1,4 +1,4 @@
-"""最小 Python 样本：异步加装饰器加别名，贴近爬虫框架写法。"""
+"""Minimal Python sample: async + decorator + alias, mirroring crawler-framework idioms."""
 
 from __future__ import annotations
 

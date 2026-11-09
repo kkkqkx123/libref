@@ -1,4 +1,4 @@
-"""测试公共 fixture：临时库连接（已应用迁移）与跨文件复用的建库助手。"""
+"""Shared test fixtures: temporary DB connection (migrations applied) and reusable DB-seeding helpers."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ def conn(tmp_path) -> sqlite3.Connection:
 def seed_library_version(
     conn: sqlite3.Connection, library: str = "docs", version: str = "1.0"
 ) -> tuple[int, int]:
-    """测试库与版本外键行，固定标识为 1。"""
+    """Library and version FK rows for tests, fixed to ids 1."""
     conn.execute("INSERT INTO libraries(id, name) VALUES(1, ?)", (library,))
     conn.execute("INSERT INTO versions(id, library_id, version) VALUES(1, 1, ?)", (version,))
     conn.commit()
@@ -45,7 +45,7 @@ def seed_library_version(
 
 
 def seed_mcp_db(db_path: Path, marker: str, page_url: str) -> None:
-    """MCP 握手冒烟用的最小库：单版本单页面，内容携带 marker。"""
+    """Minimal DB for MCP handshake smoke tests: one version, one page, content carrying the marker."""
     from libref.chunking import Chunk
     from libref.store.document_store import DocumentStore
 
@@ -77,7 +77,7 @@ def seed_mcp_db(db_path: Path, marker: str, page_url: str) -> None:
 
 
 def copy_mini_repo(tmp_path: Path) -> Path:
-    """复制 tests/fixtures/mini_repo 到临时目录，路径相对本文件解析，不依赖 cwd。"""
+    """Copy tests/fixtures/mini_repo to a temp dir; path resolved relative to this file, no cwd dependency."""
     src = Path(__file__).resolve().parent / "fixtures" / "mini_repo"
     dst = tmp_path / "mini_repo"
     shutil.copytree(src, dst)
@@ -86,7 +86,7 @@ def copy_mini_repo(tmp_path: Path) -> Path:
 
 @contextlib.contextmanager
 def mock_ingest(handler) -> Iterator[httpx.AsyncClient]:
-    """将 ingest._client 替换为 MockTransport 客户端，不出网，退出时复原并关闭。"""
+    """Swap ingest._client for a MockTransport client; no network; restored and closed on exit."""
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
     @contextlib.asynccontextmanager

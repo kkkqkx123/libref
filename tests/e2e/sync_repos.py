@@ -1,8 +1,8 @@
-"""仓库同步：按清单把网络仓拉取到本地持久目录，同步一次多次复用。
+"""Repo sync: pull network repos listed in the manifest into a persistent local dir; sync once, reuse many times.
 
-用法：uv run python tests/e2e/sync_repos.py [--update] [--lang javascript]
-复用现有仓库管理入口的浅克隆与更新语义，不做贮藏等写操作。
-网络失败返回码 2 标记环境不可用，不视为回归。
+Usage: uv run python tests/e2e/sync_repos.py [--update] [--lang javascript]
+Reuses the existing repo management entry points' shallow-clone and update semantics; no write operations like stashing.
+A network failure exits with code 2, marking the environment unavailable; not treated as a regression.
 """
 
 from __future__ import annotations

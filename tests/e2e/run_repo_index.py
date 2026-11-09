@@ -1,10 +1,10 @@
-"""端到端 runner：同步本地持久仓，全量索引并导出审查报告。
+"""E2E runner: sync persistent local repos, fully index, and export a review report.
 
-用法：uv run python tests/e2e/run_repo_index.py --out /tmp/e2e-report.txt
-先经同步入口备好本地持久仓，再复用仓库索引入口全量解析，
-最后导出逐文件审查报告到 tests/e2e/outputs/。
-网络失败返回码 2 标记环境不可用，不视为回归。
-只做参数解析加服务调用，不写业务逻辑。
+Usage: uv run python tests/e2e/run_repo_index.py --out /tmp/e2e-report.txt
+First prepare persistent local repos via the sync entry point, then reuse the repo indexing entry point for full parsing,
+and finally export a per-file review report to tests/e2e/outputs/.
+A network failure exits with code 2, marking the environment unavailable; not treated as a regression.
+Only argument parsing plus service calls; no business logic.
 """
 
 from __future__ import annotations

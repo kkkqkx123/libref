@@ -1,7 +1,7 @@
-"""真实调用验证：走正式传输层调嵌入与重排，校验响应形态。
+"""Live-call verification: call embedding and rerank through the real transport layer and validate response shapes.
 
-密钥经仓库根 .env 注入，不在脚本内硬编码；无密钥时跳过实际调用。
-用法：uv run python e2e/check_llm.py
+Secrets are injected via the repo-root .env, never hardcoded in the script; actual calls are skipped without a key.
+Usage: uv run python e2e/check_llm.py
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ async def _main() -> int:
     if not settings.embedding_api_key:
         print("SKIP: no embedding api key in .env")
         return 0
-    # 重排与问答默认关闭，验证时仅在内存中打开，不改 .env。
+    # Rerank and chat are off by default; enable them in memory only for this check, never touching .env.
     settings.rerank_enabled = True
     settings.chat_enabled = True
     settings.chat_timeout = 120.0
