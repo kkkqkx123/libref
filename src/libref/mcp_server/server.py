@@ -13,6 +13,7 @@ from mcp.server.mcpserver import MCPServer
 
 from libref.config import LibrefSettings, load_settings
 from libref.crawler.registry import RegistryError
+from libref.observe import setup_logging
 from libref.services.resolver import resolve_package as _resolve_package
 from libref.services.search import SearchService
 
@@ -24,6 +25,7 @@ def build_mcp_server(
     mcp = MCPServer("libref")
     search = SearchService(conn)
     resolve_settings = settings or load_settings()
+    setup_logging(resolve_settings)
 
     @mcp.tool()
     def search_docs(

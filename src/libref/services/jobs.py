@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sqlite3
 import time
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _JOBS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS jobs(
@@ -89,6 +92,7 @@ class JobManager:
         self._conn.commit()
         job_id = int(cur.lastrowid)
         self._queue.put_nowait(job_id)
+        logger.debug("job submitted id=%d kind=%s", job_id, kind)
         return job_id
 
     def get(self, job_id: int) -> Job | None:
@@ -149,10 +153,13 @@ class JobManager:
                 self._update(job_id, status="done", heartbeat_at=time.time(),
                              result=payload,
                              finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
+                logger.info("job done id=%d kind=%s", job_id, job.kind)
             except BaseException as exc:  # noqa: BLE001
                 self._update(job_id, status="failed",
                              error=f"{type(exc).__name__}: {exc}",
                              finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
+                logger.warning("job failed id=%d kind=%s error=%s: %s",
+                               job_id, job.kind, type(exc).__name__, exc)
             finally:
                 beat.cancel()
                 self._queue.task_done()
@@ -209,6 +216,8 @@ class JobManager:
         for job_id in stale_ids:
             self._update(job_id, status="failed", error="stale: heartbeat timeout",
                          finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
+        if stale_ids:
+            logger.warning("job stale recovered ids=%s", stale_ids)
         return stale_ids
 
     # ── 内部 ──

@@ -15,6 +15,7 @@ from libref.config import (
 )
 from libref.crawler.registry import REGISTRY_MIRRORS, RegistryError
 from libref.db import apply_migrations, open_db
+from libref.observe import setup_logging
 from libref.llm import LlmGateway
 from libref.services.answer import answer_query
 from libref.services.ingest import (
@@ -40,10 +41,34 @@ _config_parent.add_argument(
     default=None,
     help="配置文件路径；缺省依次查找当前目录与用户配置目录",
 )
+_config_parent.add_argument(
+    "--log-level",
+    default=None,
+    help="日志级别：DEBUG/INFO/WARNING/ERROR，缺省读配置",
+)
+_config_parent.add_argument(
+    "--log-file",
+    default=None,
+    help="日志文件路径，缺省读配置；未设置时只输出到标准错误",
+)
+_config_parent.add_argument(
+    "--log-format",
+    default=None,
+    help="日志格式：text/json，缺省读配置",
+)
 
 
 def _load_settings(args: argparse.Namespace, overrides: dict | None = None):
-    return load_settings(getattr(args, "config", None), overrides)
+    merged = dict(overrides or {})
+    if getattr(args, "log_level", None) is not None:
+        merged["log_level"] = args.log_level
+    if getattr(args, "log_file", None) is not None:
+        merged["log_file"] = args.log_file
+    if getattr(args, "log_format", None) is not None:
+        merged["log_format"] = args.log_format
+    settings = load_settings(getattr(args, "config", None), merged)
+    setup_logging(settings)
+    return settings
 
 
 def _registry_overrides(args: argparse.Namespace) -> dict:
@@ -407,18 +432,22 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
             job = asyncio.run(_drive())
             _print_job(job)
             return 0 if job.status == "done" else 1
-        counts = index_repo(
-            conn,
-            library,
-            version,
-            source,
-            update=bool(args.update),
-            repos_dir=repos_dir,
-            ecosystem=ecosystem,
-            resolved_from=resolved_from,
-            registry_confirmed=registry_confirmed,
-            repos_quota_mb=int(settings.repos_quota_mb),
-        )
+        try:
+            counts = index_repo(
+                conn,
+                library,
+                version,
+                source,
+                update=bool(args.update),
+                repos_dir=repos_dir,
+                ecosystem=ecosystem,
+                resolved_from=resolved_from,
+                registry_confirmed=registry_confirmed,
+                repos_quota_mb=int(settings.repos_quota_mb),
+            )
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 1
     finally:
         conn.close()
     for outcome, n in counts.items():
@@ -799,6 +828,32 @@ def cmd_purge(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_deletions(args: argparse.Namespace) -> int:
+    import json as _json
+    from libref.services.retention import list_deletions, prune_expired_logs
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        if getattr(args, "prune", False):
+            ttl = getattr(args, "ttl_days", None)
+            if ttl is None:
+                ttl = float(settings.deletion_log_ttl_days)
+            removed = prune_expired_logs(conn, float(ttl))
+            print(f"pruned: {removed}")
+            return 0
+        rows = list_deletions(conn, limit=int(getattr(args, "limit", 50)))
+        if not rows:
+            print("(no deletions)")
+            return 0
+        for row in rows:
+            print(f"{row['id']} {row['ecosystem']}:{row['library']} {row['version']} {row['reason']} {row['created_at']}")
+            if getattr(args, "full", False):
+                print(f"    {_json.dumps(row['detail'], ensure_ascii=False)[:1000]}")
+        return 0
+    finally:
+        conn.close()
+
+
 def cmd_config_show(args: argparse.Namespace) -> int:
     import json as _json
     settings = _load_settings(args)
@@ -1044,6 +1099,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_purge.add_argument("version")
     p_purge.add_argument("--ecosystem", default=None)
     p_purge.set_defaults(func=cmd_purge)
+
+    p_del = sub.add_parser("deletions", help="查看删除日志/清理过期记录", parents=[_config_parent])
+    p_del.add_argument("--limit", type=int, default=50)
+    p_del.add_argument("--full", action="store_true", help="打印摘要详情")
+    p_del.add_argument("--prune", action="store_true", help="按保留期清理过期记录")
+    p_del.add_argument("--ttl-days", type=float, default=None, help="缺省读配置 deletion_log_ttl_days")
+    p_del.set_defaults(func=cmd_deletions)
     return parser
 
 

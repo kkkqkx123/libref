@@ -31,6 +31,8 @@ from libref.services.search import SearchService
 from libref.store.document_store import DocumentStore, StoreResult
 from libref.store.vec_store import QdrantVecStore, build_embed_text
 
+logger = logging.getLogger(__name__)
+
 _DEFAULT_SEED_HOST_TTL = 7.0
 _EMBED_BATCH = 64
 
@@ -594,7 +596,8 @@ class IngestService:
                                 scope=scope,
                                 snapshot_ctx=(ecosystem, library, version),
                             )
-                        except Exception:  # noqa: BLE001
+                        except Exception as exc:  # noqa: BLE001 —— 单页失败记结局，不阻断整批
+                            logger.debug("page failed url=%s: %s", url, exc)
                             result, empty_dropped, render_skipped, stage_ms = StoreResult("failed"), 0, False, {}
                         counts[result.outcome] = counts.get(result.outcome, 0) + 1
                         counts["chunk_empty_dropped"] += empty_dropped
@@ -629,6 +632,12 @@ class IngestService:
             import time as _time2
             counts["seed_truncated"] = 1 if truncated else 0
             counts["elapsed_ms"] = int((_time2.monotonic() - started) * 1000)
+            logger.info(
+                "scrape done %s:%s %s stored=%d unchanged=%d absent=%d failed=%d skipped=%d",
+                ecosystem, library, version, counts.get("stored", 0),
+                counts.get("unchanged", 0), counts.get("absent", 0),
+                counts.get("failed", 0), counts.get("skipped", 0),
+            )
             return counts
 
     async def _sync_vectors(
@@ -650,13 +659,15 @@ class IngestService:
                 getattr(self._settings, "embedding_model", ""),
                 getattr(self._settings, "embedding_dim", 0),
             )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             counts["vector_failed"] += len(removed) + len(inserted)
+            logger.warning("vector ensure collection failed: %s", exc)
             return
         try:
             self._vec.delete_docs(removed)
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             counts["vector_failed"] += len(removed) + len(inserted)
+            logger.warning("vector delete failed: %s", exc)
             return
         try:
             docs = [
@@ -674,7 +685,7 @@ class IngestService:
                 clipped, was_clipped = ensure_hard_limit(text, ChunkPath.EMBEDDING, hard)
                 if was_clipped:
                     counts["chunk_truncated"] = counts.get("chunk_truncated", 0) + 1
-                    logging.getLogger(__name__).warning(
+                    logger.warning(
                         "embedding text clipped to %d tokens for doc %d", hard, d["id"]
                     )
                 texts.append(clipped)
@@ -687,8 +698,9 @@ class IngestService:
                     for d, vec in zip(docs, vecs)
                 ]
             )
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
             counts["vector_failed"] += len(inserted)
+            logger.warning("vector upsert failed: %s", exc)
 
     def _sweep_absent(
         self,
@@ -719,22 +731,24 @@ class IngestService:
                 counts["absent"] = counts.get("absent", 0) + 1
         if removed_urls and snapshot_ctx is not None:
             try:
-                from libref.services.retention import log_deletion
+                from libref.services.retention import REASON_ABSENT_SWEEP, log_deletion
                 ecosystem, library, version = snapshot_ctx
                 log_deletion(
                     self._conn,
                     library=library,
                     version=version,
                     ecosystem=ecosystem,
-                    reason="absent-sweep",
+                    reason=REASON_ABSENT_SWEEP,
                     detail={
                         "urls": removed_urls[:20],
                         "url_count": len(removed_urls),
                         "removed_docs": len(removed),
                     },
                 )
-            except Exception:  # noqa: BLE001
-                pass
+                logger.info("absent sweep %s:%s %s urls=%d docs=%d",
+                            ecosystem, library, version, len(removed_urls), len(removed))
+            except Exception as exc:  # noqa: BLE001 —— 留痕失败不推翻真源删除
+                logger.debug("absent log failed: %s", exc)
         return removed
 
     def _clean_with_cache(self, kind: str, raw: str, url: str) -> str:

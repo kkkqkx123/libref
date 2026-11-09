@@ -101,6 +101,18 @@ class LibrefSettings(BaseSettings):
     snapshot_quota_mb: int = Field(default=512, ge=0)
     repos_quota_mb: int = Field(default=2048, ge=0)
     deletion_log_ttl_days: float = Field(default=30.0, ge=0)
+    # 运行日志：级别与落盘，默认只走标准错误且保持安静。
+    log_level: str = "WARNING"
+    log_file: Path | None = None
+    log_format: str = "text"
+
+    @model_validator(mode="after")
+    def _check_logging(self) -> LibrefSettings:
+        if str(self.log_level or "").upper() not in ("DEBUG", "INFO", "WARNING", "ERROR"):
+            raise ValueError("log_level must be one of DEBUG/INFO/WARNING/ERROR")
+        if str(self.log_format or "").lower() not in ("text", "json"):
+            raise ValueError("log_format must be one of text/json")
+        return self
 
     @model_validator(mode="after")
     def _check_window_bounds(self) -> LibrefSettings:
@@ -194,11 +206,12 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "deletion_log_ttl_days",
         }
     ),
+    "logging": frozenset({"log_level", "log_file", "log_format"}),
 }
 
 RESERVED_SECTIONS = frozenset({"mcp.auth", "web"})
 
-PATH_FIELDS = frozenset({"db_path", "registry_overrides_file", "snapshot_dir"})
+PATH_FIELDS = frozenset({"db_path", "registry_overrides_file", "snapshot_dir", "log_file"})
 
 MASKED_VALUE = "***"
 

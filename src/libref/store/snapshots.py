@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import logging
+import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_segment(text: str) -> str:
@@ -61,14 +65,18 @@ class SnapshotStore:
         target_dir = self._root / version_key(ecosystem, library, version)
         try:
             if self._quota_bytes > 0 and dir_size_bytes(self._root) + len(raw) > self._quota_bytes:
+                logger.debug("snapshot quota skip url=%s", url)
                 return "", False
             target_dir.mkdir(parents=True, exist_ok=True)
             target = target_dir / f"{digest}.gz"
             meta = target_dir / f"{digest}.meta"
             target.write_bytes(gzip.compress(raw))
-            meta.write_text(url + "\n" + (content_type or ""), encoding="utf-8")
+            fetched_at = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
+            meta.write_text(url + "\n" + fetched_at + "\n" + (content_type or ""), encoding="utf-8")
+            logger.debug("snapshot written url=%s", url)
             return str(target), True
-        except OSError:
+        except OSError as exc:
+            logger.debug("snapshot write failed url=%s: %s", url, exc)
             return "", False
 
     def version_files(self, ecosystem: str, library: str, version: str) -> list[Path]:
@@ -80,12 +88,16 @@ class SnapshotStore:
         except OSError:
             return []
 
+    def version_snapshots(self, ecosystem: str, library: str, version: str) -> list[Path]:
+        return [p for p in self.version_files(ecosystem, library, version) if p.suffix == ".gz"]
+
     def drop_version(self, ecosystem: str, library: str, version: str) -> int:
         removed = 0
         for path in self.version_files(ecosystem, library, version):
             try:
                 path.unlink()
-                removed += 1
+                if path.suffix == ".gz":
+                    removed += 1
             except OSError:
                 continue
         target_dir = self._root / version_key(ecosystem, library, version)
@@ -93,4 +105,5 @@ class SnapshotStore:
             target_dir.rmdir()
         except OSError:
             pass
+        logger.info("snapshot drop %s:%s %s removed=%d", ecosystem, library, version, removed)
         return removed
