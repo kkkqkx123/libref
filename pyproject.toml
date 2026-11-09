@@ -11,6 +11,7 @@ dependencies = [
     "dulwich>=0.22",
     "fastapi>=0.162.2",
     "httpx[http2]>=0.27",
+    "jieba>=0.42.1",
     "markdownify>=0.13",
     "mcp>=1.2",
     "pydantic>=2.8",

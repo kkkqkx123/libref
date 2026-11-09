@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from libref.text.embedding import strip_markdown_for_embedding
 from libref.text.query import safe_fts_query
 from libref.text.snippet import make_snippet
 
@@ -85,7 +86,7 @@ class SearchService:
                     "id": r[0],
                     "url": r[1],
                     "score": r[2],
-                    "snippet": make_snippet(r[3], query, radius=radius, cap=cap),
+                    "snippet": make_snippet(strip_markdown_for_embedding(r[3]), query, radius=radius, cap=cap),
                     "title": r[4],
                     "path": r[5],
                     "library": r[6],

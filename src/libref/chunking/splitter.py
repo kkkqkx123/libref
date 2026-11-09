@@ -45,7 +45,6 @@ class Chunk:
     span_kind: str = DOCUMENT_RANGE
     merged_from: list[str] = field(default_factory=list)
     overlap_from: str | None = None
-    overlap_text: str = ""
     start_char: int = -1
     end_char: int = -1
     prev_chunk_id: str | None = None
@@ -255,36 +254,16 @@ def _rechain(chunks: list[Chunk]) -> None:
         chunk.prev_chunk_id = chunks[order - 1].chunk_id if order > 0 else None
         chunk.next_chunk_id = chunks[order + 1].chunk_id if order + 1 < len(chunks) else None
         chunk.overlap_from = None
-        chunk.overlap_text = ""
 
 
 def _attach_prev_overlap(
     chunks: list[Chunk], budget: ChunkBudget
 ) -> None:
-    """只向前携带重叠，重叠区注明来源块，不在正文内重复。"""
+    """只向前记录前驱来源，不在正文内重复。"""
     if budget.overlap <= 0:
         return
     for prev, cur in itertools.pairwise(chunks):
-        tail = _overlap_tail(prev.content, cur.chunk_path, budget.overlap)
-        if tail.strip():
-            cur.overlap_from = prev.chunk_id
-            cur.overlap_text = tail
-
-
-def _overlap_tail(content: str, chunk_path: str, overlap: int) -> str:
-    path = ChunkPath(chunk_path) if chunk_path in ("bm25", "embedding") else None
-    if path is None:
-        return ""
-    lines = content.splitlines()
-    kept: list[str] = []
-    total = 0
-    for line in reversed(lines):
-        line_cost = cost(line, path) + 1
-        if kept and total + line_cost > overlap:
-            break
-        kept.append(line)
-        total += line_cost
-    return "\n".join(reversed(kept))
+        cur.overlap_from = prev.chunk_id
 
 
 def _fences_balanced(text: str) -> bool:

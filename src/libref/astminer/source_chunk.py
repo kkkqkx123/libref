@@ -39,7 +39,6 @@ class SourceChunk:
     span_kind: str
     merged_quals: list[str] = field(default_factory=list)
     overlap_from: str | None = None
-    overlap_text: str = ""
 
 
 @dataclass
@@ -240,22 +239,7 @@ def _attach_prev_overlap(chunks: list[SourceChunk], budgets) -> None:
         if budget.overlap <= 0:
             continue
         for prev, cur in itertools.pairwise(stream):
-            tail = _overlap_tail(prev.content, ChunkPath(path_value), budget.overlap)
-            if tail.strip():
-                cur.overlap_from = prev.chunk_id
-                cur.overlap_text = tail
-
-
-def _overlap_tail(content: str, path: ChunkPath, overlap: int) -> str:
-    kept: list[str] = []
-    total = 0
-    for line in reversed(content.splitlines()):
-        line_cost = cost(line, path) + 1
-        if kept and total + line_cost > overlap:
-            break
-        kept.append(line)
-        total += line_cost
-    return "\n".join(reversed(kept))
+            cur.overlap_from = prev.chunk_id
 
 
 def as_chunk(source_chunk: SourceChunk, url: str):
@@ -286,5 +270,4 @@ def as_chunk(source_chunk: SourceChunk, url: str):
         span_kind=source_chunk.span_kind,
         merged_from=list(source_chunk.merged_quals),
         overlap_from=source_chunk.overlap_from,
-        overlap_text=source_chunk.overlap_text,
     )

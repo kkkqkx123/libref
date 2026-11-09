@@ -12,6 +12,7 @@ from typing import Any
 
 from libref.mining.scoring import cluster_hit, support_for_content
 from libref.text.query import safe_fts_query
+from libref.text.embedding import strip_markdown_for_embedding
 from libref.text.snippet import make_snippet
 
 
@@ -108,7 +109,7 @@ def _fetch_details(
         out[int(r[0])] = {
             "id": int(r[0]),
             "url": r[1],
-            "snippet": make_snippet(r[2], query, radius=snippet_radius, cap=snippet_cap),
+            "snippet": make_snippet(strip_markdown_for_embedding(r[2]), query, radius=snippet_radius, cap=snippet_cap),
             "title": r[3],
             "path": r[4],
             "library": r[5],
@@ -460,7 +461,7 @@ class HybridRetriever:
                 if len(window) > 1:
                     item = dict(item)
                     item["window"] = [
-                        {"id": w["id"], "sort_order": w["sort_order"], "content": (w["content"] or "")[:preview_cap]}
+                        {"id": w["id"], "sort_order": w["sort_order"], "content": strip_markdown_for_embedding(w["content"])[:preview_cap]}
                         for w in window
                     ]
                 expanded.append(item)

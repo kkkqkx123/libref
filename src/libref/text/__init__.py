@@ -6,6 +6,7 @@ duplicating string transforms.
 """
 
 from libref.text.bm25 import clean_text_for_bm25
+from libref.text.cjk import CJK_RUN_RE, expand_cjk_run
 from libref.text.embedding import build_embed_text, strip_markdown_for_embedding
 from libref.text.ident import ident_snake_form, snake_variant
 from libref.text.normalize import (
@@ -19,7 +20,9 @@ from libref.text.snippet import make_snippet, truncate_material
 __all__ = [
     "build_embed_text",
     "classify_content",
+    "CJK_RUN_RE",
     "clean_text_for_bm25",
+    "expand_cjk_run",
     "ident_snake_form",
     "make_snippet",
     "normalize_markdown",

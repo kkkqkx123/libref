@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from libref.text.cjk import CJK_RUN_RE, expand_cjk_run
+
 _IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
 _LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _BARE_URL_RE = re.compile(r"https?://[^\s)>\]]+")
@@ -22,6 +24,7 @@ def clean_text_for_bm25(text: str | None) -> str:
         line = _ANGLE_URL_RE.sub(" ", line)
         line = _BARE_URL_RE.sub(" ", line)
         line = _QUOTE_CHARS_RE.sub("", line)
+        line = CJK_RUN_RE.sub(lambda m: " ".join(expand_cjk_run(m.group(0))), line)
         out_lines.append(line.rstrip())
     out: list[str] = []
     blank = 0

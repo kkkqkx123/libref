@@ -7,6 +7,9 @@ import sqlite3
 
 import pytest
 
+from libref.text.bm25 import clean_text_for_bm25
+from libref.text.query import safe_fts_query
+
 pytestmark = pytest.mark.integration
 
 
@@ -67,6 +70,14 @@ def test_delete_removes_from_fts(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM documents WHERE id=?", (doc_id,))
     conn.commit()
     assert _match(conn, "zebra") == []
+
+
+def test_cjk_substring_recall(conn: sqlite3.Connection) -> None:
+    _, page_id = _add_library(conn)
+    doc_id = _insert_doc(conn, page_id, clean_text_for_bm25("媒体服务器安装指南"))
+    conn.commit()
+    assert _match(conn, safe_fts_query("服务器")) == [doc_id]
+    assert _match(conn, safe_fts_query("安装")) == [doc_id]
 
 
 def test_fts_vocab_consistency(conn: sqlite3.Connection) -> None:

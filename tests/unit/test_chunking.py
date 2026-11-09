@@ -118,7 +118,6 @@ def test_overlap_is_previous_only_with_source():
     assert len(dual.bm25) > 1
     assert dual.bm25[0].overlap_from is None
     assert dual.bm25[1].overlap_from == dual.bm25[0].chunk_id
-    assert dual.bm25[1].overlap_text.strip()
 
 
 def test_span_kind_is_document_range():
