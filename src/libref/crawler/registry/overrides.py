@@ -11,8 +11,8 @@ from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-# (ecosystem, normalized_name) -> {docs_url, source, verified_at}
-# verified_at 为 YYYY-MM-DD 字符串。
+# (ecosystem, normalized_name) -> {docs_url, repo_url, source, verified_at}
+# docs_url 与 repo_url 至少一项存在，分别服务文档抓取与代码索引。
 OVERRIDES: dict[tuple[str, str], dict[str, str]] = {}
 
 _FILE_OVERRIDES: dict[tuple[str, str], dict[str, str]] = {}
@@ -52,17 +52,30 @@ def _check_entry(raw: dict) -> tuple[tuple[str, str], dict[str, str]]:
     norm = normalize_name(eco, str(raw.get("name", "")))
     if not norm:
         raise ValueError(f"empty name in overrides file: {raw!r}")
-    docs_url = str(raw.get("docs_url", "")).strip()
-    parts = urlsplit(docs_url)
-    if parts.scheme not in ("http", "https") or not parts.netloc:
-        raise ValueError(f"invalid docs_url in overrides file: {raw!r}")
+    docs_url = str(raw.get("docs_url", "") or "").strip()
+    repo_url = str(raw.get("repo_url", "") or "").strip()
+    if not docs_url and not repo_url:
+        raise ValueError(f"override needs docs_url or repo_url: {raw!r}")
+    item: dict[str, str] = {}
+    if docs_url:
+        parts = urlsplit(docs_url)
+        if parts.scheme not in ("http", "https") or not parts.netloc:
+            raise ValueError(f"invalid docs_url in overrides file: {raw!r}")
+        item["docs_url"] = docs_url
+    if repo_url:
+        cleaned = repo_url.removeprefix("git+")
+        rparts = urlsplit(cleaned)
+        if rparts.scheme not in ("http", "https") or not rparts.netloc:
+            raise ValueError(f"invalid repo_url in overrides file: {raw!r}")
+        item["repo_url"] = repo_url
     verified_at = str(raw.get("verified_at", "")).strip()
     try:
         datetime.strptime(verified_at, "%Y-%m-%d")
     except ValueError:
         raise ValueError(f"invalid verified_at in overrides file: {raw!r}") from None
     source = str(raw.get("source", "file")).strip() or "file"
-    return (eco, norm), {"docs_url": docs_url, "source": source, "verified_at": verified_at}
+    item.update({"source": source, "verified_at": verified_at})
+    return (eco, norm), item
 
 
 def load_overrides_file(path: str | Path) -> dict[tuple[str, str], dict[str, str]]:

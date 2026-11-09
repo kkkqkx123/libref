@@ -371,7 +371,7 @@ def test_overrides_have_verification_dates():
     from libref.crawler.registry.overrides import all_overrides
 
     for key, item in all_overrides().items():
-        assert item.get("docs_url"), key
+        assert item.get("docs_url") or item.get("repo_url"), key
         assert item.get("verified_at"), key
 
 

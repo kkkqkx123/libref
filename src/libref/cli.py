@@ -202,20 +202,67 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 def cmd_index_repo(args: argparse.Namespace) -> int:
     import asyncio
 
+    from libref.crawler.registry import REGISTRY_MIRRORS, RegistryError
+
     settings = LibrefSettings()
+    if getattr(args, "offline", False):
+        settings.registry_offline = True
+    if getattr(args, "registry_mirror", None):
+        settings.registry_mirror = args.registry_mirror
     conn = _connect(settings)
     repos_dir = settings.db_path.parent / "repos"
     try:
+        if args.source is not None:
+            if args.version is None:
+                print("explicit mode requires library version source", file=sys.stderr)
+                return 2
+            if args.ecosystem is not None and args.ecosystem.strip().lower() in ("pypi", "npm", "maven"):
+                from libref.crawler.registry import normalize_name
+
+                library = normalize_name(args.ecosystem.strip().lower(), args.library)
+                ecosystem = args.ecosystem.strip().lower()
+            else:
+                library, ecosystem = args.library.strip(), (args.ecosystem or "custom")
+            version, source = args.version, args.source
+            resolved_from, registry_confirmed = "explicit", True
+        else:
+            try:
+                async def _resolve():
+                    from libref.crawler.http import build_async_client
+                    from libref.services.resolver import resolve_repo
+
+                    async with build_async_client(settings) as client:
+                        return await resolve_repo(
+                            conn, client, settings,
+                            args.ecosystem, args.library, args.version,
+                        )
+                resolution = asyncio.run(_resolve())
+            except ValueError as exc:
+                print(f"invalid: {exc}", file=sys.stderr)
+                return 2
+            except RegistryError as exc:
+                hint = f" hint={exc.hint}" if exc.hint else ""
+                print(f"resolve failed [{exc.kind}]: {exc}{hint}", file=sys.stderr)
+                return 1
+            assert resolution.repo_url is not None
+            library, version, source = resolution.name, resolution.version, resolution.repo_url
+            ecosystem = resolution.ecosystem
+            resolved_from = resolution.source
+            registry_confirmed = resolution.registry_confirmed
+            print(f"resolved {ecosystem}:{library} {version} -> {source} [{resolved_from}]")
         if args.run_async:
             mgr = JobManager(conn)
             mgr.recover()
             job_id = mgr.submit(
                 INDEX_REPO_JOB_KIND,
                 {
-                    "library": args.library,
-                    "version": args.version,
-                    "source": args.source,
+                    "library": library,
+                    "version": version,
+                    "source": source,
                     "update": bool(args.update),
+                    "ecosystem": ecosystem,
+                    "resolved_from": resolved_from,
+                    "registry_confirmed": registry_confirmed,
                 },
             )
 
@@ -234,11 +281,14 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
             return 0 if job.status == "done" else 1
         counts = index_repo(
             conn,
-            args.library,
-            args.version,
-            args.source,
+            library,
+            version,
+            source,
             update=bool(args.update),
             repos_dir=repos_dir,
+            ecosystem=ecosystem,
+            resolved_from=resolved_from,
+            registry_confirmed=registry_confirmed,
         )
     finally:
         conn.close()
@@ -262,6 +312,7 @@ def cmd_mine(args: argparse.Namespace) -> int:
                 {
                     "library": args.library,
                     "version": args.version,
+                    "ecosystem": getattr(args, "ecosystem", None),
                     "minsup": args.minsup,
                     "topn": args.topn,
                     "maxlen": args.maxlen,
@@ -289,6 +340,7 @@ def cmd_mine(args: argparse.Namespace) -> int:
             conn,
             args.library,
             args.version,
+            ecosystem=getattr(args, "ecosystem", None),
             minsup=args.minsup,
             topn=args.topn,
             maxlen=args.maxlen,
@@ -611,9 +663,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp.set_defaults(func=cmd_serve_mcp)
 
     p_repo = sub.add_parser("index-repo", help="索引源码仓库并落调用实例")
-    p_repo.add_argument("library")
-    p_repo.add_argument("version")
-    p_repo.add_argument("source", help="远端地址或本地路径")
+    p_repo.add_argument("library", help="显式形态为库名，解析形态为包名")
+    p_repo.add_argument("version", nargs="?", default=None, help="显式形态必填，解析形态缺省取稳定版")
+    p_repo.add_argument("source", nargs="?", default=None, help="显式形态为远端地址或本地路径，缺省按名解析")
+    p_repo.add_argument("--ecosystem", default=None, help="按名称解析：pypi|npm|maven，缺省为 custom 显式")
+    p_repo.add_argument("--offline", action="store_true", help="只读缓存，不请求网络")
+    p_repo.add_argument(
+        "--registry-mirror",
+        default=None,
+        help="注册表镜像预设，缺省读配置",
+    )
     p_repo.add_argument("--update", action="store_true", help="已存在仓库时拉取更新")
     p_repo.add_argument(
         "--async", dest="run_async", action="store_true", help="经 jobs 队列执行"
@@ -623,6 +682,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_mine = sub.add_parser("mine", help="挖掘闭合调用序列模式")
     p_mine.add_argument("library")
     p_mine.add_argument("version")
+    p_mine.add_argument("--ecosystem", default=None, help="库所属生态，缺省跨生态定位")
     p_mine.add_argument("--minsup", type=int, default=2)
     p_mine.add_argument(
         "--topn",

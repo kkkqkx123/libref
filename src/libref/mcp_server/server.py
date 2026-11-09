@@ -120,4 +120,25 @@ def build_mcp_server(
             return {"error": exc.kind, "message": str(exc), "hint": exc.hint}
         return resolution.model_dump()
 
+    @mcp.tool()
+    async def resolve_repo(
+        ecosystem: str | None,
+        name: str,
+        version: str | None = None,
+    ) -> dict[str, Any]:
+        """按生态加名称解析仓库地址，只读，不触发索引。"""
+        from libref.crawler.http import build_async_client
+        from libref.services.resolver import resolve_repo as _resolve_repo
+
+        try:
+            async with build_async_client(resolve_settings) as client:
+                resolution = await _resolve_repo(
+                    conn, client, resolve_settings, ecosystem, name, version,
+                )
+        except ValueError as exc:
+            return {"error": "invalid", "message": str(exc)}
+        except RegistryError as exc:
+            return {"error": exc.kind, "message": str(exc), "hint": exc.hint}
+        return resolution.model_dump()
+
     return mcp

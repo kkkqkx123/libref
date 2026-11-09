@@ -897,15 +897,50 @@ def _persist_calls(
     return len(resolved), len(dead_rows)
 
 
+def lookup_index_source_cached(conn, ecosystem: str, library: str, version: str) -> tuple[str, str] | None:
+    from pathlib import Path
+
+    repo_name = f"{ecosystem}/{library}/{version}"
+    row = conn.execute(
+        "SELECT url, local_path FROM repos WHERE name=?", (repo_name,)
+    ).fetchone()
+    if row is not None:
+        url, local_path = row[0], row[1]
+        if local_path and Path(str(local_path)).is_dir():
+            return str(local_path), "repos"
+        if url:
+            return str(url), "repos"
+    lib_row = conn.execute(
+        "SELECT repo_url FROM libraries WHERE ecosystem=? AND name=?",
+        (ecosystem, library),
+    ).fetchone()
+    if lib_row is not None and lib_row[0]:
+        return str(lib_row[0]), "libraries"
+    if ecosystem in ("pypi", "npm", "maven"):
+        try:
+            from libref.crawler.registry import normalize_name
+            from libref.services.resolver import read_cache
+
+            norm = normalize_name(ecosystem, library)
+            cached = read_cache(conn, ecosystem, norm)
+        except ValueError:
+            cached = None
+        if cached is not None and cached.get("repo_url"):
+            return str(cached["repo_url"]), "registry-cache"
+    return None
+
+
 def index_repo(
     conn,
     library: str,
     version: str,
-    source: str,
+    source: str | None = None,
     *,
     update: bool = False,
     repos_dir=None,
     ecosystem: str = "custom",
+    resolved_from: str | None = None,
+    registry_confirmed: bool = True,
 ) -> dict[str, int]:
     from pathlib import Path
 
@@ -916,14 +951,26 @@ def index_repo(
     from libref.services.search import SearchService
 
     settings_dir = Path(repos_dir) if repos_dir is not None else Path("data/repos")
+    if not source:
+        hit = lookup_index_source_cached(conn, ecosystem, library, version)
+        if hit is None:
+            raise ValueError(
+                "repo source unknown: pass an explicit address or resolve by name "
+                "with --ecosystem (needs registry cache or network)"
+            )
+        source, cached_origin = hit
+        if resolved_from is None:
+            resolved_from = cached_origin
+    if resolved_from is None:
+        resolved_from = "explicit"
     search = SearchService(conn)
     library_id, version_id = search.ensure_library_version(
         library,
         version,
         ecosystem,
         repo_url=source,
-        resolved_from="explicit",
-        registry_confirmed=True,
+        resolved_from=resolved_from,
+        registry_confirmed=registry_confirmed,
     )
     manager = RepoManager(settings_dir)
     repo_name = f"{ecosystem}/{library}/{version}"
@@ -967,6 +1014,61 @@ def index_repo(
     counts["source_chunks"] = n_chunks
     counts["chunk_empty_dropped"] = chunk_dropped
     return counts
+
+
+def index_repo_by_name(
+    conn,
+    settings,
+    ecosystem: str | None,
+    library: str,
+    version: str | None = None,
+    *,
+    update: bool = False,
+    repos_dir=None,
+    explicit_source: str | None = None,
+) -> dict[str, int]:
+    return asyncio.run(
+        index_repo_by_name_async(
+            conn, settings, ecosystem, library, version,
+            update=update, repos_dir=repos_dir,
+            explicit_source=explicit_source,
+        )
+    )
+
+
+async def index_repo_by_name_async(
+    conn,
+    settings,
+    ecosystem: str | None,
+    library: str,
+    version: str | None = None,
+    *,
+    update: bool = False,
+    repos_dir=None,
+    explicit_source: str | None = None,
+) -> dict[str, int]:
+    from libref.services.resolver import infer_ecosystem, resolve_repo
+
+    if explicit_source is not None:
+        if version is None:
+            raise ValueError("explicit repo source requires a version")
+        eco = (ecosystem.strip().lower() if ecosystem else "custom")
+        return index_repo(
+            conn, library.strip(), version, explicit_source,
+            update=update, repos_dir=repos_dir, ecosystem=eco,
+            resolved_from="explicit", registry_confirmed=True,
+        )
+    async with _client(settings) as client:
+        resolution = await resolve_repo(
+            conn, client, settings, ecosystem, library, version,
+        )
+    assert resolution.repo_url is not None
+    return index_repo(
+        conn, resolution.name, resolution.version, resolution.repo_url,
+        update=update, repos_dir=repos_dir, ecosystem=resolution.ecosystem,
+        resolved_from=resolution.source,
+        registry_confirmed=resolution.registry_confirmed,
+    )
 
 
 def _clear_derived(conn, version_id: int) -> None:
@@ -1090,6 +1192,7 @@ def mine_patterns(
     library: str,
     version: str,
     *,
+    ecosystem: str | None = None,
     minsup: int = 2,
     topn: int | None = None,
     maxlen: int = 10,
@@ -1107,7 +1210,12 @@ def mine_patterns(
     from libref.services.search import SearchService
 
     search = SearchService(conn)
-    library_id, version_id = search.ensure_library_version(library, version)
+    if ecosystem is not None:
+        library_id, version_id = search.ensure_library_version(
+            library, version, ecosystem
+        )
+    else:
+        library_id, version_id = search.ensure_library_version(library, version)
     rows = conn.execute(
         "SELECT callee_name, caller_file, line_start, caller, confidence,"
         " call_order, start_byte, id FROM call_instances"
@@ -1229,9 +1337,12 @@ def build_repo_runner(settings, conn, repos_dir=None):
                 conn,
                 p["library"],
                 p["version"],
-                p["source"],
+                p.get("source"),
                 update=bool(p.get("update", False)),
                 repos_dir=repos_dir,
+                ecosystem=str(p.get("ecosystem", "custom") or "custom"),
+                resolved_from=p.get("resolved_from"),
+                registry_confirmed=bool(p.get("registry_confirmed", True)),
             )
         elif job.kind == MINE_PATTERNS_JOB_KIND:
             p = job.params
@@ -1239,6 +1350,7 @@ def build_repo_runner(settings, conn, repos_dir=None):
                 conn,
                 p["library"],
                 p["version"],
+                ecosystem=p.get("ecosystem"),
                 minsup=int(p.get("minsup", 2)),
                 topn=p.get("topn"),
                 maxlen=int(p.get("maxlen", 10)),

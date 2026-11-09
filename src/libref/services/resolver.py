@@ -116,16 +116,18 @@ def _build_resolution(
     homepage: str | None,
     repo_url: str | None,
     override_docs: str | None,
+    override_repo: str | None,
     registry_docs: str | None,
     candidates: list[str],
     source: str,
 ) -> Resolution:
     docs_url = override_docs or registry_docs
+    repo = override_repo or repo_url
     if docs_url is None:
         raise RegistryError(
             "no_docs",
             "registry has no documentation address",
-            hint={"homepage": homepage, "repo_url": repo_url},
+            hint={"homepage": homepage, "repo_url": repo},
         )
     version, confirmed = _pick_version(versions, stable, requested)
     final_candidates = [docs_url]
@@ -141,9 +143,26 @@ def _build_resolution(
         docs_url=docs_url,
         candidates=final_candidates,
         homepage=homepage,
-        repo_url=repo_url,
+        repo_url=repo,
         source=source,
     )
+
+
+def _override_addrs(
+    override: dict[str, str] | None, *, allow_private: bool
+) -> tuple[str | None, str | None]:
+    if override is None:
+        return None, None
+    docs = sanitize_http_url(
+        override.get("docs_url"), allow_private=allow_private
+    )
+    repo = sanitize_http_url(
+        override.get("repo_url"), allow_private=allow_private
+    )
+    if repo is None and override.get("repo_url"):
+        raw = str(override.get("repo_url", "")).strip().removeprefix("git+")
+        repo = sanitize_http_url(raw, allow_private=allow_private)
+    return docs, repo
 
 
 async def resolve_package(
@@ -186,15 +205,14 @@ async def resolve_package(
     if overrides_file is not None:
         ensure_overrides_file(overrides_file)
     override = get_override(eco, norm)
-    override_docs = None
-    if override is not None:
-        override_docs = sanitize_http_url(
-            override.get("docs_url"), allow_private=allow_private
-        )
+    override_docs, override_repo = _override_addrs(
+        override, allow_private=allow_private
+    )
     ttl = float(getattr(settings, "registry_cache_ttl_days", 1.0))
     offline = bool(getattr(settings, "registry_offline", False))
 
     cached = read_cache(conn, eco, norm)
+    override_hit = bool(override_docs or override_repo)
     if offline:
         if cached is None:
             raise RegistryError("retryable", "offline cache miss")
@@ -202,16 +220,18 @@ async def resolve_package(
             ecosystem=eco, name=norm, requested=requested_version,
             versions=cached["versions"], stable=cached["stable"],
             homepage=cached["homepage"], repo_url=cached["repo_url"],
-            override_docs=override_docs, registry_docs=cached["docs_url"],
-            candidates=cached["candidates"], source="override" if override_docs else "registry",
+            override_docs=override_docs, override_repo=override_repo,
+            registry_docs=cached["docs_url"],
+            candidates=cached["candidates"], source="override" if override_hit else "registry",
         )
     if cached is not None and _is_fresh(cached["fetched_at"], ttl):
         return _build_resolution(
             ecosystem=eco, name=norm, requested=requested_version,
             versions=cached["versions"], stable=cached["stable"],
             homepage=cached["homepage"], repo_url=cached["repo_url"],
-            override_docs=override_docs, registry_docs=cached["docs_url"],
-            candidates=cached["candidates"], source="override" if override_docs else "registry",
+            override_docs=override_docs, override_repo=override_repo,
+            registry_docs=cached["docs_url"],
+            candidates=cached["candidates"], source="override" if override_hit else "registry",
         )
     try:
         snap = await fetch_snapshot(eco, norm, client, settings)
@@ -221,9 +241,10 @@ async def resolve_package(
                 ecosystem=eco, name=norm, requested=requested_version,
                 versions=cached["versions"], stable=cached["stable"],
                 homepage=cached["homepage"], repo_url=cached["repo_url"],
-                override_docs=override_docs, registry_docs=cached["docs_url"],
+                override_docs=override_docs, override_repo=override_repo,
+                registry_docs=cached["docs_url"],
                 candidates=cached["candidates"],
-                source="override" if override_docs else "registry-stale",
+                source="override" if override_hit else "registry-stale",
             )
         raise
     write_cache(
@@ -235,7 +256,148 @@ async def resolve_package(
         ecosystem=eco, name=norm, requested=requested_version,
         versions=snap.versions, stable=snap.stable,
         homepage=snap.homepage, repo_url=snap.repo_url,
-        override_docs=override_docs,
+        override_docs=override_docs, override_repo=override_repo,
         registry_docs=snap.doc_candidates[0] if snap.doc_candidates else None,
-        candidates=snap.doc_candidates, source="override" if override_docs else "registry",
+        candidates=snap.doc_candidates, source="override" if override_hit else "registry",
+    )
+
+
+async def resolve_repo(
+    conn: sqlite3.Connection,
+    client,
+    settings,
+    ecosystem: str | None,
+    name: str,
+    requested_version: str | None = None,
+    explicit_source: str | None = None,
+) -> Resolution:
+    from pathlib import Path
+
+    allow_private = bool(getattr(settings, "registry_allow_private", False))
+    if explicit_source is not None:
+        text = str(explicit_source).strip()
+        if not text:
+            raise ValueError("empty repo source")
+        if not Path(text).is_dir():
+            cleaned = sanitize_http_url(text, allow_private=allow_private)
+            if cleaned is None:
+                cleaned = sanitize_http_url(
+                    text.removeprefix("git+"), allow_private=allow_private
+                )
+            if cleaned is None:
+                raise ValueError(f"invalid repo address: {explicit_source}")
+            text = cleaned
+        if requested_version is None:
+            raise ValueError("explicit repo source requires a version")
+        eco = (ecosystem.strip().lower() if ecosystem else "custom")
+        label = name.strip()
+        if eco in ("pypi", "npm", "maven"):
+            label = normalize_name(eco, name)
+        return Resolution(
+            ecosystem=eco,
+            name=label,
+            requested_version=requested_version,
+            version=requested_version,
+            registry_confirmed=True,
+            docs_url=None,
+            candidates=[],
+            source="explicit",
+            repo_url=text,
+        )
+    eco = infer_ecosystem(ecosystem, name)
+    norm = normalize_name(eco, name)
+    if not norm:
+        raise ValueError("empty package name")
+    overrides_file = settings.registry_overrides_file
+    if overrides_file is not None:
+        ensure_overrides_file(overrides_file)
+    override_docs, override_repo = _override_addrs(
+        get_override(eco, norm), allow_private=allow_private
+    )
+    override_hit = bool(override_repo)
+    ttl = float(getattr(settings, "registry_cache_ttl_days", 1.0))
+    offline = bool(getattr(settings, "registry_offline", False))
+    cached = read_cache(conn, eco, norm)
+    if offline:
+        if cached is None:
+            raise RegistryError("retryable", "offline cache miss")
+        repo_url = override_repo or cached["repo_url"]
+        if repo_url is None:
+            raise RegistryError(
+                "no_docs",
+                "registry has no repository address",
+                hint={"homepage": cached["homepage"]},
+            )
+        version, confirmed = _pick_version(
+            cached["versions"], cached["stable"], requested_version
+        )
+        return Resolution(
+            ecosystem=eco, name=norm, requested_version=requested_version,
+            version=version, registry_confirmed=confirmed,
+            docs_url=override_docs or cached["docs_url"],
+            candidates=list(cached["candidates"]),
+            homepage=cached["homepage"], repo_url=repo_url,
+            source="override" if override_hit else "registry",
+        )
+    if cached is not None and _is_fresh(cached["fetched_at"], ttl):
+        repo_url = override_repo or cached["repo_url"]
+        if repo_url is not None:
+            version, confirmed = _pick_version(
+                cached["versions"], cached["stable"], requested_version
+            )
+            return Resolution(
+                ecosystem=eco, name=norm, requested_version=requested_version,
+                version=version, registry_confirmed=confirmed,
+                docs_url=override_docs or cached["docs_url"],
+                candidates=list(cached["candidates"]),
+                homepage=cached["homepage"], repo_url=repo_url,
+                source="override" if override_hit else "registry",
+            )
+    try:
+        snap = await fetch_snapshot(eco, norm, client, settings)
+    except RegistryError as exc:
+        if exc.kind == "retryable" and cached is not None:
+            repo_url = override_repo or cached["repo_url"]
+            if repo_url is None:
+                raise RegistryError(
+                    "no_docs",
+                    "registry has no repository address",
+                    hint={"homepage": cached["homepage"]},
+                ) from None
+            version, confirmed = _pick_version(
+                cached["versions"], cached["stable"], requested_version
+            )
+            return Resolution(
+                ecosystem=eco, name=norm, requested_version=requested_version,
+                version=version, registry_confirmed=confirmed,
+                docs_url=override_docs or cached["docs_url"],
+                candidates=list(cached["candidates"]),
+                homepage=cached["homepage"], repo_url=repo_url,
+                source="override" if override_hit else "registry-stale",
+            )
+        raise
+    write_cache(
+        conn, ecosystem=eco, name=norm,
+        docs_url=snap.doc_candidates[0] if snap.doc_candidates else None,
+        candidates=snap.doc_candidates, versions=snap.versions,
+        stable=snap.stable, homepage=snap.homepage,
+        repo_url=snap.repo_url, fetched_at=time.time(),
+    )
+    repo_url = override_repo or snap.repo_url
+    if repo_url is None:
+        raise RegistryError(
+            "no_docs",
+            "registry has no repository address",
+            hint={"homepage": snap.homepage},
+        )
+    version, confirmed = _pick_version(
+        snap.versions, snap.stable, requested_version
+    )
+    return Resolution(
+        ecosystem=eco, name=norm, requested_version=requested_version,
+        version=version, registry_confirmed=confirmed,
+        docs_url=override_docs or (snap.doc_candidates[0] if snap.doc_candidates else None),
+        candidates=list(snap.doc_candidates),
+        homepage=snap.homepage, repo_url=repo_url,
+        source="override" if override_hit else "registry",
     )
