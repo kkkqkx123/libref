@@ -1,7 +1,8 @@
-"""正文净化：selectolax Pruning → markdownify。
+"""Content pruning: selectolax Pruning → markdownify.
 
-蓝本 crawl4ai PruningContentFilter 思路（剥噪 + 空文本叶节点丢弃）+
-docs-mcp-server 中间件链的 HtmlToMarkdown 环节。纯函数、零网络。
+Follows the blueprint crawl4ai PruningContentFilter idea (noise stripping +
+dropping empty-text leaf nodes) plus the HtmlToMarkdown step of the
+docs-mcp-server middleware chain. Pure functions, zero networking.
 """
 
 from __future__ import annotations
@@ -13,18 +14,18 @@ from selectolax.lexbor import LexborHTMLParser as HTMLParser
 
 from libref.text.normalize import normalize_markdown
 
-# 直接剔除的噪点标签
+# Noise tags stripped outright
 _STRIP_TAGS = ("script", "style", "noscript", "nav", "footer", "aside", "form", "header")
-# 常见正文容器，按优先级选取
+# Common main-content containers, picked by priority
 _MAIN_CANDIDATES = ("main", "article")
-# 剪枝时整体保留：表格结构、代码块、图片自身不计为空
+# Preserved wholesale during pruning: table structure, code blocks, and img self-count as non-empty
 _PRESERVE_TAGS = ("pre", "code", "table", "tbody", "thead", "tfoot", "tr", "td", "th", "img", "br", "hr")
-# 疑似客户端渲染标记：静态抓取无正文且命中则计为跳过而非失败
+# Suspected client-side rendering markers: static fetch yields no content and a hit counts as a skip, not a failure
 _JS_MARKERS = ("id=\"root\"", "id=\"app\"", "__NEXT_DATA__", "__NUXT__", "ng-app", "data-reactroot", "__INITIAL_STATE__")
 
 
 def extract_to_markdown(html: str, base_url: str | None = None) -> str:
-    """HTML → 正文 Markdown；净化后无正文返回空串（empty 结局）。"""
+    """HTML → main-content Markdown; return an empty string when nothing remains after pruning (empty outcome)."""
     tree = HTMLParser(html)
     if base_url:
         _absolutize_links(tree, base_url)
@@ -54,7 +55,7 @@ def _absolutize_links(tree: HTMLParser, base_url: str) -> None:
 
 
 def looks_like_js_rendered(html: str, markdown: str) -> bool:
-    """静态文档无正文且命中渲染标记时视为渲染页，调用方计为跳过。"""
+    """Treat as a rendered page when static extraction yields no content and a rendering marker is present; the caller counts a skip."""
     if len(markdown.strip()) >= 200:
         return False
     lowered = html.lower()
@@ -74,7 +75,7 @@ def _pick_main_root(tree: HTMLParser):
 
 
 def _densest_container(tree: HTMLParser):
-    """候选缺失时回退到正文密度最高的块容器，避免长导航页误取整页。"""
+    """Fall back to the densest block container when candidates are missing, avoiding picking the whole page on nav-heavy pages."""
     best = None
     best_score = -1.0
     for node in tree.css("div,section,article,main"):
@@ -91,7 +92,7 @@ def _densest_container(tree: HTMLParser):
 
 
 def _prune_empty_nodes(root) -> None:
-    """两遍剪枝：先收集空叶节点再统一删除，避免遍历中修改结构跳过。"""
+    """Two-pass pruning: collect empty leaf nodes first, then delete them together, avoiding skipped nodes from structural changes during traversal."""
     doomed = []
     for node in list(root.iter()):
         tag = node.tag or ""

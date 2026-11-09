@@ -55,7 +55,7 @@ def build_search_service(conn, settings, *, gateway=None, vec_store=None, embed=
 
 
 def build_ingest_service(conn, settings, *, gateway=None, vec_store=None, embed=None):
-    """装配文档抓取服务，向量缺失时退化为纯真源落库。"""
+    """Assemble the doc scrape service; degrades to pure source-of-truth storage when vectors are missing."""
     from libref.services.ingest import IngestService
 
     gw = gateway if gateway is not None else build_gateway(settings)
@@ -71,7 +71,7 @@ def build_ingest_service(conn, settings, *, gateway=None, vec_store=None, embed=
 
 
 def build_maintenance_service(conn, settings, *, gateway=None, vec_store=None, embed=None):
-    """装配向量重灌服务，调用方不再手配网关与向量。"""
+    """Assemble the vector re-ingest service; callers no longer hand-wire the gateway and vectors."""
     from libref.services.maintenance import MaintenanceService
 
     gw = gateway if gateway is not None else build_gateway(settings)

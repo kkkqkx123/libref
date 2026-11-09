@@ -1,4 +1,4 @@
-"""中文展开共用叶单测：原串保留、jieba 词元、跨词二元组、两侧对称。"""
+"""CJK run-expansion shared-leaf unit tests: original string kept, jieba tokens, cross-word bigrams, symmetric on both sides."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""抓取范围策略：起始地址与用户选项决定地址去留。纯逻辑、零网络。"""
+"""Crawl scope policy: the start URL and user options decide which URLs are kept. Pure logic, zero networking."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ from urllib.parse import urlsplit
 
 @dataclass
 class ScopePolicy:
-    """输入起始地址与显式选项，输出是否接受候选地址。
+    """Takes a start URL and explicit options, decides whether to accept a candidate URL.
 
-    默认与历史行为一致：仅同站接受、跨站拒绝；显式选项仅在给出时生效。
+    Defaults match historical behavior: same-site only, cross-site rejected;
+    explicit options apply only when given.
     """
 
     start_url: str
@@ -89,7 +90,7 @@ class ScopePolicy:
 
 
 def build_scope(start_url: str, opts: dict | None) -> ScopePolicy:
-    """按任务参数字典构造策略；空选项即默认同站策略。"""
+    """Build the policy from a task options dict; empty options yield the default same-site policy."""
     opts = opts or {}
     return ScopePolicy(
         start_url,

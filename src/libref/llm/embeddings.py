@@ -1,4 +1,4 @@
-"""编码传输，蓝本 tools/hurl/silicon.hurl 与 llm-suite-embedding；纯内存输入输出。"""
+"""Embedding transport, blueprints tools/hurl/silicon.hurl and llm-suite-embedding; pure in-memory input/output."""
 
 from __future__ import annotations
 
@@ -32,12 +32,12 @@ from libref.llm.retry import (
 EMBED_BATCH = 64
 
 EmbedFn = Callable[[list[str]], Awaitable[list[list[float]]]]
-"""批量编码函数：文本列表进，向量列表出，顺序对应。"""
+"""Batch embedding function: list of texts in, list of vectors out, order preserved."""
 
 
 @dataclass(frozen=True)
 class Preprocessor:
-    """编码前处理，直通、前缀、模板三形态，默认直通。"""
+    """Pre-embedding processing: passthrough, prefix, or template; passthrough by default."""
 
     kind: str = "none"
     param: str = ""
@@ -59,18 +59,18 @@ class Preprocessor:
 
 @dataclass(frozen=True)
 class ImageRef:
-    """图像引用，当前纯文本后端只做显式拒绝。"""
+    """Image reference; the current text-only backend only rejects it explicitly."""
 
     url: str
 
 
 EmbeddingInput = str | ImageRef
-"""混合编码输入：文本正常编码，图像引用直接拒绝。"""
+"""Mixed embedding input: text is embedded normally, image references are rejected outright."""
 
 
 @dataclass(frozen=True)
 class EmbeddingResult:
-    """批量编码结果，向量与用量同行。"""
+    """Batch embedding result; vectors and usage on the same record."""
 
     vectors: list[list[float]]
     usage: dict[str, int]
@@ -88,7 +88,7 @@ def _usage_of(payload: dict) -> dict[str, int]:
 
 @dataclass(frozen=True)
 class EmbeddingConfig:
-    """编码端点配置，本地期望维度与线上传输参数严格分离。"""
+    """Embedding endpoint config; local expected dim and remote transport params strictly separated."""
 
     base: str
     api_key: str
@@ -111,7 +111,7 @@ class EmbeddingConfig:
 
     @classmethod
     def from_settings(cls, settings: LibrefSettings) -> EmbeddingConfig | None:
-        """无密钥时返回空，调用方走纯全文路；其余缺项直接抛错。"""
+        """Return None when there is no API key (caller falls back to pure full-text); missing anything else raises."""
         if not settings.embedding_api_key:
             return None
         config = cls(
@@ -133,7 +133,7 @@ class EmbeddingConfig:
 
 
 class EmbeddingClient:
-    """兼容编码接口，批量归一与维度数量校验内聚在本层。"""
+    """Embedding-compatible interface; batch normalization and dim/count validation live in this layer."""
 
     def __init__(
         self,
@@ -184,20 +184,20 @@ class EmbeddingClient:
     async def encode(
         self, texts: list[str], *, client: httpx.AsyncClient | None = None
     ) -> list[list[float]]:
-        """批量编码，空输入直接返回空，不发起调用。"""
+        """Batch embed; empty input returns empty without making a call."""
         result = await self.encode_with_usage(texts, client=client)
         return result.vectors
 
     async def encode_with_usage(
         self, texts: list[str], *, client: httpx.AsyncClient | None = None
     ) -> EmbeddingResult:
-        """批量编码并透出用量，空输入直接返回空。"""
+        """Batch embed and surface usage; empty input returns empty."""
         return await self.encode_inputs(texts, client=client)
 
     async def encode_inputs(
         self, inputs: list[EmbeddingInput], *, client: httpx.AsyncClient | None = None
     ) -> EmbeddingResult:
-        """混合输入编码，图像引用直接拒绝，不发起调用。"""
+        """Embed mixed inputs; image references are rejected outright without a call."""
         texts: list[str] = []
         for item in inputs:
             if isinstance(item, ImageRef):
@@ -298,7 +298,7 @@ class EmbeddingClient:
 def build_embed_fn(
     settings: LibrefSettings, transport: httpx.BaseTransport | None = None
 ) -> EmbedFn | None:
-    """按配置构造编码函数，无密钥时返回空，调用方走纯全文路。"""
+    """Build the embed function from settings; returns None without an API key (caller falls back to pure full-text)."""
     config = EmbeddingConfig.from_settings(settings)
     if config is None:
         return None

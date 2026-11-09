@@ -1,7 +1,9 @@
-"""页面与文档块的读写入口，增量结局共六种。
+"""Read/write entry point for pages and document chunks, with six sync outcomes in total.
 
-全文索引由 SQLite 触发器随文档表自动同步，本层只写页面与文档两张表，
-不做索引双写。每次存储同时返回同步增量，供调用方同步派生索引。
+The full-text index is kept in sync automatically by SQLite triggers on the documents
+table; this layer writes only the pages and documents tables and never double-writes
+the index. Each store call also returns the sync delta so callers can update derived
+indexes.
 """
 
 from __future__ import annotations
@@ -68,7 +70,7 @@ class DocumentStore:
     def __init__(self, conn: sqlite3.Connection) -> None:
         self._conn = conn
 
-    # ── 读 ──
+    # ── Read ──
 
     def get_page(self, version_id: int, url: str) -> PageRecord | None:
         row = self._conn.execute(
@@ -82,7 +84,7 @@ class DocumentStore:
                           last_modified=row[3], content_hash=row[4])
 
     def list_page_urls(self, version_id: int) -> list[str]:
-        """列出该版本下已有页面的全部地址，供调用方做缺席差集。"""
+        """List all URLs of existing pages under this version, for the caller's absent-set difference."""
         rows = self._conn.execute(
             "SELECT url FROM pages WHERE version_id=? ORDER BY url",
             (version_id,),
@@ -107,7 +109,7 @@ class DocumentStore:
         ]
 
     def get_window(self, page_id: int, sort_order: int, radius: int = 1, *, chunk_path: str | None = None) -> list[dict[str, Any]]:
-        """按排序序号取前后窗口，供检索命中扩展上下文。"""
+        """Fetch a before/after window by sort order, for expanding retrieval hit context."""
         if radius < 0:
             return []
         if chunk_path is None:
@@ -135,7 +137,7 @@ class DocumentStore:
         ]
 
     def get_documents(self, doc_ids: list[int]) -> list[dict[str, Any]]:
-        """按标识批量取回文档，供派生索引编码取材与孤儿过滤。"""
+        """Batch-fetch documents by id, for derived-index encoding and orphan filtering."""
         if not doc_ids:
             return []
         marks = ",".join("?" for _ in doc_ids)
@@ -159,7 +161,7 @@ class DocumentStore:
         by_id = {d["id"]: d for d in found}
         return [by_id[i] for i in doc_ids if i in by_id]
 
-    # ── 写：唯一入口 ──
+    # ── Write: the single entry point ──
 
     def store_page(
         self,
@@ -173,10 +175,12 @@ class DocumentStore:
         etag: str | None = None,
         last_modified: str | None = None,
     ) -> StoreResult:
-        """按结局写库并返回结局与文档增量，单事务提交。
+        """Write per outcome and return the outcome plus document delta, committed in a single transaction.
 
-        存入新内容时先记下被替换的旧文档标识，写入后返回新文档标识。
-        删除整页时返回被级联删掉的文档标识。内容不变与跳过失败时增量为空。
+        When storing new content, first record the ids of the old documents being replaced,
+        then return the new document ids after writing. Deleting a whole page returns the
+        document ids removed by cascade. Unchanged, skipped and failed outcomes yield an
+        empty delta.
         """
         if outcome not in OUTCOMES:
             raise ValueError(f"unknown outcome: {outcome}")
@@ -235,7 +239,8 @@ class DocumentStore:
                 else:
                     pending.append((chunk, ""))
             leftover = [r["id"] for r in existing if r["id"] not in used_old]
-            # 先删无复用的旧行，复用行改为更新排序与元数据，避免整页抖动。
+            # Delete old rows with no reuse first; reused rows become updates of sort order
+            # and metadata, avoiding whole-page churn.
             if leftover:
                 marks = ",".join("?" for _ in leftover)
                 self._conn.execute(
@@ -286,7 +291,7 @@ class DocumentStore:
             raise
 
     def ensure_changed(self, version_id: int, url: str, raw_content: str | None) -> str:
-        """按内容指纹判定存入还是不变，服务端未给 304 时的二次短路。"""
+        """Decide stored vs unchanged by content fingerprint; a second short-circuit when the server did not return 304."""
         page = self.get_page(version_id, url)
         if (
             page is not None
@@ -296,7 +301,7 @@ class DocumentStore:
             return "unchanged"
         return "stored"
 
-    # ── 内部 ──
+    # ── Internal ──
 
     def _upsert_page(
         self,
@@ -316,7 +321,7 @@ class DocumentStore:
         )
 
     def _delete_page(self, version_id: int, url: str) -> list[int]:
-        """删除整页，返回被外键级联删掉的文档标识。"""
+        """Delete a whole page and return the document ids removed by foreign-key cascade."""
         page = self.get_page(version_id, url)
         if page is None:
             return []
@@ -328,7 +333,7 @@ class DocumentStore:
         return removed
 
     def _delete_documents(self, page_id: int) -> list[int]:
-        """清空一页的文档块，返回删掉的标识。"""
+        """Clear all document chunks of one page and return the removed ids."""
         rows = self._conn.execute(
             "SELECT id FROM documents WHERE page_id=?", (page_id,)
         ).fetchall()

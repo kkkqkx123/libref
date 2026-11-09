@@ -57,5 +57,5 @@ def build_embed_text(
 
 
 def is_embeddable_metadata(meta: dict | None) -> bool:
-    """派生向量是否收录该块：bm25 块只服务 FTS，不进向量。"""
+    """Whether derived vectors include this chunk: bm25 chunks serve FTS only and are not embedded."""
     return (meta or {}).get("chunk_path", "embedding") != "bm25"

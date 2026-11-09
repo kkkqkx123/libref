@@ -1,4 +1,4 @@
-"""混合检索离线黄金：FakeVec 注入，不依赖 Qdrant 与编码 API。"""
+"""Hybrid retrieval offline goldens: FakeVec injection, no Qdrant or embedding API dependency."""
 
 from __future__ import annotations
 

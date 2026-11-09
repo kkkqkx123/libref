@@ -1,6 +1,6 @@
-"""QdrantVecStore 集成测试（真连 localhost:6333，服务不可达则 skip）。
+"""QdrantVecStore integration tests (real connection to localhost:6333, skip if unreachable).
 
-使用独立测试集合，结束后删除。验收标准见 docs/plan/qdrant-migration.md §7。
+Uses a dedicated test collection, deleted afterwards. Acceptance criteria: docs/plan/qdrant-migration.md §7.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ def _server_up() -> bool:
     try:
         QdrantClient(url=URL, timeout=2.0, check_compatibility=False).get_collections()
         return True
-    except Exception:  # noqa: BLE001 —— 探活：任何异常即视为服务不可达
+    except Exception:  # noqa: BLE001 — liveness probe: any exception means the service is unreachable
         return False
 
 
@@ -55,15 +55,15 @@ def test_ensure_collection_and_meta(store: QdrantVecStore, conn) -> None:
     assert store.client.collection_exists(COLLECTION)
     assert _meta(conn, "vec_model") == "BAAI/bge-small-zh"
     assert _meta(conn, "vec_dim") == "4"
-    store.ensure_collection(conn, "BAAI/bge-small-zh", 4)  # 幂等
+    store.ensure_collection(conn, "BAAI/bge-small-zh", 4)  # idempotent
 
 
 def test_upsert_search_version_filter(store: QdrantVecStore, conn) -> None:
     store.ensure_collection(conn, "m", 4)
     store.upsert_batch([
-        (1, 1, 10, [1.0, 0.0, 0.0, 0.0]),   # 精确匹配，score 最高
+        (1, 1, 10, [1.0, 0.0, 0.0, 0.0]),   # exact match, highest score
         (2, 1, 10, [0.9, 0.1, 0.0, 0.0]),
-        (3, 1, 20, [0.0, 0.0, 0.0, 1.0]),   # 其他版本，应被过滤
+        (3, 1, 20, [0.0, 0.0, 0.0, 1.0]),   # other version, should be filtered
     ])
     results = store.search([1.0, 0.0, 0.0, 0.0], k=10, version_id=10)
     assert [r[0] for r in results][:1] == [1]
@@ -82,7 +82,7 @@ def test_delete_docs_and_version(store: QdrantVecStore, conn) -> None:
     assert store.count(10) == 1
     store.delete_version(10)
     assert store.count(10) == 0
-    assert store.count(20) == 1  # 其他版本不受影响
+    assert store.count(20) == 1  # other versions unaffected
 
 
 def test_model_or_dim_change_invalidates(store: QdrantVecStore, conn) -> None:
@@ -90,18 +90,18 @@ def test_model_or_dim_change_invalidates(store: QdrantVecStore, conn) -> None:
     store.upsert_batch([(1, 1, 10, [1.0, 0.0, 0.0, 0.0])])
     assert store.count(10) == 1
 
-    store.ensure_collection(conn, "m2", 4)  # 换模型 → 重建失效
+    store.ensure_collection(conn, "m2", 4)  # model change → invalidation rebuild
     assert store.count(10) == 0
     assert _meta(conn, "vec_model") == "m2"
 
-    store.ensure_collection(conn, "m2", 8)  # 换维度 → 重建，可写入新维度
+    store.ensure_collection(conn, "m2", 8)  # dim change → rebuild, new dim writable
     store.upsert_batch([(1, 1, 10, [1.0] * 8)])
     assert len(store.search([1.0] * 8, k=1, version_id=10)) == 1
     assert _meta(conn, "vec_dim") == "8"
 
 
 def test_reconcile_count_consistency(store: QdrantVecStore, conn) -> None:
-    """对账语义：count(version) 应等于 SQLite documents 计数，差集即需重灌的部分。"""
+    """Reconciliation semantics: count(version) should equal the SQLite documents count; the set difference is what needs re-ingestion."""
     conn.execute("INSERT INTO libraries(name) VALUES('l')")
     conn.execute("INSERT INTO versions(library_id, version) VALUES(1, '1.0')")
     conn.execute("INSERT INTO pages(version_id, url) VALUES(1, 'https://e.com/1')")

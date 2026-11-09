@@ -1,4 +1,4 @@
-"""语言规则函数：捕获选择、文本整形、别名构建。"""
+"""Language rule functions: capture selection, text shaping, alias building."""
 
 from __future__ import annotations
 

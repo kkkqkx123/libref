@@ -1,4 +1,4 @@
-"""抓取共享建 client 测试：代理优先级、旁路挂载、测试传输忽略代理。"""
+"""Crawler shared-client tests: proxy precedence, bypass mounting, test transport ignoring proxies."""
 
 from __future__ import annotations
 

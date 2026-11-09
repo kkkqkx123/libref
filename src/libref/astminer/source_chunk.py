@@ -1,8 +1,8 @@
-"""源码分块组装：实体原文直接作块文本，零模型调用。
+"""Source chunk assembly: member source text is used directly as chunk text, zero model calls.
 
-成员源码即块内容，两路按各自预算切分，共享源分组标识。
-空区间在源头跳过并计数；无成员的组以组区间作块；
-有独立文档说明的成员不参与合并。
+Member source is the chunk content; the two paths are split within their own budgets and share the source group id.
+Empty ranges are skipped and counted at the source; groups without members use the group range as the chunk;
+members with standalone documentation are excluded from merging.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class SourceSplit:
 
 
 def _header_for_member(qual: str | None, decls_by_qual: dict, file: str) -> str:
-    """给向量路配口语头，限定名加种类加文件加签名。"""
+    """Build a colloquial header for the vector path: qualified name, kind, file, and signature."""
     if not qual:
         return ""
     decl = (decls_by_qual or {}).get(qual)
@@ -78,7 +78,7 @@ def build_source_chunks(
     budgets: dict[ChunkPath, ChunkBudget] | None = None,
     repo: str = "",
 ) -> SourceSplit:
-    """按成员边界组装源码块，返回块流与空块计数。"""
+    """Assemble source chunks along member boundaries; return the chunk stream and empty-chunk count."""
     resolved = budgets or default_budgets()
     chunks: list[SourceChunk] = []
     dropped = 0
@@ -201,7 +201,7 @@ def _emit_pieces(
 
 
 def _merge_undersized(groups, budgets, chunks: list[SourceChunk]) -> None:
-    """低于最小阈值的非自包含块向相邻同组块合并，保留左块身份。"""
+    """Merge non-self-contained chunks below the minimum threshold into adjacent chunks of the same group, keeping the left chunk's identity."""
     by_group: dict[tuple[str, str], list[int]] = {}
     for pos, chunk in enumerate(chunks):
         by_group.setdefault((chunk.group_id, chunk.chunk_path), []).append(pos)
@@ -243,7 +243,7 @@ def _attach_prev_overlap(chunks: list[SourceChunk], budgets) -> None:
 
 
 def as_chunk(source_chunk: SourceChunk, url: str):
-    """转文档块形态以复用落库与向量组装，溯源字段完整保留。"""
+    """Convert to the document-chunk form to reuse storage and vector assembly; provenance fields are fully preserved."""
     from libref.chunking.splitter import Chunk, ident_snake_form
 
     names: list[str] = []

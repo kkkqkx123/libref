@@ -1,4 +1,4 @@
-"""查询编译与黄金样例：四域查询可用、装饰与链式可抽取。"""
+"""Query compilation and golden samples: four-domain queries usable, decorators and chains extractable."""
 
 from __future__ import annotations
 

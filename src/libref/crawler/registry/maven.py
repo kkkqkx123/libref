@@ -1,7 +1,8 @@
-"""Maven Central 提供方：坐标归一化加元数据加 POM 解析。
+"""Maven Central provider: coordinate normalization plus metadata and POM parsing.
 
-归属 registry 子包的 Maven 专属部分，通用地址卫生与版本逻辑在子包门面。
-坐标形态为 group:artifact，大小写保留以保证仓库路径正确。
+The Maven-specific part of the registry subpackage; shared URL sanitization and
+version logic live in the subpackage facade. Coordinates take the form
+group:artifact, with case preserved to keep repository paths correct.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from libref.crawler.registry import is_repo_host_url, sanitize_http_url
 
 
 def normalize_maven_name(name: str) -> str:
-    """坐标归一化：去首尾空白，组与件分别去空白，缺冒号视为用法错误。"""
+    """Coordinate normalization: trim whitespace; trim group and artifact separately; missing colon is a usage error."""
     text = name.strip()
     if ":" not in text:
         raise ValueError(f"maven name must look like group:artifact: {name!r}")
@@ -55,7 +56,7 @@ def _first_text(root: ET.Element, names: tuple[str, ...]) -> str | None:
 
 
 def parse_maven_metadata(xml_text: str) -> tuple[str | None, list[str]]:
-    """解析版本列表与稳定版，缺 versioning 时返回空。"""
+    """Parse the version list and stable version; return empty when versioning is missing."""
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
@@ -63,10 +64,12 @@ def parse_maven_metadata(xml_text: str) -> tuple[str | None, list[str]]:
     versions: list[str] = []
     for node in root.iter():
         if _local(node.tag) == "version" and node.text and node.text.strip():
-            # 只收 versioning 下的版本条目，依赖声明中的 version 同名但结构不同；
-            # 按父链判定过于繁琐，元数据文件内 version 全部为发布版本，可直接收。
+            # Only collect version entries under versioning; version elements in
+            # dependency declarations share the tag but differ in structure. Parent-chain
+            # checks would be too convoluted; all version elements in the metadata file
+            # are released versions, so collect them directly.
             versions.append(node.text.strip())
-    # 去重保序
+    # Deduplicate, preserving order
     seen: set[str] = set()
     ordered: list[str] = []
     for v in versions:
@@ -87,7 +90,7 @@ def _clean_scm_url(raw: str | None) -> str | None:
         return None
     text = raw.strip().strip("<>\"'")
     if text.startswith("scm:"):
-        # scm:git:https://... 取最后一个可识别协议段
+        # scm:git:https://... — take the last recognizable protocol segment
         idx = text.find("https://")
         jdx = text.find("http://")
         if idx >= 0:
@@ -114,14 +117,14 @@ def rank_maven_candidates(
 def parse_maven_pom(
     xml_text: str, *, allow_private: bool = False
 ) -> tuple[str | None, list[str], str | None]:
-    """解析项目地址与仓库地址，仓库地址只作提示不入候选。"""
+    """Parse the project URL and repo URL; the repo URL is a hint only and never a candidate."""
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
         return None, [], None
     project_url: str | None = None
     for node in root.iter():
-        # 项目地址取顶层 url，scm 下的 url 另行处理
+        # Project URL is the top-level url; urls under scm are handled separately
         if _local(node.tag) == "url" and node.text and node.text.strip():
             project_url = node.text.strip()
             break

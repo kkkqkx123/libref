@@ -1,4 +1,4 @@
-"""DocumentStore 测试：六态结局、增量短路、同步增量、全文级联。"""
+"""DocumentStore tests: six-state outcomes, incremental short-circuit, sync incremental, FTS cascade."""
 
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def test_unchanged_keeps_documents(conn):
     store.store_page(1, 1, "https://d.example/a.html", "stored",
                      chunks=make_chunks(), raw_content="v1 body")
     before = conn.execute("SELECT count(*) FROM documents").fetchone()[0]
-    # 同内容再次存入走短路判定
+    # storing the same content again hits the short-circuit check
     outcome = store.ensure_changed(1, "https://d.example/a.html", "v1 body")
     assert outcome == "unchanged"
     result = store.store_page(1, 1, "https://d.example/a.html", "unchanged")
@@ -75,7 +75,7 @@ def test_absent_deletes_page_and_documents(conn):
     assert sorted(result.removed_ids) == sorted(first.inserted_ids)
     assert conn.execute("SELECT count(*) FROM pages").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 0
-    # 全文触发器级联清空
+    # FTS trigger cascades the wipe
     hits = conn.execute(
         "SELECT count(*) FROM documents_fts WHERE documents_fts MATCH 'libref'"
     ).fetchone()[0]

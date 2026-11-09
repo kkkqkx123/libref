@@ -1,4 +1,4 @@
-"""查询注册表：按语言与查询类型取模式文本，统一指纹片段。"""
+"""Query registry: fetch pattern text by language and query type, with a unified fingerprint snippet."""
 
 from __future__ import annotations
 

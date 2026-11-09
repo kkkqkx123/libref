@@ -1,4 +1,4 @@
-"""Web 路由：只做参数解析加服务调用，业务编排全部落在 services 层。"""
+"""Web routes: only parameter parsing plus service calls; all orchestration lives in the services layer."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def build_web_app(
     rerank=None,
     chat=None,
 ) -> FastAPI:
-    """装配 Web 应用；连接由调用方管理生命周期。"""
+    """Assemble the web app; the caller manages the connection lifecycle."""
     svc = SearchService(conn, settings, vec_store=vec_store, embed=embed, rerank=rerank)
     pages = PageService(conn)
     catalog = LibraryService(conn)

@@ -1,4 +1,4 @@
-"""审核工作流：待定优先级与终态流转，全部离线。"""
+"""Review workflow: pending prioritization and final-state transitions, all offline."""
 
 from __future__ import annotations
 

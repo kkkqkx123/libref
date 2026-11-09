@@ -1,4 +1,4 @@
-"""FTS 触发器同步测试（P0 最小验证之一，蓝本 000-initial-schema 触发器语义）。"""
+"""FTS trigger sync tests (one of the P0 minimal checks, blueprint: 000-initial-schema trigger semantics)."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def test_insert_visible_in_fts(conn: sqlite3.Connection) -> None:
     doc_id = _insert_doc(conn, page_id, "Use requests.get to fetch pages")
     conn.commit()
     assert _match(conn, "requests") == [doc_id]
-    # metadata 的 title/path 列也可检索
+    # metadata title/path columns are also searchable
     assert _match(conn, "title:getting") == [doc_id]
     assert _match(conn, "path:start") == [doc_id]
 
@@ -81,7 +81,7 @@ def test_cjk_substring_recall(conn: sqlite3.Connection) -> None:
 
 
 def test_fts_vocab_consistency(conn: sqlite3.Connection) -> None:
-    """fts5vocab 视角：文档 token 与 FTS 索引一致。"""
+    """fts5vocab view: document tokens match the FTS index."""
     _, page_id = _add_library(conn)
     _insert_doc(conn, page_id, "alpha beta alpha")
     conn.commit()

@@ -1,4 +1,4 @@
-"""频次、共现、归一化的手工对拍黄金样例。"""
+"""Hand-checked golden samples for frequency, co-occurrence, and normalization."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
-"""抓取编排：发现地址、抓取、净化、分块、落库、同步向量。
+"""Scrape orchestration: discover URLs, fetch, clean, chunk, store, sync vectors.
 
-编排层是唯一的调度位置，出口层只调本模块。向量是派生索引：
-真源落库成功后才同步向量，向量失败只计数，不推翻真源写入。
+The orchestration layer is the only scheduling location; exit layers only call this module. Vectors are a derived index:
+vectors are synced only after the source-of-truth store succeeds; vector failures are only counted and never overturn the source write.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ from libref.text.normalize import (
 logger = logging.getLogger(__name__)
 
 SCRAPE_JOB_KIND = "scrape_docs"
-"""抓取任务在任务表中的类型名。"""
+"""Job kind name for scrape jobs in the job table."""
 
 
 def scrape_job_params(
@@ -55,7 +55,7 @@ def scrape_job_params(
     resolved_from: str | None = None,
     registry_confirmed: bool = True,
 ) -> dict[str, Any]:
-    """构造抓取任务参数，含解析来源以保证可重放。"""
+    """Build scrape job params, including the resolution source for replayability."""
     return {
         "library": library,
         "version": version,
@@ -82,7 +82,7 @@ def start_scrape_job(
     resolved_from: str | None = None,
     registry_confirmed: bool = True,
 ) -> int:
-    """提交抓取任务到队列，返回任务标识，执行由 worker 加 runner 完成。"""
+    """Submit a scrape job to the queue and return its id; execution is done by the worker plus runner."""
     return mgr.submit(
         SCRAPE_JOB_KIND,
         scrape_job_params(
@@ -110,7 +110,7 @@ def start_refresh_job(
     scope: dict[str, Any] | None = None,
     ecosystem: str = "custom",
 ) -> int:
-    """提交刷新任务到队列，复用抓取任务类型执行增量语义。"""
+    """Submit a refresh job to the queue, reusing the scrape job kind for incremental semantics."""
     return mgr.submit(
         SCRAPE_JOB_KIND,
         scrape_job_params(
@@ -245,7 +245,7 @@ def _version_lock(conn, ecosystem: str, library: str, version: str):
 
 
 def build_scrape_runner(settings, conn, *, vec_store=None, embed=None, mgr=None):
-    """构造任务消费函数，按任务参数执行整站抓取。"""
+    """Build the job consumer function that runs a full-site scrape per job params."""
     service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
 
     async def runner(job: Job):
@@ -279,7 +279,7 @@ def run_scrape_job_sync(
     vec_store=None,
     embed: EmbedFn | None = None,
 ) -> Job:
-    """同步驱动单任务：起 worker、等待落定、停 worker，供命令行异步开关使用。"""
+    """Drive a single job synchronously: start worker, wait for settle, stop worker; for the CLI's async toggle."""
 
     async def _drive() -> Job:
         mgr.start_worker(
@@ -302,16 +302,16 @@ async def _client(settings) -> AsyncIterator[httpx.AsyncClient]:
 
 
 def _doc_budgets(settings) -> dict[ChunkPath, ChunkBudget]:
-    """按配置生成文档分块的双路预算，分块预算的唯一装配点。"""
+    """Build the two-path document chunking budgets from settings; the single assembly point for chunk budgets."""
     return budgets_from_settings(settings)
 
 
 PIPELINE_STEPS = ("discover", "fetch", "clean", "split", "store", "vectors")
-"""抓取阶段顺序，耗时计数键按该顺序取各阶段名加毫秒后缀。"""
+"""Scrape stage order; timing count keys take each stage name plus a millisecond suffix in this order."""
 
 
 def _budget_fingerprint(budgets: dict[ChunkPath, ChunkBudget]) -> str:
-    """分块预算指纹，预算变更后净化缓存旧条目不再命中。"""
+    """Chunk budget fingerprint; after a budget change old cleaning-cache entries no longer hit."""
     parts = []
     for path in sorted(budgets, key=lambda p: p.value):
         budget = budgets[path]
@@ -327,7 +327,7 @@ def normalize_text_content(raw: str) -> str:
 
 
 def _plan_targets(seed, start_url: str, scope: dict[str, Any] | None, max_pages: int | None):
-    """抓取目标规划：作用域过滤加起始页回退加分页截断，纯决策不碰库。"""
+    """Scrape target planning: scope filter plus start-page fallback plus pagination truncation; pure decisions, no DB access."""
     policy = build_scope(start_url, scope)
     candidates = seed.urls + [u for u in seed.cross_site if u not in seed.urls]
     accepted, rejected = policy.filter(candidates)
@@ -342,7 +342,7 @@ def _plan_targets(seed, start_url: str, scope: dict[str, Any] | None, max_pages:
 
 
 def _record_outcome(counts, removed_all, inserted_all, result, empty_dropped, render_skipped, stage_ms) -> None:
-    """单页结局汇总：计数、向量候选、阶段耗时，一处归口。"""
+    """Per-page outcome summary: counts, vector candidates, stage timings; one funnel."""
     counts[result.outcome] = counts.get(result.outcome, 0) + 1
     counts["chunk_empty_dropped"] += empty_dropped
     if render_skipped:
@@ -357,7 +357,7 @@ def _record_outcome(counts, removed_all, inserted_all, result, empty_dropped, re
 
 
 def _build_doc_inputs(raw_chunks, content_type: str | None, kind: str) -> list[DocumentInput]:
-    """文档块输入组装：排序号与类型回填，落库前唯一成形点。"""
+    """Document chunk input assembly: sort order and type backfill; the single shaping point before storing."""
     for order, chunk in enumerate(raw_chunks):
         chunk.sort_order = order
         if not getattr(chunk, "content_type", "") or chunk.content_type == "text/markdown":
@@ -430,7 +430,7 @@ class IngestService:
         repo_url: str | None = None,
         heartbeat=None,
     ) -> dict[str, int]:
-        """同步入口：发现、抓取、净化、分块、落库，返回各类结局计数。"""
+        """Sync entry: discover, fetch, clean, chunk, store; returns outcome counts by kind."""
         return asyncio.run(
             self.scrape_docs_async(
                 library,
@@ -464,7 +464,7 @@ class IngestService:
         repo_url: str | None = None,
         heartbeat=None,
     ) -> dict[str, int]:
-        """异步入口，任务 worker 复用，避免在运行中的事件循环内嵌套启动。"""
+        """Async entry, reused by the job worker, to avoid nested loop startup inside a running event loop."""
         return await self._scrape_async(
             library,
             version,
@@ -492,7 +492,7 @@ class IngestService:
         ecosystem: str = "custom",
         heartbeat=None,
     ) -> dict[str, int]:
-        """刷新意图入口：复用抓取链路的增量语义，只表达刷新意图。"""
+        """Refresh-intent entry: reuses the scrape path's incremental semantics, only expressing refresh intent."""
         return self.scrape_docs(
             library, version, start_url, max_pages=max_pages, prefilter=prefilter,
             scope=scope, ecosystem=ecosystem, resolved_from="refresh",
@@ -511,7 +511,7 @@ class IngestService:
         ecosystem: str = "custom",
         heartbeat=None,
     ) -> dict[str, int]:
-        """刷新异步入口，供任务复用。"""
+        """Refresh async entry, for job reuse."""
         return await self.scrape_docs_async(
             library, version, start_url, max_pages=max_pages, prefilter=prefilter,
             scope=scope, ecosystem=ecosystem, resolved_from="refresh",
@@ -528,7 +528,7 @@ class IngestService:
         prefilter: bool = False,
         scope: dict[str, Any] | None = None,
     ) -> dict[str, int]:
-        """按名称解析后抓取：先解析出地址与版本，再走标准抓取链路。"""
+        """Scrape after resolving by name: resolve the address and version first, then run the standard scrape path."""
         return asyncio.run(
             self.scrape_by_name_async(
                 ecosystem,
@@ -550,7 +550,7 @@ class IngestService:
         prefilter: bool = False,
         scope: dict[str, Any] | None = None,
     ) -> dict[str, int]:
-        """按名称解析后抓取的异步入口，供任务 worker 复用。"""
+        """Async entry for scraping after name resolution, reused by the job worker."""
         from libref.services.resolver import resolve_package
 
         async with _client(self._settings) as client:
@@ -603,7 +603,7 @@ class IngestService:
                 maybe = heartbeat()
                 if asyncio.iscoroutine(maybe):
                     asyncio.get_running_loop().create_task(maybe)
-            except Exception:  # noqa: BLE001 —— 心跳只求续写
+            except Exception:  # noqa: BLE001 — heartbeat only aims to renew
                 pass
 
         counts = {
@@ -688,7 +688,7 @@ class IngestService:
                                 scope=scope,
                                 snapshot_ctx=(ecosystem, library, version),
                             )
-                        except Exception as exc:  # noqa: BLE001 —— 单页失败记结局，不阻断整批
+                        except Exception as exc:  # noqa: BLE001 — a single page's failure is recorded as an outcome and does not block the batch
                             logger.debug("page failed url=%s: %s", url, exc)
                             result, empty_dropped, render_skipped, stage_ms = StoreResult("failed"), 0, False, {}
                         _record_outcome(counts, removed_all, inserted_all, result, empty_dropped, render_skipped, stage_ms)
@@ -788,12 +788,12 @@ class IngestService:
                 )
                 logger.info("absent sweep %s:%s %s urls=%d docs=%d",
                             ecosystem, library, version, len(removed_urls), len(removed))
-            except Exception as exc:  # noqa: BLE001 —— 留痕失败不推翻真源删除
+            except Exception as exc:  # noqa: BLE001 — deletion-log failure does not overturn the source-of-truth deletion
                 logger.debug("absent log failed: %s", exc)
         return removed
 
     def _clean_with_cache(self, kind: str, raw: str, url: str) -> str:
-        """净化缓存：同内容与同预算指纹命中直接复用，超限逐出最早条目。"""
+        """Cleaning cache: same content and same budget fingerprint hit reuses directly; evict the oldest entry over the cap."""
         import hashlib as _hashlib
         digest = _hashlib.sha1(
             f"{kind}\0{self._clean_fingerprint}\0{raw}".encode("utf-8", "ignore")

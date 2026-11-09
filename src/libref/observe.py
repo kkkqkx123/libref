@@ -1,4 +1,4 @@
-"""运行日志装配：按生效配置初始化根记录器，失败不阻断业务。"""
+"""Runtime logging assembly: initialize the root logger from the effective config; failures do not block business."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def _our_handlers() -> list[logging.Handler]:
 
 
 def setup_logging(settings) -> None:
-    """按生效配置初始化日志，幂等且永不抛错。"""
+    """Initialize logging from the effective config; idempotent and never raises."""
     global _configured_fingerprint
     try:
         level = _normalize_level(getattr(settings, "log_level", "WARNING"))
@@ -56,7 +56,7 @@ def setup_logging(settings) -> None:
             try:
                 logging.root.removeHandler(handler)
                 handler.close()
-            except Exception:  # noqa: BLE001 —— 清理旧输出失败不阻断
+            except Exception:  # noqa: BLE001 — failing to clean up old output does not block
                 continue
         formatter: logging.Formatter = _JsonFormatter() if use_json else _text_formatter()
         stream = logging.StreamHandler(sys.stderr)
@@ -78,5 +78,5 @@ def setup_logging(settings) -> None:
                 logging.getLogger(__name__).warning("log file unavailable, stderr only")
         logging.root.setLevel(level)
         _configured_fingerprint = fingerprint
-    except Exception:  # noqa: BLE001 —— 日志装配永不阻断业务
+    except Exception:  # noqa: BLE001 — logging assembly never blocks business
         pass

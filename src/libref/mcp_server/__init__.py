@@ -1,4 +1,4 @@
-"""MCP 出口。"""
+"""MCP exports."""
 
 from libref.mcp_server.auth import (
     auth_required,

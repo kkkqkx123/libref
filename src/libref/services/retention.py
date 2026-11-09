@@ -1,4 +1,4 @@
-"""版本保留治理：删除留痕与整版清理的唯一位置，不做自动后台清理。"""
+"""Version retention governance: the single place for deletion logging and whole-version purge; no automatic background cleanup."""
 
 from __future__ import annotations
 
@@ -133,11 +133,11 @@ def purge_version(
     if vec_store is not None:
         try:
             vec_store.delete_docs(removed_doc_ids)
-        except Exception as exc:  # noqa: BLE001 —— 整版清理继续走真源删除，只告警
+        except Exception as exc:  # noqa: BLE001 — whole-version purge proceeds with source-of-truth deletion; warn only
             logger.warning("purge vector docs failed for version %d: %s", version_id, exc)
         try:
             vec_store.delete_version(version_id)
-        except Exception as exc:  # noqa: BLE001 —— 同上
+        except Exception as exc:  # noqa: BLE001 — same as above
             logger.warning("purge vector version failed for version %d: %s", version_id, exc)
     conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))

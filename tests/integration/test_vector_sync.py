@@ -1,4 +1,4 @@
-"""向量同步接线测试，全部离线：集合派生、编码文本、未知形态重建、抓取同步、失败计数、全文标识与排序。"""
+"""Vector sync wiring tests, all offline: collection derivation, embedded texts, unknown-shape rebuild, scrape sync, failure counting, FTS identifiers and ordering."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ pytestmark = pytest.mark.integration
 
 
 class _ShapeClient:
-    """只实现集合治理所需的最小客户端，形态由构造参数决定。"""
+    """Minimal client implementing only what collection governance needs; shape set via constructor args."""
 
     def __init__(self, vectors) -> None:
         self._vectors = vectors

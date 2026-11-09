@@ -1,4 +1,4 @@
-"""源码分组与直接分块测试：归属、文档说明、空块拦截、双路对齐。"""
+"""Source-code grouping and direct chunking tests: attribution, docstrings, empty-chunk rejection, dual-path alignment."""
 
 from __future__ import annotations
 

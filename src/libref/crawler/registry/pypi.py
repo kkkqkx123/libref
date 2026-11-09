@@ -1,7 +1,8 @@
-"""PyPI 注册表提供方：名称归一化加文档候选排序加负载解析。
+"""PyPI registry provider: name normalization, doc candidate ranking, and payload parsing.
 
-归属 registry 子包的 PyPI 专属部分，通用地址卫生与版本逻辑在子包门面。
-新增生态时新增 registry/<eco>.py，并在门面 SUPPORTED_ECOSYSTEMS 追加名称。
+The PyPI-specific part of the registry subpackage; shared URL sanitization and
+version logic live in the subpackage facade.
+To add an ecosystem, add registry/<eco>.py and append its name to the facade's SUPPORTED_ECOSYSTEMS.
 """
 
 from __future__ import annotations

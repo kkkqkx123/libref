@@ -1,4 +1,4 @@
-"""文档链路缺口回归：分派、窗口、可观测、心跳。"""
+"""Doc pipeline gap regressions: dispatch, windowing, observability, heartbeat."""
 
 from __future__ import annotations
 

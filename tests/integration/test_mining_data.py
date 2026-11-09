@@ -1,4 +1,4 @@
-"""关系挖掘数据形式：保序、去噪、清扫、剪枝与检索查询的黄金样例。"""
+"""Relation-mining data shapes: golden samples for order preservation, denoising, sweeping, pruning, and retrieval queries."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""注册表解析测试：离线 MockTransport 断言解析、排序、缓存、离线语义。"""
+"""Registry parsing tests: offline MockTransport assertions for parsing, ordering, caching, offline semantics."""
 
 from __future__ import annotations
 

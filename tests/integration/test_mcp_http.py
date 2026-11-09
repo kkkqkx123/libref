@@ -1,4 +1,4 @@
-"""MCP serve-mcp Streamable HTTP 握手冒烟测试（子进程 + SDK HTTP client，不出网）。"""
+"""MCP serve-mcp Streamable HTTP handshake smoke test (subprocess + SDK HTTP client, no network)."""
 
 from __future__ import annotations
 
@@ -53,7 +53,7 @@ async def _handshake(port: int) -> None:
                 assert not getattr(res, "isError", False)
                 assert _MARKER in res.model_dump_json().lower()
                 return
-        except Exception as exc:  # noqa: BLE001 —— 服务启动中则重试
+        except Exception as exc:  # noqa: BLE001 — retry while the service is starting
             last = exc
             await asyncio.sleep(0.2)
     raise AssertionError(f"http handshake failed: {last}")

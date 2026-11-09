@@ -1,4 +1,5 @@
-"""版本化迁移：有序版本号加已应用记录加单条事务执行，幂等重放、失败整体回滚。"""
+"""Versioned migrations: ordered version numbers plus an applied-versions record plus
+single-transaction execution; idempotent replay, full rollback on failure."""
 
 from __future__ import annotations
 
@@ -47,7 +48,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations(
 
 
 def applied_versions(conn: sqlite3.Connection) -> set[int]:
-    """已应用的迁移版本号集合（未初始化时为空）。"""
+    """Set of applied migration version numbers (empty when not initialized)."""
     row = conn.execute(
         "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
     ).fetchone()
@@ -57,9 +58,10 @@ def applied_versions(conn: sqlite3.Connection) -> set[int]:
 
 
 def apply_migrations(conn: sqlite3.Connection) -> list[int]:
-    """按序应用未执行的迁移，返回本次应用的版本号列表。
+    """Apply pending migrations in order and return the versions applied this run.
 
-    幂等：重复调用为 no-op。单条失败则整体回滚、不记录版本号。
+    Idempotent: repeated calls are no-ops. A single failure rolls everything back
+    and the version is not recorded.
     """
     conn.execute(_MIGRATIONS_TABLE_SQL)
     done = applied_versions(conn)

@@ -1,4 +1,4 @@
-"""重试策略，蓝本 llm-suite-common/retry；三路传输共用同一驱动。"""
+"""Retry policy, blueprint llm-suite-common/retry; all three transport paths share one driver."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from email.utils import parsedate_to_datetime
 
 @dataclass(frozen=True)
 class RetryAttempt:
-    """单次重试调度描述，供观察回调消费。"""
+    """Description of a single retry scheduling, consumed by observation callbacks."""
 
     attempt: int
     max_retries: int
@@ -21,14 +21,14 @@ class RetryAttempt:
 
 @dataclass(frozen=True)
 class RetryPolicy:
-    """最大次数加基线延迟加指数退避，等待提示作为延迟下限。"""
+    """Max attempts plus base delay plus exponential backoff; Retry-After hints act as a delay floor."""
 
     max_retries: int = 3
     base_delay: float = 0.5
     exponential: bool = True
 
     def delay_for_attempt(self, attempt: int, floor_ms: int = 0) -> float:
-        """第几次重试前等待多少秒，序号从一开始。"""
+        """Seconds to wait before the given retry; numbering starts at 1."""
         if self.exponential:
             computed = self.base_delay * (2.0 ** max(0, attempt - 1))
         else:
@@ -37,7 +37,7 @@ class RetryPolicy:
 
 
 def parse_retry_after_ms(value: str | None) -> int | None:
-    """解析等待提示：秒数或 HTTP 日期，不可解析时返回空。"""
+    """Parse a Retry-After hint: seconds or an HTTP date; return None if unparseable."""
     if value is None:
         return None
     text = value.strip()
@@ -70,7 +70,7 @@ async def execute_with_retry[T](
     on_retry: Callable[[RetryAttempt], None] | None = None,
     reason_of: Callable[[BaseException], str] | None = None,
 ) -> T:
-    """按策略执行异步操作，策略为空时只跑一次。"""
+    """Run the async operation per the policy; with no policy, run once."""
     if policy is None:
         return await operation()
     attempt = 0

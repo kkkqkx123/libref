@@ -1,7 +1,8 @@
-"""实体分组：类加成员、文件头加顶层项。
+"""Entity grouping: classes plus members, file header plus top-level items.
 
-输入已抽取的声明列表与文件原文，输出源码位置有序的实体组，
-供分块组装按成员边界切分。调用关系不参与分组。
+Takes the extracted declaration list and the file source, and outputs entity groups
+ordered by source position, for chunk assembly to split along member boundaries.
+Call relationships do not participate in grouping.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ class EntityGroup:
 
 
 def build_groups(decls, source: bytes, path: str) -> list[EntityGroup]:
-    """按归属折叠声明：类锚点吸收直属后代，其余顶层声明各自成组。"""
+    """Fold declarations by ownership: a class anchor absorbs its direct descendants; other top-level declarations form their own groups."""
     anchors = [d for d in decls if d.parent is None]
     anchors.sort(key=lambda d: (d.start_byte, -d.end_byte))
     children: dict[str, list] = {}

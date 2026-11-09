@@ -1,10 +1,10 @@
-"""传输错误分类，蓝本 llm-suite-common/provider_error；编码重排问答三路共用。"""
+"""Transport error classification, blueprint llm-suite-common/provider_error; shared by the embedding, rerank, and chat paths."""
 
 from __future__ import annotations
 
 
 class LlmError(Exception):
-    """传输错误基类，子类各自声明是否可重试。"""
+    """Base transport error; subclasses declare their own retryability."""
 
     def is_retryable(self) -> bool:
         return False
@@ -17,15 +17,15 @@ class LlmError(Exception):
 
 
 class LlmConfigError(LlmError, ValueError):
-    """本地配置无效，发送前拒绝，不重试。"""
+    """Invalid local configuration; rejected before sending, not retried."""
 
 
 class LlmInvalidRequestError(LlmError, ValueError):
-    """请求载荷无效，发送前拒绝，不重试。"""
+    """Invalid request payload; rejected before sending, not retried."""
 
 
 class LlmProviderError(LlmError, RuntimeError):
-    """远端返回非成功状态，限流与服务端故障可重试。"""
+    """Remote returned a non-success status; rate limiting and server faults are retryable."""
 
     def __init__(
         self, status: int, message: str, retry_after_ms: int | None = None
@@ -46,11 +46,11 @@ class LlmProviderError(LlmError, RuntimeError):
 
 
 class LlmDecodeError(LlmError, RuntimeError):
-    """响应无法解码，含维度与数量失配，不重试。"""
+    """Response could not be decoded, including dim/count mismatches; not retried."""
 
 
 class LlmTransportError(LlmError, RuntimeError):
-    """网络层故障，可重试并计入故障窗口。"""
+    """Network-layer failure; retryable and counted toward the failure window."""
 
     def is_retryable(self) -> bool:
         return True
@@ -60,7 +60,7 @@ class LlmTransportError(LlmError, RuntimeError):
 
 
 class LlmTimeoutError(LlmError, RuntimeError):
-    """调用超出时限，可重试并计入故障窗口。"""
+    """Call exceeded its deadline; retryable and counted toward the failure window."""
 
     def __init__(self, message: str = "provider request timed out") -> None:
         super().__init__(message)
@@ -73,7 +73,7 @@ class LlmTimeoutError(LlmError, RuntimeError):
 
 
 class LlmCircuitOpenError(LlmError, RuntimeError):
-    """熔断器开路占位，限流熔断实例落地前不抛，永不重试。"""
+    """Circuit-open placeholder; never raised until the rate-limit/breaker instances land, never retried."""
 
     def __init__(self, message: str = "circuit breaker is open") -> None:
         super().__init__(message)

@@ -1,4 +1,4 @@
-"""通用抽取引擎：查询匹配、去重归并、记录装配。"""
+"""Generic extraction engine: query matching, deduplication/merging, record assembly."""
 
 from __future__ import annotations
 

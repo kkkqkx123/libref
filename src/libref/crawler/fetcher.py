@@ -1,7 +1,8 @@
-"""HTTP 抓取：httpx + etag/last_modified 增量 + per-host 限速退避。
+"""HTTP fetching: httpx + etag/last_modified incrementals + per-host rate-limited backoff.
 
-蓝本 docs-mcp-server 抓取层增量语义（304 → unchanged 结局短路）与
-crawl4ai per-host 退避思路。所有请求经注入的 AsyncClient。
+Follows the blueprint docs-mcp-server fetch layer's incremental semantics
+(304 → short-circuit to the unchanged outcome) and crawl4ai's per-host backoff
+idea. All requests go through the injected AsyncClient.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ _RETRYABLE_STATUS = (408, 429)
 @dataclass
 class FetchOutcome:
     url: str
-    status: str  # ok / unchanged / absent / failed（empty 与 skipped 由编排层判定）
+    status: str  # ok / unchanged / absent / failed (empty and skipped are decided by the orchestration layer)
     content: str | None = None
     etag: str | None = None
     last_modified: str | None = None

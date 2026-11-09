@@ -1,4 +1,4 @@
-"""限定名与整数的双向映射，排序稳定以保证可重现。"""
+"""Bidirectional mapping between qualified names and integers, with stable ordering for reproducibility."""
 
 from __future__ import annotations
 

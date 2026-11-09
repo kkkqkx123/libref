@@ -135,7 +135,7 @@ def _fetch_details(
 
 
 def alignment_key(meta: dict[str, Any] | None, url: str | None, doc_id: int) -> str:
-    """跨路对齐键：实体优先，文档节次之，块标识回退。"""
+    """Cross-path alignment key: entities first, document section next, chunk id as fallback."""
     data = meta or {}
     entities = data.get("entities") or []
     if entities:
@@ -154,7 +154,7 @@ def alignment_key(meta: dict[str, Any] | None, url: str | None, doc_id: int) -> 
 def _collapse_by_group(
     conn: sqlite3.Connection, fused: list[int]
 ) -> list[int]:
-    """同源分组只保留排序最前的块，两路孪生块合并为一次命中。"""
+    """Keep only the highest-ranked chunk per source group, merging twin chunks from both paths into one hit."""
     if len(fused) < 2:
         return fused
     marks = ",".join("?" for _ in fused)
@@ -221,7 +221,7 @@ def _cluster_sets(
 
 
 class HybridRetriever:
-    """双路召回与融合重排的编排位置，向量与重排失败只标记降级。"""
+    """Orchestration point for two-path recall and fused reranking; vector and rerank failures only set the degraded flag."""
 
     def __init__(
         self, conn, settings=None, *, vec_store=None, embed=None, rerank=None
@@ -243,7 +243,7 @@ class HybridRetriever:
         expand_window: bool | None = None,
         window_radius: int | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
-        """混合检索，返回结果列表与降级标记。"""
+        """Hybrid retrieval, returning the result list and a degraded flag."""
         from libref.config import setting_or_default
 
         if not query.strip():
@@ -293,7 +293,7 @@ class HybridRetriever:
                         if len(merged) >= need:
                             break
                     vec_ids = merged
-            except Exception:  # noqa: BLE001 —— 向量失败标记降级，走纯全文
+            except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
                 degraded = True
                 vec_ids = []
         fused = self._rrf(fts_ids, vec_ids)
@@ -363,7 +363,7 @@ class HybridRetriever:
             return fused, degraded, {}
         try:
             scored = await self._rerank(query, texts, len(head))
-        except Exception:  # noqa: BLE001 —— 重排失败标记降级，保留融合排序
+        except Exception:  # noqa: BLE001 -- rerank failure marks degraded, keep fused order
             return fused, True, {}
         order = sorted(scored, key=lambda kv: kv[1], reverse=True)
         pos_of = {idx: rank for rank, (idx, _) in enumerate(order)}
@@ -459,13 +459,13 @@ class HybridRetriever:
         return out
 
     def _postprocess(self, query: str, fused: list[int], fts_ids: list[int], vec_ids: list[int], *, expand_window: bool, window_radius: int, rerank_scores: dict[int, float] | None = None) -> list[dict[str, Any]]:
-        """后处理链：装配按序执行，窗口还原失败保留装配顺序。"""
+        """Post-processing chain: assembly runs in order; on window-expansion failure the assembled order is kept."""
         results = self._assemble(query, fused, fts_ids, vec_ids, rerank_scores=rerank_scores)
         return self._expand_windows(results, enabled=expand_window, radius=window_radius)
 
 
     def _expand_windows(self, results: list[dict[str, Any]], *, enabled: bool, radius: int) -> list[dict[str, Any]]:
-        """窗口还原后处理：按配置半径取前后块拼入片段，失败即保留原序。"""
+        """Window-expansion post-processing: prepend/append neighboring chunks by the configured radius; on failure keep the original order."""
         from libref.config import setting_or_default
 
         if not enabled or not results:
@@ -497,11 +497,11 @@ class HybridRetriever:
                     ]
                 expanded.append(item)
             return expanded
-        except Exception:  # noqa: BLE001 —— 扩展失败保留原结果
+        except Exception:  # noqa: BLE001 -- expansion failure keeps the original results
             return results
 
 
 def build_retriever(settings, conn, *, vec_store=None, embed=None, rerank=None):
-    """按配置构造混合检索器，缺向量时退化为纯全文。"""
+    """Build a hybrid retriever from settings; degrades to FTS-only when vectors are missing."""
     return HybridRetriever(conn, settings, vec_store=vec_store,
                            embed=embed, rerank=rerank)

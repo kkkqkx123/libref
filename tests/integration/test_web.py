@@ -1,4 +1,4 @@
-"""Web 出口集成测试：健康、检索、读取、审核闭环，不出网。"""
+"""Web endpoint integration tests: health, search, read, review loop, no network."""
 
 from __future__ import annotations
 

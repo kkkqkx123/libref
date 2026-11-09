@@ -1,4 +1,4 @@
-"""services 层测试：search_docs bm25 命中、jobs 队列状态流转、ingest 编排（MockTransport）。"""
+"""services layer tests: search_docs bm25 hits, jobs queue state transitions, ingest orchestration (MockTransport)."""
 
 from __future__ import annotations
 
@@ -110,7 +110,7 @@ def test_jobs_submit_run_and_recover(conn):
     assert ran == [job_id]
     assert mgr.get(job_id).status == "done"
 
-    # stale 恢复：伪造 running 且心跳过期
+    # stale recovery: forge a running job with an expired heartbeat
     conn.execute("UPDATE jobs SET status='running', heartbeat_at=0 WHERE id=?", (job_id,))
     conn.commit()
     stale = mgr.recover()
@@ -241,7 +241,7 @@ def test_scrape_skips_sweep_when_seed_truncated(conn):
         robots_cache_ttl_days=1.0,
     )
     with mock_ingest(handler):
-        # max_pages=1 截断发现集：缺席清理必须跳过，避免误删未覆盖页面
+        # max_pages=1 truncates the discovery set: absent-page cleanup must be skipped to avoid deleting uncovered pages
         IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/", max_pages=1)
 

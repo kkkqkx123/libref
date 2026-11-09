@@ -1,4 +1,4 @@
-"""config 测试：默认值 + 环境变量覆盖 + 文件加载优先级。"""
+"""config tests: defaults + environment variable overrides + file loading precedence."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from libref.config import (
 
 
 def test_defaults(tmp_path, monkeypatch) -> None:
-    # 家目录隔离下验证纯默认值：三路径均为绝对路径且相互独立
+    # verify pure defaults under home-directory isolation: all three paths absolute and independent
     _isolated_env(monkeypatch, tmp_path)
     s = LibrefSettings()
     assert s.db_path == tmp_path / ".local/share/libref/libref.db"
@@ -40,7 +40,7 @@ def test_defaults(tmp_path, monkeypatch) -> None:
 
 
 def test_dotenv_file(tmp_path, monkeypatch) -> None:
-    # .env 经 env_file 生效（LIBREF_ 前缀），且不入库的 key 由该通道注入
+    # .env works via env_file (LIBREF_ prefix), and keys not persisted to the DB are injected through that channel
     monkeypatch.chdir(tmp_path)
     (tmp_path / ".env").write_text(
         "LIBREF_EMBEDDING_MODEL=some/local-model\nLIBREF_EMBEDDING_API_KEY=sk-test\n",

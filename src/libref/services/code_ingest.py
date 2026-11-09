@@ -113,7 +113,7 @@ def _store_source_chunks(
     version_id: int,
     budgets=None,
 ) -> tuple[int, int, list[int], list[int]]:
-    """源码分块落库：按文件分组装配后经文档表复用落库，返回块数、空块、删增标识。"""
+    """Chunk source code and store it: assemble grouped by file, reuse the documents table for storing; returns chunk count, empty chunks, delete/insert ids."""
     from libref.astminer import grouping as _grouping
     from libref.astminer import source_chunk as _source_chunk
     from libref.chunking import default_budgets

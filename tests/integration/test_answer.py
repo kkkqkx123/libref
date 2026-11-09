@@ -1,4 +1,4 @@
-"""问答编排测试：混合检索加 grounded 生成，全部离线。"""
+"""QA orchestration tests: hybrid retrieval plus grounded generation, all offline."""
 
 from __future__ import annotations
 

@@ -1,7 +1,6 @@
-"""应用配置：环境变量与分节文件双来源，密钥只走环境变量。
+"""App config: environment variables and sectioned file as two sources; secrets only via environment variables.
 
-加载优先级为命令行显式覆盖高于环境变量（含本地文件注入），环境变量高于
-配置文件，配置文件高于内置默认值。生效快照一经生成即冻结，只读不写。
+Load priority: explicit CLI overrides beat environment variables (including local file injection), environment variables beat the config file, and the config file beats built-in defaults. The effective snapshot is frozen once generated, read-only.
 """
 
 from __future__ import annotations
@@ -18,11 +17,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ConfigError(Exception):
-    """配置加载失败，消息内注明来源文件或环境变量名。"""
+    """Config load failure; the message names the source file or environment variable."""
 
 
 class LibrefSettings(BaseSettings):
-    """全局配置；出口层与 services 层共用，db 层不依赖本模块。"""
+    """Global settings; shared by exit and services layers, the db layer does not depend on this module."""
 
     model_config = SettingsConfigDict(env_prefix="LIBREF_", env_file=".env", frozen=True)
 
@@ -36,8 +35,8 @@ class LibrefSettings(BaseSettings):
     robots_cache_ttl_days: float = Field(default=7.0, ge=0)
     ingest_clean_cache_cap: int = Field(default=512, ge=1)
     user_agent: str = "libref-crawler/0.1"
-    # 抓取链路代理：显式值优先于标准环境变量，未设置时沿用 httpx 默认环境识别。
-    # 旁路缺省含本地回环，显式值优先于 NO_PROXY 环境变量。
+    # Scrape-path proxy: explicit values beat standard env vars; httpx default env detection applies when unset.
+    # Proxy bypass defaults include local loopback; explicit values beat the NO_PROXY env var.
     http_proxy: str | None = None
     no_proxy: str | None = None
     qdrant_url: str = "http://localhost:6333"
@@ -50,8 +49,8 @@ class LibrefSettings(BaseSettings):
     chunk_bm25_overlap_terms: int = Field(default=5, ge=0)
     chunk_bm25_min_terms: int = Field(default=45, ge=0)
     chunk_reserve_ratio: float = Field(default=0.06, ge=0)
-    # 编码模型名与维度登记在库内，变更时向量索引整体失效重建。
-    # 密钥缺省时向量路禁用，只走全文检索。
+    # Embedding model name and dim are registered in the DB; on change the vector index is invalidated and rebuilt.
+    # Without an API key the vector path is disabled, full-text search only.
     embedding_model: str = "BAAI/bge-m3"
     embedding_dim: int = 1024
     embedding_api_base: str = "https://api.siliconflow.cn/v1"
@@ -79,13 +78,13 @@ class LibrefSettings(BaseSettings):
     fts_w_path: float = Field(default=3.0, ge=0)
     cluster_threshold: float = Field(default=0.15, ge=0)
     cluster_min_size: int = Field(default=2, ge=1)
-    # 注册表解析配置：缓存有效期、离线开关、私有放行、镜像预设、生态基址映射、外部覆盖文件。
-    # 密钥型鉴权不在本方案内，镜像地址经此处显式开启后方可使用。
-    # 新增生态时在默认基址与各预设追加条目并新增 registry_<eco>.py 提供方。
+    # Registry resolution config: cache TTL, offline toggle, private allow, mirror presets, ecosystem base mapping, external overrides file.
+    # Secret-based auth is out of scope; mirror addresses are usable only after being explicitly enabled here.
+    # When adding an ecosystem, add entries to the default base and each preset plus a new registry_<eco>.py provider.
     registry_cache_ttl_days: float = Field(default=1.0, ge=0)
     registry_offline: bool = False
     registry_allow_private: bool = False
-    # 镜像预设名单，见 crawler.registry.REGISTRY_MIRRORS；显式 registry_bases 逐键优先。
+    # Mirror preset list, see crawler.registry.REGISTRY_MIRRORS; explicit registry_bases wins per key.
     registry_mirror: str = "default"
     registry_bases: dict[str, str] = Field(
         default_factory=lambda: {
@@ -103,22 +102,22 @@ class LibrefSettings(BaseSettings):
     chat_timeout: float = Field(default=60.0, gt=0)
     chat_enable_thinking: bool = False
     material_limit: int = Field(default=1500, ge=1)
-    # MCP Streamable HTTP 传输：默认只绑本地回环，对外暴露需配令牌。
+    # MCP Streamable HTTP transport: loopback-only by default; exposing externally requires a token.
     mcp_host: str = "127.0.0.1"
     mcp_port: int = Field(default=8000, ge=1, le=65535)
     mcp_path: str = "/mcp"
-    # 接口鉴权：令牌只走环境变量，不进文件；对外暴露前必须配令牌。
+    # API auth: token only via env var, never files; a token must be set before external exposure.
     mcp_token: str | None = None
     mcp_require_auth: bool = False
-    # Web 出口：默认只绑本地回环，对外暴露以前置鉴权为前置条件。
+    # Web exit: loopback-only by default; external exposure requires fronting auth.
     web_host: str = "127.0.0.1"
     web_port: int = Field(default=8001, ge=1, le=65535)
-    # 文档链路补齐：浏览器降级默认开关、检索窗口扩展。
+    # Docs-path extras: browser fallback default toggle, retrieval window expansion.
     render_js_default: bool = False
     retriever_window_radius: int = Field(default=1, ge=0)
     retriever_expand_window: bool = False
-    # 抓取审计与本地治理：快照开关目录配额、仓库目录配额、删除日志保留期。
-    # 三路径相互独立，缺省均为家目录下绝对路径，与启动目录无关。
+    # Scrape audit and local governance: snapshot toggle/dir quota, repos dir quota, deletion-log retention.
+    # The three paths are independent; each defaults to an absolute path under the home directory, independent of the startup directory.
     snapshot_enabled: bool = False
     snapshot_dir: Path = Field(
         default_factory=lambda: Path.home() / ".local/share/libref/snapshots"
@@ -129,7 +128,7 @@ class LibrefSettings(BaseSettings):
     )
     repos_quota_mb: int = Field(default=2048, ge=0)
     deletion_log_ttl_days: float = Field(default=30.0, ge=0)
-    # 运行日志：级别与落盘，默认只走标准错误且保持安静。
+    # Runtime logging: level and file sink; stderr-only and quiet by default.
     log_level: str = "WARNING"
     log_file: Path | None = None
     log_format: str = "text"
@@ -171,7 +170,7 @@ SECRET_FIELDS = frozenset({"embedding_api_key", "chat_api_key", "mcp_token"})
 
 
 def setting_or_default(settings: LibrefSettings | None, name: str):
-    """无配置对象时按配置类默认值求解，避免业务代码手写兜底字面量。"""
+    """Resolve from the settings-class default when no settings object exists, avoiding hand-written fallback literals in business code."""
     if settings is not None:
         return getattr(settings, name)
     return LibrefSettings.model_fields[name].default
@@ -281,7 +280,7 @@ MASKED_VALUE = "***"
 
 
 def resolve_config_file(explicit: str | Path | None = None) -> Path | None:
-    """按显式参数、当前目录、用户配置目录的顺序定位配置文件，未找到返回空。"""
+    """Locate the config file by explicit arg, current directory, then user config dir; None if not found."""
     if explicit is not None:
         candidate = Path(explicit)
         if not candidate.is_file():
@@ -297,7 +296,7 @@ def resolve_config_file(explicit: str | Path | None = None) -> Path | None:
 
 
 def _flatten_document(path: Path, document: Mapping[str, Any]) -> dict[str, Any]:
-    """把分节文档展平为字段字典，节名与键名未知时直接报错。"""
+    """Flatten a sectioned document into a field dict; unknown section or key names raise immediately."""
     fields = set(LibrefSettings.model_fields)
     flat: dict[str, Any] = {}
     for name, value in document.items():
@@ -339,7 +338,7 @@ def _reject_secret(path: Path, key: str) -> None:
 
 
 def _resolve_relative_paths(values: dict[str, Any], base_dir: Path) -> dict[str, Any]:
-    """文件中的相对路径按配置文件所在目录解析，绝对路径保持不动。"""
+    """Resolve relative paths in the file against the config file's directory; absolute paths stay unchanged."""
     resolved = dict(values)
     for key in PATH_FIELDS & set(values):
         value = values[key]
@@ -353,7 +352,7 @@ def _resolve_relative_paths(values: dict[str, Any], base_dir: Path) -> dict[str,
 
 
 def _env_covered_fields() -> set[str]:
-    """环境变量与本地注入文件已给出的字段，文件同名字段为其让路。"""
+    """Fields already provided by env vars or local injected files; same-named file fields yield to them."""
     from pydantic_settings.sources import DotEnvSettingsSource, EnvSettingsSource
 
     fields = set(LibrefSettings.model_fields)
@@ -369,7 +368,7 @@ def load_settings(
     config: str | Path | None = None,
     overrides: Mapping[str, Any] | None = None,
 ) -> LibrefSettings:
-    """统一加载入口：定位文件、合并三来源、校验并返回冻结快照。"""
+    """Unified load entry: locate file, merge three sources, validate, return a frozen snapshot."""
     path = resolve_config_file(config)
     file_values: dict[str, Any] = {}
     if path is not None:
@@ -398,7 +397,7 @@ def load_settings(
 
 
 def redacted_dict(settings: LibrefSettings) -> dict[str, Any]:
-    """脱敏生效快照：密钥有值时掩盖，路径转字符串，可直接序列化。"""
+    """Redacted effective snapshot: secrets masked when set, paths as strings, directly serializable."""
     dumped = settings.model_dump()
     for key in SECRET_FIELDS:
         if dumped.get(key):
@@ -410,6 +409,6 @@ def redacted_dict(settings: LibrefSettings) -> dict[str, Any]:
 
 
 def settings_fingerprint(settings: LibrefSettings) -> str:
-    """生效快照摘要，同一内容稳定，任一字段变化即不同。"""
+    """Digest of the effective snapshot; stable for identical content, differs on any field change."""
     canonical = json.dumps(redacted_dict(settings), sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

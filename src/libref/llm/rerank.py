@@ -1,4 +1,4 @@
-"""重排传输，蓝本 tools/hurl/rerank.hurl 与 llm-suite-rerank；纯内存输入输出。"""
+"""Rerank transport, blueprints tools/hurl/rerank.hurl and llm-suite-rerank; pure in-memory input/output."""
 
 from __future__ import annotations
 
@@ -29,13 +29,13 @@ from libref.llm.retry import (
 )
 
 RerankFn = Callable[[str, list[str], int | None], Awaitable[list[tuple[int, float]]]]
-"""重排函数：查询加文档列表加截断数进，索引与分数列表出，分数降序。"""
+"""Rerank function: query plus document list plus truncate count in, list of (index, score) out, scores descending."""
 
 RERANK_TRUNCATE = 500
 
 
 def truncate_content(text: str, limit: int = RERANK_TRUNCATE) -> str:
-    """按字符安全截断超长文档，截断处标记省略。"""
+    """Safely truncate overlong documents by characters, marking the cut with an ellipsis."""
     if len(text) <= limit:
         return text
     return text[:limit] + "..."
@@ -43,7 +43,7 @@ def truncate_content(text: str, limit: int = RERANK_TRUNCATE) -> str:
 
 @dataclass(frozen=True)
 class RerankConfig:
-    """重排端点配置，基址密钥默认复用编码同值由装配层决定。"""
+    """Rerank endpoint config; base/key default to the embedding values, decided by the assembly layer."""
 
     base: str
     api_key: str
@@ -62,7 +62,7 @@ class RerankConfig:
 
     @classmethod
     def from_settings(cls, settings: LibrefSettings) -> RerankConfig | None:
-        """未启用、无模型或无密钥时返回空；基址密钥复用编码同值。"""
+        """Return None when not enabled, no model, or no key; base/key reuse the embedding values."""
         if not settings.rerank_enabled:
             return None
         if not settings.rerank_model:
@@ -81,7 +81,7 @@ class RerankConfig:
 
 
 class RerankClient:
-    """兼容重排接口，超时重试内聚在本层，失败直接抛错。"""
+    """Rerank-compatible interface; timeout and retry live in this layer, failures raise directly."""
 
     def __init__(
         self,
@@ -123,7 +123,7 @@ class RerankClient:
         *,
         client: httpx.AsyncClient | None = None,
     ) -> list[tuple[int, float]]:
-        """按查询打分，空文档直接返回空，不发起调用。"""
+        """Score against the query; empty documents return empty without a call."""
         if not documents:
             return []
         if not query.strip():
@@ -216,7 +216,7 @@ class RerankClient:
 def build_rerank_fn(
     settings: LibrefSettings, transport: httpx.BaseTransport | None = None
 ):
-    """按配置构造重排函数，未启用、无模型或无密钥时返回空。"""
+    """Build the rerank function from settings; returns None when not enabled, no model, or no key."""
     config = RerankConfig.from_settings(settings)
     if config is None:
         return None

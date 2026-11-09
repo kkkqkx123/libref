@@ -39,7 +39,7 @@ def build_mcp_server(
         ecosystem: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        """默认混合检索：双路召回融合，缺向量时回落全文。"""
+        """Default hybrid search: fused two-path recall, falling back to full-text when vectors are missing."""
         results, _ = await search.search_hybrid_async(
             query, library=library, version=version, ecosystem=ecosystem, limit=limit,
         )
@@ -53,7 +53,7 @@ def build_mcp_server(
         ecosystem: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        """精确全文查：只走 FTS 单路。"""
+        """Exact full-text query: FTS single path only."""
         return search.search_docs(query, library=library, version=version, ecosystem=ecosystem, limit=limit)
 
     @mcp.tool()

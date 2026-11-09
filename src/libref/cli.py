@@ -1,4 +1,4 @@
-"""命令行出口，只做参数解析加服务调用加结果打印。"""
+"""Command-line exit: only argument parsing plus service calls plus result printing."""
 
 from __future__ import annotations
 
@@ -135,7 +135,7 @@ def _scope_from_args(args: argparse.Namespace) -> dict:
 
 
 def cmd_refresh(args: argparse.Namespace) -> int:
-    """刷新意图入口：复用抓取链路增量语义。"""
+    """Refresh-intent entry: reuses the scrape path's incremental semantics."""
     settings = _load_settings(args)
     conn = _connect(settings)
     vec_store, embed = _build_vector(settings)
@@ -169,7 +169,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
 
 
 def cmd_smoke(args: argparse.Namespace) -> int:
-    """本地冒烟：起临时 HTTP 站验证发现到落库全链路，不依赖外网。"""
+    """Local smoke test: spin up a temporary HTTP site to validate the full chain from discovery to storage, no external network needed."""
     import threading
     from functools import partial
     from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -238,7 +238,7 @@ def cmd_smoke(args: argparse.Namespace) -> int:
 
 
 def _resolve_for_cli(settings, conn, ecosystem, library, requested_version):
-    """命令行解析形态：生态加名称解析出地址与版本，失败打印分类错误。"""
+    """CLI resolution form: ecosystem plus name resolve to address and version; on failure print the classified error."""
     import asyncio
 
     from libref.crawler.http import build_async_client
@@ -880,7 +880,7 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
         except ValueError as exc:
             print(f"config error: {exc}", file=sys.stderr)
             return 2
-    # MCPServer 在 worker 线程执行工具，连接需跨线程复用。
+    # MCPServer runs tools in a worker thread; the connection must be reusable across threads.
     conn = _connect(settings, check_same_thread=False)
     mcp = build_mcp_server(conn, settings)
     if args.http:
@@ -888,9 +888,9 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
         port = args.port or settings.mcp_port
         path = args.path or settings.mcp_path
         mcp.run("streamable-http", host=host, port=port,
-                streamable_http_path=path)  # 阻塞直到进程退出
+                streamable_http_path=path)  # blocks until the process exits
     else:
-        mcp.run("stdio")  # 阻塞直到 stdio 关闭
+        mcp.run("stdio")  # blocks until stdio closes
     conn.close()
     return 0
 

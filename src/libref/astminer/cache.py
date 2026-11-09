@@ -1,4 +1,4 @@
-"""增量缓存：仓库名、路径、指纹、配置版本联合主键。"""
+"""Incremental cache: composite key of repo name, path, fingerprint, and config version."""
 
 from __future__ import annotations
 

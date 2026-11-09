@@ -1,6 +1,6 @@
-"""UrlSeeder 测试：本地 fixtures（httpx MockTransport，不联网）。
+"""UrlSeeder tests: local fixtures (httpx MockTransport, no network).
 
-黄金样例：llms.txt 格式参照 llmstxt.org 规范；sitemap 结构参照 sitemap.org 协议。
+Golden samples: llms.txt format follows the llmstxt.org spec; sitemap structure follows the sitemap.org protocol.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
-"""进程内异步任务队列 + write-through 落库 + 心跳恢复。
+"""In-process async job queue + write-through persistence + heartbeat recovery.
 
-内存队列提交任务并回写任务表，worker 消费执行，超时未续写按 stale 恢复。
-治理表经版本化迁移建表，运行时按需幂等确保。
+The in-memory queue accepts submissions and writes back to the job table; a worker consumes and executes, and jobs whose heartbeat was not renewed within the timeout are recovered as stale.
+Governance tables are created via versioned migration and idempotently ensured at runtime.
 """
 
 from __future__ import annotations
@@ -61,7 +61,7 @@ class Job:
 
 
 class JobManager:
-    """进程内队列；submit 落 jobs 表，worker 消费并回写状态，recover 处理 stale。"""
+    """In-process queue; submit writes the jobs table, the worker consumes and writes back status, recover handles stale."""
 
     def __init__(self, conn: sqlite3.Connection, *, stale_after: float = _STALE_AFTER) -> None:
         self._conn = conn
@@ -70,7 +70,7 @@ class JobManager:
         self._worker: asyncio.Task[None] | None = None
         ensure_jobs_table(conn)
 
-    # ── 提交 / 查询 ──
+    # ── submit / query ──
 
     def submit(self, kind: str, params: dict[str, Any] | None = None) -> int:
         cur = self._conn.execute(
@@ -117,11 +117,11 @@ class JobManager:
     # ── worker ──
 
     def heartbeat(self, job_id: int) -> None:
-        """长任务续写心跳，抓取侧按页回调，避免长耗时被误判 stale。"""
+        """Renew the heartbeat of a long-running job; the scrape side calls back per page to avoid long jobs being misjudged as stale."""
         self._update(job_id, status="running", heartbeat_at=time.time())
 
     def start_worker(self, runner) -> None:
-        """runner(job: Job) -> None：同步或协程均可；异常整体捕获为 failed。"""
+        """runner(job: Job) -> None: sync function or coroutine; any exception is caught wholesale as failed."""
         self._worker = asyncio.get_running_loop().create_task(self._run(runner))
 
     async def _run(self, runner) -> None:
@@ -178,7 +178,7 @@ class JobManager:
 
     async def wait_for(self, job_id: int, *, timeout: float = 300.0,
                        poll: float = 0.02) -> Job:
-        """等待任务落定（done/failed），超时抛 TimeoutError。"""
+        """Wait for the job to settle (done/failed); raises TimeoutError on timeout."""
         deadline = time.monotonic() + timeout
         while True:
             job = self.get(job_id)
@@ -190,7 +190,7 @@ class JobManager:
                 raise TimeoutError(f"job {job_id} not finished within {timeout}s")
             await asyncio.sleep(poll)
 
-    # ── 心跳恢复 ──
+    # ── heartbeat recovery ──
 
     def recover(self) -> list[int]:
         stale_ids = [
@@ -208,7 +208,7 @@ class JobManager:
             logger.warning("job stale recovered ids=%s", stale_ids)
         return stale_ids
 
-    # ── 内部 ──
+    # ── internal ──
 
     def _update(self, job_id: int, **fields: Any) -> None:
         sets = ", ".join(f"{k}=?" for k in fields)

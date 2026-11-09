@@ -1,4 +1,4 @@
-"""MCP serve-mcp stdio 真实握手冒烟测试（子进程 + SDK stdio client，不出网）。"""
+"""MCP serve-mcp stdio real handshake smoke test (subprocess + SDK stdio client, no network)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""LLM 传输测试，全部离线：模拟传输注入，不联网。"""
+"""LLM transport tests, all offline: mock transport injection, no network."""
 
 from __future__ import annotations
 

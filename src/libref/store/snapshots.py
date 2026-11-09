@@ -1,4 +1,4 @@
-"""原始抓取快照：文件存大对象，超配额跳过计数，不阻断真源写入。"""
+"""Raw fetch snapshots: files store large objects, over-quota skips are counted, never blocking source-of-truth writes."""
 
 from __future__ import annotations
 

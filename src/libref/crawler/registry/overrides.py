@@ -1,7 +1,8 @@
-"""注册表人工覆盖：内置表加外部文件合并，精确匹配优先于推导。
+"""Manual registry overrides: built-in table merged with an external file; exact matches take precedence over inference.
 
-内置 OVERRIDES 随代码发布，外部文件经配置追加，文件命中优先于内置，
-两者均只低于用户显式地址。过期不降级，由门禁提醒核验。
+The built-in OVERRIDES ship with the code; the external file is added via
+configuration. File hits take precedence over built-ins, and both yield only to
+user-explicit URLs. Stale entries are not downgraded; the CI gate prompts re-verification.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 # (ecosystem, normalized_name) -> {docs_url, repo_url, source, verified_at}
-# docs_url 与 repo_url 至少一项存在，分别服务文档抓取与代码索引。
+# At least one of docs_url / repo_url must be present, serving doc crawling and code indexing respectively.
 OVERRIDES: dict[tuple[str, str], dict[str, str]] = {}
 
 _FILE_OVERRIDES: dict[tuple[str, str], dict[str, str]] = {}
@@ -36,7 +37,7 @@ def all_overrides() -> dict[tuple[str, str], dict[str, str]]:
 
 
 def get_override(ecosystem: str, normalized_name: str) -> dict[str, str] | None:
-    """精确匹配覆盖规则，文件优先于内置，命中返回条目，否则返回空。"""
+    """Exact-match override lookup: file wins over built-ins; returns the entry on hit, else None."""
     hit = _FILE_OVERRIDES.get((ecosystem, normalized_name))
     if hit is not None:
         return hit
@@ -79,7 +80,7 @@ def _check_entry(raw: dict) -> tuple[tuple[str, str], dict[str, str]]:
 
 
 def load_overrides_file(path: str | Path) -> dict[tuple[str, str], dict[str, str]]:
-    """读取外部覆盖文件并替换文件层，格式为对象数组的 JSON。"""
+    """Load the external overrides file and replace the file layer; format is a JSON array of objects."""
     resolved = Path(path)
     payload = json.loads(resolved.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
@@ -99,7 +100,7 @@ def load_overrides_file(path: str | Path) -> dict[tuple[str, str], dict[str, str
 
 
 def ensure_overrides_file(path: str | Path) -> None:
-    """按修改时间按需重载外部文件，未变化时不重复解析。"""
+    """Reload the external file on demand based on mtime; skip re-parsing when unchanged."""
     resolved = Path(path)
     try:
         mtime = resolved.stat().st_mtime
@@ -111,7 +112,7 @@ def ensure_overrides_file(path: str | Path) -> None:
 
 
 def is_override_stale(verified_at: str, ttl_days: float, now: date | None = None) -> bool:
-    """核验日期超出有效期或格式非法即视为过期，提示重验。"""
+    """Treat an entry as stale if the verification date is past TTL or malformed, prompting re-verification."""
     try:
         verified = datetime.strptime(verified_at.strip(), "%Y-%m-%d").date()
     except ValueError:
@@ -123,7 +124,7 @@ def is_override_stale(verified_at: str, ttl_days: float, now: date | None = None
 def find_stale_overrides(
     ttl_days: float, now: date | None = None
 ) -> list[tuple[tuple[str, str], dict[str, str]]]:
-    """列出全部已过期覆盖，供持续集成门禁失败提醒核验。"""
+    """List all stale overrides so a CI gate can fail and prompt re-verification."""
     return [
         (key, item)
         for key, item in all_overrides().items()

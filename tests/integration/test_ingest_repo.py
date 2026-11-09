@@ -1,4 +1,4 @@
-"""迷你仓库端到端：建索引到闭合模式落库。"""
+"""Mini-repo end to end: from indexing to closed patterns persisted in the DB."""
 
 from __future__ import annotations
 

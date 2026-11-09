@@ -1,4 +1,4 @@
-"""抽取、别名解析、缓存与标准库交叉校验。"""
+"""Extraction, alias resolution, caching, and stdlib cross-validation."""
 
 from __future__ import annotations
 

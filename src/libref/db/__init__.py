@@ -1,4 +1,4 @@
-"""存储层：schema、迁移、连接管理。"""
+"""Storage layer: schema, migrations, connection management."""
 
 from libref.db.conn import open_db
 from libref.db.migrations import (

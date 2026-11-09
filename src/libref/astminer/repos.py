@@ -1,4 +1,4 @@
-"""仓库管理：本地目录直用，远端浅克隆，文件按后缀遍历。"""
+"""Repository management: use local directories directly, shallow-clone remote ones, walk files by extension."""
 
 from __future__ import annotations
 

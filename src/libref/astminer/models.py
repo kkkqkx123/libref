@@ -1,4 +1,4 @@
-"""抽取记录模型：与落库列一一对应的跨包边界结构。"""
+"""Extraction record models: cross-package boundary structures matching storage columns one-to-one."""
 
 from __future__ import annotations
 

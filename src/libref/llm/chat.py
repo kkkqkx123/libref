@@ -1,4 +1,4 @@
-"""问答传输，兼容问答端点非流式与流式生成；默认禁用，不接检索调用链。"""
+"""Chat transport, compatible with non-streaming and streaming chat endpoints; disabled by default, not wired into the retrieval call chain."""
 
 from __future__ import annotations
 
@@ -30,15 +30,15 @@ from libref.llm.retry import (
 )
 
 ChatFn = Callable[[list[dict[str, str]]], Awaitable[str]]
-"""问答函数：消息列表进，文本出。"""
+"""Chat function: message list in, text out."""
 
 ChatStreamFn = Callable[[list[dict[str, str]]], AsyncIterator[str]]
-"""问答流函数：消息列表进，文本增量出。"""
+"""Streaming chat function: message list in, text increments out."""
 
 
 @dataclass(frozen=True)
 class ToolCall:
-    """工具调用：标识加名称加已解析实参。"""
+    """Tool call: identifier plus name plus resolved arguments."""
 
     id: str
     name: str
@@ -47,7 +47,7 @@ class ToolCall:
 
 @dataclass(frozen=True)
 class ChatResult:
-    """问答结果，文本工具调用用量同行。"""
+    """Chat result; text, tool calls, and usage on the same record."""
 
     text: str
     tool_calls: list[ToolCall]
@@ -89,7 +89,7 @@ def _usage_of(payload: dict[str, Any]) -> dict[str, int]:
 
 @dataclass(frozen=True)
 class ChatConfig:
-    """问答端点配置，密钥基址回落嵌入同值的语义由装配层决定。"""
+    """Chat endpoint config; key/base falling back to the embedding values is decided by the assembly layer."""
 
     base: str
     api_key: str
@@ -108,7 +108,7 @@ class ChatConfig:
 
     @classmethod
     def from_settings(cls, settings: LibrefSettings) -> ChatConfig | None:
-        """未启用、无模型或无密钥时返回空；密钥基址回落嵌入同值。"""
+        """Return None when not enabled, no model, or no key; key/base fall back to the embedding values."""
         if not settings.chat_enabled:
             return None
         if not settings.chat_model:
@@ -136,7 +136,7 @@ def _check_messages(messages: list[dict[str, str]]) -> None:
 
 
 class ChatClient:
-    """兼容问答接口，非流式可重试，流式不重试。"""
+    """Chat-compatible interface; non-streaming is retryable, streaming is not."""
 
     def __init__(
         self,
@@ -176,7 +176,7 @@ class ChatClient:
         *,
         client: httpx.AsyncClient | None = None,
     ) -> str:
-        """非流式生成，空消息直接拒绝，不发起调用。"""
+        """Non-streaming generation; empty messages rejected outright without a call."""
         result = await self.complete_result(messages, client=client)
         return result.text
 
@@ -186,7 +186,7 @@ class ChatClient:
         *,
         client: httpx.AsyncClient | None = None,
     ) -> ChatResult:
-        """非流式生成并透出工具调用与用量。"""
+        """Non-streaming generation surfacing tool calls and usage."""
         _check_messages(messages)
         if client is not None:
             return await self._post(client, messages)
@@ -255,7 +255,7 @@ class ChatClient:
         *,
         client: httpx.AsyncClient | None = None,
     ) -> AsyncIterator[str]:
-        """流式生成，逐增量产出文本，空消息直接拒绝。"""
+        """Streaming generation, yielding text incrementally; empty messages rejected outright."""
         _check_messages(messages)
         if client is not None:
             async for chunk in self._stream_with(client, messages):
@@ -336,7 +336,7 @@ class ChatClient:
 def build_chat_fn(
     settings: LibrefSettings, transport: httpx.BaseTransport | None = None
 ):
-    """按配置构造问答函数，未启用、无模型或无密钥时返回空。"""
+    """Build the chat function from settings; returns None when not enabled, no model, or no key."""
     config = ChatConfig.from_settings(settings)
     if config is None:
         return None
@@ -364,7 +364,7 @@ def build_chat_fn(
 def build_chat_stream_fn(
     settings: LibrefSettings, transport: httpx.BaseTransport | None = None
 ):
-    """按配置构造问答流函数，未启用、无模型或无密钥时返回空。"""
+    """Build the streaming chat function from settings; returns None when not enabled, no model, or no key."""
     config = ChatConfig.from_settings(settings)
     if config is None:
         return None

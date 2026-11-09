@@ -1,4 +1,4 @@
-"""源码抽取包：查询、配置、规则、模型、引擎、解析、缓存、仓库管理、模块上下文。"""
+"""Source extraction package: queries, config, rules, models, engine, resolution, cache, repos, module context."""
 
 from libref.astminer import queries
 from libref.astminer.cache import (

@@ -1,4 +1,4 @@
-"""模块路径上下文：相对路径转模块路径、相对导入展开。"""
+"""Module path context: relative paths to module paths, relative import expansion."""
 
 from __future__ import annotations
 

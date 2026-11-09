@@ -1,4 +1,4 @@
-"""分块层：双路预算分块与计量原语。"""
+"""Chunking layer: dual-path budgeted chunking and metering primitives."""
 
 from libref.chunking.budget import (
     ChunkBudget,

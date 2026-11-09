@@ -1,4 +1,4 @@
-"""Web 出口。"""
+"""Web exports."""
 
 from libref.web.app import build_web_app
 

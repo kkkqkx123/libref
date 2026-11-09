@@ -1,9 +1,10 @@
-"""两阶段 Markdown 分块：结构切分、贪心合并、双路预算装配。
+"""Two-phase Markdown chunking: structural splitting, greedy merging, dual-path budget assembly.
 
-同一批结构节按两路预算各产出一股块流，全文路块小，
-向量路块大，分组标识在标题切分处一次冻结，合并只沿用首节标识，
-两路同源节标识一致以便对齐。
-重叠只向前携带并注明来源，超限截尾一律告警计数。
+The same batch of structural sections produces one chunk stream per budget path; full-text path
+chunks are small and embedding-path chunks are large. Group IDs are frozen once at heading
+split boundaries and merging only reuses the first section's ID, so sections from the same
+origin share consistent IDs across both paths for alignment.
+Overlap is only carried forward with its source noted; over-limit truncation is always counted as a warning.
 """
 
 from __future__ import annotations
@@ -73,7 +74,7 @@ def split_markdown(
     *,
     budgets: dict[ChunkPath, ChunkBudget] | None = None,
 ) -> list[Chunk]:
-    """文档分块的向量路入口，返回嵌入流，行为与双路中的嵌入流一致。"""
+    """Embedding-path entry point for document chunking; returns the embedding stream, matching the embedding stream in the dual path."""
     return split_markdown_dual(md_text, url, budgets=budgets).embedding
 
 
@@ -83,7 +84,7 @@ def split_markdown_dual(
     *,
     budgets: dict[ChunkPath, ChunkBudget] | None = None,
 ) -> DualChunks:
-    """一次切分产出两股块流，内容相同的孪生块只保留向量路一份。"""
+    """One split produces two chunk streams; twin chunks with identical content are kept only once, on the embedding path."""
     resolved = budgets or default_budgets()
     sections = [s for s in _split_by_headings(md_text) if s.content.strip()]
     for idx, sec in enumerate(sections):
@@ -204,7 +205,7 @@ def _split_path(
 def _merge_sections(
     sections: list[_Section], path: ChunkPath, budget: ChunkBudget
 ) -> list[_Section]:
-    """低于最小阈值的节才与相邻同级节合并，合并者记入被并集合。"""
+    """Only sections below the minimum threshold merge with adjacent same-level sections; the absorber records them in merged_from."""
     merged: list[_Section] = []
     for sec in sections:
         if (
@@ -230,7 +231,7 @@ def _merge_sections(
 def _split_section_by_cost(
     content: str, path: ChunkPath, budget: ChunkBudget
 ) -> list[str]:
-    """本路唯一的上限执行位置：行装配加围栏保护，单行超限走字符预算硬切。"""
+    """The only limit-enforcement site on this path: line assembly with fence protection; oversized single lines go through character-budget hard splits."""
     if cost(content, path) <= budget.body_limit:
         return [content]
     parts: list[str] = []
@@ -261,7 +262,7 @@ def _split_section_by_cost(
 
 
 def _embed_head_cost(sec: _Section, path: ChunkPath) -> int:
-    """标题路径头在编码组装中的实际占位，规划时保守扣除。"""
+    """The heading-path head's actual footprint in encoded assembly, conservatively deducted during planning."""
     head = " / ".join(p for p in (sec.title, sec.path) if p)
     if not head:
         return 0
@@ -269,7 +270,7 @@ def _embed_head_cost(sec: _Section, path: ChunkPath) -> int:
 
 
 def _repair_embed_parts(sec: _Section, parts: list[str], budget: ChunkBudget) -> list[str]:
-    """装饰复检：头加正文超硬限则收紧正文重切，避免同步处截尾。"""
+    """Decoration re-check: if head plus body exceeds the hard limit, tighten the body and re-split to avoid truncation at sync points."""
     if budget.hard_limit <= 0:
         return parts
     head_cost = _embed_head_cost(sec, ChunkPath.EMBEDDING)
@@ -286,7 +287,7 @@ def _repair_embed_parts(sec: _Section, parts: list[str], budget: ChunkBudget) ->
 
 
 def _overlap_suffix(text: str, path: ChunkPath, limit: int) -> str:
-    """按本路口径取尾部原文，行累积超限则按字符兜底。"""
+    """Take the tail of the original text under this path's convention; fall back to characters when line accumulation exceeds the limit."""
     if limit <= 0 or not text.strip():
         return ""
     lines = text.splitlines()
@@ -305,7 +306,7 @@ def _overlap_suffix(text: str, path: ChunkPath, limit: int) -> str:
 
 
 def _rechain(chunks: list[Chunk]) -> None:
-    """过滤后重建序号与前后链，消除悬指。"""
+    """Rebuild sort orders and prev/next links after filtering, removing dangling references."""
     for order, chunk in enumerate(chunks):
         chunk.sort_order = order
         chunk.prev_chunk_id = chunks[order - 1].chunk_id if order > 0 else None
@@ -317,7 +318,7 @@ def _rechain(chunks: list[Chunk]) -> None:
 def _attach_prev_overlap(
     chunks: list[Chunk], budget: ChunkBudget
 ) -> None:
-    """只向前记录前驱来源与按口径计量的尾部实文，正文不重复。"""
+    """Record only the forward predecessor source and metered tail text per this path's convention; no body duplication."""
     if budget.overlap <= 0:
         return
     for prev, cur in itertools.pairwise(chunks):
@@ -334,7 +335,7 @@ def _fences_balanced(text: str) -> bool:
 
 
 def chunk_content_hash(content: str) -> str:
-    """块级增量键：内容哈希，复用即跳过向量重编码。"""
+    """Chunk-level incremental key: content hash; reuse skips re-embedding."""
     return hashlib.sha256((content or "").encode("utf-8")).hexdigest()
 
 
@@ -347,7 +348,7 @@ _STOPWORDS = frozenset(
 
 
 def extract_keywords(text: str, limit: int = 5) -> list[str]:
-    """规则关键词：拉丁词整体计并补下划线变体，中文按字计。"""
+    """Rule-based keywords: Latin words counted whole with underscore variants added, CJK counted per character."""
     if not text or not text.strip():
         return []
     latin = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", text)
@@ -373,7 +374,7 @@ _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;。？！；])\s+")
 
 
 def _split_long_line(line: str, path: ChunkPath, limit: int) -> list[str]:
-    """超长单行优先按句子边界拆，仍超限才按字符预算硬切。"""
+    """Oversized single lines split at sentence boundaries first; hard character-budget splits only if still over the limit."""
     pieces = [p for p in _SENTENCE_SPLIT_RE.split(line) if p]
     if len(pieces) > 1 and all(cost(p, path) + 1 <= limit for p in pieces):
         return pieces
@@ -381,7 +382,7 @@ def _split_long_line(line: str, path: ChunkPath, limit: int) -> list[str]:
 
 
 def _assign_relations(chunks: list[Chunk], *, md_source: str = "") -> None:
-    """补前后指针与字符区间，区间按源文顺序查找，重复文本顺序后移。"""
+    """Fill in prev/next pointers and character ranges; ranges are located in source order, with repeated text advancing the cursor."""
     cursor = 0
     for index, chunk in enumerate(chunks):
         chunk.prev_chunk_id = chunks[index - 1].chunk_id if index > 0 else None
@@ -397,7 +398,7 @@ def _assign_relations(chunks: list[Chunk], *, md_source: str = "") -> None:
 def ensure_hard_limit(
     text: str, path: ChunkPath, hard_limit: int
 ) -> tuple[str, bool]:
-    """装饰追加后的最终校验，超限截尾并返回是否截断，告警由调用方打。"""
+    """Final validation after decoration appends: truncate when over the limit and return whether truncated; the caller logs the warning."""
     if hard_limit == 0 or cost(text, path) <= hard_limit:
         return text, False
     return truncate_to_cost(text, path, hard_limit), True

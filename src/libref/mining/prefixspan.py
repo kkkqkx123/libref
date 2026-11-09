@@ -1,7 +1,8 @@
-"""自研 PrefixSpan 频繁序列模式挖掘（含 BIDE closed 模式）。
+"""In-house PrefixSpan frequent sequential pattern mining (including BIDE closed patterns).
 
-输入约定：db 为 item 已归一化为整数索引的序列库 ``list[list[int]]``
-（限定名 -> 整数 id 的映射由 :mod:`libref.mining.normalize` 管理）。
+Input convention: db is a sequence database ``list[list[int]]`` whose items are
+already normalized to integer indices (the qualified-name -> integer-id mapping
+is managed by :mod:`libref.mining.normalize`).
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from heapq import heappush, heappushpop
 __all__ = ["PrefixSpan"]
 
 DB = list[list[int]]
-Matches = list[tuple[int, int]]  # (序列 id, 模式在该序列中最后匹配位置)
+Matches = list[tuple[int, int]]  # (sequence id, last matched position of the pattern within that sequence)
 Occurs = dict[int, Matches]
 Pattern = list[int]
 Results = list[tuple[int, Pattern]]
@@ -23,17 +24,17 @@ Callback = Callable[[Pattern, Matches], None]
 
 
 def _next_entries(db: DB, matches: Matches) -> Occurs:
-    """构建投影数据库：item -> 各序列 lastpos+1 之后首次出现的 (id, pos)。
+    """Build the projected database: item -> first occurrence (id, pos) after lastpos+1 in each sequence.
 
-    蓝本 extratools.dicttools.nextentries，一次扫描同时完成
-    "枚举可扩展 item" 与 "计算子模式 matches"（效率支点）。
+    Based on extratools.dicttools.nextentries; a single scan accomplishes both
+    "enumerate extendable items" and "compute sub-pattern matches" (the efficiency pivot).
     """
     occurs: Occurs = defaultdict(list)
     for i, lastpos in matches:
         seq = db[i]
         for pos in range(lastpos + 1, len(seq)):
             entries = occurs[seq[pos]]
-            # 同一序列内同一 item 只记第一个位置：每个 (扩展, 序列) 对只计一次支持度
+            # Record only the first position per item within a sequence: each (extension, sequence) pair counts support once
             if entries and entries[-1][0] == i:
                 continue
             entries.append((i, pos))
@@ -41,10 +42,10 @@ def _next_entries(db: DB, matches: Matches) -> Occurs:
 
 
 def _reverse_scan(db: DB, patt: list[int | None], matches: Matches) -> bool:
-    """BIDE 反向扫描：各匹配位置向前找，收集可无代价插入的 item 集合。
+    """BIDE reverse scan: scan backwards from each match position, collecting items insertable at no cost.
 
-    蓝本 closed.py.__reversescan；会原地更新 matches（向前收缩匹配位置）。
-    返回 True 表示存在与当前模式同支持度的超模式（经插入路径）。
+    Based on closed.py.__reversescan; updates matches in place (shrinking match positions backwards).
+    Returns True if a super-pattern with the same support exists (via insertion paths).
     """
     for previtem in reversed(patt[:-1]):
         closed_items: set[int] = set()
@@ -66,19 +67,20 @@ def _reverse_scan(db: DB, patt: list[int | None], matches: Matches) -> bool:
 
 
 def _is_closed(db: DB, patt: Pattern, matches: Matches) -> bool:
-    """closed 判定（蓝本 closed.py.isclosed）：无同支持度超模式。
+    """Closedness check (based on closed.py.isclosed): no super-pattern with the same support.
 
-    反向检查带首尾哨兵（尾哨兵一轮等效于"尾部扩展"的超集检查），
-    再对真实匹配位置做精确的前向检查。
+    The backward check uses head/tail sentinels (one tail-sentinel pass is equivalent to
+    a superset check for "tail extension"), followed by an exact forward check on the
+    real match positions.
     """
-    # 反向：使用 (i, len(seq)) 起点与 [None, *patt, None] 哨兵
+    # Backward: start from (i, len(seq)) with [None, *patt, None] sentinels
     if _reverse_scan(
         db,
         [None, *patt, None],
         [(i, len(db[i])) for i, _ in matches],
     ):
         return False
-    # 前向：模式最后匹配位置之后的 item，各序列求交
+    # Forward: intersect items after the pattern's last match position across sequences
     closed_items: set[int] = set()
     for k, (i, endpos) in enumerate(matches):
         local = set(db[i][endpos + 1 :])
@@ -90,16 +92,16 @@ def _is_closed(db: DB, patt: Pattern, matches: Matches) -> bool:
 
 
 def _can_closed_prune(db: DB, patt: Pattern, matches: Matches) -> bool:
-    """BIDE 剪枝：反向检查（含首哨兵）判非 closed 即整棵子树剪掉。"""
+    """BIDE pruning: if the backward check (with head sentinel) finds a non-closed pattern, prune the whole subtree."""
     return _reverse_scan(db, [None, *patt], matches[:])
 
 
 class PrefixSpan:
-    """PrefixSpan 挖掘器（蓝本 prefixspan.py + frequent.py + topk.py）。"""
+    """PrefixSpan miner (based on prefixspan.py + frequent.py + topk.py)."""
 
     def __init__(self, db: DB) -> None:
         self.db = db
-        # 定制点 3：面向 API 调用序列的默认长度窗口
+        # Customization point 3: default length window for API call sequences
         self.minlen = 2
         self.maxlen = 10
         self._results: Results = []
@@ -119,7 +121,7 @@ class PrefixSpan:
         filter_fn: Filter | None,
         callback: Callback | None,
     ) -> Results | None:
-        """公共递归驱动（frequent 与 topk 共用框架）。"""
+        """Common recursive driver (shared framework for frequent and topk)."""
         self._results.clear()
 
         def rec(patt: Pattern, matches: Matches) -> None:
@@ -156,10 +158,10 @@ class PrefixSpan:
         closed: bool = False,
         key: Key | None = None,
         bound: Key | None = None,
-        filter: Filter | None = None,  # 与蓝本 API 对齐，刻意遮蔽内置名
+        filter: Filter | None = None,  # aligns with the ref/PrefixSpan-py API; shadows the builtin intentionally
         callback: Callback | None = None,
     ) -> Results | None:
-        """挖掘支持度 >= minsup 的频繁模式；closed=True 时仅返回 closed 模式。"""
+        """Mine frequent patterns with support >= minsup; only closed patterns when closed=True."""
         key = key or self._default_key
         bound = bound or key
 
@@ -181,10 +183,10 @@ class PrefixSpan:
         closed: bool = False,
         key: Key | None = None,
         bound: Key | None = None,
-        filter: Filter | None = None,  # 与蓝本 API 对齐，刻意遮蔽内置名
+        filter: Filter | None = None,  # aligns with the ref/PrefixSpan-py API; shadows the builtin intentionally
         callback: Callback | None = None,
     ) -> Results | None:
-        """挖掘支持度最高的 k 个模式（蓝本 topk.py：堆 + 动态阈值 + 上界 break）。"""
+        """Mine the k patterns with the highest support (based on topk.py: heap + dynamic threshold + upper-bound break)."""
         key = key or self._default_key
         bound = bound or key
         heap: list[tuple[int, Pattern, Matches]] = []
@@ -206,7 +208,7 @@ class PrefixSpan:
                     return
 
             occurs = _next_entries(self.db, matches)
-            # 定制/蓝本优化：扩展 item 按上界降序，一旦低于当前阈值即 break
+            # Customization/blueprint optimization: sort extension items by upper bound descending, break once below the current threshold
             for newitem in sorted(
                 occurs,
                 key=lambda item: bound(patt + [item], occurs[item]),
@@ -230,7 +232,7 @@ class PrefixSpan:
         return results
 
     def _matches_of(self, patt: Pattern) -> Matches:
-        """按定义重算模式在库中的匹配位置（topk callback 场景用）。"""
+        """Recompute the pattern's match positions in the database from first principles (used for topk callbacks)."""
         matches: Matches = []
         for i, seq in enumerate(self.db):
             it = iter(enumerate(seq))

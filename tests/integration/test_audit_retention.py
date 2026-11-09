@@ -1,4 +1,4 @@
-"""抓取审计、快照与保留治理回归。"""
+"""Scrape audit, snapshot, and retention governance regressions."""
 
 from __future__ import annotations
 

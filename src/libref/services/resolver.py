@@ -1,7 +1,6 @@
-"""库解析编排：查缓存、调客户端、写缓存、应用覆盖规则。
+"""Library resolution orchestration: check cache, call client, write cache, apply override rules.
 
-唯一读写注册表缓存表的位置。库元数据行由检索服务的库版本入口维护，
-本模块只返回解析结论，不直接写库表。
+The only place that reads and writes the registry cache table. Library metadata rows are maintained by the search service's library-version entry; this module only returns resolution conclusions and does not write library tables directly.
 """
 
 from __future__ import annotations
@@ -22,7 +21,7 @@ from libref.crawler.registry.overrides import ensure_overrides_file, get_overrid
 
 
 def infer_ecosystem(explicit: str | None, name: str) -> str:
-    """生态判定：显式优先，裸名不猜测，仅作用域与坐标形态可推断。"""
+    """Ecosystem determination: explicit wins; bare names are not guessed; only scope and coordinate shape are inferable."""
     if explicit is not None:
         eco = explicit.strip().lower()
         if eco not in ("pypi", "npm", "maven"):
@@ -166,7 +165,7 @@ def _override_addrs(
 
 
 def _registry_context(conn, settings, ecosystem: str | None, name: str):
-    """注册表公共上下文：生态推断、覆盖地址、缓存与新鲜度，一处装配。"""
+    """Registry shared context: ecosystem inference, override addresses, cache and freshness, assembled in one place."""
     allow_private = bool(settings.registry_allow_private)
     eco = infer_ecosystem(ecosystem, name)
     norm = normalize_name(eco, name)
@@ -185,7 +184,7 @@ def _registry_context(conn, settings, ecosystem: str | None, name: str):
 
 
 def _store_snapshot(conn, eco: str, norm: str, snap) -> None:
-    """注册表快照落缓存，文档与仓库两链路共用。"""
+    """Store the registry snapshot in cache; shared by both the docs and repo paths."""
     write_cache(
         conn, ecosystem=eco, name=norm,
         docs_url=snap.doc_candidates[0] if snap.doc_candidates else None,
@@ -209,7 +208,7 @@ def _build_repo_resolution(
     candidates: list[str],
     source: str,
 ) -> Resolution:
-    """仓库结论组装：覆盖仓库优先，缺仓库直接报 no_docs，与文档结论对称。"""
+    """Repo resolution assembly: override repo wins; missing repo raises no_docs directly, symmetric with the docs resolution."""
     repo = override_repo or repo_url
     if repo is None:
         raise RegistryError(
@@ -241,7 +240,7 @@ async def resolve_package(
     requested_version: str | None = None,
     explicit_url: str | None = None,
 ) -> Resolution:
-    """名称解析唯一入口：显式地址直通，其余走覆盖加缓存加注册表。"""
+    """Single entry point for name resolution: explicit addresses pass through, the rest go through overrides + cache + registry."""
     allow_private = bool(settings.registry_allow_private)
     if explicit_url is not None:
         if requested_version is None:

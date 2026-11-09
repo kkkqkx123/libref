@@ -1,4 +1,4 @@
-"""两遍解析：首遍收声明与别名，次遍展开调用并定置信。"""
+"""Two-pass resolution: the first pass collects declarations and aliases; the second expands calls and assigns confidence."""
 
 from __future__ import annotations
 

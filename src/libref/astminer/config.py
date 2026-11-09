@@ -1,4 +1,4 @@
-"""声明式语言配置：新增语言只加查询模块并登记。"""
+"""Declarative language config: adding a language only requires a query module and registration."""
 
 from __future__ import annotations
 

@@ -1,7 +1,8 @@
-"""向量索引封装，SQLite 真源的派生索引。
+"""Vector index wrapper, a derived index over the SQLite source of truth.
 
-向量点标识与文档行标识一一对应，载荷只存过滤键，正文回 SQLite 取。
-调用方为编排层，出口层不直接触达。
+Vector point ids map one-to-one to document row ids; the payload stores only filter
+keys and body text is fetched back from SQLite. Callers are the orchestration layer;
+the API layer never touches this directly.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from qdrant_client import QdrantClient, models
 
 
 def collection_for(base: str, db_path: str | os.PathLike[str]) -> str:
-    """按库文件身份派生集合名，不同库文件天然隔离，内存库保持原名。"""
+    """Derive the collection name from the database file identity; different db files are naturally isolated, in-memory dbs keep the base name."""
     raw = os.fspath(db_path)
     if raw == ":memory:":
         return base
@@ -24,7 +25,7 @@ def collection_for(base: str, db_path: str | os.PathLike[str]) -> str:
 
 
 class QdrantVecStore:
-    """单集合加载荷版本过滤，距离为余弦。"""
+    """Single collection with payload-version filtering; distance is cosine."""
 
     def __init__(
         self,
@@ -37,13 +38,15 @@ class QdrantVecStore:
         self.collection = collection
         self.client = client if client is not None else QdrantClient(url=url, timeout=timeout)
 
-    # ── 集合治理 ──
+    # ── Collection governance ──
 
     def ensure_collection(self, conn: sqlite3.Connection, model: str, dim: int) -> None:
-        """建或校验集合并登记模型元数据。
+        """Create or verify the collection and register model metadata.
 
-        集合不存在时按维度建集合加过滤索引。模型名、维度与记录不符，
-        或集合形态无法辨认时，删除重建并更新记录。记录一致时幂等空操作。
+        When the collection does not exist, create it with the given dimension plus
+        filter indexes. If the model name, dimension or records mismatch, or the
+        collection shape is unrecognizable, delete and recreate it and update the
+        records. When records match, this is an idempotent no-op.
         """
         old_model, old_dim = self._read_meta(conn)
         if self.client.collection_exists(self.collection):
@@ -68,7 +71,8 @@ class QdrantVecStore:
         return None
 
     def _create_payload_indexes(self) -> None:
-        # 灌数前建索引；版本标识是过滤键，整数租户优化保证同值互链
+        # Build indexes before loading data; version_id is the filter key, and the
+        # integer tenant optimization keeps equal values linked
         self.client.create_payload_index(
             collection_name=self.collection,
             field_name="version_id",
@@ -102,7 +106,7 @@ class QdrantVecStore:
         )
         conn.commit()
 
-    # ── 写入 ──
+    # ── Write ──
 
     def upsert_batch(
         self,
@@ -110,7 +114,7 @@ class QdrantVecStore:
         *,
         wait: bool = True,
     ) -> None:
-        """批量写入文档标识、库标识、版本标识与向量，幂等覆盖。"""
+        """Batch-write document, library and version ids with vectors, idempotent overwrite."""
         if not points:
             return
         self.client.upsert(
@@ -127,7 +131,7 @@ class QdrantVecStore:
         )
 
     def delete_docs(self, doc_ids: list[int]) -> None:
-        """删除指定文档的向量点，单页重分块时清理旧点。"""
+        """Delete vector points for the given documents, cleaning up old points on single-page re-chunking."""
         if not doc_ids:
             return
         self.client.delete(
@@ -136,7 +140,7 @@ class QdrantVecStore:
         )
 
     def delete_version(self, version_id: int) -> None:
-        """删除整版本向量点，版本重抓时清理。"""
+        """Delete all vector points of a version, on re-crawl of that version."""
         self.client.delete(
             collection_name=self.collection,
             points_selector=models.FilterSelector(
@@ -144,12 +148,12 @@ class QdrantVecStore:
             ),
         )
 
-    # ── 检索与对账 ──
+    # ── Search and reconciliation ──
 
     def search(
         self, query_vec: list[float], *, k: int, version_id: int
     ) -> list[tuple[int, float]]:
-        """近邻检索，按版本过滤，返回文档标识与余弦相似度，相似度降序。"""
+        """Nearest-neighbor search filtered by version; returns document ids and cosine similarity in descending similarity order."""
         res = self.client.query_points(
             collection_name=self.collection,
             query=query_vec,
@@ -160,7 +164,7 @@ class QdrantVecStore:
         return [(p.id, p.score) for p in res.points]
 
     def count(self, version_id: int) -> int:
-        """版本内向量点数，供与文档表计数对账。"""
+        """Number of vector points in a version, for reconciliation against the documents table count."""
         return self.client.count(
             collection_name=self.collection,
             count_filter=self._version_filter(version_id),

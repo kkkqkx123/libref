@@ -1,8 +1,9 @@
-"""分块预算与计量：双路口径、硬限与规划预留、与索引同款的词项计数。
+"""Chunk budgets and metering: dual-path conventions, hard limits and planning reserves, plus term counting matching the index.
 
-向量路按嵌入口径的 token 估算，全文路按词项计数。
-词项计数贴近全文索引的分词规则：拉丁标识符整体计一，
-中文按字计；索引侧中文展开后每字串的词元数与字数同量级，规划口径继续成立。
+The embedding path estimates tokens by the embedding convention; the full-text path counts terms.
+Term counting mirrors the full-text index's tokenization rules: Latin identifiers count as one,
+CJK counts per character; on the index side, after CJK expansion the token count per character string is
+the same order as the character count, so the planning convention still holds.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ class ChunkBudget:
 
     @property
     def body_limit(self) -> int:
-        """切分装配上限，为下游装饰预留位置，不触碰硬限。"""
+        """Assembly limit for splitting, reserving room for downstream decoration without touching the hard limit."""
         if self.hard_limit <= 0:
             return 0
         reserve = int(self.hard_limit * self.reserve_ratio)
@@ -37,7 +38,7 @@ class ChunkBudget:
 
 
 def budgets_from_settings(settings) -> dict[ChunkPath, ChunkBudget]:
-    """按配置构造双路预算，分块与预览的唯一入口。"""
+    """Build dual-path budgets from settings; the sole entry point for chunking and preview."""
     reserve = float(settings.chunk_reserve_ratio)
     return {
         ChunkPath.EMBEDDING: ChunkBudget(
@@ -56,7 +57,7 @@ def budgets_from_settings(settings) -> dict[ChunkPath, ChunkBudget]:
 
 
 def default_budgets(settings=None) -> dict[ChunkPath, ChunkBudget]:
-    """默认预算，无配置时按配置类默认值求解，不复制数值。"""
+    """Default budgets; without settings, resolved from the settings class defaults rather than copied values."""
     if settings is not None:
         return budgets_from_settings(settings)
     from libref.config import LibrefSettings
@@ -87,7 +88,7 @@ SPAN_UNAVAILABLE = "unavailable"
 
 
 def estimate_tokens(text: str) -> int:
-    """嵌入口径的启发式估算，单调即可，不追求与具体编码器一致。"""
+    """Heuristic estimate in the embedding convention; needs only be monotonic, not match any specific encoder."""
     if not text.strip():
         return 0
     latin = len(_LATIN_RUN_RE.findall(text))
@@ -96,7 +97,7 @@ def estimate_tokens(text: str) -> int:
 
 
 def count_terms(text: str) -> int:
-    """词项计数：拉丁标识符整体计一，中文按字计，后者刻意保守。"""
+    """Term count: Latin identifiers count as one, CJK counts per character; the latter is deliberately conservative."""
     if not text.strip():
         return 0
     latin = len(_LATIN_RUN_RE.findall(text))
@@ -115,7 +116,7 @@ def fits(text: str, path: ChunkPath, limit: int) -> bool:
 
 
 def truncate_to_cost(text: str, path: ChunkPath, limit: int) -> str:
-    """贴着字符边界取最长且合规的前缀，超限告警由调用方负责。"""
+    """Take the longest valid prefix at a character boundary; the caller is responsible for over-limit warnings."""
     if limit == 0 or cost(text, path) <= limit:
         return text
     chars = list(text)
@@ -132,7 +133,7 @@ def truncate_to_cost(text: str, path: ChunkPath, limit: int) -> str:
 def split_lines_by_cost(
     text: str, path: ChunkPath, limit: int
 ) -> list[str]:
-    """按行贪心装配的唯一兜底，单行超限则按字符预算硬切。"""
+    """Sole fallback for greedy line-based assembly; oversized single lines are hard-split by character budget."""
     if not text:
         return []
     if limit == 0:

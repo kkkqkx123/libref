@@ -1,4 +1,4 @@
-"""独立传输层：编码重排问答三路加错误分类重试保护与统一装配。"""
+"""Standalone transport layer: the embedding, rerank, and chat paths plus error classification, retry, protection, and unified assembly."""
 
 from libref.llm.chat import (
     ChatClient,

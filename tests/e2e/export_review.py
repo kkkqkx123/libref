@@ -1,9 +1,9 @@
-"""审查导出：逐文件落盘解析与分段报告，供对照源码人工确认。
+"""Review export: per-file parsing and segmentation reports written to disk, for manual confirmation against source.
 
-用法：uv run python tests/e2e/export_review.py [--lang javascript]
-复用现有抽取引擎、消歧、分组、分块入口，不新增抽取逻辑。
-输出到 tests/e2e/outputs/{lang}/，可读文本，不入库，不参与断言。
-分块无自然语言转换，只记录文件标记与分段跨度。
+Usage: uv run python tests/e2e/export_review.py [--lang javascript]
+Reuses existing extraction, disambiguation, grouping, and chunking entry points; adds no extraction logic.
+Output goes to tests/e2e/outputs/{lang}/ as human-readable text, not persisted to the DB, not used in assertions.
+Chunking does no natural-language transformation; only file markers and segment spans are recorded.
 """
 
 from __future__ import annotations

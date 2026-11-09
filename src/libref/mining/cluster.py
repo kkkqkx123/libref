@@ -1,6 +1,6 @@
-"""接口分组：按作用域重合度做层次合并，区分协同与可互换。
+"""API grouping: hierarchical merging by scope overlap, distinguishing co-use from interchangeability.
 
-纯内存算法，落库由 services 编排。
+Pure in-memory algorithm; persistence is orchestrated by services.
 """
 
 from __future__ import annotations
@@ -14,10 +14,10 @@ def cluster_apis(
     threshold: float = 0.15,
     min_size: int = 2,
 ) -> list[dict]:
-    """由作用域集合分组接口，重合度达阈值即连边，连通分量为一组。
+    """Group APIs from scope sets; connect an edge when overlap reaches the threshold, each connected component becomes a group.
 
-    重合度为交集作用域数除以并集作用域数，排序与合并全程确定性。
-    每组记成员列表、代表成员与规模，代表取出现作用域多者，相同取名称排序首位。
+    Overlap is the number of intersecting scopes divided by the union scope count; sorting and merging are fully deterministic.
+    Each group records its member list, representative member, and size; the representative is the member with the most scopes, ties broken by name order.
     """
     occ: dict[str, int] = {}
     pair: dict[tuple[str, str], int] = {}

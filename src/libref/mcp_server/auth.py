@@ -1,4 +1,4 @@
-"""MCP/HTTP 鉴权：令牌校验与暴露面硬化，路由保持零业务逻辑。"""
+"""MCP/HTTP auth: token verification and exposure hardening; routes stay free of business logic."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import ipaddress
 
 
 def is_loopback_host(host: str) -> bool:
-    """判定监听地址是否本地回环，解析失败按对外暴露处理。"""
+    """Whether the listen address is a local loopback; resolution failure is treated as externally exposed."""
     name = (host or "").strip().lower()
     if name in ("localhost",):
         return True
@@ -17,14 +17,14 @@ def is_loopback_host(host: str) -> bool:
 
 
 def auth_required(host: str, *, require_auth: bool, has_token: bool) -> bool:
-    """对外暴露或显式开启时必须鉴权，本地回环缺令牌时放行。"""
+    """Auth is required when externally exposed or explicitly enabled; loopback without a token is allowed."""
     if require_auth or not is_loopback_host(host):
         return True
     return False
 
 
 def check_startup(host: str, *, require_auth: bool, token: str | None) -> None:
-    """启动前硬化检查：需鉴权而无令牌时拒绝启动，不回落为无鉴权。"""
+    """Pre-start hardening check: refuse to start when auth is required but no token is set, never fall back to no auth."""
     if auth_required(host, require_auth=require_auth, has_token=bool(token)):
         if not token:
             raise ValueError(
@@ -34,7 +34,7 @@ def check_startup(host: str, *, require_auth: bool, token: str | None) -> None:
 
 
 def verify_bearer(authorization: str | None, token: str | None) -> bool:
-    """校验 Bearer 令牌，缺任一侧即拒绝，比较采用等长语义避免时序泄漏。"""
+    """Verify a Bearer token; reject if either side is missing; equal-length comparison avoids timing leaks."""
     if not authorization or not token:
         return False
     scheme, _, credential = authorization.partition(" ")
@@ -49,7 +49,7 @@ def verify_bearer(authorization: str | None, token: str | None) -> bool:
 
 
 def is_allowed_origin(origin: str | None, *, host: str) -> bool:
-    """来源校验：无来源头放行（非浏览器调用），有来源头须与监听面一致。"""
+    """Origin check: allow when no Origin header (non-browser calls); with a header it must match the listen surface."""
     if not origin:
         return True
     lowered = origin.strip().lower()

@@ -1,4 +1,4 @@
-"""统一装配，蓝本 llm-suite-gateway；按端点共享弹性状态，短命令与长服务共用。"""
+"""Unified assembly, blueprint llm-suite-gateway; resilience state shared per endpoint, used by both short commands and long-running services."""
 
 from __future__ import annotations
 
@@ -18,9 +18,9 @@ from libref.llm.retry import RetryAttempt
 
 
 class LlmGateway:
-    """长生命周期的统一装配点，按端点地址共享熔断限流。
+    """Long-lived unified assembly point, sharing breaker/rate-limiter per endpoint address.
 
-    易错的装配决策只收拢在各配置的桥接方法内，本层只做字段映射与共享。
+    Error-prone assembly decisions are confined to each config's bridging method; this layer only maps fields and shares state.
     """
 
     def __init__(
@@ -40,7 +40,7 @@ class LlmGateway:
         self._shared: dict[str, Resilience] = {}
 
     def resilience_for(self, base: str) -> Resilience:
-        """取该端点的共享保护件，限流未配置时只共享熔断。"""
+        """Get the shared protections for this endpoint; when no rate limit is configured, only the breaker is shared."""
         key = base.rstrip("/")
         slot = self._shared.get(key)
         if slot is None:
@@ -54,7 +54,7 @@ class LlmGateway:
         return slot
 
     def embed_fn(self, transport: httpx.BaseTransport | None = None) -> EmbedFn | None:
-        """编码函数，无密钥时返回空，调用方走纯全文路。"""
+        """Embed function; returns None without a key, caller falls back to pure full-text."""
         config = EmbeddingConfig.from_settings(self._settings)
         if config is None:
             return None
@@ -83,7 +83,7 @@ class LlmGateway:
         return embed
 
     def rerank_fn(self, transport: httpx.BaseTransport | None = None) -> RerankFn | None:
-        """重排函数，未启用、无模型或无密钥时返回空。"""
+        """Rerank function; returns None when not enabled, no model, or no key."""
         config = RerankConfig.from_settings(self._settings)
         if config is None:
             return None
@@ -126,7 +126,7 @@ class LlmGateway:
         )
 
     def chat_fn(self, transport: httpx.BaseTransport | None = None) -> ChatFn | None:
-        """问答函数，未启用、无模型或无密钥时返回空。"""
+        """Chat function; returns None when not enabled, no model, or no key."""
         client = self._chat_client()
         if client is None:
             return None
@@ -147,7 +147,7 @@ class LlmGateway:
     def chat_stream_fn(
         self, transport: httpx.BaseTransport | None = None
     ) -> ChatStreamFn | None:
-        """问答流函数，未启用、无模型或无密钥时返回空。"""
+        """Streaming chat function; returns None when not enabled, no model, or no key."""
         client = self._chat_client()
         if client is None:
             return None

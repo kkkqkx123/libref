@@ -1,4 +1,4 @@
-"""鉴权单元测试：回环判定、启动拒绝、令牌校验、来源校验。"""
+"""Auth unit tests: loopback detection, startup rejection, token validation, origin validation."""
 
 from __future__ import annotations
 

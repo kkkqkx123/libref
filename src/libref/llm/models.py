@@ -1,4 +1,4 @@
-"""模型目录，已验证模型的数据登记；未知模型不受影响，只加条目。"""
+"""Model catalog: registry of verified models; unknown models are unaffected, only entries are added."""
 
 from __future__ import annotations
 
@@ -20,5 +20,5 @@ KNOWN_RERANK_MODELS: frozenset[str] = frozenset(
 
 
 def embedding_dim_for(model: str) -> int | None:
-    """已知编码模型的期望维度，未知模型返回空并信任显式维度。"""
+    """Expected dim for known embedding models; unknown models return None and trust explicit dims."""
     return KNOWN_EMBEDDING_DIMS.get(model)

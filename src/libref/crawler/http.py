@@ -1,8 +1,9 @@
-"""抓取链路共享建 client：代理与旁路挂载的唯一收口。
+"""Shared client construction for the fetch chain: the single place where proxies and bypasses are mounted.
 
-定制点：httpx 显式 proxy 会丢掉环境 NO_PROXY 旁路，
-工厂在显式代理下自行合并旁路挂载，保证本地回环不进代理。
-测试传输下忽略代理，与 httpx 原生行为一致。
+Customization point: an explicit httpx proxy drops the environment NO_PROXY
+bypass, so the factory merges the bypass mounts itself under an explicit proxy
+to guarantee the local loopback never goes through the proxy. Proxy is ignored
+under a test transport, matching httpx's native behavior.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ def _is_ipv6(hostname: str) -> bool:
 
 
 def proxy_bypass_mounts(no_proxy_text: str | None) -> dict[str, None]:
-    """按 httpx 环境旁路规则把 NO_PROXY 文本转为挂载表。"""
+    """Convert NO_PROXY text into a mounts table following httpx's environment bypass rules."""
     mounts: dict[str, None] = {}
     for raw in (no_proxy_text or "").split(","):
         hostname = raw.strip()
@@ -51,7 +52,7 @@ def proxy_bypass_mounts(no_proxy_text: str | None) -> dict[str, None]:
 
 
 def resolve_proxy_url(settings) -> str | None:
-    """显式 LIBREF_HTTP_PROXY 优先，否则读标准环境代理。"""
+    """Explicit LIBREF_HTTP_PROXY wins; otherwise read the standard environment proxy."""
     explicit = str(settings.http_proxy or "").strip()
     if explicit:
         return explicit
@@ -63,7 +64,7 @@ def resolve_proxy_url(settings) -> str | None:
 
 
 def resolve_no_proxy_text(settings) -> str:
-    """显式 LIBREF_NO_PROXY 优先，否则读环境，否则回环默认。"""
+    """Explicit LIBREF_NO_PROXY wins; otherwise read the environment; otherwise fall back to loopback defaults."""
     explicit = str(settings.no_proxy or "").strip()
     if explicit:
         return explicit
@@ -74,12 +75,12 @@ def resolve_no_proxy_text(settings) -> str:
 
 
 def proxy_disabled(no_proxy_text: str) -> bool:
-    """旁路为全通配时视为停用代理。"""
+    """A fully wildcard bypass means the proxy is disabled."""
     return any(raw.strip() == "*" for raw in (no_proxy_text or "").split(","))
 
 
 def build_async_client(settings, *, transport: httpx.BaseTransport | None = None) -> httpx.AsyncClient:
-    """按配置构造抓取用 AsyncClient，调用方以 async with 管理生命周期。"""
+    """Build a fetch AsyncClient from settings; callers manage its lifetime with async with."""
     kwargs: dict = {
         "timeout": settings.request_timeout,
         "follow_redirects": True,

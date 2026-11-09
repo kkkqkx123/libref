@@ -29,7 +29,7 @@ class SearchService:
         ecosystem: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        """精确全文查：只走 FTS 单路，混合默认查走异步混合入口。"""
+        """Exact full-text query: FTS single path only; the hybrid default goes through the async hybrid entry."""
         from libref.config import setting_or_default
 
         filters = []
@@ -123,7 +123,7 @@ class SearchService:
         expand_window: bool | None = None,
         window_radius: int | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
-        """混合默认查：双路召回融合，失败回落全文并标记降级。"""
+        """Hybrid default query: fused two-path recall; on failure fall back to full-text and flag degraded."""
         from libref.store.retriever import HybridRetriever
 
         retriever = HybridRetriever(

@@ -1,7 +1,7 @@
-"""真实解析单元验证：受控采样加最小夹具，全部离线精确判定。
+"""Real-parsing unit verification: controlled sampling plus minimal fixtures, all offline exact checks.
 
-蓝本 docs/tests/parsing-verification.md。
-只改断言层，不新增抽取模块。
+Blueprint: docs/tests/parsing-verification.md.
+Only the assertion layer is changed; no new extraction modules.
 """
 
 from __future__ import annotations

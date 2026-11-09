@@ -1,4 +1,4 @@
-"""分层特征与接口分组的黄金样例与端到端落库断言。"""
+"""Golden samples for hierarchical features and interface grouping, plus end-to-end DB persistence assertions."""
 
 from __future__ import annotations
 

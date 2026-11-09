@@ -1,4 +1,4 @@
-"""传输保护，蓝本 llm-suite-client/resilience；限流熔断默认关闭，网关装配后生效。"""
+"""Transport protection, blueprint llm-suite-client/resilience; rate limiting and breaking are off by default and take effect once wired by the gateway."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from libref.llm.errors import LlmCircuitOpenError, LlmConfigError, LlmError
 
 
 class RateLimiter:
-    """令牌桶限流，突发内直接通过，超额按缺额等待。"""
+    """Token-bucket rate limiting; passes within burst, waits for the shortfall otherwise."""
 
     def __init__(self, rate_per_sec: float, burst: int) -> None:
         if rate_per_sec <= 0:
@@ -24,7 +24,7 @@ class RateLimiter:
         self._updated = time.monotonic()
 
     async def acquire(self) -> None:
-        """取到令牌后返回，桶空时等待至攒够一个。"""
+        """Return once a token is taken; when the bucket is empty, wait until one accrues."""
         while True:
             now = time.monotonic()
             elapsed = now - self._updated
@@ -37,7 +37,7 @@ class RateLimiter:
 
 
 class CircuitBreaker:
-    """连续失败熔断，成功清零，冷却后放行单个探测。"""
+    """Break on consecutive failures; success resets the count; after cooldown allow a single probe."""
 
     def __init__(self, failure_threshold: int = 5, cooldown: float = 30.0) -> None:
         if failure_threshold < 1:
@@ -50,7 +50,7 @@ class CircuitBreaker:
         self._opened_at: float | None = None
 
     def allow(self) -> bool:
-        """当前是否允许发送，冷却过后自动进入半开探测。"""
+        """Whether sending is currently allowed; after cooldown automatically enter half-open probing."""
         if self._opened_at is None:
             return True
         if time.monotonic() - self._opened_at >= self._cooldown:
@@ -71,7 +71,7 @@ class CircuitBreaker:
 
 @dataclass
 class Resilience:
-    """一处上游的共享保护件组合，缺省即关闭全部保护。"""
+    """Shared protection bundle for one upstream; defaults disable all protection."""
 
     limiter: RateLimiter | None = None
     breaker: CircuitBreaker | None = None
@@ -94,7 +94,7 @@ class Resilience:
 async def with_resilience[T](
     resilience: Resilience | None, operation: Callable[[], Awaitable[T]]
 ) -> T:
-    """单次发送前后做保护记账，无保护件时直接执行。"""
+    """Account protection bookkeeping around a single send; run directly with no protections configured."""
     if resilience is None:
         return await operation()
     await resilience.before_send()

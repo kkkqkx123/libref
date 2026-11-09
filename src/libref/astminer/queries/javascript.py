@@ -1,4 +1,4 @@
-"""JavaScript 查询：实体、调用、依赖、注释四域的模式文本。"""
+"""JavaScript queries: pattern text for the four domains of entities, calls, dependencies, and comments."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""统计与序列挖掘（纯内存算法，落库由 services 编排）。"""
+"""Statistics and sequence mining (pure in-memory algorithms; persistence is orchestrated by services)."""
 
 from .cluster import cluster_apis
 from .cooccur import build_scope_sets, cooccur_matrix, scope_key

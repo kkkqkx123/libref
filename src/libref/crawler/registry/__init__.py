@@ -1,10 +1,11 @@
-"""注册表子包门面：模型、地址卫生、版本比较、传输加生态分发。
+"""Registry subpackage facade: models, URL sanitization, version comparison,
+transport, and per-ecosystem dispatch.
 
-生态专属解析落各提供方模块，覆盖规则落 overrides，
-本门面只保留分发与通用逻辑，不读写库。
-网络统一走注入的 httpx.AsyncClient。
-跨包边界的结论为 pydantic 模型。
-新增生态时新增 registry/<eco>.py 并在 SUPPORTED_ECOSYSTEMS 追加名称。
+Ecosystem-specific parsing lives in the provider modules, override rules in
+overrides. This facade keeps only dispatch and shared logic; it never reads or
+writes storage. All networking goes through an injected httpx.AsyncClient.
+Results crossing package boundaries are pydantic models.
+To add an ecosystem, add registry/<eco>.py and append its name to SUPPORTED_ECOSYSTEMS.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ DEFAULT_REGISTRY_BASES = {
     "maven": "https://repo1.maven.org/maven2",
 }
 
-# 具名整组镜像预设；显式 registry_bases 逐键优先于此表。
+# Named whole-group mirror presets; an explicit registry_bases takes per-key precedence over this table.
 REGISTRY_MIRRORS = {
     "default": dict(DEFAULT_REGISTRY_BASES),
     "cn": {
@@ -56,7 +57,7 @@ _PRERELEASE_HINTS = (
 
 
 class RegistryError(Exception):
-    """注册表查询分类失败：not_found / retryable / no_docs。"""
+    """Classified registry query failure: not_found / retryable / no_docs."""
 
     def __init__(self, kind: str, message: str, hint: dict[str, Any] | None = None) -> None:
         super().__init__(message)
@@ -88,7 +89,7 @@ class Resolution(BaseModel):
 
 
 def normalize_name(ecosystem: str, name: str) -> str:
-    """按生态分发归一化，实现落各提供方模块。"""
+    """Dispatch name normalization per ecosystem; implementations live in provider modules."""
     if ecosystem == "pypi":
         from libref.crawler.registry.pypi import normalize_pypi_name
 
@@ -105,7 +106,7 @@ def normalize_name(ecosystem: str, name: str) -> str:
 
 
 def registry_base_for(ecosystem: str, settings) -> str:
-    """解析生态基址：显式映射逐键优先，否则落预设同生态条目。"""
+    """Resolve the ecosystem base URL: an explicit mapping wins per-key, else fall back to the preset entry for that ecosystem."""
     if ecosystem not in SUPPORTED_ECOSYSTEMS:
         raise ValueError(f"unsupported ecosystem: {ecosystem}")
     fields_set = getattr(settings, "model_fields_set", set()) or set()
@@ -175,7 +176,7 @@ def is_docs_like_url(url: str) -> bool:
 
 
 def is_repo_host_url(url: str) -> bool:
-    """仓库根地址（含仓库内页）永不直接作为文档候选。"""
+    """Repository root URLs (including in-repo pages) are never used directly as doc candidates."""
     try:
         host = (urlsplit(url).netloc or "").lower()
     except ValueError:
@@ -186,7 +187,7 @@ def is_repo_host_url(url: str) -> bool:
 def pick_repo_url(
     project_urls: dict[str, str] | None, *, allow_private: bool = False
 ) -> str | None:
-    """仓库提示地址：优先源码类条目，跳过赞助类条目。"""
+    """Repo hint URL: prefer source-code-style entries, skip funding/sponsorship entries."""
     lowered = {k.lower(): v for k, v in dict(project_urls or {}).items()}
 
     def clean(value: str | None) -> str | None:
@@ -223,7 +224,7 @@ def _version_key(value: str) -> list[tuple[int, Any]]:
 
 
 def best_effort_stable(versions: list[str]) -> str | None:
-    """无稳定版时的兜底：过滤预发布后缀后按版本号比较取最大。"""
+    """Fallback when no stable release exists: filter pre-release suffixes, then take the max by version comparison."""
     if not versions:
         return None
     plain = [

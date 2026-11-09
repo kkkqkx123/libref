@@ -1,8 +1,8 @@
-"""DDL 定义：核心表、全文索引与触发器、扩展表、向量元数据、内容指纹。"""
+"""DDL definitions: core tables, full-text index and triggers, extension tables, vector metadata, content fingerprints."""
 
 from __future__ import annotations
 
-# ── 核心表加全文索引与触发器 ──
+# ── Core tables with full-text index and triggers ──
 INITIAL_SCHEMA_SQL = """
 CREATE TABLE libraries(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -76,7 +76,7 @@ CREATE VIRTUAL TABLE documents_fts USING fts5(
   content_rowid='id'
 );
 
--- title 与 path 存于 documents.metadata JSON，触发器同步抽取
+-- title and path are stored in documents.metadata JSON; triggers extract them in sync
 CREATE TRIGGER documents_fts_after_insert
 AFTER INSERT ON documents BEGIN
   INSERT INTO documents_fts(rowid, content, title, url, path)
@@ -102,12 +102,12 @@ AFTER UPDATE OF content, metadata, url, page_id ON documents BEGIN
 END;
 """
 
-# ── 扩展表：源码挖掘与审核 ──
+# ── Extension tables: source mining and review ──
 MINING_REVIEW_SCHEMA_SQL = """
--- api_entities：确定性标识加限定名加库版本归属
+-- api_entities: deterministic identity plus qualified name plus library/version ownership
 CREATE TABLE api_entities(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  entity_uid TEXT NOT NULL UNIQUE,          -- 语义键哈希，相同即同一实体
+  entity_uid TEXT NOT NULL UNIQUE,          -- semantic-key hash; equal means the same entity
   library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
   version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
   qualified_name TEXT NOT NULL,
@@ -117,13 +117,13 @@ CREATE TABLE api_entities(
 
 CREATE INDEX idx_api_entities_name ON api_entities(qualified_name);
 
--- call_instances：调用实例记录，归属库版本，仓库名只做溯源
+-- call_instances: call instance records, owned by library version; repo name is for provenance only
 CREATE TABLE call_instances(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  call_uid TEXT NOT NULL UNIQUE,            -- 语义键哈希，相同即同一调用
+  call_uid TEXT NOT NULL UNIQUE,            -- semantic-key hash; equal means the same call
   callee_entity_id INTEGER REFERENCES api_entities(id) ON DELETE SET NULL,
-  callee_name TEXT NOT NULL,                -- 别名解析后的限定名
-  args JSON NOT NULL DEFAULT '[]',          -- 实参摘要列表
+  callee_name TEXT NOT NULL,                -- qualified name after alias resolution
+  args JSON NOT NULL DEFAULT '[]',          -- list of argument summaries
   repo TEXT NOT NULL,
   caller_file TEXT NOT NULL,
   line_start INTEGER NOT NULL,
@@ -133,12 +133,12 @@ CREATE TABLE call_instances(
 
 CREATE INDEX idx_call_instances_callee ON call_instances(callee_entity_id);
 
--- seq_patterns：序列挖掘产出
+-- seq_patterns: sequence mining output
 CREATE TABLE seq_patterns(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
   version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
-  pattern JSON NOT NULL,                    -- 限定名序列
+  pattern JSON NOT NULL,                    -- sequence of qualified names
   support INTEGER NOT NULL,
   is_closed INTEGER NOT NULL DEFAULT 0,
   UNIQUE(version_id, pattern)
@@ -146,7 +146,7 @@ CREATE TABLE seq_patterns(
 
 CREATE INDEX idx_seq_patterns_support ON seq_patterns(version_id, support DESC);
 
--- review_status：审核工作流
+-- review_status: review workflow
 CREATE TABLE review_status(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   entity_type TEXT NOT NULL,                -- document / call_instance / seq_pattern
@@ -158,7 +158,7 @@ CREATE TABLE review_status(
 );
 """
 
-# ── 向量索引元数据：向量本体在外部向量服务，库内只记模型名与维度 ──
+# ── Vector index metadata: vectors live in an external vector service; only model name and dimension are stored here ──
 VECTOR_META_SQL = """
 CREATE TABLE schema_meta(
   key TEXT PRIMARY KEY,
@@ -166,12 +166,12 @@ CREATE TABLE schema_meta(
 );
 """
 
-# ── 页面内容指纹：内容不变时短路为不变结局 ──
+# ── Page content fingerprint: unchanged content short-circuits to the unchanged outcome ──
 PAGES_CONTENT_HASH_SQL = """
 ALTER TABLE pages ADD COLUMN content_hash TEXT;
 """
 
-# ── 仓库登记与增量缓存，以及调用实例的版本归属补齐 ──
+# ── Repo registration and incremental cache, plus backfilling call-instance version ownership ──
 REPOS_ASTCACHE_SQL = """
 CREATE TABLE repos(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,14 +201,14 @@ CREATE INDEX idx_call_instances_version ON call_instances(version_id, caller_fil
 CREATE INDEX idx_call_instances_repo ON call_instances(repo, caller_file);
 """
 
-# ── 挖掘溯源与查询支撑：提交标识加版本内常用过滤索引 ──
+# ── Mining provenance and query support: commit identity plus common per-version filter indexes ──
 MINING_PROVENANCE_INDEX_SQL = """
 ALTER TABLE call_instances ADD COLUMN commit_sha TEXT NOT NULL DEFAULT '';
 CREATE INDEX idx_call_instances_version_callee ON call_instances(version_id, callee_name);
 CREATE INDEX idx_call_instances_scope ON call_instances(version_id, caller_file, call_order, start_byte);
 """
 
-# ── 分段与关系所需字段：声明签名族与调用拆分族 ──
+# ── Fields needed by chunking and relations: declaration-signature family and call-split family ──
 AST_CHUNK_RELATION_SQL = """
 ALTER TABLE api_entities ADD COLUMN parent TEXT;
 ALTER TABLE api_entities ADD COLUMN signature TEXT NOT NULL DEFAULT '';
@@ -225,7 +225,7 @@ ALTER TABLE call_instances ADD COLUMN start_byte INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE call_instances ADD COLUMN end_byte INTEGER NOT NULL DEFAULT 0;
 """
 
-# ── 运维治理表：任务、缓存、留痕、版本互斥，全部幂等建表 ──
+# ── Operations governance tables: jobs, cache, audit trail, version mutex; all created idempotently ──
 GOVERNANCE_SQL = """
 CREATE TABLE IF NOT EXISTS jobs(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -260,7 +260,7 @@ CREATE TABLE IF NOT EXISTS version_locks(
   heartbeat_at REAL NOT NULL
 );
 """
-# ── 分层特征与接口分组：批量构建落库，查询时浏览 ──
+# ── Hierarchical features and API grouping: built in batch, browsed at query time ──
 FEATURE_TREE_CLUSTER_SQL = """
 CREATE TABLE feature_nodes(
   id INTEGER PRIMARY KEY AUTOINCREMENT,

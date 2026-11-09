@@ -1,6 +1,6 @@
-"""分层特征树：按点分前缀聚合调用次数与覆盖作用域数。
+"""Hierarchical feature tree: aggregates call counts and covered scope counts by dot-separated prefix.
 
-纯内存算法，落库由 services 编排。
+Pure in-memory algorithm; persistence is orchestrated by services.
 """
 
 from __future__ import annotations
@@ -12,11 +12,11 @@ def build_feature_tree(
     calls: list[tuple[str, str]],
     kinds: dict[str, str] | None = None,
 ) -> list[dict]:
-    """由调用清单构建分层节点。
+    """Build hierarchical nodes from a call list.
 
-    每项调用为限定名加作用域标识，作用域标识由共现模块的作用域键给出。
-    限定名按点分逐级建节点，种类取实体表映射，缺失时记为包节点。
-    频次沿父链累加，调用次数按调用行计，作用域数按标识去重计。
+    Each call is a qualified name plus a scope key, where the scope key is given by the co-occurrence module's scope_key.
+    Qualified names become nodes level by level on dot boundaries; kinds come from the entity table mapping, defaulting to package nodes when absent.
+    Frequencies accumulate up the parent chain: call counts are per call row, scope counts are deduplicated by key.
     """
     kinds = kinds or {}
     leaf_calls: dict[str, int] = {}

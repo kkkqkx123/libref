@@ -1,4 +1,4 @@
-"""分块测试：结构切分、贪心合并、围栏平衡、双路对齐、重叠与预算。"""
+"""Chunking tests: structural splitting, greedy merging, fence balance, dual-path alignment, overlap and budget."""
 
 from __future__ import annotations
 

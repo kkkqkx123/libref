@@ -1,7 +1,9 @@
-"""robots 合规检查 + SQLite 缓存（TTL 7 天）。
+"""robots compliance checking + SQLite cache (7-day TTL).
 
-蓝本 crawl4ai utils.py::RobotsParser（SQLite 缓存 + MD5 变更检测）。
-定制点：解析用 stdlib urllib.robotparser；缓存表经版本化迁移建表，运行时按需幂等确保。
+Follows the blueprint crawl4ai utils.py::RobotsParser (SQLite cache + MD5
+change detection). Customization points: parsing via stdlib
+urllib.robotparser; the cache table is created via versioned migrations and
+idempotently ensured on demand at runtime.
 """
 
 from __future__ import annotations
@@ -20,9 +22,10 @@ def ensure_robots_cache(conn: sqlite3.Connection) -> None:
 
 
 class RobotsChecker:
-    """per-host robots 检查；结果缓存于 SQLite，TTL 过期后重取。
+    """Per-host robots checking; results cached in SQLite and re-fetched after TTL expiry.
 
-    robots 不可达（404 / 网络错误）视为全允许（crawl4ai 同语义）。
+    An unreachable robots file (404 / network error) means fully allow
+    (same semantics as crawl4ai).
     """
 
     def __init__(
@@ -57,7 +60,7 @@ class RobotsChecker:
         return float(delay) if delay is not None else None
 
     async def sitemap_urls(self, start_url: str) -> list[str]:
-        """robots 中声明的 Sitemap 地址，按出现顺序去重返回。"""
+        """Sitemap URLs declared in robots, deduplicated in order of appearance."""
         body = await self.raw_body(start_url)
         if not body:
             return []
@@ -79,7 +82,7 @@ class RobotsChecker:
         return out
 
     async def raw_body(self, url: str) -> str | None:
-        """取 robots 文本（命中缓存则直接返回），不可达返回空。"""
+        """Fetch the robots text (returned directly on cache hit); return None when unreachable."""
         key = self._cache_key(url)
         body = self._cached_body(key)
         if body is not None:
@@ -90,7 +93,7 @@ class RobotsChecker:
         self._store(key, body)
         return body
 
-    # ── 内部 ──
+    # ── internal ──
 
     def _cache_key(self, url: str) -> str:
         parts = urlsplit(url)
@@ -103,7 +106,7 @@ class RobotsChecker:
         if body is None:
             body = await self._fetch_body(url)
             if body is None:
-                return None  # robots 不可达 → 全允许
+                return None  # robots unreachable → fully allow
             self._store(key, body)
         rp = urllib.robotparser.RobotFileParser()
         rp.parse(body.splitlines())

@@ -1,8 +1,9 @@
-"""URL 链式发现：robots→llms.txt→sitemap(.gz/index)（蓝本 crawl4ai AsyncUrlSeeder 模式）。
+"""Chained URL discovery: robots → llms.txt → sitemap (.gz/index) (blueprint: crawl4ai AsyncUrlSeeder pattern).
 
-定制点：所有请求经注入的 httpx.AsyncClient（测试用 MockTransport，不联网）；
-llms.txt 优先于 sitemap；同站限定 + robots Disallow 过滤 + 去重；
-HEAD 存活预筛为可选步骤。
+Customization points: all requests go through an injected httpx.AsyncClient
+(MockTransport for tests, no network); llms.txt takes precedence over sitemap;
+same-site restriction + robots Disallow filtering + deduplication; a HEAD
+liveness pre-check is an optional step.
 """
 
 from __future__ import annotations
@@ -67,7 +68,7 @@ class UrlSeeder:
         prefilter: bool = False,
         max_pages: int | None = None,
     ) -> SeedResult:
-        """从起始地址发现文档 URL；目录级回退找 llms.txt，否则走站点地图队列。"""
+        """Discover doc URLs from the start URL; fall back to directory-level llms.txt, else walk the sitemap queue."""
         parts = urlsplit(start_url)
         host = parts.netloc
 
@@ -103,7 +104,7 @@ class UrlSeeder:
             seen.add(url)
             urls.append(url)
             if max_pages is not None and len(urls) >= max_pages:
-                # 数量截断只对过滤后集合生效；是否还有更多候选决定截断标记
+                # The count cap applies only to the filtered set; whether more candidates remain decides the truncated flag
                 truncated = truncated or len(result.urls) > len(urls)
                 break
 
@@ -127,7 +128,7 @@ class UrlSeeder:
             cross_site=cross_site,
         )
 
-    # ── llms.txt（含目录级回退与文档变体）──
+    # ── llms.txt (with directory-level fallback and doc variants) ──
 
     async def _from_llms_txt(self, base: str) -> SeedResult:
         return await self._collect_llms(base)
@@ -162,7 +163,7 @@ class UrlSeeder:
     def _parse_llms_body(
         self, body: str, llms_url: str, start_url: str
     ) -> tuple[list[str], list[str]]:
-        """解析 llms 列表；显式链接目标全收（相对按 llms 地址归一化），裸词仅收文档形。"""
+        """Parse an llms list; explicit link targets are all kept (relative ones normalized against the llms URL), bare words only if doc-shaped."""
         host = urlsplit(start_url).netloc
         urls: list[str] = []
         cross: list[str] = []
@@ -177,7 +178,7 @@ class UrlSeeder:
             elif cleaned.startswith("/"):
                 norm = urljoin(llms_url, cleaned)
             else:
-                # 相对路径与裸相对链接按 llms 地址归一化
+                # Relative paths and bare relative links are normalized against the llms URL
                 if ":" in cleaned and not cleaned.startswith((".", "/")):
                     return
                 norm = urljoin(llms_url, cleaned)
@@ -214,7 +215,7 @@ class UrlSeeder:
                     _emit(cleaned)
         return urls, cross
 
-    # ── sitemap（含 robots 声明、多层索引、魔数解压）──
+    # ── sitemap (incl. robots declarations, multi-level indexes, magic-number decompression) ──
 
     async def _from_sitemap(self, base: str, depth: int = 0) -> SeedResult:
         return await self._collect_sitemap(base, depth=depth)
@@ -263,7 +264,7 @@ class UrlSeeder:
         if self._robots is not None:
             try:
                 declared = await self._robots.sitemap_urls(start_url)
-            except Exception:  # noqa: BLE001 —— robots 不可达时降级直连，不阻断发现
+            except Exception:  # noqa: BLE001 — degrade to direct URLs when robots is unreachable; never block discovery
                 declared = []
             for loc in declared:
                 if loc not in queue:
@@ -279,7 +280,7 @@ class UrlSeeder:
                 candidate = f"{directory}/{name}"
                 if candidate not in queue:
                     queue.append(candidate)
-        # 根兜底：起始地址异常时至少试站点根
+        # Root fallback: when the start URL is odd, at least try the site root
         if not queue:
             queue.append(f"{root}/sitemap.xml")
         return queue
@@ -328,7 +329,7 @@ class UrlSeeder:
         try:
             payload = _maybe_gunzip(body)
         except OSError:
-            # llms 为纯文本：魔数不符直接按原文解码
+            # llms is plain text: on magic-number mismatch just decode as-is
             payload = body
         return payload.decode("utf-8", errors="replace"), None, False
 
@@ -362,7 +363,7 @@ class UrlSeeder:
 
     @staticmethod
     def _parse_loc_tags(xml_text: str) -> list[str]:
-        """容错解析 <loc> 标签（不引入 XML 依赖，sitemap 结构固定）。"""
+        """Tolerant <loc> tag parsing (no XML dependency; sitemap structure is fixed)."""
         urls: list[str] = []
         for chunk in xml_text.split("<loc>")[1:]:
             end = chunk.find("</loc>")
@@ -374,7 +375,7 @@ class UrlSeeder:
 
     @staticmethod
     def _parse_sitemap_locs(xml_text: str) -> list[str]:
-        """sitemapindex 中 <sitemap><loc> 子 sitemap 列表。"""
+        """List of <sitemap><loc> sub-sitemaps in a sitemapindex."""
         locs: list[str] = []
         for chunk in xml_text.split("<sitemap>")[1:]:
             end = chunk.find("</sitemap>")
@@ -409,7 +410,7 @@ def _llms_directories(start_url: str) -> list[str]:
     else:
         page_dir = segments[:-1]
         dirs_from_start = [root + "/" + "/".join(page_dir)] if page_dir else [root]
-        # 起始为文件时同时尝试去掉后缀的同名目录？不猜测，只按父目录回退
+        # No guessing about suffix-less sibling directories for file starts; fall back by parent directory only
     out: list[str] = []
     current = dirs_from_start[0]
     while True:
@@ -422,7 +423,7 @@ def _llms_directories(start_url: str) -> list[str]:
             current = root
         else:
             current = root + "/" + "/".join(segs[:-1]) if len(segs) > 1 else root
-    # 去重保序
+    # Deduplicate, preserving order
     seen: set[str] = set()
     ordered: list[str] = []
     for directory in out:
@@ -446,7 +447,7 @@ def _sitemap_directories(start_url: str) -> list[str]:
     dirs = [root]
     if start_dir != root and start_dir not in dirs:
         dirs.append(start_dir.rstrip("/"))
-        # 起始深层时补全中间父目录，保证逐级可试
+        # Fill in intermediate parent directories for deep starts so every level is tried
         current = start_dir.rstrip("/")
         while current != root:
             parent_parts = urlsplit(current)

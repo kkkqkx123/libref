@@ -1,4 +1,4 @@
-"""审核工作流：待定列表按置信优先级，终态流转显式拒绝非法转移。"""
+"""Review workflow: pending list ranked by confidence; terminal transitions explicitly reject illegal moves."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ _CONFIDENCE_RANK = {"AMBIGUOUS": 0, "INFERRED": 1, "EXTRACTED": 2}
 
 
 class ReviewService:
-    """审核编排，实体标识沿用 review_status 行定位。"""
+    """Review orchestration; entity identity uses review_status rows for locating."""
 
     def review_map_for_version(self, version_id: int) -> dict[int, str]:
         rows = self._conn.execute(
@@ -25,7 +25,7 @@ class ReviewService:
     def list_pending(
         self, limit: int = 50, *, entity_type: str = "call_instance"
     ) -> list[dict[str, Any]]:
-        """列出待定项，置信越低越靠前，再按更新时间。"""
+        """List pending items, lowest confidence first, then by update time."""
         if limit <= 0:
             raise ValueError("limit must be positive")
         if entity_type != "call_instance":
@@ -63,15 +63,15 @@ class ReviewService:
         return out[:limit]
 
     def approve(self, entity_id: int, *, entity_type: str = "call_instance") -> None:
-        """待定转已核准，非待定拒绝。"""
+        """Pending to approved; non-pending is rejected."""
         self._transition(entity_id, "approved", entity_type=entity_type)
 
     def mark_conflict(self, entity_id: int, *, entity_type: str = "call_instance") -> None:
-        """待定转冲突，非待定拒绝。"""
+        """Pending to conflict; non-pending is rejected."""
         self._transition(entity_id, "conflict", entity_type=entity_type)
 
     def reopen(self, entity_id: int, *, entity_type: str = "call_instance") -> None:
-        """冲突重开为待定，非冲突拒绝。"""
+        """Reopen conflict to pending; non-conflict is rejected."""
         if entity_type != "call_instance":
             raise ValueError(f"unsupported entity_type: {entity_type}")
         cur = self._conn.execute(

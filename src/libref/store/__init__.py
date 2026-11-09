@@ -1,1 +1,1 @@
-"""知识库存储层。"""
+"""Knowledge base storage layer."""

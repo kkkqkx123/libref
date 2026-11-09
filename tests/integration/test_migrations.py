@@ -1,4 +1,4 @@
-"""迁移测试：可重放、版本记录、表齐全（P0 最小验证之一）。"""
+"""Migration tests: replayable, version-recorded, all tables present (one of the P0 minimal checks)."""
 
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ def test_reopen_replay_noop(tmp_path) -> None:
 
 def test_failed_migration_rolls_back(tmp_path, monkeypatch) -> None:
     c = open_db(tmp_path / "fail.db")
-    # 注入一条坏迁移：执行失败后不得记录版本号
+    # inject a bad migration: a failed run must not record a version number
     from libref.db import migrations as m
 
     bad_version = max(x.version for x in m.MIGRATIONS) + 1

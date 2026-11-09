@@ -1,4 +1,4 @@
-"""Web 请求响应形状，只做参数校验与结果透传。"""
+"""Web request/response shapes; only parameter validation and result passthrough."""
 
 from __future__ import annotations
 

@@ -13,7 +13,7 @@ DEFAULT_MINLEN = 2
 
 
 def _cluster_defaults(threshold: float | None, min_size: int | None) -> tuple[float, int]:
-    """集群参数缺省时按配置类默认值求解，不复制数值。"""
+    """When cluster params are missing, resolve from the settings-class defaults instead of copying numbers."""
     if threshold is not None and min_size is not None:
         return threshold, min_size
     from libref.config import LibrefSettings
@@ -25,7 +25,7 @@ def _cluster_defaults(threshold: float | None, min_size: int | None) -> tuple[fl
 
 
 def _clear_derived(conn, version_id: int) -> None:
-    """清空版本内全部派生挖掘产出，调用为空或序列为空时保持三表一致。"""
+    """Clear all derived mining outputs within a version, keeping the three tables consistent when the call or sequence list is empty."""
     conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM api_clusters WHERE version_id=?", (version_id,))
@@ -53,7 +53,7 @@ def _keep_call(confidence: str, status: str | None, include_ambiguous: bool) -> 
 def refresh_feature_tree(
     conn, library_id: int, version_id: int, *, include_ambiguous: bool = False
 ) -> int:
-    """批量重建分层特征节点，返回节点数。"""
+    """Rebuild hierarchical feature nodes in bulk; returns the node count."""
     from libref.mining import feature_tree as _tree
     from libref.mining import scope_key as _scope_key
 
@@ -116,7 +116,7 @@ def refresh_clusters(
     threshold: float | None = None,
     min_size: int | None = None,
 ) -> int:
-    """批量重建接口分组，返回分组数。"""
+    """Rebuild API clusters in bulk; returns the cluster count."""
     from libref.mining import build_scope_sets as _scope_sets
     from libref.mining.cluster import cluster_apis as _cluster_fn
 
@@ -316,7 +316,7 @@ def mine_job_params(
     cluster_threshold: float | None = None,
     cluster_min_size: int | None = None,
 ) -> dict[str, Any]:
-    """构造挖掘任务参数，与抓取任务参数对称，保证可重放。"""
+    """Build mining job params, symmetric with scrape job params, ensuring replayability."""
     return {
         "library": library,
         "version": version,
@@ -332,7 +332,7 @@ def mine_job_params(
 
 
 def build_mine_runner(settings, conn):
-    """构造挖掘任务消费函数，只处理 mine_patterns，与源码索引解耦。"""
+    """Build the mining job consumer function, handling only mine_patterns, decoupled from source indexing."""
     from libref.config import LibrefSettings
 
     _cluster_fields = LibrefSettings.model_fields

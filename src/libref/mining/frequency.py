@@ -1,4 +1,4 @@
-"""频次聚合：精确计数供挖掘截断，层级计数仅供展示。"""
+"""Frequency aggregation: exact counts feed mining truncation; hierarchical counts are for display only."""
 
 from __future__ import annotations
 
@@ -37,6 +37,6 @@ def prune_to_top_n(
 
 
 def top_exact_names(counts: dict[str, int], n: int) -> set[str]:
-    """截断唯一入口：按精确计数取前若干限定名，排序稳定可重现。"""
+    """Sole truncation entry point: take the top qualified names by exact count, with stable, reproducible ordering."""
     ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     return {name for name, _ in ordered[:n]}
