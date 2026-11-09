@@ -1,0 +1,105 @@
+# libref 实例配置模板：复制为 libref.toml 后按需改值即可生效。
+#
+#   cp libref.example.toml libref.toml
+#
+# 加载优先级：命令行显式覆盖 > 环境变量（含 .env） > 本文件 > 内置默认值。
+# 密钥（embedding_api_key、chat_api_key）禁止写在本文件，须走环境变量或 .env，
+# 写了会直接报错。相对路径按本文件所在目录解析。
+# 未列出的键保持内置默认值；未知节与未知键会直接报错，便于发现拼写错误。
+
+[server]
+# SQLite 真源库路径
+db_path = "data/libref.db"
+
+[crawler]
+# 抓取并发、超时、重试与站点礼貌性
+fetch_concurrency = 4
+request_timeout = 30.0
+fetch_max_retries = 3
+crawl_delay_default = 1.0
+robots_cache_ttl_days = 7.0
+user_agent = "libref-crawler/0.1"
+# 代理缺省走标准 HTTP_PROXY/HTTPS_PROXY/NO_PROXY 环境变量；此处显式值优先。
+# http_proxy = "http://127.0.0.1:7890"
+# no_proxy = "localhost,127.0.0.1,::1"
+# 疑似 JS 渲染页是否尝试浏览器降级（需 browser extra）
+render_js_default = false
+
+[storage]
+# 向量索引（Qdrant，可重建派生索引；崩溃后按 SQLite 重灌）
+qdrant_url = "http://localhost:6333"
+qdrant_collection = "libref_chunks"
+qdrant_timeout = 5.0
+
+[chunking]
+# 文档分块双路预算：向量路按 token，全文路按词项
+chunk_embed_max_tokens = 512
+chunk_embed_overlap_tokens = 50
+chunk_embed_min_tokens = 150
+chunk_bm25_max_terms = 150
+chunk_bm25_overlap_terms = 5
+chunk_bm25_min_terms = 45
+chunk_reserve_ratio = 0.06
+
+[embeddings]
+# 编码模型（OpenAI 兼容 /v1/embeddings）；模型名与维度登记在库内，变更时整体失效重建。
+# 密钥缺省时向量路禁用，只走全文检索。密钥见 .env，不写此处。
+embedding_model = "BAAI/bge-m3"
+embedding_dim = 1024
+embedding_api_base = "https://api.siliconflow.cn/v1"
+
+[rerank]
+# 重排默认关闭，由检索基准裁决是否开启
+rerank_model = "BAAI/bge-reranker-v2-m3"
+rerank_enabled = false
+rerank_candidate_limit = 30
+rerank_top_n = 10
+
+[retrieval]
+# 混合检索：排名融合常数、双路权重、频次与分组加成、命中窗口扩展
+rrf_k = 20
+rrf_w_fts = 1.0
+rrf_w_vec = 0.5
+freq_alpha = 0.15
+cluster_alpha = 0.05
+cluster_threshold = 0.15
+cluster_min_size = 2
+retriever_window_radius = 1
+retriever_expand_window = false
+
+[registry]
+# 注册表解析：缓存有效期、离线开关、私有放行、镜像预设、生态基址映射、外部覆盖文件
+registry_cache_ttl_days = 1.0
+registry_offline = false
+registry_allow_private = false
+registry_mirror = "default"
+# 显式基址逐键优先于镜像预设；cn 预设见 .env.example 注释
+registry_bases = { pypi = "https://pypi.org/pypi", npm = "https://registry.npmjs.org", maven = "https://repo1.maven.org/maven2" }
+# registry_overrides_file = "overrides.json"
+registry_override_ttl_days = 180.0
+
+[chat]
+# 问答默认禁用；密钥缺省时回落到嵌入密钥。密钥见 .env，不写此处。
+chat_model = "Qwen/Qwen3.5-4B"
+chat_enabled = false
+chat_api_base = "https://api.siliconflow.cn/v1"
+chat_timeout = 60.0
+chat_enable_thinking = false
+
+[mcp]
+# MCP Streamable HTTP 传输：默认只绑本地回环，无鉴权不对外暴露
+mcp_host = "127.0.0.1"
+mcp_port = 8000
+mcp_path = "/mcp"
+
+[retention]
+# 抓取审计与本地治理：原始快照开关目录配额、仓库配额、删除日志保留期
+snapshot_enabled = false
+# snapshot_dir = "data/snapshots"
+snapshot_quota_mb = 512
+repos_quota_mb = 2048
+deletion_log_ttl_days = 30.0
+
+# 预留节：后端落地前必须保持为空，填值会报错。
+# [mcp.auth]
+# [web]

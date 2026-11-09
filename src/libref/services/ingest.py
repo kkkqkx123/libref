@@ -141,12 +141,12 @@ def build_scrape_runner(settings, conn, *, vec_store=None, embed=None, mgr=None)
     """构造任务消费函数，按任务参数执行整站抓取。"""
     service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
 
-    async def runner(job: Job) -> None:
+    async def runner(job: Job):
         if job.kind != SCRAPE_JOB_KIND:
             raise ValueError(f"unsupported job kind: {job.kind}")
         params = job.params
         heartbeat = (lambda: mgr.heartbeat(job.id)) if mgr is not None else None
-        await service.scrape_docs_async(
+        return await service.scrape_docs_async(
             params["library"],
             params["version"],
             params["start_url"],
@@ -296,6 +296,13 @@ class IngestService:
         self._budgets = _doc_budgets(settings)
         self._clean_fingerprint = _budget_fingerprint(self._budgets)
         self._clean_cache: dict[str, str] = {}
+        self._snapshots = None
+        if bool(getattr(settings, "snapshot_enabled", False)):
+            from libref.store.snapshots import SnapshotStore, snapshot_root
+            self._snapshots = SnapshotStore(
+                snapshot_root(settings),
+                quota_mb=int(getattr(settings, "snapshot_quota_mb", 512)),
+            )
 
     def scrape_docs(
         self,
@@ -506,6 +513,8 @@ class IngestService:
                 "seed_discovered",
                 "scope_rejected",
                 "seed_truncated",
+                "snapshot_written",
+                "snapshot_quota_skipped",
                 "elapsed_ms",
                 *(f"{step}_ms" for step in PIPELINE_STEPS),
             )
@@ -583,14 +592,17 @@ class IngestService:
                                 url,
                                 page,
                                 scope=scope,
+                                snapshot_ctx=(ecosystem, library, version),
                             )
-                        except Exception:  # noqa: BLE001 —— 单页失败隔离计数，不中断整站抓取
+                        except Exception:  # noqa: BLE001
                             result, empty_dropped, render_skipped, stage_ms = StoreResult("failed"), 0, False, {}
                         counts[result.outcome] = counts.get(result.outcome, 0) + 1
                         counts["chunk_empty_dropped"] += empty_dropped
                         if render_skipped:
                             counts["render_skipped"] += 1
                         counts["chunk_reused"] += len(getattr(result, "reused_ids", []))
+                        counts["snapshot_written"] += int(stage_ms.get("snapshot_written", 0))
+                        counts["snapshot_quota_skipped"] += int(stage_ms.get("snapshot_quota_skipped", 0))
                         for step in PIPELINE_STEPS:
                             counts[f"{step}_ms"] += int(stage_ms.get(f"{step}_ms", 0))
                         removed_all.extend(result.removed_ids)
@@ -607,6 +619,7 @@ class IngestService:
                         accepted,
                         truncated=truncated,
                         counts=counts,
+                        snapshot_ctx=(ecosystem, library, version),
                     )
                 )
                 vectors_start = _time.monotonic()
@@ -637,12 +650,12 @@ class IngestService:
                 getattr(self._settings, "embedding_model", ""),
                 getattr(self._settings, "embedding_dim", 0),
             )
-        except Exception:  # noqa: BLE001 —— 派生索引失败只计数，不推翻真源写入
+        except Exception:  # noqa: BLE001
             counts["vector_failed"] += len(removed) + len(inserted)
             return
         try:
             self._vec.delete_docs(removed)
-        except Exception:  # noqa: BLE001 —— 派生索引失败只计数，不推翻真源写入
+        except Exception:  # noqa: BLE001
             counts["vector_failed"] += len(removed) + len(inserted)
             return
         try:
@@ -674,7 +687,7 @@ class IngestService:
                     for d, vec in zip(docs, vecs)
                 ]
             )
-        except Exception:  # noqa: BLE001 —— 派生索引失败只计数，不推翻真源写入
+        except Exception:  # noqa: BLE001
             counts["vector_failed"] += len(inserted)
 
     def _sweep_absent(
@@ -687,16 +700,14 @@ class IngestService:
         *,
         truncated: bool,
         counts: dict[str, int],
+        snapshot_ctx: tuple[str, str, str] | None = None,
     ) -> list[int]:
-        """缺席清理：已有页面减去本次发现集，返回删掉的文档标识。
-
-        有效完整发现才执行；截断或失败一律跳过，避免误删。
-        """
         if seed.source == "none":
             return []
         if seed.failed or truncated:
             return []
         removed: list[int] = []
+        removed_urls: list[str] = []
         discovered = set(accepted_urls)
         for url in store.list_page_urls(version_id):
             if not url.startswith(("http://", "https://")):
@@ -704,7 +715,26 @@ class IngestService:
             if url not in discovered:
                 result = store.store_page(version_id, library_id, url, "absent")
                 removed.extend(result.removed_ids)
+                removed_urls.append(url)
                 counts["absent"] = counts.get("absent", 0) + 1
+        if removed_urls and snapshot_ctx is not None:
+            try:
+                from libref.services.retention import log_deletion
+                ecosystem, library, version = snapshot_ctx
+                log_deletion(
+                    self._conn,
+                    library=library,
+                    version=version,
+                    ecosystem=ecosystem,
+                    reason="absent-sweep",
+                    detail={
+                        "urls": removed_urls[:20],
+                        "url_count": len(removed_urls),
+                        "removed_docs": len(removed),
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                pass
         return removed
 
     def _clean_with_cache(self, kind: str, raw: str, url: str) -> str:
@@ -723,7 +753,7 @@ class IngestService:
         else:
             try:
                 cleaned = extract_to_markdown(raw, url)
-            except Exception:  # noqa: BLE001 —— 净化失败计空
+            except Exception:  # noqa: BLE001
                 cleaned = ""
         while len(self._clean_cache) >= 512:
             oldest = next(iter(self._clean_cache))
@@ -742,9 +772,12 @@ class IngestService:
         page,
         *,
         scope: dict[str, Any] | None = None,
+        snapshot_ctx: tuple[str, str, str] | None = None,
     ) -> tuple[StoreResult, int, bool, dict[str, int]]:
         import time as _time
         stage_ms: dict[str, int] = {f"{step}_ms": 0 for step in PIPELINE_STEPS}
+        stage_ms["snapshot_written"] = 0
+        stage_ms["snapshot_quota_skipped"] = 0
         fetch_start = _time.monotonic()
         if not await robots.can_fetch(url):
             return StoreResult("skipped"), 0, False, stage_ms
@@ -764,6 +797,20 @@ class IngestService:
         if result.status == "failed":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)
             return store.store_page(version_id, library_id, url, "failed"), 0, False, stage_ms
+        if self._snapshots is not None and snapshot_ctx is not None and result.content:
+            try:
+                ecosystem, library, version = snapshot_ctx
+                _, written = self._snapshots.put(
+                    ecosystem, library, version, url,
+                    result.content.encode("utf-8", errors="ignore"),
+                    result.content_type,
+                )
+                if written:
+                    stage_ms["snapshot_written"] = 1
+                else:
+                    stage_ms["snapshot_quota_skipped"] = 1
+            except Exception:  # noqa: BLE001
+                pass
 
         raw_body = result.content or ""
         kind = classify_content(result.content_type, url)
@@ -783,7 +830,7 @@ class IngestService:
                             render_html,
                         )
                         rendered = await render_html(url) if is_playwright_available() else None
-                    except Exception:  # noqa: BLE001 —— 渲染失败回落跳过
+                    except Exception:  # noqa: BLE001
                         rendered = None
                     if rendered:
                         markdown = self._clean_with_cache("html", rendered, url)
@@ -1175,6 +1222,7 @@ def index_repo(
     ecosystem: str = "custom",
     resolved_from: str | None = None,
     registry_confirmed: bool = True,
+    repos_quota_mb: int | None = None,
 ) -> dict[str, int]:
     from pathlib import Path
 
@@ -1206,6 +1254,9 @@ def index_repo(
         resolved_from=resolved_from,
         registry_confirmed=registry_confirmed,
     )
+    if repos_quota_mb is not None:
+        from libref.services.retention import check_quota
+        check_quota(settings_dir, int(repos_quota_mb), "repos")
     manager = RepoManager(settings_dir)
     repo_name = f"{ecosystem}/{library}/{version}"
     existing = conn.execute(
@@ -1564,10 +1615,10 @@ def mine_patterns(
 
 
 def build_repo_runner(settings, conn, repos_dir=None):
-    async def runner(job) -> None:
+    async def runner(job):
         if job.kind == INDEX_REPO_JOB_KIND:
             p = job.params
-            index_repo(
+            return index_repo(
                 conn,
                 p["library"],
                 p["version"],
@@ -1577,10 +1628,11 @@ def build_repo_runner(settings, conn, repos_dir=None):
                 ecosystem=str(p.get("ecosystem", "custom") or "custom"),
                 resolved_from=p.get("resolved_from"),
                 registry_confirmed=bool(p.get("registry_confirmed", True)),
+                repos_quota_mb=int(getattr(settings, "repos_quota_mb", 2048)),
             )
         elif job.kind == MINE_PATTERNS_JOB_KIND:
             p = job.params
-            mine_patterns(
+            return mine_patterns(
                 conn,
                 p["library"],
                 p["version"],

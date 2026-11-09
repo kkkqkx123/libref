@@ -25,6 +25,9 @@ htmlcov/
 .env
 .env.*
 !.env.example
+
+# 本地实例配置（libref.example.toml 模板需入库，复制出的 libref.toml 不进版本库）
+/libref.toml
 .idea/
 .vscode/
 

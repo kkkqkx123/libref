@@ -22,16 +22,40 @@ CREATE TABLE IF NOT EXISTS jobs(
       CHECK (status IN ('pending','running','done','failed')),
   error TEXT,
   heartbeat_at REAL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  result JSON NOT NULL DEFAULT '{}',
+  finished_at TEXT
 );
 """
 
-_STALE_AFTER = 600.0  # 心跳超时（秒），超过视为 stale
+_STALE_AFTER = 600.0
+
+
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
 def ensure_jobs_table(conn: sqlite3.Connection) -> None:
     conn.execute(_JOBS_TABLE_SQL)
+    cols = _table_columns(conn, "jobs")
+    if "result" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN result JSON NOT NULL DEFAULT '{}'")
+    if "finished_at" not in cols:
+        conn.execute("ALTER TABLE jobs ADD COLUMN finished_at TEXT")
     conn.commit()
+
+
+def summarize_result(value: object) -> object:
+    if isinstance(value, dict):
+        return {str(k): summarize_result(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        items = [summarize_result(v) for v in value]
+        if len(items) > 100:
+            return {"items": items[:100], "truncated": len(items) - 100}
+        return items
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return str(value)
 
 
 @dataclass
@@ -41,6 +65,8 @@ class Job:
     params: dict[str, Any] = field(default_factory=dict)
     status: str = "pending"
     error: str | None = None
+    result: Any = field(default_factory=dict)
+    finished_at: str | None = None
 
 
 class JobManager:
@@ -67,12 +93,34 @@ class JobManager:
 
     def get(self, job_id: int) -> Job | None:
         row = self._conn.execute(
-            "SELECT id, kind, params, status, error FROM jobs WHERE id=?", (job_id,)
+            "SELECT id, kind, params, status, error, result, finished_at"
+            " FROM jobs WHERE id=?", (job_id,)
         ).fetchone()
         if row is None:
             return None
+        try:
+            result = json.loads(row[5]) if row[5] else {}
+        except ValueError:
+            result = {}
         return Job(id=row[0], kind=row[1], params=json.loads(row[2]),
-                   status=row[3], error=row[4])
+                   status=row[3], error=row[4], result=result,
+                   finished_at=row[6])
+
+    def list_recent(self, limit: int = 20) -> list[Job]:
+        rows = self._conn.execute(
+            "SELECT id, kind, params, status, error, result, finished_at"
+            " FROM jobs ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+        out: list[Job] = []
+        for row in rows:
+            try:
+                result = json.loads(row[5]) if row[5] else {}
+            except ValueError:
+                result = {}
+            out.append(Job(id=row[0], kind=row[1], params=json.loads(row[2]),
+                           status=row[3], error=row[4], result=result,
+                           finished_at=row[6]))
+        return out
 
     # ── worker ──
 
@@ -94,18 +142,22 @@ class JobManager:
             self._update(job_id, status="running", heartbeat_at=time.time())
             beat = asyncio.get_running_loop().create_task(self._beat_loop(job_id))
             try:
-                result = runner(job)
-                if asyncio.iscoroutine(result):
-                    await result
-                self._update(job_id, status="done", heartbeat_at=time.time())
-            except BaseException as exc:  # noqa: BLE001 —— 单任务失败不拖垮 worker
-                self._update(job_id, status="failed", error=f"{type(exc).__name__}: {exc}")
+                produced = runner(job)
+                if asyncio.iscoroutine(produced):
+                    produced = await produced
+                payload = json.dumps(summarize_result(produced), ensure_ascii=False)
+                self._update(job_id, status="done", heartbeat_at=time.time(),
+                             result=payload,
+                             finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
+            except BaseException as exc:  # noqa: BLE001
+                self._update(job_id, status="failed",
+                             error=f"{type(exc).__name__}: {exc}",
+                             finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
             finally:
                 beat.cancel()
                 self._queue.task_done()
 
     async def _beat_loop(self, job_id: int) -> None:
-        """后台续写心跳，间隔按超时阈值推导，任务结束即取消。"""
         try:
             interval = 5.0
             try:
@@ -116,7 +168,7 @@ class JobManager:
                 await asyncio.sleep(min(interval, 5.0))
                 try:
                     job = self.get(job_id)
-                except Exception:  # noqa: BLE001 —— 心跳只求续写，不干扰主任务
+                except Exception:  # noqa: BLE001
                     continue
                 if job is None or job.status != "running":
                     return
@@ -146,7 +198,6 @@ class JobManager:
     # ── 心跳恢复 ──
 
     def recover(self) -> list[int]:
-        """启动时调用：running 且心跳超时的任务标 failed(stale)。返回受影响 id。"""
         stale_ids = [
             r[0]
             for r in self._conn.execute(
@@ -156,7 +207,8 @@ class JobManager:
             )
         ]
         for job_id in stale_ids:
-            self._update(job_id, status="failed", error="stale: heartbeat timeout")
+            self._update(job_id, status="failed", error="stale: heartbeat timeout",
+                         finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
         return stale_ids
 
     # ── 内部 ──

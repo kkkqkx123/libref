@@ -5,7 +5,14 @@ from __future__ import annotations
 import argparse
 import sys
 
-from libref.config import LibrefSettings
+from libref.config import (
+    ConfigError,
+    LibrefSettings,
+    load_settings,
+    redacted_dict,
+    resolve_config_file,
+    settings_fingerprint,
+)
 from libref.crawler.registry import REGISTRY_MIRRORS, RegistryError
 from libref.db import apply_migrations, open_db
 from libref.llm import LlmGateway
@@ -27,6 +34,36 @@ from libref.services.search import SearchService
 from libref.store.vec_store import QdrantVecStore, collection_for
 
 
+_config_parent = argparse.ArgumentParser(add_help=False)
+_config_parent.add_argument(
+    "--config",
+    default=None,
+    help="配置文件路径；缺省依次查找当前目录与用户配置目录",
+)
+
+
+def _load_settings(args: argparse.Namespace, overrides: dict | None = None):
+    return load_settings(getattr(args, "config", None), overrides)
+
+
+def _registry_overrides(args: argparse.Namespace) -> dict:
+    overrides: dict = {}
+    if getattr(args, "offline", False):
+        overrides["registry_offline"] = True
+    if getattr(args, "registry_mirror", None) is not None:
+        overrides["registry_mirror"] = args.registry_mirror
+    return overrides
+
+
+def _window_overrides(args: argparse.Namespace) -> dict:
+    overrides: dict = {}
+    if getattr(args, "expand_window", False):
+        overrides["retriever_expand_window"] = True
+    if getattr(args, "window_radius", None) is not None:
+        overrides["retriever_window_radius"] = int(args.window_radius)
+    return overrides
+
+
 def _connect(settings: LibrefSettings, *, check_same_thread: bool = True):
     settings.db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = open_db(settings.db_path, check_same_thread=check_same_thread)
@@ -35,7 +72,7 @@ def _connect(settings: LibrefSettings, *, check_same_thread: bool = True):
 
 
 def cmd_init_db(args: argparse.Namespace) -> int:
-    conn = _connect(LibrefSettings())
+    conn = _connect(_load_settings(args))
     applied = applied_count(conn)
     conn.close()
     print(
@@ -80,7 +117,7 @@ def _scope_from_args(args: argparse.Namespace) -> dict:
 
 def cmd_refresh(args: argparse.Namespace) -> int:
     """刷新意图入口：复用抓取链路增量语义。"""
-    settings = LibrefSettings()
+    settings = _load_settings(args)
     conn = _connect(settings)
     vec_store, embed = _build_vector(settings)
     scope = _scope_from_args(args)
@@ -97,10 +134,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             job = run_scrape_job_sync(
                 mgr, settings, conn, job_id, vec_store=vec_store, embed=embed
             )
-            print(
-                f"job {job.id} {job.status}"
-                + (f" error={job.error}" if job.error else "")
-            )
+            _print_job(job)
             return 0 if job.status == "done" else 1
         service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
         counts = service.refresh_version(
@@ -164,7 +198,7 @@ def cmd_smoke(args: argparse.Namespace) -> int:
             self.send_header("Content-Type", ctype)
             self.end_headers()
 
-    settings = LibrefSettings()
+    settings = _load_settings(args)
     conn = _connect(settings)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -206,11 +240,7 @@ def _resolve_for_cli(settings, conn, ecosystem, library, requested_version):
 
 
 def cmd_ingest(args: argparse.Namespace) -> int:
-    settings = LibrefSettings()
-    if getattr(args, "offline", False):
-        settings.registry_offline = True
-    if getattr(args, "registry_mirror", None):
-        settings.registry_mirror = args.registry_mirror
+    settings = _load_settings(args, _registry_overrides(args))
     conn = _connect(settings)
     vec_store, embed = _build_vector(settings)
     scope = _scope_from_args(args)
@@ -281,10 +311,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             job = run_scrape_job_sync(
                 mgr, settings, conn, job_id, vec_store=vec_store, embed=embed
             )
-            print(
-                f"job {job.id} {job.status}"
-                + (f" error={job.error}" if job.error else "")
-            )
+            _print_job(job)
             return 0 if job.status == "done" else 1
         service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
         counts = service.scrape_docs(
@@ -312,11 +339,7 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
 
     from libref.crawler.registry import REGISTRY_MIRRORS, RegistryError
 
-    settings = LibrefSettings()
-    if getattr(args, "offline", False):
-        settings.registry_offline = True
-    if getattr(args, "registry_mirror", None):
-        settings.registry_mirror = args.registry_mirror
+    settings = _load_settings(args, _registry_overrides(args))
     conn = _connect(settings)
     repos_dir = settings.db_path.parent / "repos"
     try:
@@ -382,10 +405,7 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                     mgr.stop_worker()
 
             job = asyncio.run(_drive())
-            print(
-                f"job {job.id} {job.status}"
-                + (f" error={job.error}" if job.error else "")
-            )
+            _print_job(job)
             return 0 if job.status == "done" else 1
         counts = index_repo(
             conn,
@@ -397,6 +417,7 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
             ecosystem=ecosystem,
             resolved_from=resolved_from,
             registry_confirmed=registry_confirmed,
+            repos_quota_mb=int(settings.repos_quota_mb),
         )
     finally:
         conn.close()
@@ -409,7 +430,7 @@ def cmd_mine(args: argparse.Namespace) -> int:
     import asyncio
     import json
 
-    settings = LibrefSettings()
+    settings = _load_settings(args)
     conn = _connect(settings)
     try:
         if args.run_async:
@@ -439,10 +460,7 @@ def cmd_mine(args: argparse.Namespace) -> int:
                     mgr.stop_worker()
 
             job = asyncio.run(_drive())
-            print(
-                f"job {job.id} {job.status}"
-                + (f" error={job.error}" if job.error else "")
-            )
+            _print_job(job)
             return 0 if job.status == "done" else 1
         results = mine_patterns(
             conn,
@@ -467,11 +485,7 @@ def cmd_mine(args: argparse.Namespace) -> int:
 def cmd_search(args: argparse.Namespace) -> int:
     import asyncio as _asyncio
     import json as _json
-    settings = LibrefSettings()
-    if getattr(args, "expand_window", False):
-        settings.retriever_expand_window = True
-    if getattr(args, "window_radius", None) is not None:
-        settings.retriever_window_radius = int(args.window_radius)
+    settings = _load_settings(args, _window_overrides(args))
     conn = _connect(settings)
     try:
         if getattr(args, "hybrid", False):
@@ -507,11 +521,7 @@ def cmd_search(args: argparse.Namespace) -> int:
 
 
 def cmd_answer(args: argparse.Namespace) -> int:
-    settings = LibrefSettings()
-    if getattr(args, "expand_window", False):
-        settings.retriever_expand_window = True
-    if getattr(args, "window_radius", None) is not None:
-        settings.retriever_window_radius = int(args.window_radius)
+    settings = _load_settings(args, _window_overrides(args))
     conn = _connect(settings)
     try:
         gateway = LlmGateway(settings)
@@ -542,7 +552,7 @@ def cmd_answer(args: argparse.Namespace) -> int:
 
 def cmd_read_window(args: argparse.Namespace) -> int:
     import json as _json
-    conn = _connect(LibrefSettings())
+    conn = _connect(_load_settings(args))
     try:
         page = SearchService(conn).read_window(
             args.url, args.sort_order, radius=args.radius,
@@ -559,7 +569,7 @@ def cmd_read_window(args: argparse.Namespace) -> int:
 
 def cmd_read_section(args: argparse.Namespace) -> int:
     import json as _json
-    conn = _connect(LibrefSettings())
+    conn = _connect(_load_settings(args))
     try:
         page = SearchService(conn).read_section(
             args.url, args.source_group_id,
@@ -575,7 +585,7 @@ def cmd_read_section(args: argparse.Namespace) -> int:
 
 
 def cmd_read_page(args: argparse.Namespace) -> int:
-    conn = _connect(LibrefSettings())
+    conn = _connect(_load_settings(args))
     try:
         page = SearchService(conn).read_page(
             args.url,
@@ -594,7 +604,7 @@ def cmd_read_page(args: argparse.Namespace) -> int:
 def cmd_feature_tree(args: argparse.Namespace) -> int:
     import json
 
-    conn = _connect(LibrefSettings())
+    conn = _connect(_load_settings(args))
     try:
         rows = SearchService(conn).feature_tree(
             args.library,
@@ -612,7 +622,7 @@ def cmd_feature_tree(args: argparse.Namespace) -> int:
 def cmd_clusters(args: argparse.Namespace) -> int:
     import json
 
-    conn = _connect(LibrefSettings())
+    conn = _connect(_load_settings(args))
     try:
         containing = args.containing.split(",") if args.containing else None
         rows = SearchService(conn).api_clusters(
@@ -683,7 +693,7 @@ def cmd_dump_chunks(args: argparse.Namespace) -> int:
 
 
 def cmd_reembed(args: argparse.Namespace) -> int:
-    settings = LibrefSettings()
+    settings = _load_settings(args)
     conn = _connect(settings)
     try:
         vec_store, embed = _build_vector(settings)
@@ -700,7 +710,7 @@ def cmd_reembed(args: argparse.Namespace) -> int:
 
 
 def cmd_review(args: argparse.Namespace) -> int:
-    conn = _connect(LibrefSettings())
+    conn = _connect(_load_settings(args))
     try:
         svc = ReviewService(conn)
         action = args.review_action
@@ -729,10 +739,82 @@ def cmd_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_job(job) -> None:
+    print(
+        f"job {job.id} {job.status}"
+        + (f" error={job.error}" if job.error else "")
+    )
+    result = getattr(job, "result", None)
+    if result:
+        import json as _json
+        print(f"result: {_json.dumps(result, ensure_ascii=False)[:2000]}")
+    if getattr(job, "finished_at", None):
+        print(f"finished_at: {job.finished_at}")
+
+
+def cmd_job_show(args: argparse.Namespace) -> int:
+    import json as _json
+    conn = _connect(_load_settings(args))
+    try:
+        mgr = JobManager(conn)
+        if getattr(args, "list", False) or getattr(args, "job_id", None) is None:
+            for job in mgr.list_recent(limit=args.limit):
+                print(f"{job.id} {job.kind} {job.status} {job.finished_at or ''}")
+            return 0
+        job = mgr.get(args.job_id)
+        if job is None:
+            print(f"(unknown job: {args.job_id})", file=sys.stderr)
+            return 1
+        _print_job(job)
+        if args.full and job.result:
+            print(_json.dumps(job.result, ensure_ascii=False))
+        return 0
+    finally:
+        conn.close()
+
+
+def cmd_purge(args: argparse.Namespace) -> int:
+    from libref.services.retention import purge_version
+    from libref.store.snapshots import snapshot_root
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        vec_store, _embed = _build_vector(settings)
+        out = purge_version(
+            conn,
+            args.library,
+            args.version,
+            ecosystem=getattr(args, "ecosystem", None),
+            repos_dir=settings.db_path.parent / "repos",
+            snapshot_root=snapshot_root(settings),
+            vec_store=vec_store,
+        )
+    except ValueError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
+    for key, value in out.items():
+        print(f"{key}: {value}")
+    return 0
+
+
+def cmd_config_show(args: argparse.Namespace) -> int:
+    import json as _json
+    settings = _load_settings(args)
+    path = resolve_config_file(getattr(args, "config", None))
+    print(_json.dumps({
+        "file": str(path) if path is not None else "",
+        "fingerprint": settings_fingerprint(settings),
+        "settings": redacted_dict(settings),
+    }, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
 def cmd_serve_mcp(args: argparse.Namespace) -> int:
     from libref.mcp_server import build_mcp_server
 
-    settings = LibrefSettings()
+    settings = _load_settings(args)
     # MCPServer 在 worker 线程执行工具，连接需跨线程复用。
     conn = _connect(settings, check_same_thread=False)
     mcp = build_mcp_server(conn, settings)
@@ -749,14 +831,14 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="libref", description="libref 文档知识库")
+    parser = argparse.ArgumentParser(prog="libref", description="libref 文档知识库", parents=[_config_parent])
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init-db", help="初始化数据库（应用迁移）").set_defaults(
+    sub.add_parser("init-db", help="初始化数据库（应用迁移）", parents=[_config_parent]).set_defaults(
         func=cmd_init_db
     )
 
-    p_ingest = sub.add_parser("ingest", help="抓取文档站并入库")
+    p_ingest = sub.add_parser("ingest", help="抓取文档站并入库", parents=[_config_parent])
     p_ingest.add_argument("library", nargs="?", help="显式形态为库名，解析形态为包名")
     p_ingest.add_argument(
         "version", nargs="?", default=None, help="显式形态必填，解析形态缺省取稳定版"
@@ -805,7 +887,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ingest.set_defaults(func=cmd_ingest)
 
-    p_refresh = sub.add_parser("refresh", help="刷新版本文档并入库")
+    p_refresh = sub.add_parser("refresh", help="刷新版本文档并入库", parents=[_config_parent])
     p_refresh.add_argument("library")
     p_refresh.add_argument("version")
     p_refresh.add_argument("start_url")
@@ -818,9 +900,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_refresh.set_defaults(func=cmd_refresh)
 
-    sub.add_parser("smoke-local", help="本地冒烟：临时 HTTP 站全链路").set_defaults(func=cmd_smoke)
+    sub.add_parser("smoke-local", help="本地冒烟：临时 HTTP 站全链路", parents=[_config_parent]).set_defaults(func=cmd_smoke)
 
-    p_search = sub.add_parser("search", help="FTS 全文检索")
+    p_search = sub.add_parser("search", help="FTS 全文检索", parents=[_config_parent])
     p_search.add_argument("query")
     p_search.add_argument("--library", default=None)
     p_search.add_argument("--version", default=None)
@@ -830,7 +912,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--window-radius", type=int, default=None)
     p_search.set_defaults(func=cmd_search)
 
-    p_answer = sub.add_parser("answer", help="混合检索加问答生成")
+    p_answer = sub.add_parser("answer", help="混合检索加问答生成", parents=[_config_parent])
     p_answer.add_argument("query")
     p_answer.add_argument("--library", default=None)
     p_answer.add_argument("--version", default=None)
@@ -839,13 +921,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_answer.add_argument("--window-radius", type=int, default=None)
     p_answer.set_defaults(func=cmd_answer)
 
-    p_read = sub.add_parser("read-page", help="按 URL 读取整页文档")
+    p_read = sub.add_parser("read-page", help="按 URL 读取整页文档", parents=[_config_parent])
     p_read.add_argument("url")
     p_read.add_argument("--library", default=None)
     p_read.add_argument("--version", default=None)
     p_read.set_defaults(func=cmd_read_page)
 
-    p_window = sub.add_parser("read-window", help="按序号取前后窗口")
+    p_window = sub.add_parser("read-window", help="按序号取前后窗口", parents=[_config_parent])
     p_window.add_argument("url")
     p_window.add_argument("sort_order", type=int)
     p_window.add_argument("--radius", type=int, default=1)
@@ -853,14 +935,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_window.add_argument("--version", default=None)
     p_window.set_defaults(func=cmd_read_window)
 
-    p_section = sub.add_parser("read-section", help="按源分组取整节")
+    p_section = sub.add_parser("read-section", help="按源分组取整节", parents=[_config_parent])
     p_section.add_argument("url")
     p_section.add_argument("source_group_id")
     p_section.add_argument("--library", default=None)
     p_section.add_argument("--version", default=None)
     p_section.set_defaults(func=cmd_read_section)
 
-    p_mcp = sub.add_parser("serve-mcp", help="启动 MCP 服务（默认 stdio）")
+    p_mcp = sub.add_parser("serve-mcp", help="启动 MCP 服务（默认 stdio）", parents=[_config_parent])
     p_mcp.add_argument("--http", action="store_true",
                        help="改用 Streamable HTTP 传输（默认只绑本地回环）")
     p_mcp.add_argument("--host", default=None, help="HTTP 监听地址")
@@ -868,7 +950,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp.add_argument("--path", default=None, help="HTTP 端点路径")
     p_mcp.set_defaults(func=cmd_serve_mcp)
 
-    p_repo = sub.add_parser("index-repo", help="索引源码仓库并落调用实例")
+    p_repo = sub.add_parser("index-repo", help="索引源码仓库并落调用实例", parents=[_config_parent])
     p_repo.add_argument("library", help="显式形态为库名，解析形态为包名")
     p_repo.add_argument("version", nargs="?", default=None, help="显式形态必填，解析形态缺省取稳定版")
     p_repo.add_argument("source", nargs="?", default=None, help="显式形态为远端地址或本地路径，缺省按名解析")
@@ -885,7 +967,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_repo.set_defaults(func=cmd_index_repo)
 
-    p_mine = sub.add_parser("mine", help="挖掘闭合调用序列模式")
+    p_mine = sub.add_parser("mine", help="挖掘闭合调用序列模式", parents=[_config_parent])
     p_mine.add_argument("library")
     p_mine.add_argument("version")
     p_mine.add_argument("--ecosystem", default=None, help="库所属生态，缺省跨生态定位")
@@ -910,34 +992,34 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_mine.set_defaults(func=cmd_mine)
 
-    p_tree = sub.add_parser("feature-tree", help="按前缀浏览分层特征")
+    p_tree = sub.add_parser("feature-tree", help="按前缀浏览分层特征", parents=[_config_parent])
     p_tree.add_argument("library")
     p_tree.add_argument("version")
     p_tree.add_argument("--prefix", default=None)
     p_tree.add_argument("--limit", type=int, default=100)
     p_tree.set_defaults(func=cmd_feature_tree)
 
-    p_clusters = sub.add_parser("clusters", help="浏览接口分组")
+    p_clusters = sub.add_parser("clusters", help="浏览接口分组", parents=[_config_parent])
     p_clusters.add_argument("library")
     p_clusters.add_argument("version")
     p_clusters.add_argument("--containing", default=None, help="逗号分隔的必含接口")
     p_clusters.add_argument("--limit", type=int, default=50)
     p_clusters.set_defaults(func=cmd_clusters)
 
-    p_dump = sub.add_parser("dump-chunks", help="预览分块：文件到分块的行号字节标题")
+    p_dump = sub.add_parser("dump-chunks", help="预览分块：文件到分块的行号字节标题", parents=[_config_parent])
     group = p_dump.add_mutually_exclusive_group(required=True)
     group.add_argument("--markdown", default=None, help="Markdown 文档路径")
     group.add_argument("--source", default=None, help="源码文件路径")
     p_dump.add_argument("--url", default=None, help="文档块地址标注")
     p_dump.set_defaults(func=cmd_dump_chunks)
 
-    p_reembed = sub.add_parser("reembed", help="按真源全量重灌整版本向量")
+    p_reembed = sub.add_parser("reembed", help="按真源全量重灌整版本向量", parents=[_config_parent])
     p_reembed.add_argument("library")
     p_reembed.add_argument("version")
     p_reembed.add_argument("--ecosystem", default=None)
     p_reembed.set_defaults(func=cmd_reembed)
 
-    p_review = sub.add_parser("review", help="审核待定调用实例")
+    p_review = sub.add_parser("review", help="审核待定调用实例", parents=[_config_parent])
     review_sub = p_review.add_subparsers(dest="review_action", required=True)
     review_sub.add_parser("list", help="列出待定项").add_argument(
         "--limit", type=int, default=50,
@@ -946,13 +1028,33 @@ def build_parser() -> argparse.ArgumentParser:
         _p = review_sub.add_parser(_name)
         _p.add_argument("entity_id", type=int)
     p_review.set_defaults(func=cmd_review)
+
+    p_job = sub.add_parser("job-show", help="查看任务审计结论", parents=[_config_parent])
+    p_job.add_argument("job_id", type=int, nargs="?", default=None)
+    p_job.add_argument("--list", action="store_true", help="列出最近任务")
+    p_job.add_argument("--limit", type=int, default=20)
+    p_job.add_argument("--full", action="store_true", help="打印完整结论")
+    p_job.set_defaults(func=cmd_job_show)
+
+    p_config = sub.add_parser("config-show", help="打印脱敏生效配置", parents=[_config_parent])
+    p_config.set_defaults(func=cmd_config_show)
+
+    p_purge = sub.add_parser("purge", help="整版删除并记日志", parents=[_config_parent])
+    p_purge.add_argument("library")
+    p_purge.add_argument("version")
+    p_purge.add_argument("--ecosystem", default=None)
+    p_purge.set_defaults(func=cmd_purge)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ConfigError as exc:
+        print(f"config error: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
