@@ -210,14 +210,18 @@ class DocumentStore:
                     meta = row.get("metadata") or {}
                 except AttributeError:
                     meta = {}
-                digest = str(meta.get("content_hash") or "") or content_hash(row.get("content"))
+                stored = str(meta.get("content_hash") or "")
+                if stored:
+                    digest = stored
+                else:
+                    digest = content_hash(f"{meta.get('title', '')}\0{meta.get('path', '')}\0{row.get('content')}")
                 by_hash.setdefault(digest, []).append(row)
             inserted: list[int] = []
             reused: list[int] = []
             used_old: set[int] = set()
             pending: list[tuple[DocumentInput, str]] = []
             for chunk in chunks or []:
-                digest = getattr(chunk, "content_hash", "") or content_hash(chunk.content)
+                digest = getattr(chunk, "content_hash", "") or content_hash(f"{chunk.title}\0{chunk.path}\0{chunk.content}")
                 candidates = by_hash.get(digest, [])
                 hit = next((r for r in candidates if r["id"] not in used_old), None)
                 if hit is not None:

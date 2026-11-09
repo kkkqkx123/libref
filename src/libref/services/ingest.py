@@ -632,7 +632,6 @@ class IngestService:
                 meta = d["metadata"] or {}
                 text = build_embed_text(
                     meta.get("title"), meta.get("path"), d["content"],
-                    meta.get("keywords"),
                 )
                 clipped, was_clipped = ensure_hard_limit(text, ChunkPath.EMBEDDING, hard)
                 if was_clipped:

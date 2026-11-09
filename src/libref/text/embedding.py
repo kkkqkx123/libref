@@ -49,7 +49,6 @@ def build_embed_text(
     title: str | None,
     path: str | None,
     content: str | None,
-    keywords: list[str] | None = None,
 ) -> str:
     """Assemble encoding text with title and path first, body stripped."""
     head = " / ".join(p for p in (title, path) if p)

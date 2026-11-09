@@ -137,19 +137,23 @@ def _collapse_by_group(
         return fused
     marks = ",".join("?" for _ in fused)
     rows = conn.execute(
-        f"SELECT id, metadata FROM documents WHERE id IN ({marks})", fused
+        f"SELECT id, url, metadata FROM documents WHERE id IN ({marks})", fused
     ).fetchall()
-    groups: dict[int, str] = {}
-    for doc_id, raw in rows:
+    groups: dict[int, tuple] = {}
+    for doc_id, url, raw in rows:
         try:
             meta = json.loads(raw) if raw else {}
         except ValueError:
             meta = {}
-        groups[int(doc_id)] = meta.get("source_group_id") or f"doc:{doc_id}"
-    seen: set[str] = set()
+        group = meta.get("source_group_id") or ""
+        if group:
+            groups[int(doc_id)] = (url, group)
+        else:
+            groups[int(doc_id)] = ("doc", int(doc_id))
+    seen: set[tuple] = set()
     out: list[int] = []
     for doc_id in fused:
-        key = groups.get(doc_id, f"doc:{doc_id}")
+        key = groups.get(doc_id, ("doc", doc_id))
         if key in seen:
             continue
         seen.add(key)
@@ -243,39 +247,56 @@ class HybridRetriever:
         )
         vec_ids: list[int] = []
         vids = _version_ids(self._conn, library, version, ecosystem)
-        single_version = vids[0] if len(vids) == 1 else None
-        if self._vec is not None and self._embed is not None and single_version is not None:
+        if self._vec is not None and self._embed is not None and vids:
             try:
                 [query_vec] = await self._embed([query])
-                vec_ids = [
-                    doc_id
-                    for doc_id, _ in self._vec.search(
-                        query_vec, k=need, version_id=single_version
-                    )
-                ]
+                if len(vids) == 1:
+                    vec_ids = [
+                        doc_id
+                        for doc_id, _ in self._vec.search(
+                            query_vec, k=need, version_id=vids[0]
+                        )
+                    ]
+                else:
+                    pooled: list[tuple[float, int]] = []
+                    for vid in vids:
+                        for doc_id, score in self._vec.search(
+                            query_vec, k=need, version_id=vid
+                        ):
+                            pooled.append((float(score), int(doc_id)))
+                    pooled.sort(key=lambda kv: (kv[0], kv[1]), reverse=True)
+                    seen_ids: set[int] = set()
+                    merged: list[int] = []
+                    for _, doc_id in pooled:
+                        if doc_id in seen_ids:
+                            continue
+                        seen_ids.add(doc_id)
+                        merged.append(doc_id)
+                        if len(merged) >= need:
+                            break
+                    vec_ids = merged
             except Exception:  # noqa: BLE001 —— 向量失败标记降级，走纯全文
                 degraded = True
                 vec_ids = []
-        elif self._vec is not None and self._embed is not None:
-            degraded = True
         fused = self._rrf(fts_ids, vec_ids)
         fused = _collapse_by_group(self._conn, fused)
         if not fused:
             return [], degraded
         assemble_mult = int(setting_or_default(self._settings, "assemble_multiplier"))
         assemble_min = int(setting_or_default(self._settings, "assemble_min"))
-        reranked = await self._apply_rerank(
+        fused_reranked, degraded, rerank_scores = await self._apply_rerank(
             query, fused, limit, degraded,
             window=max(assemble_mult * limit, assemble_min),
             top_n=int(setting_or_default(self._settings, "rerank_top_n")),
         )
-        fused, degraded = reranked
+        fused = fused_reranked
         window_f = max(assemble_mult * limit, assemble_min)
         expand = setting_or_default(self._settings, "retriever_expand_window") if expand_window is None else expand_window
         radius = setting_or_default(self._settings, "retriever_window_radius") if window_radius is None else window_radius
         results = self._postprocess(
             query, fused[:window_f], fts_ids, vec_ids,
             expand_window=bool(expand), window_radius=int(radius),
+            rerank_scores=rerank_scores,
         )
         return results[:limit], degraded
 
@@ -306,35 +327,37 @@ class HybridRetriever:
     async def _apply_rerank(
         self, query: str, fused: list[int], limit: int, degraded: bool,
         *, window: int, top_n: int | None,
-    ) -> tuple[list[int], bool]:
+    ) -> tuple[list[int], bool, dict[int, float]]:
         from libref.config import setting_or_default
 
         if self._rerank is None:
-            return fused, degraded
+            return fused, degraded, {}
         if top_n is not None:
             window = min(window, int(top_n))
         head, tail = fused[:window], fused[window:]
         if not head:
-            return fused, degraded
+            return fused, degraded, {}
         radius = int(setting_or_default(self._settings, "snippet_radius"))
         cap = int(setting_or_default(self._settings, "snippet_cap"))
         details = _fetch_details(self._conn, head, query, snippet_radius=radius, snippet_cap=cap)
         texts = [details[d]["content"] for d in head if d in details]
         if len(texts) != len(head):
-            return fused, degraded
+            return fused, degraded, {}
         try:
             scored = await self._rerank(query, texts, len(head))
         except Exception:  # noqa: BLE001 —— 重排失败标记降级，保留融合排序
-            return fused, True
+            return fused, True, {}
         order = sorted(scored, key=lambda kv: kv[1], reverse=True)
         pos_of = {idx: rank for rank, (idx, _) in enumerate(order)}
         head_sorted = sorted(
             range(len(head)), key=lambda i: pos_of.get(i, len(order))
         )
-        return [head[i] for i in head_sorted] + tail, degraded
+        rerank_scores = {head[idx]: float(score) for idx, score in scored if 0 <= idx < len(head)}
+        return [head[i] for i in head_sorted] + tail, degraded, rerank_scores
 
     def _assemble(
-        self, query: str, fused: list[int], fts_ids: list[int], vec_ids: list[int]
+        self, query: str, fused: list[int], fts_ids: list[int], vec_ids: list[int],
+        *, rerank_scores: dict[int, float] | None = None,
     ) -> list[dict[str, Any]]:
         from libref.config import setting_or_default
 
@@ -353,7 +376,10 @@ class HybridRetriever:
             info = details.get(doc)
             if info is None:
                 continue
-            base = rrf.get(doc, 0.0)
+            if rerank_scores:
+                base = rerank_scores.get(doc, rrf.get(doc, 0.0))
+            else:
+                base = rrf.get(doc, 0.0)
             plist = patterns.get(info["version_id"], [])
             bonus = support_for_content(info["content"], plist) if alpha > 0 else 0.0
             cluster_bonus = 0.0
@@ -400,9 +426,9 @@ class HybridRetriever:
             )
         return out
 
-    def _postprocess(self, query: str, fused: list[int], fts_ids: list[int], vec_ids: list[int], *, expand_window: bool, window_radius: int) -> list[dict[str, Any]]:
+    def _postprocess(self, query: str, fused: list[int], fts_ids: list[int], vec_ids: list[int], *, expand_window: bool, window_radius: int, rerank_scores: dict[int, float] | None = None) -> list[dict[str, Any]]:
         """后处理链：装配按序执行，窗口还原失败保留装配顺序。"""
-        results = self._assemble(query, fused, fts_ids, vec_ids)
+        results = self._assemble(query, fused, fts_ids, vec_ids, rerank_scores=rerank_scores)
         return self._expand_windows(results, enabled=expand_window, radius=window_radius)
 
 

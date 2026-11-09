@@ -72,7 +72,7 @@ class MaintenanceService:
                     meta = json.loads(r[4]) if r[4] else {}
                 except ValueError:
                     meta = {}
-                texts.append(build_embed_text(meta.get("title"), meta.get("path"), r[3], meta.get("keywords")))
+                texts.append(build_embed_text(meta.get("title"), meta.get("path"), r[3]))
             vecs = await fn(texts)
             if len(vecs) != len(batch):
                 raise RuntimeError("embedding count mismatch")

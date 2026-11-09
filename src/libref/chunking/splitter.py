@@ -181,7 +181,7 @@ def _split_path(
                     chunk_id=f"{group_id}_{path.value}_{part_index}",
                     span_kind=DOCUMENT_RANGE,
                     merged_from=sec.merged_from.copy(),
-                    content_hash=chunk_content_hash(index_part),
+                    content_hash=chunk_content_hash(f"{sec.title}\0{sec.path}\0{index_part}"),
                     keywords=extract_keywords(index_part),
                 )
             )
