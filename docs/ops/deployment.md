@@ -1,0 +1,32 @@
+# 部署与运维说明
+
+## 最低部署要求
+
+- Python 环境经包管理器同步，数据库文件默认在 `data/libref.db`。
+- 向量服务需可达，默认 `http://localhost:6333`；不可达时检索退化为纯全文并标记降级。
+- 密钥经环境变量或仓库根环境文件注入，模板见 `.env.example`，真实文件不进版本库。
+
+## 多库隔离语义
+
+- SQLite 为唯一真源，向量为可重建派生索引。
+- 向量集合名按数据库文件绝对路径哈希派生，内存库保持原名；不同库文件天然隔离。
+- 模型名或维度变更触发集合删除重建，重灌按真源全量执行。
+
+## 暴露面规则
+
+- 接口与界面默认只绑本地回环，可直接启动。
+- 改绑对外地址或显式开启鉴权时，必须设置 `LIBREF_MCP_TOKEN`，否则拒绝启动。
+- 令牌只走环境变量，不进配置文件；请求侧用 Authorization Bearer 传递。
+
+## 常用操作
+
+- 初始化：`libref init-db`。
+- 抓取与索引：`libref ingest`、`libref index-repo`，异步形态经任务队列执行。
+- 重灌向量：`libref reembed`，对账语义为版本内向量点数等于文档表计数（全文小块除外）。
+- 审核：`libref review list|approve|conflict|reopen`，非法转移拒绝。
+- 删除与清理：`libref purge` 整版删除并记日志，`libref deletions --prune` 按保留期清理。
+- 服务：`libref serve-mcp [--http]`、`libref serve-web`；配置脱敏查看用 `libref config-show`。
+
+## 配额与保留期
+
+- 快照目录与配额、仓库配额、删除日志保留期见留存节配置；超配额写入拒绝并计数。

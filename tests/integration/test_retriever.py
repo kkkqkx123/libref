@@ -134,3 +134,53 @@ def test_fts_only_without_vec_is_not_degraded(conn, tmp_path, monkeypatch) -> No
     assert degraded is False
     assert len(results) == 2
     assert all(r["sources"] == ["fts"] for r in results)
+
+
+def test_precise_attribution_ignores_substring(conn, tmp_path, monkeypatch) -> None:
+    seed_library_version(conn)
+    store = DocumentStore(conn)
+    hit = store.store_page(
+        1, 1, "https://d.example/exact.html", "stored",
+        chunks=[Chunk(url="https://d.example/exact.html", path="G", title="G",
+                      content="quetzalgate numpy.array usage", sort_order=0)],
+        raw_content="quetzalgate numpy.array usage",
+    )
+    miss = store.store_page(
+        1, 1, "https://d.example/sub.html", "stored",
+        chunks=[Chunk(url="https://d.example/sub.html", path="G", title="G",
+                      content="quetzalgate my_numpy.arrayish helper", sort_order=0)],
+        raw_content="quetzalgate my_numpy.arrayish helper",
+    )
+    conn.execute(
+        "INSERT INTO seq_patterns(library_id, version_id, pattern, support, is_closed)"
+        " VALUES(1, 1, ?, 9, 1)",
+        (json.dumps(["numpy.array"]),),
+    )
+    conn.commit()
+    monkeypatch.chdir(tmp_path)
+    s = LibrefSettings(freq_alpha=5.0, cluster_alpha=0.0)
+    vec = _FakeVec([miss.inserted_ids[0], hit.inserted_ids[0]])
+    results, _ = asyncio.run(
+        HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
+            "quetzalgate", limit=8
+        )
+    )
+    first = [r["id"] for r in results][0]
+    assert first == hit.inserted_ids[0]
+
+
+def test_dual_track_gate_records_both_roads(conn, tmp_path, monkeypatch) -> None:
+    ids = _seed(conn)
+    monkeypatch.chdir(tmp_path)
+    s = LibrefSettings(freq_alpha=5.0, cluster_alpha=0.0)
+    vec = _FakeVec([ids["pattern"], ids["plain"]])
+    fts_only, _ = asyncio.run(HybridRetriever(conn, s).search_async("quetzalhybrid", limit=8))
+    hybrid, degraded = asyncio.run(
+        HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
+            "quetzalhybrid", limit=8
+        )
+    )
+    assert degraded is False
+    assert len(fts_only) == 2 and len(hybrid) == 2
+    assert [r["id"] for r in hybrid][0] == ids["pattern"]
+    assert all(isinstance(r["score"], float) for r in hybrid)

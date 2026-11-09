@@ -39,7 +39,9 @@ async def _handshake(db_path: Path) -> None:
         names = {t.name for t in tools.tools}
         assert {"search_docs", "read_page", "list_libraries",
                 "list_versions", "api_usage", "related_apis",
-                "pattern_evidence"} <= names
+                "pattern_evidence", "search_hybrid", "answer",
+                "review_pending", "review_approve", "review_conflict",
+                "review_reopen", "job_show"} <= names
 
         res = await session.call_tool("search_docs", {"query": _MARKER})
         assert not getattr(res, "isError", False)

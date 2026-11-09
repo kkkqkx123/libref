@@ -3,7 +3,7 @@
 #   cp libref.example.toml libref.toml
 #
 # 加载优先级：命令行显式覆盖 > 环境变量（含 .env） > 本文件 > 内置默认值。
-# 密钥（embedding_api_key、chat_api_key）禁止写在本文件，须走环境变量或 .env，
+# 密钥（embedding_api_key、chat_api_key、mcp_token）禁止写在本文件，须走环境变量或 .env，
 # 写了会直接报错。相对路径按本文件所在目录解析。
 # 未列出的键保持内置默认值；未知节与未知键会直接报错，便于发现拼写错误。
 
@@ -87,10 +87,21 @@ chat_timeout = 60.0
 chat_enable_thinking = false
 
 [mcp]
-# MCP Streamable HTTP 传输：默认只绑本地回环，无鉴权不对外暴露
+# MCP Streamable HTTP 传输：默认只绑本地回环，对外暴露需配令牌
 mcp_host = "127.0.0.1"
 mcp_port = 8000
 mcp_path = "/mcp"
+
+[mcp.auth]
+# 接口鉴权：令牌只走环境变量 LIBREF_MCP_TOKEN，不进文件；
+# 对外暴露或显式开启时必须配令牌，否则拒绝启动。
+# mcp_token 经环境变量注入，此处只登记开关。
+mcp_require_auth = false
+
+[web]
+# Web 出口：默认只绑本地回环，对外暴露以前置鉴权为前置条件
+web_host = "127.0.0.1"
+web_port = 8001
 
 [retention]
 # 抓取审计与本地治理：原始快照开关目录配额、仓库配额、删除日志保留期
@@ -100,6 +111,11 @@ snapshot_quota_mb = 512
 repos_quota_mb = 2048
 deletion_log_ttl_days = 30.0
 
-# 预留节：后端落地前必须保持为空，填值会报错。
-# [mcp.auth]
-# [web]
+# 预留节已启用：接口鉴权节与界面节均为正式配置（见下）。
+[mcp.auth]
+# mcp_token 经环境变量注入，此处只登记开关。
+mcp_require_auth = false
+
+[web]
+web_host = "127.0.0.1"
+web_port = 8001

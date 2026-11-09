@@ -147,23 +147,35 @@ def test_unknown_section_and_key_rejected(monkeypatch, tmp_path) -> None:
         load_settings(bad_key)
 
 
-def test_reserved_section_must_stay_empty(monkeypatch, tmp_path) -> None:
+def test_reserved_sections_now_enabled(monkeypatch, tmp_path) -> None:
     _isolated_env(monkeypatch, tmp_path)
     filled = tmp_path / "a.toml"
-    filled.write_text('[mcp.auth]\ntoken = "x"\n', encoding="utf-8")
-    with pytest.raises(ConfigError, match="reserved"):
-        load_settings(filled)
-    empty = tmp_path / "b.toml"
+    filled.write_text('[mcp.auth]\nmcp_require_auth = true\n', encoding="utf-8")
+    assert load_settings(filled).mcp_require_auth is True
+    web_conf = tmp_path / "b.toml"
+    web_conf.write_text("[web]\nweb_port = 8100\n", encoding="utf-8")
+    assert load_settings(web_conf).web_port == 8100
+    empty = tmp_path / "c.toml"
     empty.write_text("[web]\n", encoding="utf-8")
     assert load_settings(empty).fetch_concurrency == 4
+
+
+def test_mcp_token_in_file_rejected(monkeypatch, tmp_path) -> None:
+    _isolated_env(monkeypatch, tmp_path)
+    conf = tmp_path / "a.toml"
+    conf.write_text('[mcp.auth]\nmcp_token = "sk-test"\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="mcp_token"):
+        load_settings(conf)
 
 
 def test_redaction_and_fingerprint(monkeypatch, tmp_path) -> None:
     _isolated_env(monkeypatch, tmp_path)
     monkeypatch.setenv("LIBREF_EMBEDDING_API_KEY", "sk-test")
+    monkeypatch.setenv("LIBREF_MCP_TOKEN", "tok-test")
     s = load_settings()
     dumped = redacted_dict(s)
     assert dumped["embedding_api_key"] == "***"
+    assert dumped["mcp_token"] == "***"
     assert dumped["chat_api_key"] is None
     assert settings_fingerprint(s) == settings_fingerprint(load_settings())
     other = load_settings(None, {"fetch_concurrency": 9})

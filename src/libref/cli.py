@@ -867,9 +867,20 @@ def cmd_config_show(args: argparse.Namespace) -> int:
 
 
 def cmd_serve_mcp(args: argparse.Namespace) -> int:
-    from libref.mcp_server import build_mcp_server
+    from libref.mcp_server import build_mcp_server, check_startup
 
     settings = _load_settings(args)
+    if args.http:
+        host = args.host or settings.mcp_host
+        try:
+            check_startup(
+                host,
+                require_auth=bool(settings.mcp_require_auth),
+                token=settings.mcp_token,
+            )
+        except ValueError as exc:
+            print(f"config error: {exc}", file=sys.stderr)
+            return 2
     # MCPServer 在 worker 线程执行工具，连接需跨线程复用。
     conn = _connect(settings, check_same_thread=False)
     mcp = build_mcp_server(conn, settings)
@@ -881,6 +892,35 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
                 streamable_http_path=path)  # 阻塞直到进程退出
     else:
         mcp.run("stdio")  # 阻塞直到 stdio 关闭
+    conn.close()
+    return 0
+
+
+def cmd_serve_web(args: argparse.Namespace) -> int:
+    from libref.mcp_server.auth import check_startup
+
+    settings = _load_settings(args)
+    host = args.host or settings.web_host
+    port = args.port or settings.web_port
+    try:
+        check_startup(
+            host,
+            require_auth=bool(settings.mcp_require_auth),
+            token=settings.mcp_token,
+        )
+    except ValueError as exc:
+        print(f"config error: {exc}", file=sys.stderr)
+        return 2
+    import uvicorn
+
+    from libref.web import build_web_app
+
+    conn = _connect(settings, check_same_thread=False)
+    gateway = LlmGateway(settings)
+    vec_store, embed = _build_vector(settings, gateway)
+    app = build_web_app(conn, settings, vec_store=vec_store, embed=embed,
+                        rerank=gateway.rerank_fn(), chat=gateway.chat_fn())
+    uvicorn.run(app, host=host, port=port, log_level="warning")
     conn.close()
     return 0
 
@@ -1004,6 +1044,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp.add_argument("--port", type=int, default=None, help="HTTP 监听端口")
     p_mcp.add_argument("--path", default=None, help="HTTP 端点路径")
     p_mcp.set_defaults(func=cmd_serve_mcp)
+
+    p_web = sub.add_parser("serve-web", help="启动 Web 服务（默认只绑本地回环）", parents=[_config_parent])
+    p_web.add_argument("--host", default=None, help="HTTP 监听地址")
+    p_web.add_argument("--port", type=int, default=None, help="HTTP 监听端口")
+    p_web.set_defaults(func=cmd_serve_web)
 
     p_repo = sub.add_parser("index-repo", help="索引源码仓库并落调用实例", parents=[_config_parent])
     p_repo.add_argument("library", help="显式形态为库名，解析形态为包名")

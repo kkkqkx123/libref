@@ -91,6 +91,44 @@ def _fts_candidates(
     return [int(r[0]) for r in rows]
 
 
+_IDENT_RE = re.compile(r"[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)+")
+_TOKEN_RE = re.compile(r"[A-Za-z_][\w]*")
+
+
+def _content_idents(content: str) -> tuple[set[str], set[str]]:
+    """抽取块内点分标识全名与词元集合，命中只认词元边界精确匹配。"""
+    full = set(_IDENT_RE.findall(content or ""))
+    toks = set(_TOKEN_RE.findall(content or ""))
+    return full, toks
+
+
+def _name_hit(name: str, full: set[str], toks: set[str]) -> bool:
+    if name in full or name in toks:
+        return True
+    short = name.rsplit(".", 1)[-1]
+    return short in toks
+
+
+def _support_for_content(content: str, plist: list[tuple[list[str], int]]) -> float:
+    """块归属取命中模式的最大支持度并按版本内最大值归一，无命中返回零。"""
+    if not plist:
+        return 0.0
+    ceiling = max(s for _, s in plist)
+    if ceiling <= 0:
+        return 0.0
+    full, toks = _content_idents(content)
+    hit = max(
+        (s for names, s in plist if any(_name_hit(n, full, toks) for n in names)),
+        default=0,
+    )
+    return hit / ceiling
+
+
+def _cluster_hit(content: str, members: set[str]) -> bool:
+    full, toks = _content_idents(content)
+    return sum(1 for n in members if _name_hit(n, full, toks)) >= 2
+
+
 def _fetch_details(
     conn: sqlite3.Connection, doc_ids: list[int], query: str
 ) -> dict[int, dict[str, Any]]:
@@ -125,6 +163,10 @@ def _fetch_details(
             "content": r[2] or "",
             "chunk_path": meta.get("chunk_path", "embedding"),
             "source_group_id": meta.get("source_group_id", ""),
+            "chunk_id": meta.get("chunk_id", ""),
+            "span_kind": meta.get("span_kind", "document_range"),
+            "merged_from": list(meta.get("merged_from", []) or []),
+            "overlap_from": meta.get("overlap_from"),
             "keywords": list(meta.get("keywords", []) or []),
             "content_type": meta.get("content_type", "text/markdown"),
         }
@@ -325,23 +367,14 @@ class HybridRetriever:
             if info is None:
                 continue
             base = rrf.get(doc, 0.0)
-            bonus = 0.0
             plist = patterns.get(info["version_id"], [])
-            if plist and alpha > 0:
-                ceiling = max(s for _, s in plist)
-                if ceiling > 0:
-                    hit = max(
-                        (s for names, s in plist if any(n in (info["content"] or "") for n in names)),
-                        default=0,
-                    )
-                    bonus = hit / ceiling
+            bonus = _support_for_content(info["content"], plist) if alpha > 0 else 0.0
             cluster_bonus = 0.0
             clist = clusters.get(info["version_id"], [])
             if clist and cluster_alpha > 0:
                 content = info["content"] or ""
                 for members in clist:
-                    hits = sum(1 for n in members if n in content)
-                    if hits >= 2:
+                    if _cluster_hit(content, members):
                         cluster_bonus = 1.0
                         break
             final = base * (1.0 + alpha * bonus + cluster_alpha * cluster_bonus)
@@ -368,6 +401,10 @@ class HybridRetriever:
                     "sources": sources,
                     "chunk_path": info.get("chunk_path", "embedding"),
                     "source_group_id": info.get("source_group_id", ""),
+                    "chunk_id": info.get("chunk_id", ""),
+                    "span_kind": info.get("span_kind", "document_range"),
+                    "merged_from": list(info.get("merged_from", []) or []),
+                    "overlap_from": info.get("overlap_from"),
                     "keywords": list(info.get("keywords", []) or []),
                     "content_type": info.get("content_type", "text/markdown"),
                 }

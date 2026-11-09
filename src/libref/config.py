@@ -87,10 +87,16 @@ class LibrefSettings(BaseSettings):
     chat_api_key: str | None = None
     chat_timeout: float = Field(default=60.0, gt=0)
     chat_enable_thinking: bool = False
-    # MCP Streamable HTTP 传输：默认只绑本地回环，无鉴权不对外暴露。
+    # MCP Streamable HTTP 传输：默认只绑本地回环，对外暴露需配令牌。
     mcp_host: str = "127.0.0.1"
     mcp_port: int = Field(default=8000, ge=1, le=65535)
     mcp_path: str = "/mcp"
+    # 接口鉴权：令牌只走环境变量，不进文件；对外暴露前必须配令牌。
+    mcp_token: str | None = None
+    mcp_require_auth: bool = False
+    # Web 出口：默认只绑本地回环，对外暴露以前置鉴权为前置条件。
+    web_host: str = "127.0.0.1"
+    web_port: int = Field(default=8001, ge=1, le=65535)
     # 文档链路补齐：浏览器降级默认开关、检索窗口扩展。
     render_js_default: bool = False
     retriever_window_radius: int = Field(default=1, ge=0)
@@ -125,7 +131,7 @@ class LibrefSettings(BaseSettings):
         return self
 
 
-SECRET_FIELDS = frozenset({"embedding_api_key", "chat_api_key"})
+SECRET_FIELDS = frozenset({"embedding_api_key", "chat_api_key", "mcp_token"})
 
 CONFIG_FILE_NAME = "libref.toml"
 
@@ -197,6 +203,8 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
         }
     ),
     "mcp": frozenset({"mcp_host", "mcp_port", "mcp_path"}),
+    "mcp.auth": frozenset({"mcp_token", "mcp_require_auth"}),
+    "web": frozenset({"web_host", "web_port"}),
     "retention": frozenset(
         {
             "snapshot_enabled",
@@ -209,7 +217,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
     "logging": frozenset({"log_level", "log_file", "log_format"}),
 }
 
-RESERVED_SECTIONS = frozenset({"mcp.auth", "web"})
+RESERVED_SECTIONS = frozenset()
 
 PATH_FIELDS = frozenset({"db_path", "registry_overrides_file", "snapshot_dir", "log_file"})
 
@@ -240,6 +248,14 @@ def _flatten_document(path: Path, document: Mapping[str, Any]) -> dict[str, Any]
         if isinstance(value, dict) and name in SECTION_FIELDS:
             allowed = SECTION_FIELDS[name]
             for key, item in value.items():
+                nested = f"{name}.{key}"
+                if isinstance(item, dict) and nested in SECTION_FIELDS:
+                    for sub, sub_item in item.items():
+                        if sub not in SECTION_FIELDS[nested]:
+                            raise ConfigError(f"unknown config key '{nested}.{sub}' in {path}")
+                        _reject_secret(path, sub)
+                        flat[sub] = sub_item
+                    continue
                 if key not in allowed:
                     raise ConfigError(f"unknown config key '{name}.{key}' in {path}")
                 _reject_secret(path, key)

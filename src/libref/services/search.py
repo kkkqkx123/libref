@@ -118,6 +118,11 @@ class SearchService:
                     "path": r[5],
                     "library": r[6],
                     "version": r[7],
+                    "source_group_id": meta.get("source_group_id", ""),
+                    "chunk_id": meta.get("chunk_id", ""),
+                    "span_kind": meta.get("span_kind", "document_range"),
+                    "merged_from": list(meta.get("merged_from", []) or []),
+                    "overlap_from": meta.get("overlap_from"),
                     "keywords": list(meta.get("keywords", []) or []),
                     "content_type": meta.get("content_type", "text/markdown"),
                 }
@@ -267,6 +272,20 @@ class SearchService:
         meta = {}
         if rows[0][2]:
             meta = json.loads(rows[0][2])
+        details = []
+        for content, raw, order in ((r[1], r[2], None) for r in rows):
+            try:
+                parsed = json.loads(raw) if raw else {}
+            except ValueError:
+                parsed = {}
+            details.append({
+                "content": content,
+                "source_group_id": parsed.get("source_group_id", ""),
+                "chunk_id": parsed.get("chunk_id", ""),
+                "span_kind": parsed.get("span_kind", "document_range"),
+                "merged_from": list(parsed.get("merged_from", []) or []),
+                "overlap_from": parsed.get("overlap_from"),
+            })
         return {
             "url": url,
             "library": rows[0][4],
@@ -275,6 +294,7 @@ class SearchService:
             "path": meta.get("path"),
             "content": "\n\n".join(contents),
             "chunks": len(contents),
+            "chunk_details": details,
         }
 
     def read_window(
@@ -344,11 +364,26 @@ class SearchService:
         ).fetchall()
         if not rows:
             return None
+        details = []
+        for content, raw, _order in rows:
+            try:
+                parsed = json.loads(raw) if raw else {}
+            except ValueError:
+                parsed = {}
+            details.append({
+                "content": content,
+                "source_group_id": parsed.get("source_group_id", ""),
+                "chunk_id": parsed.get("chunk_id", ""),
+                "span_kind": parsed.get("span_kind", "document_range"),
+                "merged_from": list(parsed.get("merged_from", []) or []),
+                "overlap_from": parsed.get("overlap_from"),
+            })
         return {
             "url": url,
             "source_group_id": source_group_id,
             "content": "\n\n".join(r[0] for r in rows if r[0]),
             "chunks": len(rows),
+            "chunk_details": details,
         }
 
     def list_libraries(self) -> list[dict[str, Any]]:

@@ -13,19 +13,43 @@ from mcp.server.mcpserver import MCPServer
 
 from libref.config import LibrefSettings, load_settings
 from libref.crawler.registry import RegistryError
+from libref.llm import LlmGateway
 from libref.observe import setup_logging
 from libref.services.resolver import resolve_package as _resolve_package
+from libref.services.review import ReviewService
 from libref.services.search import SearchService
+
+
+def _wired_search(conn, settings):
+    """按配置装配检索服务，无密钥时退化为纯全文。"""
+    gateway = LlmGateway(settings)
+    embed = gateway.embed_fn()
+    rerank_fn = None
+    try:
+        rerank_fn = gateway.rerank_fn()
+    except Exception:  # noqa: BLE001 —— 重排不可用即关闭，不阻塞全文
+        rerank_fn = None
+    vec_store = None
+    if embed is not None:
+        from libref.store.vec_store import QdrantVecStore, collection_for
+
+        vec_store = QdrantVecStore(
+            settings.qdrant_url,
+            collection_for(settings.qdrant_collection, settings.db_path),
+            timeout=settings.qdrant_timeout,
+        )
+    return SearchService(conn, settings, vec_store=vec_store, embed=embed, rerank=rerank_fn), gateway
 
 
 def build_mcp_server(
     conn: sqlite3.Connection, settings: LibrefSettings | None = None
 ) -> MCPServer:
     """构建 MCPServer 实例并注册文档检索工具；连接由调用方管理生命周期。"""
-    mcp = MCPServer("libref")
-    search = SearchService(conn)
     resolve_settings = settings or load_settings()
     setup_logging(resolve_settings)
+    mcp = MCPServer("libref")
+    search, gateway = _wired_search(conn, resolve_settings)
+    review = ReviewService(conn)
 
     @mcp.tool()
     def search_docs(
@@ -111,6 +135,90 @@ def build_mcp_server(
     ) -> list[dict[str, Any]]:
         """浏览接口分组。"""
         return search.api_clusters(library=library, version=version, limit=limit)
+
+    @mcp.tool()
+    async def search_hybrid(
+        query: str,
+        library: str | None = None,
+        version: str | None = None,
+        limit: int = 8,
+    ) -> dict[str, Any]:
+        """混合检索文档库，与命令行 search --hybrid 同序，附降级标记。"""
+        results, degraded = await search.search_hybrid_async(
+            query, library=library, version=version, limit=limit,
+        )
+        return {"results": results, "degraded": degraded}
+
+    @mcp.tool()
+    async def answer(
+        query: str,
+        library: str | None = None,
+        version: str | None = None,
+        limit: int = 5,
+    ) -> dict[str, Any]:
+        """混合检索加问答生成，未启用时返回明确原因。"""
+        from libref.services.answer import answer_query_async
+
+        try:
+            return await answer_query_async(
+                conn, resolve_settings, query,
+                library=library, version=version, limit=limit,
+            )
+        except ValueError as exc:
+            return {"error": "unavailable", "message": str(exc)}
+        except Exception as exc:  # noqa: BLE001 —— 问答失败透出原因，不抛内部栈
+            return {"error": "failed", "message": str(exc)}
+
+    @mcp.tool()
+    def review_pending(limit: int = 50) -> list[dict[str, Any]]:
+        """列出待审核调用实例，与命令行 review list 同序。"""
+        return review.list_pending(limit=limit)
+
+    @mcp.tool()
+    def review_approve(entity_id: int) -> dict[str, Any]:
+        """待定转已核准，非法转移返回原因。"""
+        try:
+            review.approve(entity_id)
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc)}
+        return {"ok": True}
+
+    @mcp.tool()
+    def review_conflict(entity_id: int) -> dict[str, Any]:
+        """待定标冲突，非法转移返回原因。"""
+        try:
+            review.mark_conflict(entity_id)
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc)}
+        return {"ok": True}
+
+    @mcp.tool()
+    def review_reopen(entity_id: int) -> dict[str, Any]:
+        """冲突重开为待定，非冲突返回原因。"""
+        try:
+            review.reopen(entity_id)
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc)}
+        return {"ok": True}
+
+    @mcp.tool()
+    def job_show(job_id: int | None = None, limit: int = 20) -> dict[str, Any]:
+        """查看任务结论，缺标识时列出最近任务。"""
+        from libref.services.jobs import JobManager
+
+        mgr = JobManager(conn)
+        if job_id is None:
+            return {"jobs": [
+                {"id": j.id, "kind": j.kind, "status": j.status,
+                 "finished_at": j.finished_at, "error": j.error}
+                for j in mgr.list_recent(limit=limit)
+            ]}
+        job = mgr.get(job_id)
+        if job is None:
+            return {"error": "not_found", "message": f"unknown job: {job_id}"}
+        return {"id": job.id, "kind": job.kind, "status": job.status,
+                "error": job.error, "result": job.result,
+                "finished_at": job.finished_at}
 
     @mcp.tool()
     async def resolve_package(
