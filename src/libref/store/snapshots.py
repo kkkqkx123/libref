@@ -16,16 +16,6 @@ def _safe_segment(text: str) -> str:
     return cleaned[:64] or "default"
 
 
-def snapshot_root(settings, default_base: Path | None = None) -> Path:
-    configured = getattr(settings, "snapshot_dir", None)
-    if configured is not None:
-        return Path(configured)
-    if default_base is not None:
-        return Path(default_base)
-    base = Path(getattr(settings, "db_path", Path("data/libref.db"))).parent
-    return base / "snapshots"
-
-
 def version_key(ecosystem: str, library: str, version: str) -> str:
     return f"{_safe_segment(ecosystem)}/{_safe_segment(library)}/{_safe_segment(version)}"
 

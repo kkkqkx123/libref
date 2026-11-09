@@ -19,10 +19,12 @@ from libref.config import (
 
 
 def test_defaults(tmp_path, monkeypatch) -> None:
-    # 在临时 cwd 跑，隔离仓库根 .env 的 dotenv 注入，验证纯默认值
-    monkeypatch.chdir(tmp_path)
+    # 家目录隔离下验证纯默认值：三路径均为绝对路径且相互独立
+    _isolated_env(monkeypatch, tmp_path)
     s = LibrefSettings()
-    assert s.db_path == Path("data/libref.db")
+    assert s.db_path == tmp_path / ".local/share/libref/libref.db"
+    assert s.repos_dir == tmp_path / ".local/share/libref/repos"
+    assert s.snapshot_dir == tmp_path / ".local/share/libref/snapshots"
     assert s.fetch_concurrency == 4
     assert s.embedding_model == "BAAI/bge-m3"
     assert s.embedding_dim == 1024
@@ -49,12 +51,15 @@ def test_dotenv_file(tmp_path, monkeypatch) -> None:
     assert s.embedding_api_key == "sk-test"
 
 
-def test_env_override(monkeypatch) -> None:
+def test_env_override(tmp_path, monkeypatch) -> None:
+    _isolated_env(monkeypatch, tmp_path)
     monkeypatch.setenv("LIBREF_DB_PATH", "/tmp/other.db")
     monkeypatch.setenv("LIBREF_FETCH_CONCURRENCY", "8")
     s = LibrefSettings()
     assert s.db_path == Path("/tmp/other.db")
     assert s.fetch_concurrency == 8
+    assert s.repos_dir == tmp_path / ".local/share/libref/repos"
+    assert s.snapshot_dir == tmp_path / ".local/share/libref/snapshots"
 
 
 def _isolated_env(monkeypatch, tmp_path: Path) -> None:
@@ -193,6 +198,17 @@ def test_relative_paths_resolve_to_file_dir(monkeypatch, tmp_path) -> None:
     abs_conf = tmp_path / "abs.toml"
     abs_conf.write_text('[server]\ndb_path = "/tmp/x.db"\n', encoding="utf-8")
     assert load_settings(abs_conf).db_path == Path("/tmp/x.db")
+
+
+def test_paths_absolute_and_independent(monkeypatch, tmp_path) -> None:
+    _isolated_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("LIBREF_DB_PATH", "relative/other.db")
+    s = LibrefSettings()
+    assert s.db_path == tmp_path / "relative/other.db"
+    assert s.repos_dir.is_absolute()
+    assert s.snapshot_dir.is_absolute()
+    assert s.repos_dir != s.db_path.parent / "repos"
+    assert s.snapshot_dir != s.db_path.parent / "snapshots"
 
 
 def test_snapshot_is_frozen(monkeypatch, tmp_path) -> None:

@@ -26,7 +26,9 @@ class LibrefSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="LIBREF_", env_file=".env", frozen=True)
 
-    db_path: Path = Path("data/libref.db")
+    db_path: Path = Field(
+        default_factory=lambda: Path.home() / ".local/share/libref/libref.db"
+    )
     fetch_concurrency: int = Field(default=4, ge=1)
     request_timeout: float = Field(default=30.0, gt=0)
     fetch_max_retries: int = Field(default=3, ge=0)
@@ -101,16 +103,34 @@ class LibrefSettings(BaseSettings):
     render_js_default: bool = False
     retriever_window_radius: int = Field(default=1, ge=0)
     retriever_expand_window: bool = False
-    # 抓取审计与本地治理：快照开关目录配额、仓库配额、删除日志保留期。
+    # 抓取审计与本地治理：快照开关目录配额、仓库目录配额、删除日志保留期。
+    # 三路径相互独立，缺省均为家目录下绝对路径，与启动目录无关。
     snapshot_enabled: bool = False
-    snapshot_dir: Path | None = None
+    snapshot_dir: Path = Field(
+        default_factory=lambda: Path.home() / ".local/share/libref/snapshots"
+    )
     snapshot_quota_mb: int = Field(default=512, ge=0)
+    repos_dir: Path = Field(
+        default_factory=lambda: Path.home() / ".local/share/libref/repos"
+    )
     repos_quota_mb: int = Field(default=2048, ge=0)
     deletion_log_ttl_days: float = Field(default=30.0, ge=0)
     # 运行日志：级别与落盘，默认只走标准错误且保持安静。
     log_level: str = "WARNING"
     log_file: Path | None = None
     log_format: str = "text"
+
+    @model_validator(mode="after")
+    def _freeze_paths(self) -> LibrefSettings:
+        for key in PATH_FIELDS:
+            value = getattr(self, key, None)
+            if value is None:
+                continue
+            candidate = Path(str(value)).expanduser()
+            if not candidate.is_absolute():
+                candidate = Path.cwd() / candidate
+            object.__setattr__(self, key, candidate)
+        return self
 
     @model_validator(mode="after")
     def _check_logging(self) -> LibrefSettings:
@@ -210,6 +230,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "snapshot_enabled",
             "snapshot_dir",
             "snapshot_quota_mb",
+            "repos_dir",
             "repos_quota_mb",
             "deletion_log_ttl_days",
         }
@@ -219,7 +240,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
 
 RESERVED_SECTIONS = frozenset()
 
-PATH_FIELDS = frozenset({"db_path", "registry_overrides_file", "snapshot_dir", "log_file"})
+PATH_FIELDS = frozenset({"db_path", "registry_overrides_file", "snapshot_dir", "repos_dir", "log_file"})
 
 MASKED_VALUE = "***"
 

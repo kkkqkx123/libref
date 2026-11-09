@@ -97,13 +97,11 @@ def _connect(settings: LibrefSettings, *, check_same_thread: bool = True):
 
 
 def cmd_init_db(args: argparse.Namespace) -> int:
-    conn = _connect(_load_settings(args))
+    settings = _load_settings(args)
+    conn = _connect(settings)
     applied = applied_count(conn)
     conn.close()
-    print(
-        f"db ready at {args.db_path if hasattr(args, 'db_path') else 'data/libref.db'} "
-        f"({applied} migrations applied)"
-    )
+    print(f"db ready at {settings.db_path} ({applied} migrations applied)")
     return 0
 
 
@@ -366,7 +364,7 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
 
     settings = _load_settings(args, _registry_overrides(args))
     conn = _connect(settings)
-    repos_dir = settings.db_path.parent / "repos"
+    repos_dir = settings.repos_dir
     try:
         if args.source is not None:
             if args.version is None:
@@ -804,7 +802,6 @@ def cmd_job_show(args: argparse.Namespace) -> int:
 
 def cmd_purge(args: argparse.Namespace) -> int:
     from libref.services.retention import purge_version
-    from libref.store.snapshots import snapshot_root
     settings = _load_settings(args)
     conn = _connect(settings)
     try:
@@ -814,8 +811,8 @@ def cmd_purge(args: argparse.Namespace) -> int:
             args.library,
             args.version,
             ecosystem=getattr(args, "ecosystem", None),
-            repos_dir=settings.db_path.parent / "repos",
-            snapshot_root=snapshot_root(settings),
+            repos_dir=settings.repos_dir,
+            snapshot_root=settings.snapshot_dir,
             vec_store=vec_store,
         )
     except ValueError as exc:

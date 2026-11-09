@@ -11,6 +11,7 @@ import logging
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -300,9 +301,9 @@ class IngestService:
         self._clean_cache: dict[str, str] = {}
         self._snapshots = None
         if bool(getattr(settings, "snapshot_enabled", False)):
-            from libref.store.snapshots import SnapshotStore, snapshot_root
+            from libref.store.snapshots import SnapshotStore
             self._snapshots = SnapshotStore(
-                snapshot_root(settings),
+                Path(settings.snapshot_dir),
                 quota_mb=int(getattr(settings, "snapshot_quota_mb", 512)),
             )
 
@@ -1232,21 +1233,19 @@ def index_repo(
     source: str | None = None,
     *,
     update: bool = False,
-    repos_dir=None,
+    repos_dir: Path,
     ecosystem: str = "custom",
     resolved_from: str | None = None,
     registry_confirmed: bool = True,
     repos_quota_mb: int | None = None,
 ) -> dict[str, int]:
-    from pathlib import Path
-
     from libref.astminer import cache as ast_cache
     from libref.astminer import config as ast_config
     from libref.astminer import resolution as ast_resolution
     from libref.astminer.repos import RepoManager, iter_source_files
     from libref.services.search import SearchService
 
-    settings_dir = Path(repos_dir) if repos_dir is not None else Path("data/repos")
+    settings_dir = Path(repos_dir)
     if not source:
         hit = lookup_index_source_cached(conn, ecosystem, library, version)
         if hit is None:
@@ -1354,7 +1353,9 @@ async def index_repo_by_name_async(
         eco = (ecosystem.strip().lower() if ecosystem else "custom")
         return index_repo(
             conn, library.strip(), version, explicit_source,
-            update=update, repos_dir=repos_dir, ecosystem=eco,
+            update=update,
+            repos_dir=Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir),
+            ecosystem=eco,
             resolved_from="explicit", registry_confirmed=True,
         )
     async with _client(settings) as client:
@@ -1364,7 +1365,9 @@ async def index_repo_by_name_async(
     assert resolution.repo_url is not None
     return index_repo(
         conn, resolution.name, resolution.version, resolution.repo_url,
-        update=update, repos_dir=repos_dir, ecosystem=resolution.ecosystem,
+        update=update,
+        repos_dir=Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir),
+        ecosystem=resolution.ecosystem,
         resolved_from=resolution.source,
         registry_confirmed=resolution.registry_confirmed,
     )
@@ -1629,6 +1632,8 @@ def mine_patterns(
 
 
 def build_repo_runner(settings, conn, repos_dir=None):
+    resolved_dir = Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir)
+
     async def runner(job):
         if job.kind == INDEX_REPO_JOB_KIND:
             p = job.params
@@ -1638,7 +1643,7 @@ def build_repo_runner(settings, conn, repos_dir=None):
                 p["version"],
                 p.get("source"),
                 update=bool(p.get("update", False)),
-                repos_dir=repos_dir,
+                repos_dir=resolved_dir,
                 ecosystem=str(p.get("ecosystem", "custom") or "custom"),
                 resolved_from=p.get("resolved_from"),
                 registry_confirmed=bool(p.get("registry_confirmed", True)),
