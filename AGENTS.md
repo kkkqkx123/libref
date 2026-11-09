@@ -1,37 +1,160 @@
-# AGENTS.md — libref 开发环境与协作约定
+# AGENTS.md — libref Development Conventions
 
-## 环境管理（uv，唯一入口）
+## Guideline
 
-本项目所有 Python 环境操作**只经 uv**，不使用系统 pip / 全局安装：
+- **No backward compatibility.** The project is in active development. Prioritize
+  long-term architecture maintainability and fix design defects early. Never keep
+  legacy code or shim old data.
+- **Document Reference Rule.** Code comments describe intent only. Never cite plan
+  or doc structure identifiers (e.g. P1, P2-3, T1, section numbers, phase names)
+  in code comments.
+- **Plan/Design Documents.** Use concise natural language. Avoid complete code snippets.
+
+## Language
+
+- **Code files** (including config files, identifiers, and all comments/docstrings):
+  English only.
+- **Documentation** (`docs/`, in-doc explanations): Simplified Chinese only.
+- A module docstring may cite a blueprint name (e.g. `ref/PrefixSpan-py`), which
+  stays in its original form; the surrounding explanation is still English.
+
+## Project Overview
+
+`libref` is a library-reference knowledge base: it crawls library documentation,
+mines open-source usage of the same libraries, and serves grounded answers
+through CLI / MCP / Web exits.
+
+- **Branch A — doc crawl** (`crawler/` → `chunking/`): robots/sitemap/`llms.txt`
+  discovery → httpx fetch with incremental revalidation → main-content extraction
+  → heading-path structural chunking → SQLite + FTS5.
+- **Branch B — source mining** (`astminer/` → `mining/`): clone repos (dulwich) →
+  tree-sitter AST extraction of classes/functions/imports/call instances → two-pass
+  cross-file alias resolution → frequency / co-occurrence / PrefixSpan sequence
+  mining → `seq_patterns`.
+- **Retrieval** (`store/` + `llm/`): FTS5 BM25 + Qdrant KNN → RRF → frequency
+  rerank → grounded answer generation. SQLite is the sole source of truth;
+  Qdrant vectors are a rebuildable derived index owned only by `store/vec_store.py`.
+- **Orchestration** (`services/`): the only layer exits may call.
+
+Details: `docs/architecture/tech-stack.md`, `docs/architecture/module-layout.md`,
+`docs/architecture/code-indexing-chain.md`, `docs/architecture/doc-indexing-chain.md`.
+
+## Environment (uv Only)
+
+All Python environment operations go through `uv`. Never use system pip or
+global installs.
 
 ```bash
-uv sync                    # 按 uv.lock 创建/同步 .venv（含 dev 组）
-uv sync --group dev        # 显式含开发依赖（默认 dependency-groups.dev 已随 sync 安装）
-uv add <pkg>               # 新增运行依赖（同时更新 pyproject 与 uv.lock）
-uv add --optional browser <pkg>   # 可选 extra（如 playwright）
-uv run <cmd>               # 在 .venv 中执行任意命令（pytest、python 等）
-uv run pytest              # 运行测试
-uv run python -c "..."     # 一次性脚本
+uv sync                    # create/sync .venv from uv.lock (includes dev group)
+uv add <pkg>               # add a runtime dependency (updates pyproject + uv.lock)
+uv add --optional browser <pkg>  # optional extra (e.g. playwright)
+uv run <cmd>               # run anything inside .venv (pytest, python, ruff, mypy)
 ```
 
-- 虚拟环境固定在项目根 `.venv/`（`uv sync` 自动创建），**不要**手动 `source .venv/bin/activate` 之外的方式激活，也**不要**直接调用 `.venv/bin/python` —— 一律走 `uv run`。
-- 依赖变更只允许通过 `uv add` / `uv remove` / 直接编辑 `pyproject.toml` 后 `uv sync`，禁止 `pip install`（会产生与 uv.lock 不一致的环境）。
-- Python 版本由 `.python-version`（3.14）钉住；升级版本须同步核对 tree-sitter grammar wheel、sqlite-vec 等二进制依赖兼容性（见 docs/architecture/tech-stack.md §6）。
+- The venv lives at project root `.venv/` (created by `uv sync`). Never activate
+  it manually and never call `.venv/bin/python` directly — always use `uv run`.
+- Dependency changes only via `uv add` / `uv remove`, or by editing
+  `pyproject.toml` followed by `uv sync`. `pip install` is forbidden (it desyncs
+  `uv.lock`).
+- Python is pinned by `.python-version` (3.14). A version bump must re-verify
+  binary dependencies (tree-sitter grammar wheels, sqlite-vec, …).
 
-## 项目布局
+## Workspace Layout
 
-- src 布局：源码在 `src/libref/`，测试在 `tests/`，结构与模块依赖规则见 `docs/architecture/module-layout.md`。
-- 技术选型与依赖分阶段清单：`docs/architecture/tech-stack.md`。
-- 对标项目蓝本分析：`docs/ref/`；`ref/` 目录为只读参考仓库，**不参与构建、不加进依赖**。
+Source in `src/libref/`, tests in `tests/`. Full tree: `docs/architecture/module-layout.md`.
 
-## 代码与测试约定
+```
+crawler ─┐
+chunking ├→ db ←─ store ←─ services ←─ {cli, mcp_server, web}
+astminer ┘   ↑       ↑
+mining ──────┘       llm (transport leaf over httpx; consumed via injection/constructors)
+              └→ Qdrant (reachable only from store/vec_store.py)
+```
 
-- 模块 docstring 首行注明蓝本来源（如 `蓝本 ref/PrefixSpan-py (MIT)`）与定制点。
-- `mining/` 等算法模块保持纯内存、零 db 依赖，落库由 `services/` 编排（module-layout.md §2）。
-- 出口模块（cli / mcp_server / web）不写业务逻辑，只做参数解析 + 调 `services/`。
-- 测试黄金样例标注来源；检索质量基准（MRR/Recall@k）后续作为 CI 门禁，不得静默放宽阈值。
-- 新增语言支持只加 tree-sitter grammar wheel + `astminer/config.py` 的 LanguageConfig，不改引擎。
+- **One-way dependencies.** `db` is the only shared SQL bottom layer; `services/`
+  is the only orchestration layer. The three exits (`cli`, `mcp_server`, `web`)
+  must never bypass `services/` to call `store`/`crawler`/`mining` directly.
+- **Thin exits.** Exit modules do argument parsing + `services/` calls + result
+  formatting only. No business logic.
+- **Pure algorithms.** `mining/` and AST extraction cores are pure in-memory code
+  with zero `db` dependency (plain-Python inputs); persistence is orchestrated
+  by `services/`.
+- **Branch independence.** `astminer/` and `crawler/` do not depend on each other;
+  they merge only through `db`, orchestrated by `services/`.
+- **Pydantic at boundaries.** Cross-package schemas (extraction records, call
+  instances, MCP parameters, REST responses) are pydantic models derived from one
+  definition. No field drift.
+- **`ref/` is read-only.** External reference checkouts never participate in the
+  build and never become dependencies.
 
-## 验证
+## Command Execution
 
-提交前至少运行一次：`uv run pytest`。涉及检索或挖掘逻辑的改动，须附对应黄金样例或对拍测试。
+```bash
+uv run pytest              # full test suite (minimum check before submit)
+uv run ruff check src tests  # lint
+uv run ruff format --check src tests  # format check
+uv run mypy src            # type check
+```
+
+Consolidate verification into as few runs as possible. When filtering long build
+output repeatedly, redirect to a file first, then read it.
+
+## Testing
+
+- **Organization.** Unit tests live next to the code (`test_*.py` mirroring the
+  module); integration tests under `tests/integration/`; network-dependent E2E
+  under `tests/e2e/`; parse samples under `tests/fixtures/` (fixtures may
+  intentionally contain unresolved calls/idle bindings — see ruff
+  per-file-ignores in `pyproject.toml`).
+- **Markers** (`pyproject.toml`): `unit` (pure in-memory, no DB/subprocess),
+  `integration` (needs sqlite/subprocess/external service), `e2e` (needs real
+  network, skipped unless `LIBREF_RUN_E2E=1`), `requires_qdrant` (needs local
+  Qdrant), `requires_binary` (needs built entrypoint).
+- **Golden samples.** Every borrowed algorithm keeps golden cases with annotated
+  provenance (upstream README/paper). Retrieval quality baselines (MRR/Recall@k)
+  are CI gates — never silently loosen thresholds.
+- Changes touching retrieval or mining logic must come with golden or
+  differential (cross-check) tests.
+
+## Workflow
+
+### Doc pipeline
+
+```
+Discover (robots → sitemap/llms.txt) → Fetch (etag/last-modified, per-host backoff)
+→ Extract (main-content prune → markdown) → Chunk (heading path + greedy merge,
+fence-balance invariant) → SQLite + FTS → services.ingest orchestration
+```
+
+### Source-mining pipeline
+
+```
+Clone/update repos → Parse (tree-sitter, per-language queries) → Group
+→ Extract call instances (line range + args + confidence) → Resolve (declare/import
+facts, then cross-file aliases) → Aggregate (frequency/co-occurrence/PrefixSpan closed)
+→ services.mining_refresh persists to seq_patterns
+```
+
+### Retrieval pipeline
+
+```
+Query → FTS5 BM25 + Qdrant KNN → RRF fusion → frequency rerank → passage assembly
+→ grounded answer (llm gateway: shared resilience state per endpoint)
+```
+
+## Code Conventions
+
+- **Blueprint attribution.** Each module borrowed from an external project states
+  the blueprint on the module docstring's first line
+  (e.g. `Blueprint ref/PrefixSpan-py (MIT)`) plus what was customized.
+- **New language support** = add a tree-sitter grammar wheel + a `LanguageConfig`
+  in `astminer/config.py`. Never touch the engine.
+- **Config.** `config.py` (pydantic-settings) is shared by exits and `services/`;
+  `db` never depends on it. Precedence: explicit CLI overrides > environment
+  (including local file injection) > config file > built-in defaults. The
+  effective snapshot is frozen read-only once built.
+- **Secrets** travel via environment variables only, never via config files.
+  Logs print redacted snapshots only (`redacted_dict`).
+- **Cross-file sync in one change.** When touching a contract with multiple
+  mirrors (config defaults/docs, Qdrant collection governance, grammar
+  wheel/`LanguageConfig`/fixtures), update all mirrors in the same change.

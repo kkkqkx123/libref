@@ -36,11 +36,12 @@ def build_mcp_server(
         query: str,
         library: str | None = None,
         version: str | None = None,
+        ecosystem: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
         """默认混合检索：双路召回融合，缺向量时回落全文。"""
         results, _ = await search.search_hybrid_async(
-            query, library=library, version=version, limit=limit,
+            query, library=library, version=version, ecosystem=ecosystem, limit=limit,
         )
         return results
 
@@ -49,25 +50,26 @@ def build_mcp_server(
         query: str,
         library: str | None = None,
         version: str | None = None,
+        ecosystem: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
         """精确全文查：只走 FTS 单路。"""
-        return search.search_docs(query, library=library, version=version, limit=limit)
+        return search.search_docs(query, library=library, version=version, ecosystem=ecosystem, limit=limit)
 
     @mcp.tool()
-    def read_page(url: str, library: str | None = None, version: str | None = None) -> dict[str, Any] | None:
+    def read_page(url: str, library: str | None = None, version: str | None = None, ecosystem: str | None = None) -> dict[str, Any] | None:
         """Read a full page reassembled from ordered blocks."""
-        return pages.read_page(url, library=library, version=version)
+        return pages.read_page(url, library=library, version=version, ecosystem=ecosystem)
 
     @mcp.tool()
-    def read_window(url: str, sort_order: int, radius: int = 1) -> dict[str, Any] | None:
+    def read_window(url: str, sort_order: int, radius: int = 1, library: str | None = None, version: str | None = None, ecosystem: str | None = None) -> dict[str, Any] | None:
         """Read neighboring blocks around a hit for context expansion."""
-        return pages.read_window(url, sort_order, radius)
+        return pages.read_window(url, sort_order, radius, library=library, version=version, ecosystem=ecosystem)
 
     @mcp.tool()
-    def read_section(url: str, source_group_id: str) -> dict[str, Any] | None:
+    def read_section(url: str, source_group_id: str, library: str | None = None, version: str | None = None, ecosystem: str | None = None) -> dict[str, Any] | None:
         """Read a whole source group to trace a sub-block to its section."""
-        return pages.read_section(url, source_group_id)
+        return pages.read_section(url, source_group_id, library=library, version=version, ecosystem=ecosystem)
 
     @mcp.tool()
     def list_libraries() -> list[dict[str, Any]]:
@@ -85,62 +87,91 @@ def build_mcp_server(
     def api_usage(
         library: str | None = None,
         version: str | None = None,
+        ecosystem: str | None = None,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         """Count calls and covering scopes per API (frequency query)."""
-        return mining.api_usage_counts(library=library, version=version, limit=limit)
+        return mining.api_usage_counts(library=library, version=version, ecosystem=ecosystem, limit=limit)
 
     @mcp.tool()
     def related_apis(
         api: str,
         library: str | None = None,
         version: str | None = None,
+        ecosystem: str | None = None,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         """Find APIs co-occurring in the same scopes (co-occurrence query)."""
-        return mining.related_apis(api, library=library, version=version, limit=limit)
+        return mining.related_apis(api, library=library, version=version, ecosystem=ecosystem, limit=limit)
 
     @mcp.tool()
     def pattern_evidence(
         pattern: list[str],
         library: str | None = None,
         version: str | None = None,
+        ecosystem: str | None = None,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
         """Fetch source evidence for a call sequence pattern."""
-        return mining.pattern_evidence(pattern, library=library, version=version, limit=limit)
+        return mining.pattern_evidence(pattern, library=library, version=version, ecosystem=ecosystem, limit=limit)
 
     @mcp.tool()
     def feature_tree(
         library: str | None = None,
         version: str | None = None,
+        ecosystem: str | None = None,
         prefix: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """Browse hierarchical feature nodes by prefix."""
-        return mining.feature_tree(library=library, version=version, prefix=prefix, limit=limit)
+        return mining.feature_tree(library=library, version=version, ecosystem=ecosystem, prefix=prefix, limit=limit)
 
     @mcp.tool()
     def api_clusters(
         library: str | None = None,
         version: str | None = None,
+        ecosystem: str | None = None,
+        containing: list[str] | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         """Browse API clusters."""
-        return mining.api_clusters(library=library, version=version, limit=limit)
+        return mining.api_clusters(library=library, version=version, ecosystem=ecosystem, containing=containing, limit=limit)
+
+    @mcp.tool()
+    def list_patterns(
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        containing: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """List mined call sequence patterns, optionally filtered by members."""
+        return mining.list_patterns(library=library, version=version, ecosystem=ecosystem, containing=containing, limit=limit)
+
+    @mcp.tool()
+    def arg_shapes(
+        api: str,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Show common argument shapes for an API."""
+        return mining.arg_shapes(api, library=library, version=version, ecosystem=ecosystem, limit=limit)
 
     @mcp.tool()
     async def search_hybrid(
         query: str,
         library: str | None = None,
         version: str | None = None,
+        ecosystem: str | None = None,
         limit: int = 8,
         window_radius: int | None = None,
         expand_window: bool = False,
     ) -> dict[str, Any]:
         """Hybrid retrieval matching CLI search --hybrid with degradation flag."""
         results, degraded = await search.search_hybrid_async(
-            query, library=library, version=version, limit=limit,
+            query, library=library, version=version, ecosystem=ecosystem, limit=limit,
             expand_window=expand_window or None, window_radius=window_radius,
         )
         return {"results": results, "degraded": degraded}
@@ -150,6 +181,7 @@ def build_mcp_server(
         query: str,
         library: str | None = None,
         version: str | None = None,
+        ecosystem: str | None = None,
         limit: int = 5,
         window_radius: int | None = None,
         expand_window: bool = False,
@@ -161,7 +193,7 @@ def build_mcp_server(
         try:
             return await answer_query_async(
                 conn, resolve_settings, query,
-                library=library, version=version, limit=limit,
+                library=library, version=version, ecosystem=ecosystem, limit=limit,
                 expand_window=expand_window or None, window_radius=window_radius,
                 material_limit=material_limit,
             )
