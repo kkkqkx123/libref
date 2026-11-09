@@ -23,11 +23,15 @@ def collection_for(base: str, db_path: str | os.PathLike[str]) -> str:
     return f"{base}_{digest}"
 
 
-def build_embed_text(title: str | None, path: str | None, content: str | None) -> str:
-    """组装编码文本，标题路径在前、正文在后，写入与查询共用同一构造。"""
+def build_embed_text(title: str | None, path: str | None, content: str | None, keywords: list[str] | None = None) -> str:
+    """组装编码文本，标题路径在前、关键词随后、正文在后，写入与查询共用同一构造。"""
     head = " / ".join(p for p in (title, path) if p)
     body = content or ""
-    return f"{head}\n{body}" if head else body
+    key_part = " ".join(k for k in (keywords or []) if k)
+    prefix = head
+    if key_part:
+        prefix = f"{head} | {key_part}" if head else key_part
+    return f"{prefix}\n{body}" if prefix else body
 
 
 class QdrantVecStore:

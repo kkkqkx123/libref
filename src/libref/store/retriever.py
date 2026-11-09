@@ -125,6 +125,8 @@ def _fetch_details(
             "content": r[2] or "",
             "chunk_path": meta.get("chunk_path", "embedding"),
             "source_group_id": meta.get("source_group_id", ""),
+            "keywords": list(meta.get("keywords", []) or []),
+            "content_type": meta.get("content_type", "text/markdown"),
         }
     return out
 
@@ -254,7 +256,7 @@ class HybridRetriever:
         reranked = await self._apply_rerank(query, fused, limit, degraded)
         fused, degraded = reranked
         window_f = max(2 * limit, 10)
-        results = self._assemble(query, fused[:window_f], fts_ids, vec_ids)
+        results = self._postprocess(query, fused[:window_f], fts_ids, vec_ids)
         return results[:limit], degraded
 
     def _rrf_scores(
@@ -366,9 +368,56 @@ class HybridRetriever:
                     "sources": sources,
                     "chunk_path": info.get("chunk_path", "embedding"),
                     "source_group_id": info.get("source_group_id", ""),
+                    "keywords": list(info.get("keywords", []) or []),
+                    "content_type": info.get("content_type", "text/markdown"),
                 }
             )
         return out
+
+    def _postprocess(self, query: str, fused: list[int], fts_ids: list[int], vec_ids: list[int]) -> list[dict[str, Any]]:
+        """后处理链：装配按序执行，窗口还原失败保留装配顺序。"""
+        results = self._assemble(query, fused, fts_ids, vec_ids)
+        return self._expand_windows(results)
+
+
+    def _expand_windows(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """窗口还原后处理：按配置半径取前后块拼入片段，失败即保留原序。"""
+        try:
+            enabled = bool(getattr(self._settings, "retriever_expand_window", False))
+        except AttributeError:
+            enabled = False
+        if not enabled or not results:
+            return results
+        try:
+            radius = max(0, int(getattr(self._settings, "retriever_window_radius", 1)))
+        except (TypeError, ValueError):
+            radius = 1
+        if radius <= 0:
+            return results
+        try:
+            from libref.store.document_store import DocumentStore
+            store = DocumentStore(self._conn)
+            by_id = {int(r["id"]): r for r in self._conn.execute(
+                "SELECT id, page_id, sort_order FROM documents WHERE id IN (%s)" % ",".join("?" for _ in results),
+                [r["id"] for r in results],
+            ).fetchall()}
+            expanded: list[dict[str, Any]] = []
+            for item in results:
+                loc = by_id.get(int(item["id"]))
+                if loc is None:
+                    expanded.append(item)
+                    continue
+                window = store.get_window(int(loc[1]), int(loc[2]), radius)
+                if len(window) > 1:
+                    item = dict(item)
+                    item["window"] = [
+                        {"id": w["id"], "sort_order": w["sort_order"], "content": (w["content"] or "")[:300]}
+                        for w in window
+                    ]
+                expanded.append(item)
+            return expanded
+        except Exception:  # noqa: BLE001 —— 扩展失败保留原结果
+            return results
 
 
 def build_retriever(settings, conn, *, vec_store=None, embed=None, rerank=None):

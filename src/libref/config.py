@@ -78,3 +78,7 @@ class LibrefSettings(BaseSettings):
     mcp_host: str = "127.0.0.1"
     mcp_port: int = 8000
     mcp_path: str = "/mcp"
+    # 文档链路补齐：浏览器降级默认开关、检索窗口扩展。
+    render_js_default: bool = False
+    retriever_window_radius: int = 1
+    retriever_expand_window: bool = False

@@ -6,10 +6,14 @@ import ast
 import hashlib
 from pathlib import Path
 
+import pytest
+
 from libref.astminer import cache as ast_cache
 from libref.astminer import config as ast_config
 from libref.astminer import engine as ast_engine
 from libref.astminer import resolution as ast_resolution
+
+pytestmark = pytest.mark.integration
 
 
 def _parse(path: str, source: bytes):

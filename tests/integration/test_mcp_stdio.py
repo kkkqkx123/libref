@@ -8,33 +8,19 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+from tests.conftest import seed_mcp_db
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 SERVER_BIN = Path(sys.executable).parent / "libref"
+
+pytestmark = [pytest.mark.integration, pytest.mark.requires_binary]
 
 _MARKER = "quetzalstdio"
 _PAGE_URL = "https://d.example/hello.html"
 
 
 def _seed_db(db_path: Path) -> None:
-    from libref.chunking import Chunk
-    from libref.db import apply_migrations, open_db
-    from libref.store.document_store import DocumentStore
-
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = open_db(db_path)
-    try:
-        apply_migrations(conn)
-        conn.execute("INSERT INTO libraries(name) VALUES('docs')")
-        conn.execute("INSERT INTO versions(library_id, version) VALUES(1, '1.0')")
-        conn.commit()
-        DocumentStore(conn).store_page(
-            1, 1, _PAGE_URL, "stored",
-            chunks=[Chunk(url=_PAGE_URL, path="Guide", title="Guide",
-                          content=f"hello libref {_MARKER} marker", sort_order=0)],
-            raw_content="seed body",
-        )
-    finally:
-        conn.close()
+    seed_mcp_db(db_path, _MARKER, _PAGE_URL)
 
 
 async def _handshake(db_path: Path) -> None:

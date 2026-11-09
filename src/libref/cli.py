@@ -18,6 +18,7 @@ from libref.services.ingest import (
     index_repo,
     mine_patterns,
     run_scrape_job_sync,
+    start_refresh_job,
     start_scrape_job,
 )
 from libref.services.jobs import JobManager
@@ -73,7 +74,114 @@ def _scope_from_args(args: argparse.Namespace) -> dict:
         "include_patterns": list(getattr(args, "include_pattern", None) or []),
         "exclude_patterns": list(getattr(args, "exclude_pattern", None) or []),
         "max_depth": getattr(args, "max_depth", None),
+        "render_js": bool(getattr(args, "render_js", False)),
     }
+
+
+def cmd_refresh(args: argparse.Namespace) -> int:
+    """刷新意图入口：复用抓取链路增量语义。"""
+    settings = LibrefSettings()
+    conn = _connect(settings)
+    vec_store, embed = _build_vector(settings)
+    scope = _scope_from_args(args)
+    try:
+        if getattr(args, "run_async", False):
+            mgr = JobManager(conn)
+            mgr.recover()
+            job_id = start_refresh_job(
+                mgr,
+                args.library, args.version, args.start_url,
+                max_pages=args.max_pages, prefilter=args.prefilter,
+                scope=scope, ecosystem=getattr(args, "ecosystem", None) or "custom",
+            )
+            job = run_scrape_job_sync(
+                mgr, settings, conn, job_id, vec_store=vec_store, embed=embed
+            )
+            print(
+                f"job {job.id} {job.status}"
+                + (f" error={job.error}" if job.error else "")
+            )
+            return 0 if job.status == "done" else 1
+        service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
+        counts = service.refresh_version(
+            args.library, args.version, args.start_url,
+            max_pages=args.max_pages, prefilter=args.prefilter,
+            scope=scope, ecosystem=getattr(args, "ecosystem", None) or "custom",
+        )
+    finally:
+        conn.close()
+    for outcome, n in counts.items():
+        print(f"{outcome}: {n}")
+    return 0
+
+
+def cmd_smoke(args: argparse.Namespace) -> int:
+    """本地冒烟：起临时 HTTP 站验证发现到落库全链路，不依赖外网。"""
+    import threading
+    from functools import partial
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+    from pathlib import Path
+    import tempfile
+
+    pages = {
+        "/sitemap.xml": (
+            "<?xml version=\"1.0\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">"
+            "<url><loc>PLACE/a.html</loc></url><url><loc>PLACE/b.md</loc></url></urlset>",
+            "application/xml",
+        ),
+        "/a.html": (
+            "<html><head><title>A</title></head><body><main><h1>Guide</h1>"
+            "<p>smoke install libref here</p></main></body></html>",
+            "text/html",
+        ),
+        "/b.md": ("# Guide\n\nsmoke markdown body\n", "text/markdown"),
+    }
+
+    class Handler(SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            body, ctype = pages.get(self.path, (None, None))
+            if body is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            data = body.replace("PLACE", f"http://127.0.0.1:{self.server.server_port}").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_HEAD(self):
+            body, ctype = pages.get(self.path, (None, None))
+            if body is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.end_headers()
+
+    settings = LibrefSettings()
+    conn = _connect(settings)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        service = IngestService(settings, conn)
+        counts = service.scrape_docs("smoke", "1.0", f"{base}/sitemap.xml")
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        conn.close()
+    for outcome, n in counts.items():
+        print(f"{outcome}: {n}")
+    ok = counts.get("stored", 0) >= 1
+    print("smoke: ok" if ok else "smoke: empty")
+    return 0 if ok else 1
 
 
 def _resolve_for_cli(settings, conn, ecosystem, library, requested_version):
@@ -357,14 +465,34 @@ def cmd_mine(args: argparse.Namespace) -> int:
 
 
 def cmd_search(args: argparse.Namespace) -> int:
-    conn = _connect(LibrefSettings())
+    import asyncio as _asyncio
+    import json as _json
+    settings = LibrefSettings()
+    if getattr(args, "expand_window", False):
+        settings.retriever_expand_window = True
+    if getattr(args, "window_radius", None) is not None:
+        settings.retriever_window_radius = int(args.window_radius)
+    conn = _connect(settings)
     try:
-        results = SearchService(conn).search_docs(
-            args.query,
-            library=args.library,
-            version=args.version,
-            limit=args.limit,
-        )
+        if getattr(args, "hybrid", False):
+            vec_store, embed = _build_vector(settings)
+            service = SearchService(conn, settings, vec_store=vec_store, embed=embed)
+            results, degraded = _asyncio.run(service.search_hybrid_async(
+                args.query,
+                library=args.library,
+                version=args.version,
+                limit=args.limit,
+            ))
+            if degraded:
+                print("(degraded: partial retrieval)", file=sys.stderr)
+        else:
+            service = SearchService(conn)
+            results = service.search_docs(
+                args.query,
+                library=args.library,
+                version=args.version,
+                limit=args.limit,
+            )
     finally:
         conn.close()
     if not results:
@@ -373,11 +501,17 @@ def cmd_search(args: argparse.Namespace) -> int:
     for r in results:
         print(f"[{r['score']:.3f}] {r['title'] or '(untitled)'} — {r['url']}")
         print(f"    {r['snippet']}")
+        if r.get("window"):
+            print(f"    window: {_json.dumps(r['window'], ensure_ascii=False)[:300]}")
     return 0
 
 
 def cmd_answer(args: argparse.Namespace) -> int:
     settings = LibrefSettings()
+    if getattr(args, "expand_window", False):
+        settings.retriever_expand_window = True
+    if getattr(args, "window_radius", None) is not None:
+        settings.retriever_window_radius = int(args.window_radius)
     conn = _connect(settings)
     try:
         gateway = LlmGateway(settings)
@@ -403,6 +537,40 @@ def cmd_answer(args: argparse.Namespace) -> int:
         print(f"- {c['title'] or '(untitled)'} — {c['url']}")
     if out["degraded"]:
         print("(degraded: partial retrieval)", file=sys.stderr)
+    return 0
+
+
+def cmd_read_window(args: argparse.Namespace) -> int:
+    import json as _json
+    conn = _connect(LibrefSettings())
+    try:
+        page = SearchService(conn).read_window(
+            args.url, args.sort_order, radius=args.radius,
+            library=args.library, version=args.version,
+        )
+    finally:
+        conn.close()
+    if page is None:
+        print(f"(window not found: {args.url} @{args.sort_order})", file=sys.stderr)
+        return 1
+    print(_json.dumps(page, ensure_ascii=False))
+    return 0
+
+
+def cmd_read_section(args: argparse.Namespace) -> int:
+    import json as _json
+    conn = _connect(LibrefSettings())
+    try:
+        page = SearchService(conn).read_section(
+            args.url, args.source_group_id,
+            library=args.library, version=args.version,
+        )
+    finally:
+        conn.close()
+    if page is None:
+        print(f"(section not found: {args.url} {args.source_group_id})", file=sys.stderr)
+        return 1
+    print(_json.dumps(page, ensure_ascii=False))
     return 0
 
 
@@ -632,13 +800,34 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument(
         "--max-depth", type=int, default=None, help="相对起始目录的最大深度"
     )
+    p_ingest.add_argument(
+        "--render-js", action="store_true", help="疑似渲染页尝试浏览器降级"
+    )
     p_ingest.set_defaults(func=cmd_ingest)
+
+    p_refresh = sub.add_parser("refresh", help="刷新版本文档并入库")
+    p_refresh.add_argument("library")
+    p_refresh.add_argument("version")
+    p_refresh.add_argument("start_url")
+    p_refresh.add_argument("--ecosystem", default=None)
+    p_refresh.add_argument("--max-pages", type=int, default=None)
+    p_refresh.add_argument("--prefilter", action="store_true")
+    p_refresh.add_argument("--render-js", action="store_true")
+    p_refresh.add_argument(
+        "--async", dest="run_async", action="store_true", help="经 jobs 队列执行"
+    )
+    p_refresh.set_defaults(func=cmd_refresh)
+
+    sub.add_parser("smoke-local", help="本地冒烟：临时 HTTP 站全链路").set_defaults(func=cmd_smoke)
 
     p_search = sub.add_parser("search", help="FTS 全文检索")
     p_search.add_argument("query")
     p_search.add_argument("--library", default=None)
     p_search.add_argument("--version", default=None)
     p_search.add_argument("--limit", type=int, default=8)
+    p_search.add_argument("--hybrid", action="store_true", help="改用混合检索")
+    p_search.add_argument("--expand-window", action="store_true", help="命中后扩展前后窗口")
+    p_search.add_argument("--window-radius", type=int, default=None)
     p_search.set_defaults(func=cmd_search)
 
     p_answer = sub.add_parser("answer", help="混合检索加问答生成")
@@ -646,6 +835,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_answer.add_argument("--library", default=None)
     p_answer.add_argument("--version", default=None)
     p_answer.add_argument("--limit", type=int, default=5)
+    p_answer.add_argument("--expand-window", action="store_true", help="命中后扩展前后窗口")
+    p_answer.add_argument("--window-radius", type=int, default=None)
     p_answer.set_defaults(func=cmd_answer)
 
     p_read = sub.add_parser("read-page", help="按 URL 读取整页文档")
@@ -653,6 +844,21 @@ def build_parser() -> argparse.ArgumentParser:
     p_read.add_argument("--library", default=None)
     p_read.add_argument("--version", default=None)
     p_read.set_defaults(func=cmd_read_page)
+
+    p_window = sub.add_parser("read-window", help="按序号取前后窗口")
+    p_window.add_argument("url")
+    p_window.add_argument("sort_order", type=int)
+    p_window.add_argument("--radius", type=int, default=1)
+    p_window.add_argument("--library", default=None)
+    p_window.add_argument("--version", default=None)
+    p_window.set_defaults(func=cmd_read_window)
+
+    p_section = sub.add_parser("read-section", help="按源分组取整节")
+    p_section.add_argument("url")
+    p_section.add_argument("source_group_id")
+    p_section.add_argument("--library", default=None)
+    p_section.add_argument("--version", default=None)
+    p_section.set_defaults(func=cmd_read_section)
 
     p_mcp = sub.add_parser("serve-mcp", help="启动 MCP 服务（默认 stdio）")
     p_mcp.add_argument("--http", action="store_true",

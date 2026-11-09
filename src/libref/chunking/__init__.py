@@ -12,13 +12,17 @@ from libref.chunking.budget import (
 from libref.chunking.splitter import (
     Chunk,
     DualChunks,
+    chunk_content_hash,
     ensure_hard_limit,
+    extract_keywords,
     split_markdown,
     split_markdown_dual,
 )
 
 __all__ = [
     "Chunk",
+    "chunk_content_hash",
+    "extract_keywords",
     "ChunkBudget",
     "ChunkPath",
     "DualChunks",

@@ -35,6 +35,7 @@ class StoreResult:
     outcome: str
     removed_ids: list[int] = field(default_factory=list)
     inserted_ids: list[int] = field(default_factory=list)
+    reused_ids: list[int] = field(default_factory=list)
 
 
 class DocumentStore:
@@ -67,6 +68,26 @@ class DocumentStore:
             "SELECT id, url, content, metadata, sort_order FROM documents "
             "WHERE page_id=? ORDER BY sort_order",
             (page_id,),
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "url": r[1],
+                "content": r[2],
+                "metadata": json.loads(r[3]) if r[3] else {},
+                "sort_order": r[4],
+            }
+            for r in rows
+        ]
+
+    def get_window(self, page_id: int, sort_order: int, radius: int = 1) -> list[dict[str, Any]]:
+        """按排序序号取前后窗口，供检索命中扩展上下文。"""
+        if radius < 0:
+            return []
+        rows = self._conn.execute(
+            "SELECT id, url, content, metadata, sort_order FROM documents "
+            "WHERE page_id=? AND sort_order BETWEEN ? AND ? ORDER BY sort_order",
+            (page_id, sort_order - radius, sort_order + radius),
         ).fetchall()
         return [
             {
@@ -152,9 +173,37 @@ class DocumentStore:
             self._upsert_page(version_id, url, etag, last_modified, raw_content)
             page = self.get_page(version_id, url)
             assert page is not None
-            removed = self._delete_documents(page.page_id)
+            existing = self.list_page_documents(page.page_id)
+            by_hash: dict[str, list[dict[str, Any]]] = {}
+            for row in existing:
+                try:
+                    meta = row.get("metadata") or {}
+                except AttributeError:
+                    meta = {}
+                digest = str(meta.get("content_hash") or "") or content_hash(row.get("content"))
+                by_hash.setdefault(digest, []).append(row)
             inserted: list[int] = []
+            reused: list[int] = []
+            used_old: set[int] = set()
+            pending: list[tuple[Chunk, str]] = []
             for chunk in chunks or []:
+                digest = getattr(chunk, "content_hash", "") or content_hash(chunk.content)
+                candidates = by_hash.get(digest, [])
+                hit = next((r for r in candidates if r["id"] not in used_old), None)
+                if hit is not None:
+                    used_old.add(int(hit["id"]))
+                    reused.append(int(hit["id"]))
+                    pending.append((chunk, str(hit["id"])))
+                else:
+                    pending.append((chunk, ""))
+            leftover = [r["id"] for r in existing if r["id"] not in used_old]
+            # 先删无复用的旧行，复用行改为更新排序与元数据，避免整页抖动。
+            if leftover:
+                marks = ",".join("?" for _ in leftover)
+                self._conn.execute(
+                    f"DELETE FROM documents WHERE id IN ({marks})", leftover
+                )
+            for chunk, reuse_id in pending:
                 metadata = json.dumps(
                     {
                         "title": chunk.title,
@@ -165,18 +214,31 @@ class DocumentStore:
                         "span_kind": getattr(chunk, "span_kind", "document_range"),
                         "merged_from": list(getattr(chunk, "merged_from", []) or []),
                         "overlap_from": getattr(chunk, "overlap_from", None),
+                        "content_hash": getattr(chunk, "content_hash", "") or content_hash(chunk.content),
+                        "keywords": list(getattr(chunk, "keywords", []) or []),
+                        "content_type": getattr(chunk, "content_type", "text/markdown"),
+                        "start_char": getattr(chunk, "start_char", -1),
+                        "end_char": getattr(chunk, "end_char", -1),
+                        "prev_chunk_id": getattr(chunk, "prev_chunk_id", None),
+                        "next_chunk_id": getattr(chunk, "next_chunk_id", None),
                     },
                     ensure_ascii=False,
                 )
-                cur = self._conn.execute(
-                    "INSERT INTO documents(library_id, version_id, page_id, url, content, metadata, sort_order) "
-                    "VALUES(?,?,?,?,?,?,?)",
-                    (library_id, version_id, page.page_id, chunk.url,
-                     chunk.content, metadata, chunk.sort_order),
-                )
-                inserted.append(int(cur.lastrowid))
+                if reuse_id:
+                    self._conn.execute(
+                        "UPDATE documents SET url=?, content=?, metadata=?, sort_order=? WHERE id=?",
+                        (chunk.url, chunk.content, metadata, chunk.sort_order, int(reuse_id)),
+                    )
+                else:
+                    cur = self._conn.execute(
+                        "INSERT INTO documents(library_id, version_id, page_id, url, content, metadata, sort_order) "
+                        "VALUES(?,?,?,?,?,?,?)",
+                        (library_id, version_id, page.page_id, chunk.url,
+                         chunk.content, metadata, chunk.sort_order),
+                    )
+                    inserted.append(int(cur.lastrowid))
             self._conn.commit()
-            return StoreResult(outcome, removed_ids=removed, inserted_ids=inserted)
+            return StoreResult(outcome, removed_ids=leftover, inserted_ids=inserted, reused_ids=reused)
         except BaseException:
             self._conn.rollback()
             raise

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import sqlite3
 
 import httpx
+import pytest
 
 from libref.chunking import Chunk
 from libref.config import LibrefSettings
@@ -19,14 +19,13 @@ from libref.services import (
     start_scrape_job,
 )
 from libref.store.document_store import DocumentStore
+from tests.conftest import mock_ingest, seed_library_version
+
+pytestmark = pytest.mark.integration
 
 
 def seed_lv(conn, library: str = "docs", version: str = "1.0") -> tuple[int, int]:
-    """测试库/版本外键行（固定 id=1）。"""
-    conn.execute("INSERT INTO libraries(id, name) VALUES(1, ?)", (library,))
-    conn.execute("INSERT INTO versions(id, library_id, version) VALUES(1, 1, ?)", (version,))
-    conn.commit()
-    return 1, 1
+    return seed_library_version(conn, library, version)
 
 
 def seed_docs(conn: sqlite3.Connection) -> None:
@@ -166,51 +165,14 @@ def test_scrape_docs_end_to_end_with_mock(conn, tmp_path):
     )
     service = IngestService(settings, conn)
 
-    # 补丁 ingest 的 _client 上下文管理器，注入 MockTransport（不联网，不递归）
-    mock_client = make_client(handler)
-
-    @contextlib.asynccontextmanager
-    async def fake_client(_settings):
-        yield mock_client
-
-    import libref.services.ingest as ingest_mod
-    original = ingest_mod._client
-    ingest_mod._client = fake_client
-    try:
+    with mock_ingest(handler):
         counts = service.scrape_docs("docs", "1.0", "https://d.example/", max_pages=5)
-    finally:
-        ingest_mod._client = original
-        import asyncio
-        asyncio.run(mock_client.aclose())
 
     assert counts["stored"] == 1
     assert counts["absent"] == 1
     results = SearchService(conn).search_docs("libref")
     assert len(results) == 1
     assert results[0]["url"] == "https://d.example/install.html"
-
-
-def make_client(handler) -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=httpx.MockTransport(handler))
-
-
-def _patch_client(handler):
-    """将 ingest._client 换成 MockTransport 注入（不出网），返回复原函数。"""
-    mock_client = make_client(handler)
-
-    @contextlib.asynccontextmanager
-    async def fake_client(_settings):
-        yield mock_client
-
-    import libref.services.ingest as ingest_mod
-    original = ingest_mod._client
-    ingest_mod._client = fake_client
-
-    def restore():
-        ingest_mod._client = original
-        asyncio.run(mock_client.aclose())
-
-    return restore
 
 
 def test_scrape_sweeps_pages_missing_from_seed_to_absent(conn):
@@ -240,11 +202,8 @@ def test_scrape_sweeps_pages_missing_from_seed_to_absent(conn):
         request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
         robots_cache_ttl_days=1.0,
     )
-    restore = _patch_client(handler)
-    try:
+    with mock_ingest(handler):
         counts = IngestService(settings, conn).scrape_docs("docs", "1.0", "https://d.example/")
-    finally:
-        restore()
 
     assert counts["absent"] == 1
     assert store.get_page(1, stale_url) is None
@@ -279,13 +238,10 @@ def test_scrape_skips_sweep_when_seed_truncated(conn):
         request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
         robots_cache_ttl_days=1.0,
     )
-    restore = _patch_client(handler)
-    try:
+    with mock_ingest(handler):
         # max_pages=1 截断发现集：缺席清理必须跳过，避免误删未覆盖页面
         IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/", max_pages=1)
-    finally:
-        restore()
 
     assert store.get_page(1, other_url) is not None
 
@@ -303,12 +259,9 @@ def test_scrape_falls_back_to_start_url_without_seed(conn):
         request_timeout=5.0, fetch_concurrency=2, crawl_delay_default=0.0,
         robots_cache_ttl_days=1.0,
     )
-    restore = _patch_client(handler)
-    try:
+    with mock_ingest(handler):
         counts = IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/javadoc/index.html")
-    finally:
-        restore()
     assert counts["stored"] == 1
     assert SearchService(conn).search_docs("javadoc") != []
 
@@ -333,11 +286,8 @@ def test_start_scrape_job_runs_through_queue(conn):
     job_id = start_scrape_job(mgr, "docs", "1.0", "https://d.example/", max_pages=5)
     assert mgr.get(job_id).kind == "scrape_docs"
 
-    restore = _patch_client(handler)
-    try:
+    with mock_ingest(handler):
         job = run_scrape_job_sync(mgr, settings, conn, job_id, timeout=30.0)
-    finally:
-        restore()
 
     assert job.status == "done"
     assert SearchService(conn).search_docs("libref") != []

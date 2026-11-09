@@ -41,6 +41,16 @@ def build_mcp_server(
         return search.read_page(url, library=library, version=version)
 
     @mcp.tool()
+    def read_window(url: str, sort_order: int, radius: int = 1) -> dict[str, Any] | None:
+        """按序号取前后窗口，用于命中后扩展上下文。"""
+        return search.read_window(url, sort_order, radius)
+
+    @mcp.tool()
+    def read_section(url: str, source_group_id: str) -> dict[str, Any] | None:
+        """按源分组取整节，用于由子块回溯父节。"""
+        return search.read_section(url, source_group_id)
+
+    @mcp.tool()
     def list_libraries() -> list[dict[str, Any]]:
         """列出全部文档库及其版本数。"""
         return search.list_libraries()

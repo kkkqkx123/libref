@@ -5,10 +5,15 @@ from __future__ import annotations
 import asyncio
 import json
 
+import pytest
+
 from libref.chunking import Chunk
 from libref.config import LibrefSettings
 from libref.store.document_store import DocumentStore
 from libref.store.retriever import HybridRetriever
+from tests.conftest import seed_library_version
+
+pytestmark = pytest.mark.integration
 
 
 class _FakeVec:
@@ -24,9 +29,7 @@ async def _fake_embed(texts: list[str]) -> list[list[float]]:
 
 
 def _seed(conn) -> dict[str, int]:
-    conn.execute("INSERT INTO libraries(id, name) VALUES(1, 'docs')")
-    conn.execute("INSERT INTO versions(id, library_id, version) VALUES(1, 1, '1.0')")
-    conn.commit()
+    seed_library_version(conn)
     store = DocumentStore(conn)
     ids: dict[str, int] = {}
     for key, url, body in (

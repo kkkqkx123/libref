@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-
 import httpx
+import pytest
 
 from libref.chunking import Chunk
 from libref.config import LibrefSettings
@@ -13,6 +11,9 @@ from libref.services.ingest import IngestService
 from libref.services.search import SearchService
 from libref.store.document_store import DocumentStore
 from libref.store.vec_store import QdrantVecStore, build_embed_text, collection_for
+from tests.conftest import mock_ingest, seed_library_version
+
+pytestmark = pytest.mark.integration
 
 
 class _ShapeClient:
@@ -90,27 +91,7 @@ def test_unknown_collection_shape_triggers_rebuild(conn):
 
 
 def _seed_lv(conn):
-    conn.execute("INSERT INTO libraries(id, name) VALUES(1, 'docs')")
-    conn.execute("INSERT INTO versions(id, library_id, version) VALUES(1, 1, '1.0')")
-    conn.commit()
-
-
-def _patch_client(handler):
-    mock = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-
-    @contextlib.asynccontextmanager
-    async def fake_client(_settings):
-        yield mock
-
-    import libref.services.ingest as ingest_mod
-    original = ingest_mod._client
-    ingest_mod._client = fake_client
-
-    def restore():
-        ingest_mod._client = original
-        asyncio.run(mock.aclose())
-
-    return restore
+    seed_library_version(conn)
 
 
 def _handler(body: str):
@@ -135,14 +116,11 @@ def _settings():
 def test_scrape_syncs_vectors(conn):
     body = ("<html><body><main><h1>Install</h1>"
             "<p>use uv to install libref quetzalvec</p></main></body></html>")
-    restore = _patch_client(_handler(body))
-    try:
-        vec = _FakeVec()
+    vec = _FakeVec()
+    with mock_ingest(_handler(body)):
         counts = IngestService(_settings(), conn, vec_store=vec,
                                embed=_fake_embed).scrape_docs(
             "docs", "1.0", "https://d.example/", max_pages=5)
-    finally:
-        restore()
     assert counts["stored"] == 1
     assert counts["vector_failed"] == 0
     assert vec.ensured and vec.deleted == []
@@ -159,17 +137,14 @@ def test_rescrape_replaces_vectors(conn):
     def dynamic(request: httpx.Request) -> httpx.Response:
         return _handler(current[0])(request)
 
-    restore = _patch_client(dynamic)
-    try:
-        vec = _FakeVec()
+    vec = _FakeVec()
+    with mock_ingest(dynamic):
         svc = IngestService(_settings(), conn, vec_store=vec, embed=_fake_embed)
         svc.scrape_docs("docs", "1.0", "https://d.example/", max_pages=5)
         old_points = list(vec.upserted)
         vec.upserted.clear()
         current[0] = second
         counts = svc.scrape_docs("docs", "1.0", "https://d.example/", max_pages=5)
-    finally:
-        restore()
     assert counts["stored"] == 1
     assert counts["vector_failed"] == 0
     assert sorted(vec.deleted) == sorted(p[0] for p in old_points)
@@ -181,14 +156,11 @@ def test_embed_failure_counts_without_losing_truth(conn):
     async def boom(texts: list[str]):
         raise RuntimeError("encoder down")
 
-    restore = _patch_client(_handler("<html><body><main><p>truth body quetzalboom</p></main></body></html>"))
-    try:
-        vec = _FakeVec()
+    vec = _FakeVec()
+    with mock_ingest(_handler("<html><body><main><p>truth body quetzalboom</p></main></body></html>")):
         counts = IngestService(_settings(), conn, vec_store=vec,
                                embed=boom).scrape_docs(
             "docs", "1.0", "https://d.example/", max_pages=5)
-    finally:
-        restore()
     assert counts["stored"] == 1
     assert counts["vector_failed"] == 1
     assert SearchService(conn).search_docs("quetzalboom")

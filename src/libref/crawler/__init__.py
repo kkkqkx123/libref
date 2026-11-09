@@ -5,6 +5,7 @@
 httpx.AsyncClient（便于测试 MockTransport）。
 """
 
+from libref.crawler.browser import is_playwright_available, render_html
 from libref.crawler.extract import extract_to_markdown, looks_like_js_rendered
 from libref.crawler.fetcher import FetchOutcome, HttpFetcher
 from libref.crawler.registry import (
@@ -26,6 +27,8 @@ __all__ = [
     "RegistryError",
     "RegistrySnapshot",
     "Resolution",
+    "is_playwright_available",
+    "render_html",
     "RobotsChecker",
     "ScopePolicy",
     "SeedResult",

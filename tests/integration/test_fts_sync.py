@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 import sqlite3
 
+import pytest
+
+pytestmark = pytest.mark.integration
+
 
 def _add_library(conn: sqlite3.Connection) -> tuple[int, int]:
     conn.execute("INSERT INTO libraries(name) VALUES('lib')")

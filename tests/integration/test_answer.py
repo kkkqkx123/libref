@@ -10,6 +10,9 @@ from libref.config import LibrefSettings
 from libref.llm import LlmConfigError, build_chat_fn
 from libref.services.answer import answer_query
 from libref.store.document_store import DocumentStore
+from tests.conftest import seed_library_version
+
+pytestmark = pytest.mark.integration
 
 
 def _isolated_settings(monkeypatch, tmp_path, **kwargs) -> LibrefSettings:
@@ -18,9 +21,7 @@ def _isolated_settings(monkeypatch, tmp_path, **kwargs) -> LibrefSettings:
 
 
 def _seed_docs(conn) -> None:
-    conn.execute("INSERT INTO libraries(id, name) VALUES(1, 'docs')")
-    conn.execute("INSERT INTO versions(id, library_id, version) VALUES(1, 1, '1.0')")
-    conn.commit()
+    seed_library_version(conn)
     store = DocumentStore(conn)
     store.store_page(
         1,

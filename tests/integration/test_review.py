@@ -6,6 +6,8 @@ import pytest
 
 from libref.services.review import ReviewService
 
+pytestmark = pytest.mark.integration
+
 
 _counter = [0]
 

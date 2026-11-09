@@ -8,6 +8,8 @@ import pytest
 
 from libref.db import MIGRATIONS, applied_versions, apply_migrations, open_db
 
+pytestmark = pytest.mark.integration
+
 CORE_TABLES = {"libraries", "versions", "pages", "documents", "documents_fts"}
 EXT_TABLES = {"api_entities", "call_instances", "seq_patterns", "review_status"}
 

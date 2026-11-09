@@ -30,6 +30,12 @@ browser = ["playwright>=1.47"]      # 反爬兜底（tech-stack §6 P1），默�
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "unit: pure in-memory tests, no DB or subprocess",
+    "integration: needs sqlite, subprocess or external service",
+    "requires_qdrant: needs localhost Qdrant service",
+    "requires_binary: needs built libref entrypoint",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # 夹具是待解析的源样本，刻意含未定义调用与闲置绑定，不做清理。

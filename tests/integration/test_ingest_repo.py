@@ -3,21 +3,17 @@
 from __future__ import annotations
 
 import json
-import shutil
-from pathlib import Path
+
+import pytest
 
 from libref.services.ingest import index_repo, mine_patterns
+from tests.conftest import copy_mini_repo
 
-
-def _copy_fixture(tmp_path: Path) -> Path:
-    src = Path("tests/fixtures/mini_repo")
-    dst = tmp_path / "mini_repo"
-    shutil.copytree(src, dst)
-    return dst
+pytestmark = pytest.mark.integration
 
 
 def test_ingest_repo_end_to_end(conn, tmp_path):
-    repo = _copy_fixture(tmp_path)
+    repo = copy_mini_repo(tmp_path)
     repos_dir = tmp_path / "repos"
     counts = index_repo(
         conn, "demo", "0.1", str(repo), repos_dir=repos_dir,

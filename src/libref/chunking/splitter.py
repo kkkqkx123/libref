@@ -7,9 +7,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import logging
 import re
+from collections import Counter
 from dataclasses import dataclass, field
 
 from libref.chunking.budget import (
@@ -42,6 +44,13 @@ class Chunk:
     merged_from: list[str] = field(default_factory=list)
     overlap_from: str | None = None
     overlap_text: str = ""
+    start_char: int = -1
+    end_char: int = -1
+    prev_chunk_id: str | None = None
+    next_chunk_id: str | None = None
+    content_hash: str = ""
+    keywords: list[str] = field(default_factory=list)
+    content_type: str = "text/markdown"
 
 
 @dataclass
@@ -168,8 +177,11 @@ def _split_path(
                     chunk_id=f"{group_id}_{path.value}_{part_index}",
                     span_kind=DOCUMENT_RANGE,
                     merged_from=sec.merged_from.copy(),
+                    content_hash=chunk_content_hash(part),
+                    keywords=extract_keywords(part),
                 )
             )
+    _assign_relations(chunks, md_source="\n\n".join(s.content for s in merged))
     assert all(_fences_balanced(c.content) for c in chunks), "fence invariant violated"
     return chunks, dropped
 
@@ -217,7 +229,7 @@ def _split_section_by_cost(
             parts.append("\n".join(cur))
             cur, cur_cost = [], 0
         if not cur and line_cost > budget.body_limit:
-            parts.extend(split_lines_by_cost(line, path, budget.body_limit))
+            parts.extend(_split_long_line(line, path, budget.body_limit))
             continue
         cur.append(line)
         cur_cost += line_cost
@@ -267,6 +279,58 @@ def _fences_balanced(text: str) -> bool:
         if _FENCE_RE.match(line):
             count += 1
     return count % 2 == 0
+
+
+def chunk_content_hash(content: str) -> str:
+    """块级增量键：内容哈希，复用即跳过向量重编码。"""
+    return hashlib.sha256((content or "").encode("utf-8")).hexdigest()
+
+
+_STOPWORDS = frozenset(
+    "the a an and or of to in on for with as by at from is are was were be been "
+    "this that these those it its you we they he she him her them his our your their "
+    "not no yes if else when then than so such can will just into over under out up "
+    "的 了 在 是 和 与 或 有 个 上 下 中 大 小 不 也 就 都 而 及 等 于 为 来 用 对".split()
+)
+
+
+def extract_keywords(text: str, limit: int = 5) -> list[str]:
+    """规则关键词：拉丁词整体计、中文按字计，去停用词后按频次取前列。"""
+    if not text or not text.strip():
+        return []
+    latin = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", text.lower())
+    cjk = re.findall(r"[\u4e00-\u9fff]{2,4}", text)
+    counts: Counter[str] = Counter()
+    for token in latin + cjk:
+        if token in _STOPWORDS:
+            continue
+        counts[token] += 1
+    return [token for token, _ in counts.most_common(limit)]
+
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;。？！；])\s+")
+
+
+def _split_long_line(line: str, path: ChunkPath, limit: int) -> list[str]:
+    """超长单行优先按句子边界拆，仍超限才按字符预算硬切。"""
+    pieces = [p for p in _SENTENCE_SPLIT_RE.split(line) if p]
+    if len(pieces) > 1 and all(cost(p, path) + 1 <= limit for p in pieces):
+        return pieces
+    return split_lines_by_cost(line, path, limit)
+
+
+def _assign_relations(chunks: list[Chunk], *, md_source: str = "") -> None:
+    """补前后指针与字符区间，区间按源文顺序查找，重复文本顺序后移。"""
+    cursor = 0
+    for index, chunk in enumerate(chunks):
+        chunk.prev_chunk_id = chunks[index - 1].chunk_id if index > 0 else None
+        chunk.next_chunk_id = chunks[index + 1].chunk_id if index + 1 < len(chunks) else None
+        if md_source:
+            found = md_source.find(chunk.content, cursor)
+            if found >= 0:
+                chunk.start_char = found
+                chunk.end_char = found + len(chunk.content)
+                cursor = found + 1
 
 
 def ensure_hard_limit(

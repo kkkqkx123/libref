@@ -15,6 +15,8 @@ from libref.crawler.registry import RegistryError, normalize_name, sanitize_http
 from libref.crawler.registry import overrides as _overrides_state
 from libref.services.resolver import resolve_package
 
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture(autouse=True)
 def _clean_file_overrides():

@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from libref.services.ingest import index_repo, mine_patterns
 from libref.services.search import SearchService
+from tests.conftest import copy_mini_repo
+
+pytestmark = pytest.mark.integration
 
 
 def _seed_calls(conn, library="demo", version="t", rows=()):
@@ -74,11 +79,7 @@ def test_topn_keeps_exact_frequent_names(conn):
 
 
 def test_retrieval_queries_over_mined_data(conn, tmp_path):
-    import shutil
-    from pathlib import Path
-
-    dst = tmp_path / "mini_repo"
-    shutil.copytree(Path("tests/fixtures/mini_repo"), dst)
+    dst = copy_mini_repo(tmp_path)
     index_repo(conn, "demo", "0.1", str(dst), repos_dir=tmp_path / "repos")
     mine_patterns(conn, "demo", "0.1", minsup=2)
     svc = SearchService(conn)

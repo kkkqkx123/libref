@@ -118,6 +118,8 @@ class SearchService:
                     "path": r[5],
                     "library": r[6],
                     "version": r[7],
+                    "keywords": list(meta.get("keywords", []) or []),
+                    "content_type": meta.get("content_type", "text/markdown"),
                 }
             )
         return out
@@ -202,7 +204,7 @@ class SearchService:
                     meta = json.loads(r[4]) if r[4] else {}
                 except ValueError:
                     meta = {}
-                texts.append(build_embed_text(meta.get("title"), meta.get("path"), r[3]))
+                texts.append(build_embed_text(meta.get("title"), meta.get("path"), r[3], meta.get("keywords")))
             vecs = await fn(texts)
             if len(vecs) != len(batch):
                 raise RuntimeError("embedding count mismatch")
@@ -273,6 +275,80 @@ class SearchService:
             "path": meta.get("path"),
             "content": "\n\n".join(contents),
             "chunks": len(contents),
+        }
+
+    def read_window(
+        self,
+        url: str,
+        sort_order: int,
+        radius: int = 1,
+        *,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+    ) -> dict[str, Any] | None:
+        """按序号取前后窗口，用于命中后扩展上下文。"""
+        page = self.read_page(url, library=library, version=version, ecosystem=ecosystem)
+        if page is None:
+            return None
+        filters = ["p.url = ?"]
+        params: list[Any] = [url]
+        if library is not None:
+            filters.append("l.name = ?")
+            params.append(library)
+        if ecosystem is not None:
+            filters.append("l.ecosystem = ?")
+            params.append(ecosystem)
+        if version is not None:
+            filters.append("v.version = ?")
+            params.append(version)
+        row = self._conn.execute(
+            "SELECT p.id FROM pages p JOIN versions v ON v.id = p.version_id "
+            "JOIN libraries l ON l.id = v.library_id "
+            f"WHERE {' AND '.join(filters)}",
+            params,
+        ).fetchone()
+        if row is None:
+            return None
+        from libref.store.document_store import DocumentStore
+        docs = DocumentStore(self._conn).get_window(int(row[0]), sort_order, radius)
+        return {"url": url, "center": sort_order, "radius": radius, "docs": docs}
+
+    def read_section(
+        self,
+        url: str,
+        source_group_id: str,
+        *,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+    ) -> dict[str, Any] | None:
+        """按源分组取整节，用于由子块回溯父节。"""
+        filters = ["d.url = ?", "json_extract(d.metadata, '$.source_group_id') = ?"]
+        params: list[Any] = [url, source_group_id]
+        if library is not None:
+            filters.append("l.name = ?")
+            params.append(library)
+        if ecosystem is not None:
+            filters.append("l.ecosystem = ?")
+            params.append(ecosystem)
+        if version is not None:
+            filters.append("v.version = ?")
+            params.append(version)
+        rows = self._conn.execute(
+            "SELECT d.content, d.metadata, d.sort_order FROM documents d "
+            "JOIN versions v ON v.id = d.version_id "
+            "JOIN libraries l ON l.id = d.library_id "
+            f"WHERE {' AND '.join(filters)} ORDER BY d.sort_order",
+            params,
+        ).fetchall()
+        if not rows:
+            return None
+        return {
+            "url": url,
+            "source_group_id": source_group_id,
+            "content": "\n\n".join(r[0] for r in rows if r[0]),
+            "chunks": len(rows),
         }
 
     def list_libraries(self) -> list[dict[str, Any]]:

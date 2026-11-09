@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
-import shutil
-from pathlib import Path
+
+import pytest
 
 from libref.mining.cluster import cluster_apis
 from libref.mining.cooccur import build_scope_sets
 from libref.mining.feature_tree import build_feature_tree
 from libref.services.ingest import index_repo, mine_patterns
 from libref.services.search import SearchService
+from tests.conftest import copy_mini_repo
+
+pytestmark = pytest.mark.integration
 
 
 def test_feature_tree_hand_computed():
@@ -45,8 +48,7 @@ def test_scope_sets_share_scope_key_with_ingest():
 
 
 def test_mine_persists_tree_and_clusters(conn, tmp_path):
-    dst = tmp_path / "mini_repo"
-    shutil.copytree(Path("tests/fixtures/mini_repo"), dst)
+    dst = copy_mini_repo(tmp_path)
     index_repo(conn, "demo", "0.1", str(dst), repos_dir=tmp_path / "repos")
     mine_patterns(conn, "demo", "0.1", minsup=2)
     svc = SearchService(conn)

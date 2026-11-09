@@ -1,6 +1,6 @@
 """进程内异步任务队列 + write-through 落库 + 心跳恢复。
 
-蓝本 docs-mcp-server "内存队列 + 版本行兼作任务记录" 模式（tech-stack §1）。
+内存队列提交任务并回写任务表，worker 消费执行，超时未续写按 stale 恢复。
 jobs 表为运维表，由 ensure_jobs_table 建表，不入业务迁移。
 """
 
@@ -76,6 +76,10 @@ class JobManager:
 
     # ── worker ──
 
+    def heartbeat(self, job_id: int) -> None:
+        """长任务续写心跳，抓取侧按页回调，避免长耗时被误判 stale。"""
+        self._update(job_id, status="running", heartbeat_at=time.time())
+
     def start_worker(self, runner) -> None:
         """runner(job: Job) -> None：同步或协程均可；异常整体捕获为 failed。"""
         self._worker = asyncio.get_running_loop().create_task(self._run(runner))
@@ -88,6 +92,7 @@ class JobManager:
                 self._queue.task_done()
                 continue
             self._update(job_id, status="running", heartbeat_at=time.time())
+            beat = asyncio.get_running_loop().create_task(self._beat_loop(job_id))
             try:
                 result = runner(job)
                 if asyncio.iscoroutine(result):
@@ -96,7 +101,28 @@ class JobManager:
             except BaseException as exc:  # noqa: BLE001 —— 单任务失败不拖垮 worker
                 self._update(job_id, status="failed", error=f"{type(exc).__name__}: {exc}")
             finally:
+                beat.cancel()
                 self._queue.task_done()
+
+    async def _beat_loop(self, job_id: int) -> None:
+        """后台续写心跳，间隔按超时阈值推导，任务结束即取消。"""
+        try:
+            interval = 5.0
+            try:
+                interval = max(1.0, float(self._stale_after) / 6.0)
+            except (TypeError, ValueError):
+                pass
+            while True:
+                await asyncio.sleep(min(interval, 5.0))
+                try:
+                    job = self.get(job_id)
+                except Exception:  # noqa: BLE001 —— 心跳只求续写，不干扰主任务
+                    continue
+                if job is None or job.status != "running":
+                    return
+                self._update(job_id, heartbeat_at=time.time())
+        except asyncio.CancelledError:
+            return
 
     def stop_worker(self) -> None:
         if self._worker is not None:

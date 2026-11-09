@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import pytest
+
 from libref.chunking import Chunk
 from libref.store.document_store import DocumentStore, content_hash
+from tests.conftest import seed_library_version
+
+pytestmark = pytest.mark.integration
 
 
 def seed_lv(conn, library: str = "docs", version: str = "1.0") -> tuple[int, int]:
-    """测试库与版本外键行，固定标识为 1。"""
-    conn.execute("INSERT INTO libraries(id, name) VALUES(1, ?)", (library,))
-    conn.execute("INSERT INTO versions(id, library_id, version) VALUES(1, 1, ?)", (version,))
-    conn.commit()
-    return 1, 1
+    return seed_library_version(conn, library, version)
 
 
 def make_chunks(url: str = "https://d.example/a.html") -> list[Chunk]:

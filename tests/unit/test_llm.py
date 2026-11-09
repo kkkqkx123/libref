@@ -1,4 +1,4 @@
-"""LLM 传输与混合检索测试，全部离线：模拟传输注入，不联网。"""
+"""LLM 传输测试，全部离线：模拟传输注入，不联网。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import math
 import httpx
 import pytest
 
-from libref.chunking import Chunk
 from libref.config import LibrefSettings
 from libref.llm import (
     ChatClient,
@@ -43,9 +42,6 @@ from libref.llm import (
     with_resilience,
 )
 from libref.llm.retry import execute_with_retry
-from libref.services.search import SearchService
-from libref.store.document_store import DocumentStore
-from libref.store.retriever import HybridRetriever
 
 
 def _isolated_settings(monkeypatch, tmp_path, **kwargs) -> LibrefSettings:
@@ -210,104 +206,6 @@ def test_chat_empty_messages_rejected() -> None:
     c = ChatClient(base="https://b", api_key="k", model="m")
     with pytest.raises(ValueError, match="empty"):
         asyncio.run(c.complete([]))
-
-
-class _FakeVec:
-    def __init__(self, hits: list[int]) -> None:
-        self._hits = hits
-        self.searched: list[int] = []
-
-    def search(self, query_vec, *, k: int, version_id: int):
-        self.searched.append(version_id)
-        return [(d, 1.0 - i * 0.1) for i, d in enumerate(self._hits[:k])]
-
-    def ensure_collection(self, conn, model: str, dim: int) -> None:
-        pass
-
-    def delete_version(self, version_id: int) -> None:
-        pass
-
-    def upsert_batch(self, points, *, wait: bool = True) -> None:
-        self.upserted = list(points)
-
-
-def _seed_docs(conn) -> list[int]:
-    conn.execute("INSERT INTO libraries(id, name) VALUES(1, 'docs')")
-    conn.execute("INSERT INTO versions(id, library_id, version) VALUES(1, 1, '1.0')")
-    conn.commit()
-    store = DocumentStore(conn)
-    ids: list[int] = []
-    for url, body in (
-        ("https://d.example/a.html", "libref uses uv for deps"),
-        ("https://d.example/b.html", "unrelated pineapple text"),
-    ):
-        r = store.store_page(
-            1,
-            1,
-            url,
-            "stored",
-            chunks=[Chunk(url=url, path="G", title="G", content=body, sort_order=0)],
-            raw_content=body,
-        )
-        ids.extend(r.inserted_ids)
-    return ids
-
-
-async def _vec_embed(texts: list[str]) -> list[list[float]]:
-    return [[1.0, 0.0] for _ in texts]
-
-
-def test_retriever_fts_only_without_vec(conn, monkeypatch, tmp_path) -> None:
-    _seed_docs(conn)
-    s = _isolated_settings(monkeypatch, tmp_path)
-    results, degraded = asyncio.run(HybridRetriever(conn, s).search_async("libref"))
-    assert degraded is False
-    assert len(results) == 1
-    assert results[0]["url"] == "https://d.example/a.html"
-    assert results[0]["sources"] == ["fts"]
-
-
-def test_retriever_hybrid_marks_both_sources(conn, monkeypatch, tmp_path) -> None:
-    ids = _seed_docs(conn)
-    s = _isolated_settings(monkeypatch, tmp_path)
-    vec = _FakeVec(list(reversed(ids)))
-    results, degraded = asyncio.run(
-        HybridRetriever(conn, s, vec_store=vec, embed=_vec_embed).search_async("libref")
-    )
-    assert degraded is False
-    assert vec.searched == [1]
-    both = [
-        r
-        for r in results
-        if r["sources"] == ["fts", "vec"] or set(r["sources"]) == {"fts", "vec"}
-    ]
-    assert both
-
-
-def test_retriever_degraded_on_embed_failure(conn, monkeypatch, tmp_path) -> None:
-    _seed_docs(conn)
-    s = _isolated_settings(monkeypatch, tmp_path)
-
-    async def boom(texts: list[str]):
-        raise RuntimeError("encoder down")
-
-    results, degraded = asyncio.run(
-        HybridRetriever(conn, s, vec_store=_FakeVec([1]), embed=boom).search_async(
-            "libref"
-        )
-    )
-    assert degraded is True
-    assert len(results) == 1
-
-
-def test_reembed_single_version(conn, monkeypatch, tmp_path) -> None:
-    ids = _seed_docs(conn)
-    s = _isolated_settings(monkeypatch, tmp_path)
-    vec = _FakeVec([])
-    svc = SearchService(conn, s, vec_store=vec, embed=_vec_embed)
-    out = asyncio.run(svc.reembed_library_async("docs", "1.0"))
-    assert out == {"docs": len(ids), "upserted": len(ids)}
-    assert sorted(p[0] for p in vec.upserted) == sorted(ids)
 
 
 def test_error_classification() -> None:

@@ -25,7 +25,7 @@ def _server_up() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(not _server_up(), reason="Qdrant server unreachable")
+pytestmark = [pytest.mark.integration, pytest.mark.requires_qdrant, pytest.mark.skipif(not _server_up(), reason="Qdrant server unreachable")]
 
 
 @pytest.fixture()
