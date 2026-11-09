@@ -33,21 +33,30 @@ async def _handshake(db_path: Path) -> None:
         env={"LIBREF_DB_PATH": str(db_path)},
         cwd=str(REPO_ROOT),
     )
-    async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+    async with (
+        stdio_client(params) as (read, write),
+        ClientSession(read, write) as session,
+    ):
         await session.initialize()
         tools = await session.list_tools()
         names = {t.name for t in tools.tools}
-        assert {"search_docs", "read_page", "list_libraries",
-                "list_versions", "api_usage", "related_apis",
-                "pattern_evidence", "search_hybrid", "answer",
-                "review_pending", "review_approve", "review_conflict",
-                "review_reopen", "job_show"} <= names
+        assert {
+            "search",
+            "read_doc",
+            "catalog",
+            "api_insight",
+            "pattern_insight",
+            "answer",
+            "review",
+            "job_show",
+            "resolve",
+        } <= names
 
-        res = await session.call_tool("search_docs", {"query": _MARKER})
+        res = await session.call_tool("search", {"query": _MARKER, "mode": "hybrid"})
         assert not getattr(res, "isError", False)
         assert _MARKER in res.model_dump_json().lower()
 
-        libs = await session.call_tool("list_libraries", {})
+        libs = await session.call_tool("catalog", {})
         assert "docs" in libs.model_dump_json()
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 
@@ -25,156 +25,45 @@ def build_mcp_server(
     resolve_settings = settings or load_settings()
     setup_logging(resolve_settings)
     mcp = MCPServer("libref")
-    search, gateway = build_search_service(conn, resolve_settings)
+    search_svc, _gateway = build_search_service(conn, resolve_settings)
     pages = PageService(conn)
-    catalog = LibraryService(conn)
+    catalog_svc = LibraryService(conn)
     mining = MiningReadService(conn)
-    review = ReviewService(conn)
+    review_svc = ReviewService(conn)
 
     @mcp.tool()
-    async def search_docs(
+    async def search(
         query: str,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 8,
-    ) -> list[dict[str, Any]]:
-        """Default hybrid search: fused two-path recall, falling back to full-text when vectors are missing."""
-        results, _ = await search.search_hybrid_async(
-            query, library=library, version=version, ecosystem=ecosystem, limit=limit,
-        )
-        return results
-
-    @mcp.tool()
-    def search_docs_precise(
-        query: str,
-        library: str | None = None,
-        version: str | None = None,
-        ecosystem: str | None = None,
-        limit: int = 8,
-    ) -> list[dict[str, Any]]:
-        """Exact full-text query: FTS single path only."""
-        return search.search_docs(query, library=library, version=version, ecosystem=ecosystem, limit=limit)
-
-    @mcp.tool()
-    def read_page(url: str, library: str | None = None, version: str | None = None, ecosystem: str | None = None) -> dict[str, Any] | None:
-        """Read a full page reassembled from ordered blocks."""
-        return pages.read_page(url, library=library, version=version, ecosystem=ecosystem)
-
-    @mcp.tool()
-    def read_window(url: str, sort_order: int, radius: int = 1, library: str | None = None, version: str | None = None, ecosystem: str | None = None) -> dict[str, Any] | None:
-        """Read neighboring blocks around a hit for context expansion."""
-        return pages.read_window(url, sort_order, radius, library=library, version=version, ecosystem=ecosystem)
-
-    @mcp.tool()
-    def read_section(url: str, source_group_id: str, library: str | None = None, version: str | None = None, ecosystem: str | None = None) -> dict[str, Any] | None:
-        """Read a whole source group to trace a sub-block to its section."""
-        return pages.read_section(url, source_group_id, library=library, version=version, ecosystem=ecosystem)
-
-    @mcp.tool()
-    def list_libraries() -> list[dict[str, Any]]:
-        """List all libraries and their version counts."""
-        return catalog.list_libraries()
-
-    @mcp.tool()
-    def list_versions(
-        library: str, ecosystem: str | None = None
-    ) -> list[dict[str, Any]]:
-        """List all versions of a library with page counts."""
-        return catalog.list_versions(library, ecosystem)
-
-    @mcp.tool()
-    def api_usage(
-        library: str | None = None,
-        version: str | None = None,
-        ecosystem: str | None = None,
-        limit: int = 20,
-    ) -> list[dict[str, Any]]:
-        """Count calls and covering scopes per API (frequency query)."""
-        return mining.api_usage_counts(library=library, version=version, ecosystem=ecosystem, limit=limit)
-
-    @mcp.tool()
-    def related_apis(
-        api: str,
-        library: str | None = None,
-        version: str | None = None,
-        ecosystem: str | None = None,
-        limit: int = 10,
-    ) -> list[dict[str, Any]]:
-        """Find APIs co-occurring in the same scopes (co-occurrence query)."""
-        return mining.related_apis(api, library=library, version=version, ecosystem=ecosystem, limit=limit)
-
-    @mcp.tool()
-    def pattern_evidence(
-        pattern: list[str],
-        library: str | None = None,
-        version: str | None = None,
-        ecosystem: str | None = None,
-        limit: int = 5,
-    ) -> list[dict[str, Any]]:
-        """Fetch source evidence for a call sequence pattern."""
-        return mining.pattern_evidence(pattern, library=library, version=version, ecosystem=ecosystem, limit=limit)
-
-    @mcp.tool()
-    def feature_tree(
-        library: str | None = None,
-        version: str | None = None,
-        ecosystem: str | None = None,
-        prefix: str | None = None,
-        limit: int = 100,
-    ) -> list[dict[str, Any]]:
-        """Browse hierarchical feature nodes by prefix."""
-        return mining.feature_tree(library=library, version=version, ecosystem=ecosystem, prefix=prefix, limit=limit)
-
-    @mcp.tool()
-    def api_clusters(
-        library: str | None = None,
-        version: str | None = None,
-        ecosystem: str | None = None,
-        containing: list[str] | None = None,
-        limit: int = 50,
-    ) -> list[dict[str, Any]]:
-        """Browse API clusters."""
-        return mining.api_clusters(library=library, version=version, ecosystem=ecosystem, containing=containing, limit=limit)
-
-    @mcp.tool()
-    def list_patterns(
-        library: str | None = None,
-        version: str | None = None,
-        ecosystem: str | None = None,
-        containing: list[str] | None = None,
-        limit: int = 50,
-    ) -> list[dict[str, Any]]:
-        """List mined call sequence patterns, optionally filtered by members."""
-        return mining.list_patterns(library=library, version=version, ecosystem=ecosystem, containing=containing, limit=limit)
-
-    @mcp.tool()
-    def arg_shapes(
-        api: str,
-        library: str | None = None,
-        version: str | None = None,
-        ecosystem: str | None = None,
-        limit: int = 10,
-    ) -> list[dict[str, Any]]:
-        """Show common argument shapes for an API."""
-        return mining.arg_shapes(api, library=library, version=version, ecosystem=ecosystem, limit=limit)
-
-    @mcp.tool()
-    async def search_hybrid(
-        query: str,
-        library: str | None = None,
-        version: str | None = None,
-        ecosystem: str | None = None,
-        limit: int = 8,
+        mode: Literal["hybrid", "precise"] = "hybrid",
         window_radius: int | None = None,
         expand_window: bool = False,
     ) -> dict[str, Any]:
-        """Hybrid retrieval matching CLI search --hybrid with degradation flag."""
-        results, degraded = await search.search_hybrid_async(
-            query, library=library, version=version, ecosystem=ecosystem, limit=limit,
-            expand_window=expand_window or None, window_radius=window_radius,
-        )
-        return {"results": results, "degraded": degraded}
+        """Unified retrieval: hybrid fused recall by default, exact full-text when precise."""
+        if mode == "precise":
+            results = search_svc.search_docs(
+                query,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit,
+            )
+            return {"results": results, "degraded": False}
+        if mode == "hybrid":
+            results, degraded = await search_svc.search_hybrid_async(
+                query,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit,
+                expand_window=expand_window or None,
+                window_radius=window_radius,
+            )
+            return {"results": results, "degraded": degraded}
+        raise ValueError(f"unsupported search mode: {mode}")
 
     @mcp.tool()
     async def answer(
@@ -192,9 +81,15 @@ def build_mcp_server(
 
         try:
             return await answer_query_async(
-                conn, resolve_settings, query,
-                library=library, version=version, ecosystem=ecosystem, limit=limit,
-                expand_window=expand_window or None, window_radius=window_radius,
+                conn,
+                resolve_settings,
+                query,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit,
+                expand_window=expand_window or None,
+                window_radius=window_radius,
                 material_limit=material_limit,
             )
         except ValueError as exc:
@@ -203,33 +98,160 @@ def build_mcp_server(
             return {"error": "failed", "message": str(exc)}
 
     @mcp.tool()
-    def review_pending(limit: int = 50) -> list[dict[str, Any]]:
-        """List pending call instances, same order as CLI review list."""
-        return review.list_pending(limit=limit)
+    def read_doc(
+        url: str,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        mode: Literal["page", "window", "section"] = "page",
+        sort_order: int | None = None,
+        radius: int = 1,
+        source_group_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Read a document by URL: full page, neighboring window, or whole section."""
+        if mode == "page":
+            return pages.read_page(
+                url, library=library, version=version, ecosystem=ecosystem
+            )
+        if mode == "window":
+            if sort_order is None:
+                raise ValueError("window mode requires sort_order")
+            return pages.read_window(
+                url,
+                sort_order,
+                radius,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+            )
+        if mode == "section":
+            if not source_group_id:
+                raise ValueError("section mode requires source_group_id")
+            return pages.read_section(
+                url,
+                source_group_id,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+            )
+        raise ValueError(f"unsupported read mode: {mode}")
 
     @mcp.tool()
-    def review_approve(entity_id: int) -> dict[str, Any]:
-        """Move pending to approved, returning the reason on illegal moves."""
-        try:
-            review.approve(entity_id)
-        except ValueError as exc:
-            return {"ok": False, "message": str(exc)}
-        return {"ok": True}
+    def catalog(
+        library: str | None = None, ecosystem: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Browse the catalog: libraries when no name is given, versions otherwise."""
+        if library is None:
+            return catalog_svc.list_libraries()
+        return catalog_svc.list_versions(library, ecosystem)
 
     @mcp.tool()
-    def review_conflict(entity_id: int) -> dict[str, Any]:
-        """Mark pending as conflict, returning the reason on illegal moves."""
-        try:
-            review.mark_conflict(entity_id)
-        except ValueError as exc:
-            return {"ok": False, "message": str(exc)}
-        return {"ok": True}
+    def api_insight(
+        view: Literal["usage", "related", "args"],
+        api: str | None = None,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """API-centric usage: frequency ranking, co-occurring APIs, argument shapes."""
+        if view == "usage":
+            return mining.api_usage_counts(
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit if limit is not None else 20,
+            )
+        if view == "related":
+            if not api:
+                raise ValueError("related view requires api")
+            return mining.related_apis(
+                api,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit if limit is not None else 10,
+            )
+        if view == "args":
+            if not api:
+                raise ValueError("args view requires api")
+            return mining.arg_shapes(
+                api,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit if limit is not None else 10,
+            )
+        raise ValueError(f"unsupported api view: {view}")
 
     @mcp.tool()
-    def review_reopen(entity_id: int) -> dict[str, Any]:
-        """Reopen a conflict to pending, returning the reason when not in conflict."""
+    def pattern_insight(
+        view: Literal["patterns", "evidence", "tree", "clusters"],
+        pattern: list[str] | None = None,
+        containing: list[str] | None = None,
+        prefix: str | None = None,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Sequence and structure insight: patterns, evidence, feature tree, clusters."""
+        if view == "patterns":
+            return mining.list_patterns(
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                containing=containing,
+                limit=limit if limit is not None else 50,
+            )
+        if view == "evidence":
+            if not pattern:
+                raise ValueError("evidence view requires a non-empty pattern")
+            return mining.pattern_evidence(
+                pattern,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit if limit is not None else 5,
+            )
+        if view == "tree":
+            return mining.feature_tree(
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                prefix=prefix,
+                limit=limit if limit is not None else 100,
+            )
+        if view == "clusters":
+            return mining.api_clusters(
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                containing=containing,
+                limit=limit if limit is not None else 50,
+            )
+        raise ValueError(f"unsupported pattern view: {view}")
+
+    @mcp.tool()
+    def review(
+        action: Literal["list", "approve", "conflict", "reopen"],
+        entity_id: int | None = None,
+        limit: int = 50,
+    ) -> Any:
+        """Review workflow: list pending items or transition one item."""
+        if action == "list":
+            return review_svc.list_pending(limit=limit)
+        if entity_id is None:
+            raise ValueError(f"{action} requires entity_id")
         try:
-            review.reopen(entity_id)
+            if action == "approve":
+                review_svc.approve(entity_id)
+            elif action == "conflict":
+                review_svc.mark_conflict(entity_id)
+            elif action == "reopen":
+                review_svc.reopen(entity_id)
+            else:
+                raise ValueError(f"unsupported review action: {action}")
         except ValueError as exc:
             return {"ok": False, "message": str(exc)}
         return {"ok": True}
@@ -241,53 +263,63 @@ def build_mcp_server(
 
         mgr = JobManager(conn)
         if job_id is None:
-            return {"jobs": [
-                {"id": j.id, "kind": j.kind, "status": j.status,
-                 "finished_at": j.finished_at, "error": j.error}
-                for j in mgr.list_recent(limit=limit)
-            ]}
+            return {
+                "jobs": [
+                    {
+                        "id": j.id,
+                        "kind": j.kind,
+                        "status": j.status,
+                        "finished_at": j.finished_at,
+                        "error": j.error,
+                    }
+                    for j in mgr.list_recent(limit=limit)
+                ]
+            }
         job = mgr.get(job_id)
         if job is None:
             return {"error": "not_found", "message": f"unknown job: {job_id}"}
-        return {"id": job.id, "kind": job.kind, "status": job.status,
-                "error": job.error, "result": job.result,
-                "finished_at": job.finished_at}
+        return {
+            "id": job.id,
+            "kind": job.kind,
+            "status": job.status,
+            "error": job.error,
+            "result": job.result,
+            "finished_at": job.finished_at,
+        }
 
     @mcp.tool()
-    async def resolve_package(
+    async def resolve(
         ecosystem: str | None,
         name: str,
         version: str | None = None,
+        target: Literal["docs", "repo"] = "docs",
     ) -> dict[str, Any]:
-        """Resolve a document source by ecosystem and name, read-only."""
-        from libref.crawler.http import build_async_client
-
-        try:
-            async with build_async_client(resolve_settings) as client:
-                resolution = await _resolve_package(
-                    conn, client, resolve_settings, ecosystem, name, version,
-                )
-        except ValueError as exc:
-            return {"error": "invalid", "message": str(exc)}
-        except RegistryError as exc:
-            return {"error": exc.kind, "message": str(exc), "hint": exc.hint}
-        return resolution.model_dump()
-
-    @mcp.tool()
-    async def resolve_repo(
-        ecosystem: str | None,
-        name: str,
-        version: str | None = None,
-    ) -> dict[str, Any]:
-        """Resolve a repo address by ecosystem and name, read-only."""
+        """Resolve a package address by ecosystem and name, read-only."""
         from libref.crawler.http import build_async_client
         from libref.services.resolver import resolve_repo as _resolve_repo
 
         try:
             async with build_async_client(resolve_settings) as client:
-                resolution = await _resolve_repo(
-                    conn, client, resolve_settings, ecosystem, name, version,
-                )
+                if target == "docs":
+                    resolution = await _resolve_package(
+                        conn,
+                        client,
+                        resolve_settings,
+                        ecosystem,
+                        name,
+                        version,
+                    )
+                elif target == "repo":
+                    resolution = await _resolve_repo(
+                        conn,
+                        client,
+                        resolve_settings,
+                        ecosystem,
+                        name,
+                        version,
+                    )
+                else:
+                    raise ValueError(f"unsupported resolve target: {target}")
         except ValueError as exc:
             return {"error": "invalid", "message": str(exc)}
         except RegistryError as exc:

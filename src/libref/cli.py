@@ -43,22 +43,22 @@ _config_parent = argparse.ArgumentParser(add_help=False)
 _config_parent.add_argument(
     "--config",
     default=None,
-    help="配置文件路径；缺省依次查找当前目录与用户配置目录",
+    help="Config file path; by default looked up in the current directory, then the user config directory",
 )
 _config_parent.add_argument(
     "--log-level",
     default=None,
-    help="日志级别：DEBUG/INFO/WARNING/ERROR，缺省读配置",
+    help="Log level: DEBUG/INFO/WARNING/ERROR; defaults to the config value",
 )
 _config_parent.add_argument(
     "--log-file",
     default=None,
-    help="日志文件路径，缺省读配置；未设置时只输出到标准错误",
+    help="Log file path; defaults to the config value; when unset, only stderr is used",
 )
 _config_parent.add_argument(
     "--log-format",
     default=None,
-    help="日志格式：text/json，缺省读配置",
+    help="Log format: text/json; defaults to the config value",
 )
 
 
@@ -927,63 +927,63 @@ def cmd_serve_web(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="libref", description="libref 文档知识库", parents=[_config_parent])
+    parser = argparse.ArgumentParser(prog="libref", description="libref documentation knowledge base", parents=[_config_parent])
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("init-db", help="初始化数据库（应用迁移）", parents=[_config_parent]).set_defaults(
+    sub.add_parser("init-db", help="Initialize the database (apply migrations)", parents=[_config_parent]).set_defaults(
         func=cmd_init_db
     )
 
-    p_ingest = sub.add_parser("ingest", help="抓取文档站并入库", parents=[_config_parent])
-    p_ingest.add_argument("library", nargs="?", help="显式形态为库名，解析形态为包名")
+    p_ingest = sub.add_parser("ingest", help="Crawl a documentation site and store it", parents=[_config_parent])
+    p_ingest.add_argument("library", nargs="?", help="Library name in explicit form, package name in resolved form")
     p_ingest.add_argument(
-        "version", nargs="?", default=None, help="显式形态必填，解析形态缺省取稳定版"
+        "version", nargs="?", default=None, help="Required in explicit form; defaults to the stable version in resolved form"
     )
     p_ingest.add_argument(
-        "start_url", nargs="?", default=None, help="显式形态必填，与 --ecosystem 互斥"
+        "start_url", nargs="?", default=None, help="Required in explicit form; mutually exclusive with --ecosystem"
     )
-    p_ingest.add_argument("--ecosystem", default=None, help="按名称解析：pypi|npm|maven，java 坐标形如 group:artifact")
-    p_ingest.add_argument("--offline", action="store_true", help="只读缓存，不请求网络")
+    p_ingest.add_argument("--ecosystem", default=None, help="Resolve by name: pypi|npm|maven; Java coordinates look like group:artifact")
+    p_ingest.add_argument("--offline", action="store_true", help="Read cache only; do not touch the network")
     p_ingest.add_argument(
         "--registry-mirror",
         default=None,
-        help=f"注册表镜像预设（{', '.join(sorted(REGISTRY_MIRRORS))}），缺省读配置",
+        help=f"Registry mirror preset ({', '.join(sorted(REGISTRY_MIRRORS))}); defaults to the config value",
     )
     p_ingest.add_argument("--max-pages", type=int, default=None)
-    p_ingest.add_argument("--prefilter", action="store_true", help="HEAD 存活预筛")
+    p_ingest.add_argument("--prefilter", action="store_true", help="Prefilter URLs with a liveness HEAD check")
     p_ingest.add_argument(
         "--async",
         dest="run_async",
         action="store_true",
-        help="经 jobs 队列执行（提交→同进程 worker 消费→回写 jobs 表）",
+        help="Run via the jobs queue (submit -> in-process worker consumes -> results written back to the jobs table)",
     )
     p_ingest.add_argument(
-        "--allow-cross-site", action="store_true", help="允许跨站抓取"
+        "--allow-cross-site", action="store_true", help="Allow crawling across sites"
     )
     p_ingest.add_argument(
-        "--allow-subdomains", action="store_true", help="允许同域子域"
+        "--allow-subdomains", action="store_true", help="Allow same-domain subdomains"
     )
     p_ingest.add_argument(
-        "--path-prefix", action="append", default=None, help="仅接受此前缀路径，可重复"
+        "--path-prefix", action="append", default=None, help="Accept only paths under this prefix; repeatable"
     )
     p_ingest.add_argument(
-        "--path-suffix", action="append", default=None, help="仅接受此后缀路径，可重复"
+        "--path-suffix", action="append", default=None, help="Accept only paths with this suffix; repeatable"
     )
     p_ingest.add_argument(
-        "--include-pattern", action="append", default=None, help="正则白名单，可重复"
+        "--include-pattern", action="append", default=None, help="Regex allowlist; repeatable"
     )
     p_ingest.add_argument(
-        "--exclude-pattern", action="append", default=None, help="正则黑名单，可重复"
+        "--exclude-pattern", action="append", default=None, help="Regex denylist; repeatable"
     )
     p_ingest.add_argument(
-        "--max-depth", type=int, default=None, help="相对起始目录的最大深度"
+        "--max-depth", type=int, default=None, help="Maximum depth relative to the start URL"
     )
     p_ingest.add_argument(
-        "--render-js", action="store_true", help="疑似渲染页尝试浏览器降级"
+        "--render-js", action="store_true", help="Fall back to the browser for pages that look JS-rendered"
     )
     p_ingest.set_defaults(func=cmd_ingest)
 
-    p_refresh = sub.add_parser("refresh", help="刷新版本文档并入库", parents=[_config_parent])
+    p_refresh = sub.add_parser("refresh", help="Refresh a version's docs and store them", parents=[_config_parent])
     p_refresh.add_argument("library")
     p_refresh.add_argument("version")
     p_refresh.add_argument("start_url")
@@ -992,39 +992,39 @@ def build_parser() -> argparse.ArgumentParser:
     p_refresh.add_argument("--prefilter", action="store_true")
     p_refresh.add_argument("--render-js", action="store_true")
     p_refresh.add_argument(
-        "--async", dest="run_async", action="store_true", help="经 jobs 队列执行"
+        "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
     )
     p_refresh.set_defaults(func=cmd_refresh)
 
-    sub.add_parser("smoke-local", help="本地冒烟：临时 HTTP 站全链路", parents=[_config_parent]).set_defaults(func=cmd_smoke)
+    sub.add_parser("smoke-local", help="Local smoke test: full chain against a temporary HTTP site", parents=[_config_parent]).set_defaults(func=cmd_smoke)
 
-    p_search = sub.add_parser("search", help="默认混合检索", parents=[_config_parent])
+    p_search = sub.add_parser("search", help="Default hybrid retrieval", parents=[_config_parent])
     p_search.add_argument("query")
     p_search.add_argument("--library", default=None)
     p_search.add_argument("--version", default=None)
     p_search.add_argument("--limit", type=int, default=8)
-    p_search.add_argument("--precise", action="store_true", help="只走全文单路")
-    p_search.add_argument("--expand-window", action="store_true", help="命中后扩展前后窗口")
+    p_search.add_argument("--precise", action="store_true", help="Use the full-text path only")
+    p_search.add_argument("--expand-window", action="store_true", help="Expand the surrounding window on hits")
     p_search.add_argument("--window-radius", type=int, default=None)
     p_search.set_defaults(func=cmd_search)
 
-    p_answer = sub.add_parser("answer", help="混合检索加问答生成", parents=[_config_parent])
+    p_answer = sub.add_parser("answer", help="Hybrid retrieval plus grounded answer generation", parents=[_config_parent])
     p_answer.add_argument("query")
     p_answer.add_argument("--library", default=None)
     p_answer.add_argument("--version", default=None)
     p_answer.add_argument("--limit", type=int, default=5)
-    p_answer.add_argument("--expand-window", action="store_true", help="命中后扩展前后窗口")
+    p_answer.add_argument("--expand-window", action="store_true", help="Expand the surrounding window on hits")
     p_answer.add_argument("--window-radius", type=int, default=None)
-    p_answer.add_argument("--material-limit", type=int, default=None, help="问答材料截断长度，缺省读配置")
+    p_answer.add_argument("--material-limit", type=int, default=None, help="Answer material truncation length; defaults to the config value")
     p_answer.set_defaults(func=cmd_answer)
 
-    p_read = sub.add_parser("read-page", help="按 URL 读取整页文档", parents=[_config_parent])
+    p_read = sub.add_parser("read-page", help="Read a full document page by URL", parents=[_config_parent])
     p_read.add_argument("url")
     p_read.add_argument("--library", default=None)
     p_read.add_argument("--version", default=None)
     p_read.set_defaults(func=cmd_read_page)
 
-    p_window = sub.add_parser("read-window", help="按序号取前后窗口", parents=[_config_parent])
+    p_window = sub.add_parser("read-window", help="Read the surrounding window by sort order", parents=[_config_parent])
     p_window.add_argument("url")
     p_window.add_argument("sort_order", type=int)
     p_window.add_argument("--radius", type=int, default=1)
@@ -1032,98 +1032,98 @@ def build_parser() -> argparse.ArgumentParser:
     p_window.add_argument("--version", default=None)
     p_window.set_defaults(func=cmd_read_window)
 
-    p_section = sub.add_parser("read-section", help="按源分组取整节", parents=[_config_parent])
+    p_section = sub.add_parser("read-section", help="Read a whole section by source group", parents=[_config_parent])
     p_section.add_argument("url")
     p_section.add_argument("source_group_id")
     p_section.add_argument("--library", default=None)
     p_section.add_argument("--version", default=None)
     p_section.set_defaults(func=cmd_read_section)
 
-    p_mcp = sub.add_parser("serve-mcp", help="启动 MCP 服务（默认 stdio）", parents=[_config_parent])
+    p_mcp = sub.add_parser("serve-mcp", help="Start the MCP server (stdio by default)", parents=[_config_parent])
     p_mcp.add_argument("--http", action="store_true",
-                       help="改用 Streamable HTTP 传输（默认只绑本地回环）")
-    p_mcp.add_argument("--host", default=None, help="HTTP 监听地址")
-    p_mcp.add_argument("--port", type=int, default=None, help="HTTP 监听端口")
-    p_mcp.add_argument("--path", default=None, help="HTTP 端点路径")
+                       help="Use the Streamable HTTP transport instead (binds loopback only by default)")
+    p_mcp.add_argument("--host", default=None, help="HTTP listen address")
+    p_mcp.add_argument("--port", type=int, default=None, help="HTTP listen port")
+    p_mcp.add_argument("--path", default=None, help="HTTP endpoint path")
     p_mcp.set_defaults(func=cmd_serve_mcp)
 
-    p_web = sub.add_parser("serve-web", help="启动 Web 服务（默认只绑本地回环）", parents=[_config_parent])
-    p_web.add_argument("--host", default=None, help="HTTP 监听地址")
-    p_web.add_argument("--port", type=int, default=None, help="HTTP 监听端口")
+    p_web = sub.add_parser("serve-web", help="Start the Web server (binds loopback only by default)", parents=[_config_parent])
+    p_web.add_argument("--host", default=None, help="HTTP listen address")
+    p_web.add_argument("--port", type=int, default=None, help="HTTP listen port")
     p_web.set_defaults(func=cmd_serve_web)
 
-    p_repo = sub.add_parser("index-repo", help="索引源码仓库并落调用实例", parents=[_config_parent])
-    p_repo.add_argument("library", help="显式形态为库名，解析形态为包名")
-    p_repo.add_argument("version", nargs="?", default=None, help="显式形态必填，解析形态缺省取稳定版")
-    p_repo.add_argument("source", nargs="?", default=None, help="显式形态为远端地址或本地路径，缺省按名解析")
-    p_repo.add_argument("--ecosystem", default=None, help="按名称解析：pypi|npm|maven，缺省为 custom 显式")
-    p_repo.add_argument("--offline", action="store_true", help="只读缓存，不请求网络")
+    p_repo = sub.add_parser("index-repo", help="Index a source repo and persist call instances", parents=[_config_parent])
+    p_repo.add_argument("library", help="Library name in explicit form, package name in resolved form")
+    p_repo.add_argument("version", nargs="?", default=None, help="Required in explicit form; defaults to the stable version in resolved form")
+    p_repo.add_argument("source", nargs="?", default=None, help="Remote URL or local path in explicit form; resolved by name by default")
+    p_repo.add_argument("--ecosystem", default=None, help="Resolve by name: pypi|npm|maven; defaults to explicit custom")
+    p_repo.add_argument("--offline", action="store_true", help="Read cache only; do not touch the network")
     p_repo.add_argument(
         "--registry-mirror",
         default=None,
-        help="注册表镜像预设，缺省读配置",
+        help="Registry mirror preset; defaults to the config value",
     )
-    p_repo.add_argument("--update", action="store_true", help="已存在仓库时拉取更新")
+    p_repo.add_argument("--update", action="store_true", help="Pull updates when the repo already exists")
     p_repo.add_argument(
-        "--async", dest="run_async", action="store_true", help="经 jobs 队列执行"
+        "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
     )
     p_repo.set_defaults(func=cmd_index_repo)
 
-    p_mine = sub.add_parser("mine", help="挖掘闭合调用序列模式", parents=[_config_parent])
+    p_mine = sub.add_parser("mine", help="Mine closed call-sequence patterns", parents=[_config_parent])
     p_mine.add_argument("library")
     p_mine.add_argument("version")
-    p_mine.add_argument("--ecosystem", default=None, help="库所属生态，缺省跨生态定位")
+    p_mine.add_argument("--ecosystem", default=None, help="Ecosystem of the library; by default resolved across ecosystems")
     p_mine.add_argument("--minsup", type=int, default=2)
     p_mine.add_argument(
         "--topn",
         type=int,
         default=None,
-        help="显式剪枝：只保留调用次数前 N 的完整限定名",
+        help="Explicit pruning: keep only fully qualified names ranked in the top N by call count",
     )
     p_mine.add_argument(
         "--include-ambiguous",
         action="store_true",
-        help="将待定调用纳入序列（默认只用显式与推导）",
+        help="Include pending calls in sequences (by default only explicit and inferred ones are used)",
     )
     p_mine.add_argument("--maxlen", type=int, default=10)
     p_mine.add_argument("--minlen", type=int, default=2)
     p_mine.add_argument("--cluster-threshold", type=float, default=0.15)
     p_mine.add_argument("--cluster-min-size", type=int, default=2)
     p_mine.add_argument(
-        "--async", dest="run_async", action="store_true", help="经 jobs 队列执行"
+        "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
     )
     p_mine.set_defaults(func=cmd_mine)
 
-    p_tree = sub.add_parser("feature-tree", help="按前缀浏览分层特征", parents=[_config_parent])
+    p_tree = sub.add_parser("feature-tree", help="Browse hierarchical features by prefix", parents=[_config_parent])
     p_tree.add_argument("library")
     p_tree.add_argument("version")
     p_tree.add_argument("--prefix", default=None)
     p_tree.add_argument("--limit", type=int, default=100)
     p_tree.set_defaults(func=cmd_feature_tree)
 
-    p_clusters = sub.add_parser("clusters", help="浏览接口分组", parents=[_config_parent])
+    p_clusters = sub.add_parser("clusters", help="Browse interface clusters", parents=[_config_parent])
     p_clusters.add_argument("library")
     p_clusters.add_argument("version")
-    p_clusters.add_argument("--containing", default=None, help="逗号分隔的必含接口")
+    p_clusters.add_argument("--containing", default=None, help="Comma-separated APIs that must all be present")
     p_clusters.add_argument("--limit", type=int, default=50)
     p_clusters.set_defaults(func=cmd_clusters)
 
-    p_dump = sub.add_parser("dump-chunks", help="预览分块：文件到分块的行号字节标题", parents=[_config_parent])
+    p_dump = sub.add_parser("dump-chunks", help="Preview chunking: line ranges, byte offsets, and headings per file", parents=[_config_parent])
     group = p_dump.add_mutually_exclusive_group(required=True)
-    group.add_argument("--markdown", default=None, help="Markdown 文档路径")
-    group.add_argument("--source", default=None, help="源码文件路径")
-    p_dump.add_argument("--url", default=None, help="文档块地址标注")
+    group.add_argument("--markdown", default=None, help="Markdown document path")
+    group.add_argument("--source", default=None, help="Source file path")
+    p_dump.add_argument("--url", default=None, help="URL annotation for document chunks")
     p_dump.set_defaults(func=cmd_dump_chunks)
 
-    p_reembed = sub.add_parser("reembed", help="按真源全量重灌整版本向量", parents=[_config_parent])
+    p_reembed = sub.add_parser("reembed", help="Fully re-embed a version's vectors from the source of truth", parents=[_config_parent])
     p_reembed.add_argument("library")
     p_reembed.add_argument("version")
     p_reembed.add_argument("--ecosystem", default=None)
     p_reembed.set_defaults(func=cmd_reembed)
 
-    p_review = sub.add_parser("review", help="审核待定调用实例", parents=[_config_parent])
+    p_review = sub.add_parser("review", help="Review pending call instances", parents=[_config_parent])
     review_sub = p_review.add_subparsers(dest="review_action", required=True)
-    review_sub.add_parser("list", help="列出待定项").add_argument(
+    review_sub.add_parser("list", help="List pending items").add_argument(
         "--limit", type=int, default=50,
     )
     for _name in ("approve", "conflict", "reopen"):
@@ -1131,27 +1131,27 @@ def build_parser() -> argparse.ArgumentParser:
         _p.add_argument("entity_id", type=int)
     p_review.set_defaults(func=cmd_review)
 
-    p_job = sub.add_parser("job-show", help="查看任务审计结论", parents=[_config_parent])
+    p_job = sub.add_parser("job-show", help="Inspect job audit outcomes", parents=[_config_parent])
     p_job.add_argument("job_id", type=int, nargs="?", default=None)
-    p_job.add_argument("--list", action="store_true", help="列出最近任务")
+    p_job.add_argument("--list", action="store_true", help="List recent jobs")
     p_job.add_argument("--limit", type=int, default=20)
-    p_job.add_argument("--full", action="store_true", help="打印完整结论")
+    p_job.add_argument("--full", action="store_true", help="Print the full outcome")
     p_job.set_defaults(func=cmd_job_show)
 
-    p_config = sub.add_parser("config-show", help="打印脱敏生效配置", parents=[_config_parent])
+    p_config = sub.add_parser("config-show", help="Print the effective configuration, redacted", parents=[_config_parent])
     p_config.set_defaults(func=cmd_config_show)
 
-    p_purge = sub.add_parser("purge", help="整版删除并记日志", parents=[_config_parent])
+    p_purge = sub.add_parser("purge", help="Delete a whole version and log it", parents=[_config_parent])
     p_purge.add_argument("library")
     p_purge.add_argument("version")
     p_purge.add_argument("--ecosystem", default=None)
     p_purge.set_defaults(func=cmd_purge)
 
-    p_del = sub.add_parser("deletions", help="查看删除日志/清理过期记录", parents=[_config_parent])
+    p_del = sub.add_parser("deletions", help="View deletion logs / prune expired records", parents=[_config_parent])
     p_del.add_argument("--limit", type=int, default=50)
-    p_del.add_argument("--full", action="store_true", help="打印摘要详情")
-    p_del.add_argument("--prune", action="store_true", help="按保留期清理过期记录")
-    p_del.add_argument("--ttl-days", type=float, default=None, help="缺省读配置 deletion_log_ttl_days")
+    p_del.add_argument("--full", action="store_true", help="Print full details")
+    p_del.add_argument("--prune", action="store_true", help="Prune expired records per the retention period")
+    p_del.add_argument("--ttl-days", type=float, default=None, help="Defaults to the config value deletion_log_ttl_days")
     p_del.set_defaults(func=cmd_deletions)
     return parser
 

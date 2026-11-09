@@ -26,8 +26,8 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="e2e repo index and review runner")
     parser.add_argument("--out", default="e2e-parsing-report.txt")
     parser.add_argument("--lang", action="append", default=None)
-    parser.add_argument("--update", action="store_true", help="已存在仓库时拉取更新")
-    parser.add_argument("--no-export", action="store_true", help="跳过审查报告导出")
+    parser.add_argument("--update", action="store_true", help="Pull updates when the repo already exists")
+    parser.add_argument("--no-export", action="store_true", help="Skip the review report export")
     return parser.parse_args()
 
 

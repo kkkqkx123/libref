@@ -40,16 +40,24 @@ async def _handshake(port: int) -> None:
     last: Exception | None = None
     for _ in range(100):
         try:
-            async with streamable_http_client(url) as (read, write), \
-                    ClientSession(read, write) as session:
+            async with (
+                streamable_http_client(url) as (read, write),
+                ClientSession(read, write) as session,
+            ):
                 await session.initialize()
                 tools = await session.list_tools()
                 names = {t.name for t in tools.tools}
-                assert {"search_docs", "read_page", "list_libraries",
-                        "list_versions", "api_usage", "related_apis",
-                        "pattern_evidence"} <= names
+                assert {
+                    "search",
+                    "read_doc",
+                    "catalog",
+                    "api_insight",
+                    "pattern_insight",
+                } <= names
 
-                res = await session.call_tool("search_docs", {"query": _MARKER})
+                res = await session.call_tool(
+                    "search", {"query": _MARKER, "mode": "hybrid"}
+                )
                 assert not getattr(res, "isError", False)
                 assert _MARKER in res.model_dump_json().lower()
                 return

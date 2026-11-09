@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="sync e2e network repos to local dir")
-    parser.add_argument("--update", action="store_true", help="已存在仓库时拉取更新")
+    parser.add_argument("--update", action="store_true", help="Pull updates when the repo already exists")
     parser.add_argument("--lang", action="append", default=None)
     return parser.parse_args()
 
