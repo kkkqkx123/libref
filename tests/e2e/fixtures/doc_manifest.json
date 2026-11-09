@@ -1,0 +1,16 @@
+{
+  "baseline": {
+    "kind": "network",
+    "url": "https://example.com/",
+    "version": "baseline",
+    "max_pages": 1,
+    "note": "连通性基线单页，承担可用性下限门禁"
+  },
+  "rich": {
+    "kind": "network",
+    "url": "https://www.markdownguide.org/tools/bear/",
+    "version": "v1",
+    "max_pages": 1,
+    "note": "栏位丰富的真实文档页，检验多级标题代码围栏表格的净化与分块；原 basic-syntax 地址被站方重定向至此，已同步为实际地址"
+  }
+}

@@ -22,6 +22,8 @@ def pytest_collection_modifyitems(items) -> None:
             item.add_marker(pytest.mark.unit)
         elif "/tests/integration/" in path:
             item.add_marker(pytest.mark.integration)
+        elif "/tests/e2e/" in path:
+            item.add_marker(pytest.mark.e2e)
 
 
 @pytest.fixture()

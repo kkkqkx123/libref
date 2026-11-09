@@ -101,6 +101,7 @@ class RepoManager:
     def _clone(self, url: str, target: Path) -> None:
         from dulwich import porcelain
 
+        Path(target).parent.mkdir(parents=True, exist_ok=True)
         porcelain.clone(url, str(target), depth=1)
 
     def _pull(self, target: Path) -> None:

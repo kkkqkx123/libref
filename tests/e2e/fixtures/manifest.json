@@ -1,0 +1,20 @@
+{
+  "python": {
+    "kind": "local-sampling",
+    "note": "离线受控采样，不整体搬运，覆盖异步装饰器相对导入包内重导出；采样清单见 tests/fixtures/parsing/sampling.json"
+  },
+  "javascript": {
+    "kind": "network",
+    "url": "https://github.com/tj/commander.js",
+    "tag": "v12.1.0",
+    "local": "tests/e2e/repos/custom/e2e-javascript/v12.1.0",
+    "note": "命令行解析库，同时含模块导入与共通导入，类加链式密集"
+  },
+  "java": {
+    "kind": "network",
+    "url": "https://github.com/modelmapper/ModelMapper",
+    "tag": "v3.2.0",
+    "local": "tests/e2e/repos/custom/e2e-java/v3.2.0",
+    "note": "对象映射库，泛型注解内部类枚举重载构造器齐全"
+  }
+}

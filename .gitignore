@@ -37,3 +37,8 @@ Thumbs.db
 
 # 数据库文件
 data/
+
+# 端到端本地持久仓与审查输出（同步一次多次复用，不入库）
+tests/e2e/repos/
+tests/e2e/outputs/
+tests/e2e/snapshots/
