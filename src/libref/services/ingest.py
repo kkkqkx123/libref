@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 
-from libref.chunking import ChunkPath, ensure_hard_limit, split_markdown_dual
+from libref.chunking import ChunkPath, split_markdown_dual
 from libref.chunking.budget import ChunkBudget, budgets_from_settings
 from libref.crawler import (
     HttpFetcher,
@@ -31,7 +31,6 @@ from libref.services.jobs import Job, JobManager
 from libref.services.libraries import LibraryService
 from libref.store.document_store import DocumentInput, DocumentStore, StoreResult
 from libref.store.vec_store import QdrantVecStore
-from libref.text.embedding import build_embed_text, is_embeddable_metadata
 from libref.text.normalize import (
     classify_content,
     normalize_markdown,
@@ -128,19 +127,121 @@ def start_refresh_job(
     )
 
 
-_version_locks: dict[tuple[str, str, str], asyncio.Lock] = {}
-_version_locks_guard = threading.Lock()
+def _version_key(ecosystem: str, library: str, version: str) -> str:
+    return f"{ecosystem}\0{library}\0{version}"
 
 
-def _version_lock(ecosystem: str, library: str, version: str) -> asyncio.Lock:
-    """同版本同时只允许一个抓取任务执行，第二个任务排队等待。"""
-    key = (ecosystem, library, version)
-    with _version_locks_guard:
-        lock = _version_locks.get(key)
+def _ensure_version_locks(conn) -> None:
+    from libref.db.schema import GOVERNANCE_SQL
+
+    conn.executescript(GOVERNANCE_SQL)
+    conn.commit()
+
+
+_mem_locks: dict[str, asyncio.Lock] = {}
+_mem_guard = threading.Lock()
+
+
+def _mem_lock(key: str) -> asyncio.Lock:
+    with _mem_guard:
+        lock = _mem_locks.get(key)
         if lock is None:
             lock = asyncio.Lock()
-            _version_locks[key] = lock
+            _mem_locks[key] = lock
         return lock
+
+
+class _VersionGuard:
+    def __init__(self, conn, key: str, stale_after: float = 600.0) -> None:
+        self._conn = conn
+        self._key = key
+        self._stale_after = stale_after
+        self._owner = f"{__import__('os').getpid()}-{__import__('time').time_ns()}"
+        self._mem = _mem_lock(key)
+        self._beat_task = None
+
+    async def __aenter__(self):
+        await self._mem.acquire()
+        try:
+            await self._claim()
+        except BaseException:
+            self._mem.release()
+            raise
+        self._beat_task = asyncio.get_running_loop().create_task(self._beat_loop())
+        return self
+
+    async def __aexit__(self, *exc):
+        try:
+            if self._beat_task is not None:
+                self._beat_task.cancel()
+        finally:
+            try:
+                self._conn.execute(
+                    "DELETE FROM version_locks WHERE version_key=? AND owner=?",
+                    (self._key, self._owner),
+                )
+                self._conn.commit()
+            except Exception:
+                pass
+            self._mem.release()
+        return False
+
+    async def _claim(self) -> None:
+        import time as _time
+
+        _ensure_version_locks(self._conn)
+        while True:
+            now = _time.time()
+            try:
+                self._conn.execute(
+                    "INSERT INTO version_locks(version_key, owner, heartbeat_at) VALUES(?,?,?)",
+                    (self._key, self._owner, now),
+                )
+                self._conn.commit()
+                return
+            except Exception:
+                try:
+                    self._conn.rollback()
+                except Exception:
+                    pass
+            row = self._conn.execute(
+                "SELECT owner, heartbeat_at FROM version_locks WHERE version_key=?", (self._key,)
+            ).fetchone()
+            if row is None:
+                continue
+            owner, heartbeat = row[0], float(row[1] or 0)
+            if owner == self._owner:
+                return
+            if now - heartbeat > self._stale_after:
+                cur = self._conn.execute(
+                    "UPDATE version_locks SET owner=?, heartbeat_at=? WHERE version_key=? AND heartbeat_at=?",
+                    (self._owner, now, self._key, heartbeat),
+                )
+                self._conn.commit()
+                if cur.rowcount > 0:
+                    return
+            await asyncio.sleep(0.2)
+
+    async def _beat_loop(self) -> None:
+        import time as _time
+
+        try:
+            while True:
+                await asyncio.sleep(max(1.0, self._stale_after / 6.0))
+                try:
+                    self._conn.execute(
+                        "UPDATE version_locks SET heartbeat_at=? WHERE version_key=? AND owner=?",
+                        (_time.time(), self._key, self._owner),
+                    )
+                    self._conn.commit()
+                except Exception:
+                    continue
+        except asyncio.CancelledError:
+            return
+
+
+def _version_lock(conn, ecosystem: str, library: str, version: str):
+    return _VersionGuard(conn, _version_key(ecosystem, library, version))
 
 
 def build_scrape_runner(settings, conn, *, vec_store=None, embed=None, mgr=None):
@@ -525,7 +626,7 @@ class IngestService:
                 *(f"{step}_ms" for step in PIPELINE_STEPS),
             )
         }
-        async with _version_lock(ecosystem, library, version):
+        async with _version_lock(self._conn, ecosystem, library, version):
             removed_all: list[int] = []
             inserted_all: list[int] = []
             async with _client(self._settings) as client:
@@ -610,6 +711,13 @@ class IngestService:
             import time as _time2
             counts["seed_truncated"] = 1 if truncated else 0
             counts["elapsed_ms"] = int((_time2.monotonic() - started) * 1000)
+            if counts.get("render_skipped", 0) > 0:
+                scope_render = bool((scope or {}).get("render_js", False) or bool(self._settings.render_js_default))
+                if not scope_render:
+                    logger.warning(
+                        "render candidates skipped=%d without browser fallback; enable render_js to rescan",
+                        counts.get("render_skipped", 0),
+                    )
             logger.info(
                 "scrape done %s:%s %s stored=%d unchanged=%d absent=%d failed=%d skipped=%d",
                 ecosystem, library, version, counts.get("stored", 0),
@@ -625,59 +733,12 @@ class IngestService:
         removed: list[int],
         inserted: list[int],
     ) -> None:
-        """收尾批量同步向量：集合校验、删旧点、编码、写入，分段计数失败。"""
-        if self._vec is None or self._embed is None:
-            return
-        if not removed and not inserted:
-            return
-        assert self._vec is not None and self._embed is not None
-        try:
-            self._vec.ensure_collection(
-                self._conn,
-                self._settings.embedding_model,
-                self._settings.embedding_dim,
-            )
-        except Exception as exc:  # noqa: BLE001
-            counts["vector_failed"] += len(removed) + len(inserted)
-            logger.warning("vector ensure collection failed: %s", exc)
-            return
-        try:
-            self._vec.delete_docs(removed)
-        except Exception as exc:  # noqa: BLE001
-            counts["vector_failed"] += len(removed) + len(inserted)
-            logger.warning("vector delete failed: %s", exc)
-            return
-        try:
-            docs = [
-                d for d in store.get_documents(inserted)
-                if is_embeddable_metadata(d["metadata"])
-            ]
-            hard = int(self._settings.chunk_embed_max_tokens)
-            texts = []
-            for d in docs:
-                meta = d["metadata"] or {}
-                text = build_embed_text(
-                    meta.get("title"), meta.get("path"), d["content"],
-                )
-                clipped, was_clipped = ensure_hard_limit(text, ChunkPath.EMBEDDING, hard)
-                if was_clipped:
-                    counts["chunk_truncated"] = counts.get("chunk_truncated", 0) + 1
-                    logger.warning(
-                        "embedding text clipped to %d tokens for doc %d", hard, d["id"]
-                    )
-                texts.append(clipped)
-            vecs = await self._embed(texts) if texts else []
-            if len(vecs) != len(docs):
-                raise RuntimeError("embedding count mismatch")
-            self._vec.upsert_batch(
-                [
-                    (d["id"], d["library_id"], d["version_id"], vec)
-                    for d, vec in zip(docs, vecs)
-                ]
-            )
-        except Exception as exc:  # noqa: BLE001
-            counts["vector_failed"] += len(inserted)
-            logger.warning("vector upsert failed: %s", exc)
+        from libref.services.maintenance import sync_vectors_for_docs
+
+        await sync_vectors_for_docs(
+            self._conn, self._settings, self._vec, self._embed,
+            store, counts, removed, inserted,
+        )
 
     def _sweep_absent(
         self,

@@ -1,7 +1,7 @@
 """进程内异步任务队列 + write-through 落库 + 心跳恢复。
 
 内存队列提交任务并回写任务表，worker 消费执行，超时未续写按 stale 恢复。
-jobs 表为运维表，由 ensure_jobs_table 建表，不入业务迁移。
+治理表经版本化迁移建表，运行时按需幂等确保。
 """
 
 from __future__ import annotations
@@ -16,36 +16,24 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-_JOBS_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS jobs(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  kind TEXT NOT NULL,
-  params JSON NOT NULL DEFAULT '{}',
-  status TEXT NOT NULL DEFAULT 'pending'
-      CHECK (status IN ('pending','running','done','failed')),
-  error TEXT,
-  heartbeat_at REAL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  result JSON NOT NULL DEFAULT '{}',
-  finished_at TEXT
-);
-"""
-
-_STALE_AFTER = 600.0
-
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
 def ensure_jobs_table(conn: sqlite3.Connection) -> None:
-    conn.execute(_JOBS_TABLE_SQL)
+    from libref.db.schema import GOVERNANCE_SQL
+
+    conn.executescript(GOVERNANCE_SQL)
     cols = _table_columns(conn, "jobs")
     if "result" not in cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN result JSON NOT NULL DEFAULT '{}'")
     if "finished_at" not in cols:
         conn.execute("ALTER TABLE jobs ADD COLUMN finished_at TEXT")
     conn.commit()
+
+
+_STALE_AFTER = 600.0
 
 
 def summarize_result(value: object) -> object:

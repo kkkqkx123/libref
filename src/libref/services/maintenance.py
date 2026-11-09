@@ -11,6 +11,57 @@ from libref.services.libraries import mining_version_ids
 from libref.text.embedding import build_embed_text, is_embeddable_metadata
 
 
+async def sync_vectors_for_docs(conn, settings, vec_store, embed, store, counts, removed, inserted) -> None:
+    import logging
+
+    from libref.chunking import ChunkPath, ensure_hard_limit
+    from libref.text.embedding import build_embed_text, is_embeddable_metadata
+
+    logger = logging.getLogger(__name__)
+    if vec_store is None or embed is None:
+        return
+    if not removed and not inserted:
+        return
+    try:
+        vec_store.ensure_collection(
+            conn,
+            settings.embedding_model,
+            settings.embedding_dim,
+        )
+    except Exception as exc:
+        counts["vector_failed"] = counts.get("vector_failed", 0) + len(removed) + len(inserted)
+        logger.warning("vector ensure collection failed: %s", exc)
+        return
+    try:
+        vec_store.delete_docs(removed)
+    except Exception as exc:
+        counts["vector_failed"] = counts.get("vector_failed", 0) + len(removed) + len(inserted)
+        logger.warning("vector delete failed: %s", exc)
+        return
+    try:
+        docs = [
+            d for d in store.get_documents(inserted)
+            if is_embeddable_metadata(d["metadata"])
+        ]
+        hard = int(settings.chunk_embed_max_tokens)
+        texts = []
+        for d in docs:
+            meta = d["metadata"] or {}
+            text = build_embed_text(meta.get("title"), meta.get("path"), d["content"])
+            clipped, was_clipped = ensure_hard_limit(text, ChunkPath.EMBEDDING, hard)
+            if was_clipped:
+                counts["chunk_truncated"] = counts.get("chunk_truncated", 0) + 1
+                logger.warning("embedding text clipped to %d tokens for doc %d", hard, d["id"])
+            texts.append(clipped)
+        vecs = await embed(texts) if texts else []
+        if len(vecs) != len(docs):
+            raise RuntimeError("embedding count mismatch")
+        vec_store.upsert_batch([(d["id"], d["library_id"], d["version_id"], vec) for d, vec in zip(docs, vecs)])
+    except Exception as exc:
+        counts["vector_failed"] = counts.get("vector_failed", 0) + len(inserted)
+        logger.warning("vector upsert failed: %s", exc)
+
+
 class MaintenanceService:
     """Full re-embedding of one library version into the derived vector index."""
 

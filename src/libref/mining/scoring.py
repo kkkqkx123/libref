@@ -26,6 +26,24 @@ def name_hit(name: str, full: set[str], toks: set[str]) -> bool:
     return short in toks
 
 
+def support_for_entities(entities: list[str], plist: list[tuple[list[str], int]]) -> float:
+    if not entities or not plist:
+        return 0.0
+    ceiling = max(s for _, s in plist)
+    if ceiling <= 0:
+        return 0.0
+    have = set(entities)
+    hit = max((s for names, s in plist if have.intersection(names)), default=0)
+    return hit / ceiling
+
+
+def cluster_hit_exact(entities: list[str], members: set[str]) -> bool:
+    if not entities:
+        return False
+    have = set(entities)
+    return len(have.intersection(members)) >= 2
+
+
 def support_for_content(content: str, plist: list[tuple[list[str], int]]) -> float:
     """Max matched pattern support normalized by the version ceiling."""
     if not plist:

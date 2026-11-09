@@ -10,7 +10,7 @@ import json
 import sqlite3
 from typing import Any
 
-from libref.mining.scoring import cluster_hit, support_for_content
+from libref.mining.scoring import cluster_hit, cluster_hit_exact, support_for_content, support_for_entities
 from libref.text.query import safe_fts_query
 from libref.text.embedding import strip_markdown_for_embedding
 from libref.text.snippet import make_snippet
@@ -124,6 +124,7 @@ def _fetch_details(
             "overlap_from": meta.get("overlap_from"),
             "keywords": list(meta.get("keywords", []) or []),
             "content_type": meta.get("content_type", "text/markdown"),
+            "entities": list(meta.get("entities", []) or []),
             "page_id": int(r[9]),
             "sort_order": int(r[10]),
         }
@@ -382,15 +383,25 @@ class HybridRetriever:
             else:
                 base = rrf.get(doc, 0.0)
             plist = patterns.get(info["version_id"], [])
-            bonus = support_for_content(info["content"], plist) if alpha > 0 else 0.0
+            have_entities = list(info.get("entities", []) or [])
+            if have_entities and alpha > 0:
+                bonus = support_for_entities(have_entities, plist)
+            else:
+                bonus = support_for_content(info["content"], plist) if alpha > 0 else 0.0
             cluster_bonus = 0.0
             clist = clusters.get(info["version_id"], [])
             if clist and cluster_alpha > 0:
-                content = info["content"] or ""
-                for members in clist:
-                    if cluster_hit(content, members):
-                        cluster_bonus = 1.0
-                        break
+                if have_entities:
+                    for members in clist:
+                        if cluster_hit_exact(have_entities, members):
+                            cluster_bonus = 1.0
+                            break
+                else:
+                    content = info["content"] or ""
+                    for members in clist:
+                        if cluster_hit(content, members):
+                            cluster_bonus = 1.0
+                            break
             final = base * (1.0 + alpha * bonus + cluster_alpha * cluster_bonus)
             scored.append((final, doc))
         scored.sort(key=lambda kv: kv[0], reverse=True)
@@ -423,6 +434,7 @@ class HybridRetriever:
                     "overlap_from": info.get("overlap_from"),
                     "keywords": list(info.get("keywords", []) or []),
                     "content_type": info.get("content_type", "text/markdown"),
+                    "entities": list(info.get("entities", []) or []),
                 }
             )
         return out

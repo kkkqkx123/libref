@@ -112,8 +112,8 @@ def _store_source_chunks(
     library_id: int,
     version_id: int,
     budgets=None,
-) -> tuple[int, int]:
-    """源码分块落库：按文件分组装配后经文档表复用落库，返回块数与空块计数。"""
+) -> tuple[int, int, list[int], list[int]]:
+    """源码分块落库：按文件分组装配后经文档表复用落库，返回块数、空块、删增标识。"""
     from libref.astminer import grouping as _grouping
     from libref.astminer import source_chunk as _source_chunk
     from libref.chunking import default_budgets
@@ -126,6 +126,8 @@ def _store_source_chunks(
     store = DocumentStore(conn)
     n_chunks = 0
     dropped = 0
+    removed_all: list[int] = []
+    inserted_all: list[int] = []
     for rel in sorted(sources):
         decls = by_file.get(rel, [])
         if not decls:
@@ -165,16 +167,19 @@ def _store_source_chunks(
                 end_char=getattr(c, "end_char", -1),
                 prev_chunk_id=getattr(c, "prev_chunk_id", None),
                 next_chunk_id=getattr(c, "next_chunk_id", None),
+                entities=list(getattr(c, "entities", []) or []),
             )
             for c in raw_chunks
         ]
-        store.store_page(
+        result = store.store_page(
             version_id, library_id, page_url, "stored",
             chunks=inputs,
             raw_content=data.decode("utf-8", "replace"),
         )
+        removed_all.extend(result.removed_ids)
+        inserted_all.extend(result.inserted_ids)
         n_chunks += len(inputs)
-    return n_chunks, dropped
+    return n_chunks, dropped, removed_all, inserted_all
 
 
 def _persist_entities(
@@ -372,7 +377,7 @@ def lookup_index_source_cached(conn, ecosystem: str, library: str, version: str)
     return None
 
 
-def index_repo(
+async def index_repo_async(
     conn,
     library: str,
     version: str,
@@ -384,6 +389,9 @@ def index_repo(
     resolved_from: str | None = None,
     registry_confirmed: bool = True,
     repos_quota_mb: int | None = None,
+    settings=None,
+    vec_store=None,
+    embed=None,
 ) -> dict[str, int]:
     from libref.astminer import cache as ast_cache
     from libref.astminer import config as ast_config
@@ -447,7 +455,7 @@ def index_repo(
     n_calls, swept_calls = _persist_calls(
         conn, library_id, version_id, resolved, commit
     )
-    n_chunks, chunk_dropped = _store_source_chunks(
+    n_chunks, chunk_dropped, removed_ids, inserted_ids = _store_source_chunks(
         conn, repo_name, sources, all_decls, library_id, version_id
     )
     conn.commit()
@@ -457,7 +465,42 @@ def index_repo(
     counts["swept_calls"] = swept_calls
     counts["source_chunks"] = n_chunks
     counts["chunk_empty_dropped"] = chunk_dropped
+    counts["vector_failed"] = 0
+    counts["chunk_truncated"] = 0
+    if settings is not None and vec_store is not None and embed is not None:
+        from libref.services.maintenance import sync_vectors_for_docs
+        from libref.store.document_store import DocumentStore
+
+        await sync_vectors_for_docs(
+            conn, settings, vec_store, embed,
+            DocumentStore(conn), counts, removed_ids, inserted_ids,
+        )
     return counts
+
+
+def index_repo(
+    conn,
+    library: str,
+    version: str,
+    source: str | None = None,
+    *,
+    update: bool = False,
+    repos_dir: Path,
+    ecosystem: str = "custom",
+    resolved_from: str | None = None,
+    registry_confirmed: bool = True,
+    repos_quota_mb: int | None = None,
+    settings=None,
+    vec_store=None,
+    embed=None,
+) -> dict[str, int]:
+    return asyncio.run(index_repo_async(
+        conn, library, version, source,
+        update=update, repos_dir=repos_dir, ecosystem=ecosystem,
+        resolved_from=resolved_from, registry_confirmed=registry_confirmed,
+        repos_quota_mb=repos_quota_mb,
+        settings=settings, vec_store=vec_store, embed=embed,
+    ))
 
 
 def index_repo_by_name(
@@ -497,30 +540,48 @@ async def index_repo_by_name_async(
         if version is None:
             raise ValueError("explicit repo source requires a version")
         eco = (ecosystem.strip().lower() if ecosystem else "custom")
-        return index_repo(
+        vec_store = None
+        embed = None
+        try:
+            from libref.services.factory import build_vector as _build_vector
+
+            vec_store, embed, _ = _build_vector(settings)
+        except Exception:
+            vec_store, embed = None, None
+        return await index_repo_async(
             conn, library.strip(), version, explicit_source,
             update=update,
             repos_dir=Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir),
             ecosystem=eco,
             resolved_from="explicit", registry_confirmed=True,
+            settings=settings, vec_store=vec_store, embed=embed,
         )
     async with _client(settings) as client:
         resolution = await resolve_repo(
             conn, client, settings, ecosystem, library, version,
         )
     assert resolution.repo_url is not None
-    return index_repo(
+    vec_store = None
+    embed = None
+    try:
+        from libref.services.factory import build_vector as _build_vector
+
+        vec_store, embed, _ = _build_vector(settings)
+    except Exception:
+        vec_store, embed = None, None
+    return await index_repo_async(
         conn, resolution.name, resolution.version, resolution.repo_url,
         update=update,
         repos_dir=Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir),
         ecosystem=resolution.ecosystem,
         resolved_from=resolution.source,
         registry_confirmed=resolution.registry_confirmed,
+        settings=settings, vec_store=vec_store, embed=embed,
     )
 
 
 
-def build_repo_runner(settings, conn, repos_dir=None):
+def build_repo_runner(settings, conn, repos_dir=None, vec_store=None, embed=None):
     """Build a job runner handling repo indexing only; mining lives in mining_refresh."""
     resolved_dir = Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir)
 
@@ -528,7 +589,19 @@ def build_repo_runner(settings, conn, repos_dir=None):
         if job.kind != INDEX_REPO_JOB_KIND:
             raise ValueError(f"unsupported job kind: {job.kind}")
         p = job.params
-        return index_repo(
+        local_vec, local_embed = vec_store, embed
+        if local_vec is None or local_embed is None:
+            try:
+                from libref.services.factory import build_vector as _build_vector
+
+                built_vec, built_embed, _ = _build_vector(settings)
+                if local_vec is None:
+                    local_vec = built_vec
+                if local_embed is None:
+                    local_embed = built_embed
+            except Exception:
+                pass
+        return await index_repo_async(
             conn,
             p["library"],
             p["version"],
@@ -539,6 +612,7 @@ def build_repo_runner(settings, conn, repos_dir=None):
             resolved_from=p.get("resolved_from"),
             registry_confirmed=bool(p.get("registry_confirmed", True)),
             repos_quota_mb=int(settings.repos_quota_mb),
+            settings=settings, vec_store=local_vec, embed=local_embed,
         )
 
     return runner

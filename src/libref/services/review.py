@@ -10,6 +10,15 @@ _CONFIDENCE_RANK = {"AMBIGUOUS": 0, "INFERRED": 1, "EXTRACTED": 2}
 class ReviewService:
     """审核编排，实体标识沿用 review_status 行定位。"""
 
+    def review_map_for_version(self, version_id: int) -> dict[int, str]:
+        rows = self._conn.execute(
+            "SELECT ci.id, rs.status FROM call_instances ci "
+            "JOIN review_status rs ON rs.entity_type='call_instance' AND rs.entity_id=ci.id "
+            "WHERE ci.version_id=?",
+            (version_id,),
+        ).fetchall()
+        return {int(r[0]): str(r[1]) for r in rows}
+
     def __init__(self, conn) -> None:
         self._conn = conn
 

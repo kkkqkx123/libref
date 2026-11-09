@@ -225,6 +225,41 @@ ALTER TABLE call_instances ADD COLUMN start_byte INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE call_instances ADD COLUMN end_byte INTEGER NOT NULL DEFAULT 0;
 """
 
+# ── 运维治理表：任务、缓存、留痕、版本互斥，全部幂等建表 ──
+GOVERNANCE_SQL = """
+CREATE TABLE IF NOT EXISTS jobs(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind TEXT NOT NULL,
+  params JSON NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (status IN ('pending','running','done','failed')),
+  error TEXT,
+  heartbeat_at REAL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  result JSON NOT NULL DEFAULT '{}',
+  finished_at TEXT
+);
+CREATE TABLE IF NOT EXISTS robots_cache(
+  host TEXT PRIMARY KEY,
+  body TEXT NOT NULL,
+  body_md5 TEXT NOT NULL,
+  fetched_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS deletion_log(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library TEXT NOT NULL,
+  version TEXT NOT NULL,
+  ecosystem TEXT NOT NULL DEFAULT 'custom',
+  reason TEXT NOT NULL,
+  detail JSON NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS version_locks(
+  version_key TEXT PRIMARY KEY,
+  owner TEXT NOT NULL,
+  heartbeat_at REAL NOT NULL
+);
+"""
 # ── 分层特征与接口分组：批量构建落库，查询时浏览 ──
 FEATURE_TREE_CLUSTER_SQL = """
 CREATE TABLE feature_nodes(

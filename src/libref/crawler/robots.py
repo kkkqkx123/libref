@@ -1,8 +1,7 @@
 """robots 合规检查 + SQLite 缓存（TTL 7 天）。
 
 蓝本 crawl4ai utils.py::RobotsParser（SQLite 缓存 + MD5 变更检测）。
-定制点：解析用 stdlib urllib.robotparser；缓存表由 ensure_robots_cache 建表，
-属合规运维缓存而非业务 schema，不入版本化迁移。
+定制点：解析用 stdlib urllib.robotparser；缓存表经版本化迁移建表，运行时按需幂等确保。
 """
 
 from __future__ import annotations
@@ -13,18 +12,10 @@ import time
 import urllib.robotparser
 from urllib.parse import urlsplit
 
-_ROBOTS_CACHE_SQL = """
-CREATE TABLE IF NOT EXISTS robots_cache(
-  host TEXT PRIMARY KEY,
-  body TEXT NOT NULL,
-  body_md5 TEXT NOT NULL,
-  fetched_at REAL NOT NULL
-);
-"""
-
-
 def ensure_robots_cache(conn: sqlite3.Connection) -> None:
-    conn.execute(_ROBOTS_CACHE_SQL)
+    from libref.db.schema import GOVERNANCE_SQL
+
+    conn.executescript(GOVERNANCE_SQL)
     conn.commit()
 
 

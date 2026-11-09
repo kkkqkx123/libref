@@ -17,21 +17,10 @@ REASON_ABSENT_SWEEP = "absent-sweep"
 REASON_PURGE = "purge"
 
 
-_DELETION_LOG_SQL = """
-CREATE TABLE IF NOT EXISTS deletion_log(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  library TEXT NOT NULL,
-  version TEXT NOT NULL,
-  ecosystem TEXT NOT NULL DEFAULT 'custom',
-  reason TEXT NOT NULL,
-  detail JSON NOT NULL DEFAULT '{}',
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-"""
-
-
 def ensure_deletion_log(conn: sqlite3.Connection) -> None:
-    conn.execute(_DELETION_LOG_SQL)
+    from libref.db.schema import GOVERNANCE_SQL
+
+    conn.executescript(GOVERNANCE_SQL)
     conn.commit()
 
 

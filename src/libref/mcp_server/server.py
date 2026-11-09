@@ -32,13 +32,26 @@ def build_mcp_server(
     review = ReviewService(conn)
 
     @mcp.tool()
-    def search_docs(
+    async def search_docs(
         query: str,
         library: str | None = None,
         version: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        """Full-text search over the document library ordered by relevance."""
+        """默认混合检索：双路召回融合，缺向量时回落全文。"""
+        results, _ = await search.search_hybrid_async(
+            query, library=library, version=version, limit=limit,
+        )
+        return results
+
+    @mcp.tool()
+    def search_docs_precise(
+        query: str,
+        library: str | None = None,
+        version: str | None = None,
+        limit: int = 8,
+    ) -> list[dict[str, Any]]:
+        """精确全文查：只走 FTS 单路。"""
         return search.search_docs(query, library=library, version=version, limit=limit)
 
     @mcp.tool()

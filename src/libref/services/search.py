@@ -29,7 +29,7 @@ class SearchService:
         ecosystem: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        """Full-text search with library and version filters."""
+        """精确全文查：只走 FTS 单路，混合默认查走异步混合入口。"""
         from libref.config import setting_or_default
 
         filters = []
@@ -100,6 +100,7 @@ class SearchService:
                     "overlap_from": meta.get("overlap_from"),
                     "keywords": list(meta.get("keywords", []) or []),
                     "content_type": meta.get("content_type", "text/markdown"),
+                    "entities": list(meta.get("entities", []) or []),
                 }
             )
         return out
@@ -118,7 +119,7 @@ class SearchService:
         expand_window: bool | None = None,
         window_radius: int | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
-        """Hybrid retrieval with degradation flag; falls back to FTS when vectors miss."""
+        """混合默认查：双路召回融合，失败回落全文并标记降级。"""
         from libref.store.retriever import HybridRetriever
 
         retriever = HybridRetriever(

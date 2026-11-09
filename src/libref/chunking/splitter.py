@@ -52,6 +52,7 @@ class Chunk:
     content_hash: str = ""
     keywords: list[str] = field(default_factory=list)
     content_type: str = "text/markdown"
+    entities: list[str] = field(default_factory=list)
 
 
 @dataclass

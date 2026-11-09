@@ -38,11 +38,16 @@ class MiningReadService:
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
-        conf = "" if include_ambiguous else "AND confidence != 'AMBIGUOUS'"
+        base_filter = "(rs.status IS NULL OR rs.status != 'conflict')"
+        if include_ambiguous:
+            conf = f"AND {base_filter}"
+        else:
+            conf = f"AND {base_filter} AND (call_instances.confidence != 'AMBIGUOUS' OR rs.status='approved')"
         sql = (
             "SELECT callee_name, count(*), "
             "count(DISTINCT caller_file || char(0) || COALESCE(caller, '')) "
-            "FROM call_instances "
+            "FROM call_instances LEFT JOIN review_status rs "
+            "ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id "
             f"WHERE version_id IN ({placeholders}) {conf} "
             "GROUP BY callee_name ORDER BY count(*) DESC, callee_name"
         )
@@ -68,9 +73,14 @@ class MiningReadService:
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
-        conf = "" if include_ambiguous else "AND confidence != 'AMBIGUOUS'"
+        base_filter = "(rs.status IS NULL OR rs.status != 'conflict')"
+        if include_ambiguous:
+            conf = f"AND {base_filter}"
+        else:
+            conf = f"AND {base_filter} AND (call_instances.confidence != 'AMBIGUOUS' OR rs.status='approved')"
         rows = self._conn.execute(
-            "SELECT args, count(*) FROM call_instances "
+            "SELECT args, count(*) FROM call_instances LEFT JOIN review_status rs "
+            "ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id "
             f"WHERE version_id IN ({placeholders}) AND callee_name = ? {conf} "
             "GROUP BY args ORDER BY count(*) DESC LIMIT ?",
             (*vids, api, limit),
@@ -97,16 +107,24 @@ class MiningReadService:
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
-        conf = "" if include_ambiguous else "AND c.confidence != 'AMBIGUOUS'"
-        tconf = "" if include_ambiguous else "AND confidence != 'AMBIGUOUS'"
+        no_conflict_c = "(rc.status IS NULL OR rc.status != 'conflict')"
+        no_conflict_t = "(rt.status IS NULL OR rt.status != 'conflict')"
+        if include_ambiguous:
+            conf = f"AND {no_conflict_c}"
+            tconf = f"AND {no_conflict_t}"
+        else:
+            conf = f"AND {no_conflict_c} AND (c.confidence != 'AMBIGUOUS' OR rc.status='approved')"
+            tconf = f"AND {no_conflict_t} AND (call_instances.confidence != 'AMBIGUOUS' OR rt.status='approved')"
         rows = self._conn.execute(
             "WITH target(file, caller_key) AS ("
             " SELECT DISTINCT caller_file, COALESCE(caller, '')"
-            " FROM call_instances"
+            " FROM call_instances LEFT JOIN review_status rt "
+            "ON rt.entity_type='call_instance' AND rt.entity_id=call_instances.id"
             f" WHERE version_id IN ({placeholders}) AND callee_name = ? {tconf})"
             " SELECT c.callee_name,"
             " count(DISTINCT c.caller_file || char(0) || COALESCE(c.caller, '')),"
-            " count(*) FROM call_instances c"
+            " count(*) FROM call_instances c LEFT JOIN review_status rc "
+            "ON rc.entity_type='call_instance' AND rc.entity_id=c.id"
             " JOIN target t ON c.caller_file = t.file"
             " AND COALESCE(c.caller, '') = t.caller_key"
             f" WHERE c.version_id IN ({placeholders}) AND c.callee_name != ? {conf}"
@@ -162,12 +180,17 @@ class MiningReadService:
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
-        conf = "" if include_ambiguous else "AND ci.confidence != 'AMBIGUOUS'"
+        base_filter = "(rs.status IS NULL OR rs.status != 'conflict')"
+        if include_ambiguous:
+            conf = f"AND {base_filter}"
+        else:
+            conf = f"AND {base_filter} AND (ci.confidence != 'AMBIGUOUS' OR rs.status='approved')"
         rows = self._conn.execute(
             "SELECT ci.version_id, l.name, v.version, ci.caller_file, ci.caller,"
             " ci.callee_name, ci.args, ci.line_start, ci.line_end, ci.confidence,"
             " ci.call_order, ci.start_byte, ci.id"
-            " FROM call_instances ci"
+            " FROM call_instances ci LEFT JOIN review_status rs "
+            "ON rs.entity_type='call_instance' AND rs.entity_id=ci.id"
             " JOIN versions v ON v.id = ci.version_id"
             " JOIN libraries l ON l.id = v.library_id"
             f" WHERE ci.version_id IN ({placeholders}) {conf}"

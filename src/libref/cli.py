@@ -361,6 +361,7 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
     settings = _load_settings(args, _registry_overrides(args))
     conn = _connect(settings)
     repos_dir = settings.repos_dir
+    vec_store, embed = _build_vector(settings)
     try:
         if args.source is not None:
             if args.version is None:
@@ -417,7 +418,7 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
             )
 
             async def _drive():
-                mgr.start_worker(build_repo_runner(settings, conn, repos_dir))
+                mgr.start_worker(build_repo_runner(settings, conn, repos_dir, vec_store, embed))
                 try:
                     return await mgr.wait_for(job_id)
                 finally:
@@ -438,6 +439,7 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                 resolved_from=resolved_from,
                 registry_confirmed=registry_confirmed,
                 repos_quota_mb=int(settings.repos_quota_mb),
+                settings=settings, vec_store=vec_store, embed=embed,
             )
         except ValueError as exc:
             print(f"invalid: {exc}", file=sys.stderr)
@@ -511,7 +513,16 @@ def cmd_search(args: argparse.Namespace) -> int:
     settings = _load_settings(args, _window_overrides(args))
     conn = _connect(settings)
     try:
-        if getattr(args, "hybrid", False):
+        if getattr(args, "precise", False):
+            service = SearchService(conn)
+            results = service.search_docs(
+                args.query,
+                library=args.library,
+                version=args.version,
+                limit=args.limit,
+            )
+            degraded = False
+        else:
             vec_store, embed = _build_vector(settings)
             service = SearchService(conn, settings, vec_store=vec_store, embed=embed)
             results, degraded = _asyncio.run(service.search_hybrid_async(
@@ -522,14 +533,6 @@ def cmd_search(args: argparse.Namespace) -> int:
             ))
             if degraded:
                 print("(degraded: partial retrieval)", file=sys.stderr)
-        else:
-            service = SearchService(conn)
-            results = service.search_docs(
-                args.query,
-                library=args.library,
-                version=args.version,
-                limit=args.limit,
-            )
     finally:
         conn.close()
     if not results:
@@ -995,12 +998,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("smoke-local", help="本地冒烟：临时 HTTP 站全链路", parents=[_config_parent]).set_defaults(func=cmd_smoke)
 
-    p_search = sub.add_parser("search", help="FTS 全文检索", parents=[_config_parent])
+    p_search = sub.add_parser("search", help="默认混合检索", parents=[_config_parent])
     p_search.add_argument("query")
     p_search.add_argument("--library", default=None)
     p_search.add_argument("--version", default=None)
     p_search.add_argument("--limit", type=int, default=8)
-    p_search.add_argument("--hybrid", action="store_true", help="改用混合检索")
+    p_search.add_argument("--precise", action="store_true", help="只走全文单路")
     p_search.add_argument("--expand-window", action="store_true", help="命中后扩展前后窗口")
     p_search.add_argument("--window-radius", type=int, default=None)
     p_search.set_defaults(func=cmd_search)

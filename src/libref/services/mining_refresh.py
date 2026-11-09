@@ -31,6 +31,25 @@ def _clear_derived(conn, version_id: int) -> None:
     conn.execute("DELETE FROM api_clusters WHERE version_id=?", (version_id,))
 
 
+def _review_map(conn, version_id: int) -> dict[int, str]:
+    try:
+        from libref.services.review import ReviewService
+
+        return ReviewService(conn).review_map_for_version(version_id)
+    except Exception:
+        return {}
+
+
+def _keep_call(confidence: str, status: str | None, include_ambiguous: bool) -> bool:
+    if status == "conflict":
+        return False
+    if confidence != "AMBIGUOUS":
+        return True
+    if status == "approved":
+        return True
+    return bool(include_ambiguous)
+
+
 def refresh_feature_tree(
     conn, library_id: int, version_id: int, *, include_ambiguous: bool = False
 ) -> int:
@@ -39,12 +58,12 @@ def refresh_feature_tree(
     from libref.mining import scope_key as _scope_key
 
     rows = conn.execute(
-        "SELECT callee_name, caller_file, caller, confidence FROM call_instances"
+        "SELECT callee_name, caller_file, caller, confidence, id FROM call_instances"
         " WHERE version_id=?",
         (version_id,),
     ).fetchall()
-    if not include_ambiguous:
-        rows = [r for r in rows if r[3] != "AMBIGUOUS"]
+    review = _review_map(conn, version_id)
+    rows = [r for r in rows if _keep_call(str(r[3]), review.get(int(r[4])), include_ambiguous)]
     calls = [(str(r[0]), _scope_key(str(r[1]), r[2])) for r in rows if r[0]]
     if not calls:
         conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
@@ -104,12 +123,12 @@ def refresh_clusters(
     threshold, min_size = _cluster_defaults(threshold, min_size)
 
     rows = conn.execute(
-        "SELECT callee_name, caller_file, caller, confidence FROM call_instances"
+        "SELECT callee_name, caller_file, caller, confidence, id FROM call_instances"
         " WHERE version_id=?",
         (version_id,),
     ).fetchall()
-    if not include_ambiguous:
-        rows = [r for r in rows if r[3] != "AMBIGUOUS"]
+    review = _review_map(conn, version_id)
+    rows = [r for r in rows if _keep_call(str(r[3]), review.get(int(r[4])), include_ambiguous)]
     triplets = [(str(r[0]), str(r[1]), r[2]) for r in rows if r[0]]
     sets = _scope_sets(triplets)
     groups = _cluster_fn(sets, threshold=threshold, min_size=min_size)
@@ -181,12 +200,12 @@ def mine_patterns(
         _clear_derived(conn, version_id)
         conn.commit()
         return []
-    if not include_ambiguous:
-        rows = [r for r in rows if r[4] != "AMBIGUOUS"]
-        if not rows:
-            _clear_derived(conn, version_id)
-            conn.commit()
-            return []
+    review = _review_map(conn, version_id)
+    rows = [r for r in rows if _keep_call(str(r[4]), review.get(int(r[7])), include_ambiguous)]
+    if not rows:
+        _clear_derived(conn, version_id)
+        conn.commit()
+        return []
     groups: dict[str, list[tuple[int, int, int, int, str]]] = {}
     for callee, caller_file, line_start, caller, _conf, order, start, row_id in rows:
         key = _scope_key(str(caller_file), caller)

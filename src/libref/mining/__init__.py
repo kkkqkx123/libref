@@ -6,12 +6,13 @@ from .feature_tree import build_feature_tree
 from .frequency import exact_counts, level_counts, prune_to_top_n, top_exact_names
 from .normalize import build_table, decode_pattern, encode_sequences, reverse_table
 from .prefixspan import PrefixSpan
-from .scoring import cluster_hit, content_idents, name_hit, support_for_content
+from .scoring import cluster_hit, cluster_hit_exact, content_idents, name_hit, support_for_content, support_for_entities
 
 __all__ = [
     "PrefixSpan",
     "build_feature_tree",
     "cluster_hit",
+    "cluster_hit_exact",
     "content_idents",
     "build_scope_sets",
     "build_table",
@@ -26,5 +27,6 @@ __all__ = [
     "name_hit",
     "scope_key",
     "support_for_content",
+    "support_for_entities",
     "top_exact_names",
 ]

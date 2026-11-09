@@ -184,3 +184,70 @@ def test_dual_track_gate_records_both_roads(conn, tmp_path, monkeypatch) -> None
     assert len(fts_only) == 2 and len(hybrid) == 2
     assert [r["id"] for r in hybrid][0] == ids["pattern"]
     assert all(isinstance(r["score"], float) for r in hybrid)
+
+
+def _mrr_and_recall(ranked_ids: list[int], relevant: set[int], k: int) -> tuple[float, float]:
+    rank = next((i + 1 for i, doc in enumerate(ranked_ids) if doc in relevant), 0)
+    mrr = 1.0 / rank if rank else 0.0
+    hits = len(set(ranked_ids[:k]).intersection(relevant))
+    recall = hits / len(relevant) if relevant else 1.0
+    return mrr, recall
+
+
+def test_quality_gate_mrr_recall_no_regression(conn, tmp_path, monkeypatch) -> None:
+    seed_library_version(conn)
+    store = DocumentStore(conn)
+    ids: dict[str, int] = {}
+    for key, body in (
+        ("install", "quetzalalpha install guide apple orchard"),
+        ("advanced", "quetzalalpha advanced usage banana grove"),
+        ("quick", "quetzalalpha quickstart apple banana meadow"),
+        ("other", "unrelated pineapple desert"),
+    ):
+        url = f"https://d.example/{key}.html"
+        result = store.store_page(
+            1, 1, url, "stored",
+            chunks=[Chunk(url=url, path="Guide", title=key, content=body, sort_order=0)],
+            raw_content=body,
+        )
+        ids[key] = result.inserted_ids[0]
+    cases = [
+        ("apple install orchard", {ids["install"]}),
+        ("banana advanced grove", {ids["advanced"]}),
+        ("quickstart meadow", {ids["quick"]}),
+    ]
+    monkeypatch.chdir(tmp_path)
+    settings = LibrefSettings(freq_alpha=0.0, cluster_alpha=0.0)
+    fts_mrrs: list[float] = []
+    fts_recalls: list[float] = []
+    for query, relevant in cases:
+        results, degraded = asyncio.run(
+            HybridRetriever(conn, settings).search_async(query, limit=4)
+        )
+        assert degraded is False
+        mrr, recall = _mrr_and_recall([r["id"] for r in results], relevant, 2)
+        fts_mrrs.append(mrr)
+        fts_recalls.append(recall)
+    fts_mrr = sum(fts_mrrs) / len(fts_mrrs)
+    fts_recall = sum(fts_recalls) / len(fts_recalls)
+    assert fts_mrr >= 0.5
+    assert fts_recall >= 0.66
+    helpful = _FakeVec([ids["install"], ids["advanced"], ids["quick"], ids["other"]])
+    hybrid_mrrs: list[float] = []
+    hybrid_recalls: list[float] = []
+    for query, relevant in cases:
+        results, degraded = asyncio.run(
+            HybridRetriever(conn, settings, vec_store=helpful, embed=_fake_embed).search_async(
+                query, limit=4
+            )
+        )
+        assert degraded is False
+        mrr, recall = _mrr_and_recall([r["id"] for r in results], relevant, 2)
+        hybrid_mrrs.append(mrr)
+        hybrid_recalls.append(recall)
+    hybrid_mrr = sum(hybrid_mrrs) / len(hybrid_mrrs)
+    hybrid_recall = sum(hybrid_recalls) / len(hybrid_recalls)
+    assert hybrid_mrr >= 0.5
+    assert hybrid_recall >= 0.66
+    assert hybrid_mrr >= fts_mrr
+    assert hybrid_recall >= fts_recall

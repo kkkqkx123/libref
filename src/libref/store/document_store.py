@@ -41,6 +41,7 @@ class DocumentInput:
     end_char: int = -1
     prev_chunk_id: str | None = None
     next_chunk_id: str | None = None
+    entities: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -255,6 +256,7 @@ class DocumentStore:
                         "end_char": getattr(chunk, "end_char", -1),
                         "prev_chunk_id": getattr(chunk, "prev_chunk_id", None),
                         "next_chunk_id": getattr(chunk, "next_chunk_id", None),
+                        "entities": list(getattr(chunk, "entities", []) or []),
                     },
                     ensure_ascii=False,
                 )

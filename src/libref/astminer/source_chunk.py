@@ -257,6 +257,12 @@ def as_chunk(source_chunk: SourceChunk, url: str):
         ):
             if cand and len(cand) >= 2 and not cand[0].isdigit() and cand not in names:
                 names.append(cand)
+    quals: list[str] = []
+    if qual:
+        quals.append(qual)
+    for extra in source_chunk.merged_quals:
+        if extra and extra not in quals:
+            quals.append(extra)
     return Chunk(
         url=url,
         path=source_chunk.file,
@@ -270,4 +276,5 @@ def as_chunk(source_chunk: SourceChunk, url: str):
         span_kind=source_chunk.span_kind,
         merged_from=list(source_chunk.merged_quals),
         overlap_from=source_chunk.overlap_from,
+        entities=quals,
     )
