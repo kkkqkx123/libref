@@ -7,10 +7,38 @@ import re
 import sqlite3
 from typing import Any
 
-_SNIPPET_RADIUS = 60
+_CAMEL_BOUND_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
-def _make_snippet(content: str | None, query: str) -> str:
+def _snake_variant(token: str) -> str:
+    """查询词的下划线变体，相同则返回空串。"""
+    snake = _CAMEL_BOUND_RE.sub("_", token).lower()
+    return snake if snake and snake != token.lower() else ""
+
+
+def _safe_fts_query(query: str) -> str:
+    """把用户输入转成无语法错的全文查询，无有效词元时返回空串。"""
+    latin = re.findall(r"[A-Za-z0-9_]+", query or "")
+    cjk = re.findall(r"[\u4e00-\u9fff]+", query or "")
+    seen: set[str] = set()
+    parts: list[str] = []
+    for token in latin:
+        lowered = token.lower()
+        if lowered and lowered not in seen:
+            seen.add(lowered)
+            parts.append(f'"{token}"')
+        snake = _snake_variant(token)
+        if snake and snake not in seen:
+            seen.add(snake)
+            parts.append(f'"{snake}"')
+    for token in cjk:
+        if token not in seen:
+            seen.add(token)
+            parts.append(f'"{token}"')
+    return " OR ".join(parts)
+
+
+def _make_snippet(content: str | None, query: str, *, radius: int, cap: int) -> str:
     text = (content or "").strip()
     if not text:
         return ""
@@ -21,8 +49,14 @@ def _make_snippet(content: str | None, query: str) -> str:
         if idx >= 0 and (pos < 0 or idx < pos):
             pos = idx
     pos = max(pos, 0)
-    start = max(0, pos - _SNIPPET_RADIUS)
-    end = min(len(text), pos + _SNIPPET_RADIUS)
+    start = max(0, pos - radius)
+    end = min(len(text), pos + radius)
+    line_start = text.rfind("\n", 0, start)
+    start = line_start + 1 if line_start >= 0 else 0
+    line_end = text.find("\n", end)
+    end = line_end if line_end >= 0 else len(text)
+    if end - start > cap:
+        end = start + cap
     prefix = "…" if start > 0 else ""
     suffix = "…" if end < len(text) else ""
     window = text[start:end]
@@ -65,9 +99,14 @@ def _fts_candidates(
     version: str | None,
     ecosystem: str | None,
     limit: int,
+    *,
+    weights: tuple[float, float, float, float],
 ) -> list[int]:
+    safe = _safe_fts_query(query)
+    if not safe:
+        return []
     filters = []
-    params: list[Any] = [query]
+    params: list[Any] = [safe]
     if library is not None:
         filters.append("l.name = ?")
         params.append(library)
@@ -85,7 +124,7 @@ def _fts_candidates(
         "JOIN versions v ON v.id = d.version_id "
         "JOIN libraries l ON l.id = d.library_id "
         f"WHERE documents_fts MATCH ? {where}"
-        "ORDER BY bm25(documents_fts, 1.0, 5.0, 1.0, 3.0) LIMIT ?",
+        f"ORDER BY bm25(documents_fts, {weights[0]}, {weights[1]}, {weights[2]}, {weights[3]}) LIMIT ?",
         params,
     ).fetchall()
     return [int(r[0]) for r in rows]
@@ -130,7 +169,8 @@ def _cluster_hit(content: str, members: set[str]) -> bool:
 
 
 def _fetch_details(
-    conn: sqlite3.Connection, doc_ids: list[int], query: str
+    conn: sqlite3.Connection, doc_ids: list[int], query: str,
+    *, snippet_radius: int, snippet_cap: int,
 ) -> dict[int, dict[str, Any]]:
     if not doc_ids:
         return {}
@@ -138,7 +178,7 @@ def _fetch_details(
     rows = conn.execute(
         "SELECT d.id, d.url, d.content, json_extract(d.metadata, '$.title'), "
         "json_extract(d.metadata, '$.path'), l.name, v.version, d.version_id, "
-        "d.metadata "
+        "d.metadata, d.page_id, d.sort_order "
         "FROM documents d "
         "JOIN versions v ON v.id = d.version_id "
         "JOIN libraries l ON l.id = d.library_id "
@@ -154,7 +194,7 @@ def _fetch_details(
         out[int(r[0])] = {
             "id": int(r[0]),
             "url": r[1],
-            "snippet": _make_snippet(r[2], query),
+            "snippet": _make_snippet(r[2], query, radius=snippet_radius, cap=snippet_cap),
             "title": r[3],
             "path": r[4],
             "library": r[5],
@@ -169,6 +209,8 @@ def _fetch_details(
             "overlap_from": meta.get("overlap_from"),
             "keywords": list(meta.get("keywords", []) or []),
             "content_type": meta.get("content_type", "text/markdown"),
+            "page_id": int(r[9]),
+            "sort_order": int(r[10]),
         }
     return out
 
@@ -262,17 +304,28 @@ class HybridRetriever:
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 8,
+        expand_window: bool | None = None,
+        window_radius: int | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """混合检索，返回结果列表与降级标记。"""
+        from libref.config import setting_or_default
+
         if not query.strip():
             raise ValueError("query is empty")
         if limit <= 0:
             raise ValueError("limit must be positive")
         degraded = False
-        candidate_floor = int(getattr(self._settings, "rerank_candidate_limit", 30))
-        need = max(3 * limit, candidate_floor)
+        candidate_floor = int(setting_or_default(self._settings, "rerank_candidate_limit"))
+        candidate_mult = int(setting_or_default(self._settings, "candidate_multiplier"))
+        need = max(candidate_mult * limit, candidate_floor)
+        weights = (
+            float(setting_or_default(self._settings, "fts_w_content")),
+            float(setting_or_default(self._settings, "fts_w_title")),
+            float(setting_or_default(self._settings, "fts_w_url")),
+            float(setting_or_default(self._settings, "fts_w_path")),
+        )
         fts_ids = _fts_candidates(
-            self._conn, query, library, version, ecosystem, need
+            self._conn, query, library, version, ecosystem, need, weights=weights
         )
         vec_ids: list[int] = []
         vids = _version_ids(self._conn, library, version, ecosystem)
@@ -295,18 +348,31 @@ class HybridRetriever:
         fused = _collapse_by_group(self._conn, fused)
         if not fused:
             return [], degraded
-        reranked = await self._apply_rerank(query, fused, limit, degraded)
+        assemble_mult = int(setting_or_default(self._settings, "assemble_multiplier"))
+        assemble_min = int(setting_or_default(self._settings, "assemble_min"))
+        reranked = await self._apply_rerank(
+            query, fused, limit, degraded,
+            window=max(assemble_mult * limit, assemble_min),
+            top_n=int(setting_or_default(self._settings, "rerank_top_n")),
+        )
         fused, degraded = reranked
-        window_f = max(2 * limit, 10)
-        results = self._postprocess(query, fused[:window_f], fts_ids, vec_ids)
+        window_f = max(assemble_mult * limit, assemble_min)
+        expand = setting_or_default(self._settings, "retriever_expand_window") if expand_window is None else expand_window
+        radius = setting_or_default(self._settings, "retriever_window_radius") if window_radius is None else window_radius
+        results = self._postprocess(
+            query, fused[:window_f], fts_ids, vec_ids,
+            expand_window=bool(expand), window_radius=int(radius),
+        )
         return results[:limit], degraded
 
     def _rrf_scores(
         self, fts_ids: list[int], vec_ids: list[int]
     ) -> dict[int, float]:
-        k = int(getattr(self._settings, "rrf_k", 20))
-        w_fts = float(getattr(self._settings, "rrf_w_fts", 1.0))
-        w_vec = float(getattr(self._settings, "rrf_w_vec", 0.5))
+        from libref.config import setting_or_default
+
+        k = int(setting_or_default(self._settings, "rrf_k"))
+        w_fts = float(setting_or_default(self._settings, "rrf_w_fts"))
+        w_vec = float(setting_or_default(self._settings, "rrf_w_vec"))
         rank_fts = {doc: i + 1 for i, doc in enumerate(fts_ids)}
         rank_vec = {doc: i + 1 for i, doc in enumerate(vec_ids)}
         scored: dict[int, float] = {}
@@ -324,18 +390,21 @@ class HybridRetriever:
         return sorted(scored, key=lambda d: scored[d], reverse=True)
 
     async def _apply_rerank(
-        self, query: str, fused: list[int], limit: int, degraded: bool
+        self, query: str, fused: list[int], limit: int, degraded: bool,
+        *, window: int, top_n: int | None,
     ) -> tuple[list[int], bool]:
+        from libref.config import setting_or_default
+
         if self._rerank is None:
             return fused, degraded
-        window = max(2 * limit, 10)
-        top_n = getattr(self._settings, "rerank_top_n", None)
         if top_n is not None:
             window = min(window, int(top_n))
         head, tail = fused[:window], fused[window:]
         if not head:
             return fused, degraded
-        details = _fetch_details(self._conn, head, query)
+        radius = int(setting_or_default(self._settings, "snippet_radius"))
+        cap = int(setting_or_default(self._settings, "snippet_cap"))
+        details = _fetch_details(self._conn, head, query, snippet_radius=radius, snippet_cap=cap)
         texts = [details[d]["content"] for d in head if d in details]
         if len(texts) != len(head):
             return fused, degraded
@@ -353,10 +422,14 @@ class HybridRetriever:
     def _assemble(
         self, query: str, fused: list[int], fts_ids: list[int], vec_ids: list[int]
     ) -> list[dict[str, Any]]:
-        details = _fetch_details(self._conn, fused, query)
+        from libref.config import setting_or_default
+
+        radius = int(setting_or_default(self._settings, "snippet_radius"))
+        cap = int(setting_or_default(self._settings, "snippet_cap"))
+        details = _fetch_details(self._conn, fused, query, snippet_radius=radius, snippet_cap=cap)
         fts_set, vec_set = set(fts_ids), set(vec_ids)
-        alpha = float(getattr(self._settings, "freq_alpha", 0.15))
-        cluster_alpha = float(getattr(self._settings, "cluster_alpha", 0.05))
+        alpha = float(setting_or_default(self._settings, "freq_alpha"))
+        cluster_alpha = float(setting_or_default(self._settings, "cluster_alpha"))
         rrf = self._rrf_scores(fts_ids, vec_ids)
         vids = sorted({details[d]["version_id"] for d in fused if d in details})
         patterns = _pattern_supports(self._conn, vids)
@@ -402,6 +475,8 @@ class HybridRetriever:
                     "chunk_path": info.get("chunk_path", "embedding"),
                     "source_group_id": info.get("source_group_id", ""),
                     "chunk_id": info.get("chunk_id", ""),
+                    "page_id": info.get("page_id"),
+                    "sort_order": info.get("sort_order"),
                     "span_kind": info.get("span_kind", "document_range"),
                     "merged_from": list(info.get("merged_from", []) or []),
                     "overlap_from": info.get("overlap_from"),
@@ -411,26 +486,22 @@ class HybridRetriever:
             )
         return out
 
-    def _postprocess(self, query: str, fused: list[int], fts_ids: list[int], vec_ids: list[int]) -> list[dict[str, Any]]:
+    def _postprocess(self, query: str, fused: list[int], fts_ids: list[int], vec_ids: list[int], *, expand_window: bool, window_radius: int) -> list[dict[str, Any]]:
         """后处理链：装配按序执行，窗口还原失败保留装配顺序。"""
         results = self._assemble(query, fused, fts_ids, vec_ids)
-        return self._expand_windows(results)
+        return self._expand_windows(results, enabled=expand_window, radius=window_radius)
 
 
-    def _expand_windows(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _expand_windows(self, results: list[dict[str, Any]], *, enabled: bool, radius: int) -> list[dict[str, Any]]:
         """窗口还原后处理：按配置半径取前后块拼入片段，失败即保留原序。"""
-        try:
-            enabled = bool(getattr(self._settings, "retriever_expand_window", False))
-        except AttributeError:
-            enabled = False
+        from libref.config import setting_or_default
+
         if not enabled or not results:
             return results
-        try:
-            radius = max(0, int(getattr(self._settings, "retriever_window_radius", 1)))
-        except (TypeError, ValueError):
-            radius = 1
+        radius = max(0, int(radius))
         if radius <= 0:
             return results
+        preview_cap = int(setting_or_default(self._settings, "window_preview_cap"))
         try:
             from libref.store.document_store import DocumentStore
             store = DocumentStore(self._conn)
@@ -444,11 +515,12 @@ class HybridRetriever:
                 if loc is None:
                     expanded.append(item)
                     continue
-                window = store.get_window(int(loc[1]), int(loc[2]), radius)
+                hit_path = str(item.get("chunk_path", "embedding") or "embedding")
+                window = store.get_window(int(loc[1]), int(loc[2]), radius, chunk_path=hit_path)
                 if len(window) > 1:
                     item = dict(item)
                     item["window"] = [
-                        {"id": w["id"], "sort_order": w["sort_order"], "content": (w["content"] or "")[:300]}
+                        {"id": w["id"], "sort_order": w["sort_order"], "content": (w["content"] or "")[:preview_cap]}
                         for w in window
                     ]
                 expanded.append(item)

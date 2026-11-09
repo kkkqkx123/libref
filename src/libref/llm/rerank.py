@@ -50,6 +50,7 @@ class RerankConfig:
     model: str
     timeout: float = 30.0
     retries: int = 3
+    truncate: int = RERANK_TRUNCATE
 
     def validate(self) -> None:
         if not self.api_key:
@@ -73,6 +74,7 @@ class RerankConfig:
             api_key=settings.embedding_api_key,
             model=settings.rerank_model,
             timeout=settings.request_timeout,
+            truncate=settings.rerank_truncate,
         )
         config.validate()
         return config
@@ -89,6 +91,7 @@ class RerankClient:
         model: str,
         timeout: float = 30.0,
         retries: int = 3,
+        truncate: int = RERANK_TRUNCATE,
         retry_policy: RetryPolicy | None = None,
         on_retry: Callable[[RetryAttempt], None] | None = None,
         resilience: Resilience | None = None,
@@ -103,6 +106,7 @@ class RerankClient:
         self._key = api_key
         self._model = model
         self._timeout = timeout
+        self._truncate = truncate
         self._policy = (
             retry_policy
             if retry_policy is not None
@@ -138,7 +142,7 @@ class RerankClient:
     ) -> list[tuple[int, float]]:
         url = self._base + "/rerank"
         headers = {"Authorization": f"Bearer {self._key}"}
-        truncated = [truncate_content(d) for d in documents]
+        truncated = [truncate_content(d, self._truncate) for d in documents]
         body: dict = {
             "model": self._model,
             "query": query,

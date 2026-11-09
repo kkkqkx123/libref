@@ -563,6 +563,7 @@ def cmd_answer(args: argparse.Namespace) -> int:
             vec_store=vec_store,
             embed=embed,
             chat=gateway.chat_fn(),
+            material_limit=args.material_limit,
         )
     finally:
         conn.close()
@@ -1011,6 +1012,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_answer.add_argument("--limit", type=int, default=5)
     p_answer.add_argument("--expand-window", action="store_true", help="命中后扩展前后窗口")
     p_answer.add_argument("--window-radius", type=int, default=None)
+    p_answer.add_argument("--material-limit", type=int, default=None, help="问答材料截断长度，缺省读配置")
     p_answer.set_defaults(func=cmd_answer)
 
     p_read = sub.add_parser("read-page", help="按 URL 读取整页文档", parents=[_config_parent])

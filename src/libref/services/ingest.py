@@ -34,9 +34,6 @@ from libref.store.vec_store import QdrantVecStore, build_embed_text
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_SEED_HOST_TTL = 7.0
-_EMBED_BATCH = 64
-
 SCRAPE_JOB_KIND = "scrape_docs"
 """抓取任务在任务表中的类型名。"""
 
@@ -201,16 +198,16 @@ def _doc_budgets(settings) -> dict[ChunkPath, ChunkBudget]:
     """按配置生成文档分块的双路预算，缺省回退到内置默认值。"""
     resolved = default_budgets()
     resolved[ChunkPath.EMBEDDING] = ChunkBudget(
-        hard_limit=int(getattr(settings, "chunk_embed_max_tokens", 512)),
-        min_limit=int(getattr(settings, "chunk_embed_min_tokens", 150)),
-        overlap=int(getattr(settings, "chunk_embed_overlap_tokens", 50)),
-        reserve_ratio=float(getattr(settings, "chunk_reserve_ratio", 0.06)),
+        hard_limit=int(settings.chunk_embed_max_tokens),
+        min_limit=int(settings.chunk_embed_min_tokens),
+        overlap=int(settings.chunk_embed_overlap_tokens),
+        reserve_ratio=float(settings.chunk_reserve_ratio),
     )
     resolved[ChunkPath.BM25] = ChunkBudget(
-        hard_limit=int(getattr(settings, "chunk_bm25_max_terms", 150)),
-        min_limit=int(getattr(settings, "chunk_bm25_min_terms", 45)),
-        overlap=int(getattr(settings, "chunk_bm25_overlap_terms", 5)),
-        reserve_ratio=float(getattr(settings, "chunk_reserve_ratio", 0.06)),
+        hard_limit=int(settings.chunk_bm25_max_terms),
+        min_limit=int(settings.chunk_bm25_min_terms),
+        overlap=int(settings.chunk_bm25_overlap_terms),
+        reserve_ratio=float(settings.chunk_reserve_ratio),
     )
     return resolved
 
@@ -300,11 +297,11 @@ class IngestService:
         self._clean_fingerprint = _budget_fingerprint(self._budgets)
         self._clean_cache: dict[str, str] = {}
         self._snapshots = None
-        if bool(getattr(settings, "snapshot_enabled", False)):
+        if bool(settings.snapshot_enabled):
             from libref.store.snapshots import SnapshotStore
             self._snapshots = SnapshotStore(
                 Path(settings.snapshot_dir),
-                quota_mb=int(getattr(settings, "snapshot_quota_mb", 512)),
+                quota_mb=int(settings.snapshot_quota_mb),
             )
 
     def scrape_docs(
@@ -529,18 +526,14 @@ class IngestService:
                 robots = RobotsChecker(
                     self._conn,
                     client,
-                    ttl_days=getattr(
-                        self._settings, "robots_cache_ttl_days", _DEFAULT_SEED_HOST_TTL
-                    ),
-                    user_agent=getattr(
-                        self._settings, "user_agent", "libref-crawler/0.1"
-                    ),
+                    ttl_days=self._settings.robots_cache_ttl_days,
+                    user_agent=self._settings.user_agent,
                 )
                 seeder = UrlSeeder(client, robots)
                 fetcher = HttpFetcher(
                     client,
-                    max_retries=getattr(self._settings, "fetch_max_retries", 3),
-                    default_delay=getattr(self._settings, "crawl_delay_default", 1.0),
+                    max_retries=self._settings.fetch_max_retries,
+                    default_delay=self._settings.crawl_delay_default,
                 )
                 discover_start = _time.monotonic()
                 seed = await seeder.discover(
@@ -580,7 +573,7 @@ class IngestService:
                     registry_confirmed=registry_confirmed,
                 )
 
-                sem = asyncio.Semaphore(getattr(self._settings, "fetch_concurrency", 4))
+                sem = asyncio.Semaphore(self._settings.fetch_concurrency)
 
                 async def process(url: str) -> None:
                     async with sem:
@@ -657,8 +650,8 @@ class IngestService:
         try:
             self._vec.ensure_collection(
                 self._conn,
-                getattr(self._settings, "embedding_model", ""),
-                getattr(self._settings, "embedding_dim", 0),
+                self._settings.embedding_model,
+                self._settings.embedding_dim,
             )
         except Exception as exc:  # noqa: BLE001
             counts["vector_failed"] += len(removed) + len(inserted)
@@ -675,7 +668,7 @@ class IngestService:
                 d for d in store.get_documents(inserted)
                 if d["metadata"].get("chunk_path", "embedding") != "bm25"
             ]
-            hard = int(getattr(self._settings, "chunk_embed_max_tokens", 512))
+            hard = int(self._settings.chunk_embed_max_tokens)
             texts = []
             for d in docs:
                 meta = d["metadata"] or {}
@@ -770,7 +763,7 @@ class IngestService:
                 cleaned = extract_to_markdown(raw, url)
             except Exception:  # noqa: BLE001
                 cleaned = ""
-        while len(self._clean_cache) >= 512:
+        while len(self._clean_cache) >= self._settings.ingest_clean_cache_cap:
             oldest = next(iter(self._clean_cache))
             del self._clean_cache[oldest]
         self._clean_cache[digest] = cleaned
@@ -835,9 +828,7 @@ class IngestService:
         if not markdown:
             if looks_like_js_rendered(raw_body, markdown):
                 render_attempted = True
-                want_render = bool((scope or {}).get("render_js", False) or getattr(
-                    self._settings, "render_js_default", False
-                ))
+                want_render = bool((scope or {}).get("render_js", False) or self._settings.render_js_default)
                 if want_render:
                     try:
                         from libref.crawler.browser import (
@@ -1647,7 +1638,7 @@ def build_repo_runner(settings, conn, repos_dir=None):
                 ecosystem=str(p.get("ecosystem", "custom") or "custom"),
                 resolved_from=p.get("resolved_from"),
                 registry_confirmed=bool(p.get("registry_confirmed", True)),
-                repos_quota_mb=int(getattr(settings, "repos_quota_mb", 2048)),
+                repos_quota_mb=int(settings.repos_quota_mb),
             )
         elif job.kind == MINE_PATTERNS_JOB_KIND:
             p = job.params

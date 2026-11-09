@@ -120,6 +120,7 @@ class EmbeddingConfig:
             model=settings.embedding_model,
             dim=settings.embedding_dim,
             timeout=settings.request_timeout,
+            batch_size=settings.embed_batch,
         )
         config.validate()
         known = embedding_dim_for(config.model)

@@ -13,8 +13,10 @@ from libref.chunking.splitter import (
     Chunk,
     DualChunks,
     chunk_content_hash,
+    clean_text_for_bm25,
     ensure_hard_limit,
     extract_keywords,
+    ident_snake_form,
     split_markdown,
     split_markdown_dual,
 )
@@ -22,7 +24,9 @@ from libref.chunking.splitter import (
 __all__ = [
     "Chunk",
     "chunk_content_hash",
+    "clean_text_for_bm25",
     "extract_keywords",
+    "ident_snake_form",
     "ChunkBudget",
     "ChunkPath",
     "DualChunks",

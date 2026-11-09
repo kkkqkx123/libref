@@ -142,10 +142,13 @@ def build_mcp_server(
         library: str | None = None,
         version: str | None = None,
         limit: int = 8,
+        window_radius: int | None = None,
+        expand_window: bool = False,
     ) -> dict[str, Any]:
         """混合检索文档库，与命令行 search --hybrid 同序，附降级标记。"""
         results, degraded = await search.search_hybrid_async(
             query, library=library, version=version, limit=limit,
+            expand_window=expand_window or None, window_radius=window_radius,
         )
         return {"results": results, "degraded": degraded}
 
@@ -155,6 +158,9 @@ def build_mcp_server(
         library: str | None = None,
         version: str | None = None,
         limit: int = 5,
+        window_radius: int | None = None,
+        expand_window: bool = False,
+        material_limit: int | None = None,
     ) -> dict[str, Any]:
         """混合检索加问答生成，未启用时返回明确原因。"""
         from libref.services.answer import answer_query_async
@@ -163,6 +169,8 @@ def build_mcp_server(
             return await answer_query_async(
                 conn, resolve_settings, query,
                 library=library, version=version, limit=limit,
+                expand_window=expand_window or None, window_radius=window_radius,
+                material_limit=material_limit,
             )
         except ValueError as exc:
             return {"error": "unavailable", "message": str(exc)}

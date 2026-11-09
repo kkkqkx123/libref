@@ -64,6 +64,7 @@ class LlmGateway:
             model=config.model,
             dim=config.dim,
             timeout=config.timeout,
+            batch_size=config.batch_size,
             preprocessor=config.preprocessor,
             on_retry=self._on_retry,
             resilience=self.resilience_for(config.base),
@@ -91,6 +92,7 @@ class LlmGateway:
             api_key=config.api_key,
             model=config.model,
             timeout=config.timeout,
+            truncate=config.truncate,
             on_retry=self._on_retry,
             resilience=self.resilience_for(config.base),
         )

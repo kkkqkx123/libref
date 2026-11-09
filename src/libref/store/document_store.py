@@ -80,15 +80,23 @@ class DocumentStore:
             for r in rows
         ]
 
-    def get_window(self, page_id: int, sort_order: int, radius: int = 1) -> list[dict[str, Any]]:
+    def get_window(self, page_id: int, sort_order: int, radius: int = 1, *, chunk_path: str | None = None) -> list[dict[str, Any]]:
         """按排序序号取前后窗口，供检索命中扩展上下文。"""
         if radius < 0:
             return []
-        rows = self._conn.execute(
-            "SELECT id, url, content, metadata, sort_order FROM documents "
-            "WHERE page_id=? AND sort_order BETWEEN ? AND ? ORDER BY sort_order",
-            (page_id, sort_order - radius, sort_order + radius),
-        ).fetchall()
+        if chunk_path is None:
+            rows = self._conn.execute(
+                "SELECT id, url, content, metadata, sort_order FROM documents "
+                "WHERE page_id=? AND sort_order BETWEEN ? AND ? ORDER BY sort_order",
+                (page_id, sort_order - radius, sort_order + radius),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT id, url, content, metadata, sort_order FROM documents "
+                "WHERE page_id=? AND sort_order BETWEEN ? AND ? "
+                "AND json_extract(metadata, '$.chunk_path')=? ORDER BY sort_order",
+                (page_id, sort_order - radius, sort_order + radius, chunk_path),
+            ).fetchall()
         return [
             {
                 "id": r[0],

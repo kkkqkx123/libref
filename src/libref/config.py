@@ -34,6 +34,7 @@ class LibrefSettings(BaseSettings):
     fetch_max_retries: int = Field(default=3, ge=0)
     crawl_delay_default: float = Field(default=1.0, ge=0)
     robots_cache_ttl_days: float = Field(default=7.0, ge=0)
+    ingest_clean_cache_cap: int = Field(default=512, ge=1)
     user_agent: str = "libref-crawler/0.1"
     # 抓取链路代理：显式值优先于标准环境变量，未设置时沿用 httpx 默认环境识别。
     # 旁路缺省含本地回环，显式值优先于 NO_PROXY 环境变量。
@@ -55,15 +56,27 @@ class LibrefSettings(BaseSettings):
     embedding_dim: int = 1024
     embedding_api_base: str = "https://api.siliconflow.cn/v1"
     embedding_api_key: str | None = None
+    embed_batch: int = Field(default=64, ge=1)
     rerank_model: str = "BAAI/bge-reranker-v2-m3"
     rerank_enabled: bool = False
     rerank_candidate_limit: int = Field(default=30, ge=1)
     rerank_top_n: int = Field(default=10, ge=1)
+    rerank_truncate: int = Field(default=500, ge=1)
     rrf_k: int = Field(default=20, ge=1)
     rrf_w_fts: float = Field(default=1.0, ge=0)
     rrf_w_vec: float = Field(default=0.5, ge=0)
     freq_alpha: float = Field(default=0.15, ge=0)
     cluster_alpha: float = Field(default=0.05, ge=0)
+    candidate_multiplier: int = Field(default=3, ge=1)
+    assemble_multiplier: int = Field(default=2, ge=1)
+    assemble_min: int = Field(default=10, ge=1)
+    snippet_radius: int = Field(default=60, ge=0)
+    snippet_cap: int = Field(default=400, ge=1)
+    window_preview_cap: int = Field(default=300, ge=1)
+    fts_w_content: float = Field(default=1.0, ge=0)
+    fts_w_title: float = Field(default=5.0, ge=0)
+    fts_w_url: float = Field(default=1.0, ge=0)
+    fts_w_path: float = Field(default=3.0, ge=0)
     cluster_threshold: float = Field(default=0.15, ge=0)
     cluster_min_size: int = Field(default=2, ge=1)
     # 注册表解析配置：缓存有效期、离线开关、私有放行、镜像预设、生态基址映射、外部覆盖文件。
@@ -89,6 +102,7 @@ class LibrefSettings(BaseSettings):
     chat_api_key: str | None = None
     chat_timeout: float = Field(default=60.0, gt=0)
     chat_enable_thinking: bool = False
+    material_limit: int = Field(default=1500, ge=1)
     # MCP Streamable HTTP 传输：默认只绑本地回环，对外暴露需配令牌。
     mcp_host: str = "127.0.0.1"
     mcp_port: int = Field(default=8000, ge=1, le=65535)
@@ -142,6 +156,8 @@ class LibrefSettings(BaseSettings):
 
     @model_validator(mode="after")
     def _check_window_bounds(self) -> LibrefSettings:
+        if self.snippet_cap <= self.snippet_radius:
+            raise ValueError("snippet_cap must exceed snippet_radius")
         if self.rerank_top_n > self.rerank_candidate_limit:
             raise ValueError("rerank_top_n must not exceed rerank_candidate_limit")
         if self.chunk_embed_min_tokens > self.chunk_embed_max_tokens:
@@ -152,6 +168,13 @@ class LibrefSettings(BaseSettings):
 
 
 SECRET_FIELDS = frozenset({"embedding_api_key", "chat_api_key", "mcp_token"})
+
+
+def setting_or_default(settings: LibrefSettings | None, name: str):
+    """无配置对象时按配置类默认值求解，避免业务代码手写兜底字面量。"""
+    if settings is not None:
+        return getattr(settings, name)
+    return LibrefSettings.model_fields[name].default
 
 CONFIG_FILE_NAME = "libref.toml"
 
@@ -168,6 +191,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "http_proxy",
             "no_proxy",
             "render_js_default",
+            "ingest_clean_cache_cap",
         }
     ),
     "storage": frozenset({"qdrant_url", "qdrant_collection", "qdrant_timeout"}),
@@ -183,10 +207,10 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
         }
     ),
     "embeddings": frozenset(
-        {"embedding_model", "embedding_dim", "embedding_api_base", "embedding_api_key"}
+        {"embedding_model", "embedding_dim", "embedding_api_base", "embedding_api_key", "embed_batch"}
     ),
     "rerank": frozenset(
-        {"rerank_model", "rerank_enabled", "rerank_candidate_limit", "rerank_top_n"}
+        {"rerank_model", "rerank_enabled", "rerank_candidate_limit", "rerank_top_n", "rerank_truncate"}
     ),
     "retrieval": frozenset(
         {
@@ -199,6 +223,16 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "cluster_min_size",
             "retriever_window_radius",
             "retriever_expand_window",
+            "candidate_multiplier",
+            "assemble_multiplier",
+            "assemble_min",
+            "snippet_radius",
+            "snippet_cap",
+            "window_preview_cap",
+            "fts_w_content",
+            "fts_w_title",
+            "fts_w_url",
+            "fts_w_path",
         }
     ),
     "registry": frozenset(
@@ -220,6 +254,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "chat_api_key",
             "chat_timeout",
             "chat_enable_thinking",
+            "material_limit",
         }
     ),
     "mcp": frozenset({"mcp_host", "mcp_port", "mcp_path"}),

@@ -48,6 +48,28 @@ class SourceSplit:
     empty_dropped: int = 0
 
 
+def _header_for_member(qual: str | None, decls_by_qual: dict, file: str) -> str:
+    """给向量路配口语头，限定名加种类加文件加签名。"""
+    if not qual:
+        return ""
+    decl = (decls_by_qual or {}).get(qual)
+    if decl is None:
+        return f"{qual} in {file}" if file else str(qual)
+    kind = str(getattr(decl, "kind", "") or "")
+    sig = str(getattr(decl, "signature", "") or "")
+    head = qual
+    if kind:
+        head = f"{head} {kind}"
+    if file:
+        head = f"{head} in {file}"
+    if sig.strip():
+        one = " ".join(sig.split())
+        if len(one) > 300:
+            one = one[:300]
+        return f"{head}\nSignature: {one}"
+    return head
+
+
 def build_source_chunks(
     groups,
     decls_by_qual: dict,
@@ -87,10 +109,18 @@ def build_source_chunks(
                 continue
             for chunk_path in ChunkPath:
                 budget = resolved[chunk_path]
+                before = len(chunks)
                 dropped += _emit_pieces(
                     group, qual, text, span, chunk_path,
                     budget, EXACT_ENTITIES, chunks, source, repo,
                 )
+                if chunk_path == ChunkPath.EMBEDDING:
+                    head = _header_for_member(qual, decls_by_qual, path)
+                    if head:
+                        for fresh in chunks[before:]:
+                            if fresh.qual == qual and fresh.chunk_path == chunk_path.value:
+                                fresh.content = f"{head}\n{fresh.content}"
+                                break
     _merge_undersized(groups, resolved, chunks)
     _attach_prev_overlap(chunks, resolved)
     return SourceSplit(chunks=chunks, empty_dropped=dropped)
@@ -230,13 +260,25 @@ def _overlap_tail(content: str, path: ChunkPath, overlap: int) -> str:
 
 def as_chunk(source_chunk: SourceChunk, url: str):
     """转文档块形态以复用落库与向量组装，溯源字段完整保留。"""
-    from libref.chunking.splitter import Chunk
+    from libref.chunking.splitter import Chunk, ident_snake_form
 
+    names: list[str] = []
+    qual = source_chunk.qual or ""
+    if qual:
+        for cand in (
+            qual.lower(),
+            ident_snake_form(qual),
+            qual.rsplit(".", 1)[-1].lower(),
+            ident_snake_form(qual.rsplit(".", 1)[-1]),
+        ):
+            if cand and len(cand) >= 2 and not cand[0].isdigit() and cand not in names:
+                names.append(cand)
     return Chunk(
         url=url,
         path=source_chunk.file,
         title=source_chunk.qual or source_chunk.file,
         content=source_chunk.content,
+        keywords=names[:5],
         sort_order=0,
         chunk_path=source_chunk.chunk_path,
         source_group_id=source_chunk.group_id,

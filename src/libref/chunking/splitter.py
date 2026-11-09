@@ -28,6 +28,46 @@ logger = logging.getLogger(__name__)
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _FENCE_RE = re.compile(r"^(```|~~~)")
+_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
+_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_BARE_URL_RE = re.compile(r"https?://[^\s)>\]]+")
+_ANGLE_URL_RE = re.compile(r"<(https?://[^<>\s]+)>")
+_QUOTE_CHARS_RE = re.compile(r"[\"'`]")
+_CAMEL_BOUND_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
+
+
+def ident_snake_form(name: str) -> str:
+    """驼峰转下划线，供跨命名风格对齐。"""
+    text = (name or "").strip()
+    if not text:
+        return ""
+    glued = _CAMEL_BOUND_RE.sub("_", text)
+    return glued.lower()
+
+
+def clean_text_for_bm25(text: str | None) -> str:
+    """全文索引前的轻量降噪，保留换行与围栏。"""
+    if not text:
+        return ""
+    out_lines: list[str] = []
+    for line in text.splitlines():
+        line = _IMAGE_RE.sub(r"\1", line)
+        line = _LINK_RE.sub(r"\1", line)
+        line = _ANGLE_URL_RE.sub(" ", line)
+        line = _BARE_URL_RE.sub(" ", line)
+        line = _QUOTE_CHARS_RE.sub("", line)
+        out_lines.append(line.rstrip())
+    out: list[str] = []
+    blank = 0
+    for line in out_lines:
+        if not line.strip():
+            blank += 1
+            if blank > 2:
+                continue
+        else:
+            blank = 0
+        out.append(line)
+    return "\n".join(out).strip()
 
 
 @dataclass
@@ -88,10 +128,8 @@ def split_markdown_dual(
     )
     twin_contents = {c.content for c in embedding}
     kept_bm25 = [c for c in bm25 if c.content not in twin_contents]
-    for order, chunk in enumerate(embedding):
-        chunk.sort_order = order
-    for order, chunk in enumerate(kept_bm25):
-        chunk.sort_order = order
+    _rechain(embedding)
+    _rechain(kept_bm25)
     _attach_prev_overlap(kept_bm25, resolved[ChunkPath.BM25])
     _attach_prev_overlap(embedding, resolved[ChunkPath.EMBEDDING])
     return DualChunks(bm25=kept_bm25, embedding=embedding,
@@ -165,20 +203,24 @@ def _split_path(
             if not part.strip():
                 dropped += 1
                 continue
+            index_part = clean_text_for_bm25(part) if path == ChunkPath.BM25 else part
+            if not index_part.strip():
+                dropped += 1
+                continue
             chunks.append(
                 Chunk(
                     url=url,
                     path=sec.path,
                     title=sec.title,
-                    content=part,
+                    content=index_part,
                     sort_order=len(chunks),
                     chunk_path=path.value,
                     source_group_id=group_id,
                     chunk_id=f"{group_id}_{path.value}_{part_index}",
                     span_kind=DOCUMENT_RANGE,
                     merged_from=sec.merged_from.copy(),
-                    content_hash=chunk_content_hash(part),
-                    keywords=extract_keywords(part),
+                    content_hash=chunk_content_hash(index_part),
+                    keywords=extract_keywords(index_part),
                 )
             )
     _assign_relations(chunks, md_source="\n\n".join(s.content for s in merged))
@@ -244,6 +286,16 @@ def _split_section_by_cost(
     return [p for p in out if p]
 
 
+def _rechain(chunks: list[Chunk]) -> None:
+    """过滤后重建序号与前后链，消除悬指。"""
+    for order, chunk in enumerate(chunks):
+        chunk.sort_order = order
+        chunk.prev_chunk_id = chunks[order - 1].chunk_id if order > 0 else None
+        chunk.next_chunk_id = chunks[order + 1].chunk_id if order + 1 < len(chunks) else None
+        chunk.overlap_from = None
+        chunk.overlap_text = ""
+
+
 def _attach_prev_overlap(
     chunks: list[Chunk], budget: ChunkBudget
 ) -> None:
@@ -295,17 +347,26 @@ _STOPWORDS = frozenset(
 
 
 def extract_keywords(text: str, limit: int = 5) -> list[str]:
-    """规则关键词：拉丁词整体计、中文按字计，去停用词后按频次取前列。"""
+    """规则关键词：拉丁词整体计并补下划线变体，中文按字计。"""
     if not text or not text.strip():
         return []
-    latin = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", text.lower())
+    latin = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", text)
     cjk = re.findall(r"[\u4e00-\u9fff]{2,4}", text)
     counts: Counter[str] = Counter()
-    for token in latin + cjk:
+    for token in [t.lower() for t in latin] + cjk:
         if token in _STOPWORDS:
             continue
         counts[token] += 1
-    return [token for token, _ in counts.most_common(limit)]
+    ranked = [token for token, _ in counts.most_common(limit)]
+    expanded: list[str] = []
+    for token in ranked:
+        if token not in expanded:
+            expanded.append(token)
+        snake = ident_snake_form(token)
+        if snake and snake != token and snake not in _STOPWORDS and snake not in expanded:
+            if len(expanded) < limit:
+                expanded.append(snake)
+    return expanded[:limit]
 
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?;。？！；])\s+")

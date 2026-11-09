@@ -21,10 +21,38 @@ def _is_subsequence(pattern: list[str], names: list[str]) -> bool:
     return True
 
 
-_SNIPPET_RADIUS = 60
+_CAMEL_BOUND_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 
 
-def _make_snippet(content: str | None, query: str) -> str:
+def _snake_variant(token: str) -> str:
+    """查询词的下划线变体，相同则返回空串。"""
+    snake = _CAMEL_BOUND_RE.sub("_", token).lower()
+    return snake if snake and snake != token.lower() else ""
+
+
+def _safe_fts_query(query: str) -> str:
+    """把用户输入转成无语法错的全文查询，无有效词元时返回空串。"""
+    latin = re.findall(r"[A-Za-z0-9_]+", query or "")
+    cjk = re.findall(r"[\u4e00-\u9fff]+", query or "")
+    seen: set[str] = set()
+    parts: list[str] = []
+    for token in latin:
+        lowered = token.lower()
+        if lowered and lowered not in seen:
+            seen.add(lowered)
+            parts.append(f'"{token}"')
+        snake = _snake_variant(token)
+        if snake and snake not in seen:
+            seen.add(snake)
+            parts.append(f'"{snake}"')
+    for token in cjk:
+        if token not in seen:
+            seen.add(token)
+            parts.append(f'"{token}"')
+    return " OR ".join(parts)
+
+
+def _make_snippet(content: str | None, query: str, *, radius: int, cap: int) -> str:
     """围绕首个查询词命中位置截取上下文片段（替代 FTS5 snippet()）。"""
     text = (content or "").strip()
     if not text:
@@ -36,8 +64,14 @@ def _make_snippet(content: str | None, query: str) -> str:
         if idx >= 0 and (pos < 0 or idx < pos):
             pos = idx
     pos = max(pos, 0)
-    start = max(0, pos - _SNIPPET_RADIUS)
-    end = min(len(text), pos + _SNIPPET_RADIUS)
+    start = max(0, pos - radius)
+    end = min(len(text), pos + radius)
+    line_start = text.rfind("\n", 0, start)
+    start = line_start + 1 if line_start >= 0 else 0
+    line_end = text.find("\n", end)
+    end = line_end if line_end >= 0 else len(text)
+    if end - start > cap:
+        end = start + cap
     prefix = "…" if start > 0 else ""
     suffix = "…" if end < len(text) else ""
     window = text[start:end]
@@ -71,8 +105,21 @@ class SearchService:
         片段在 Python 侧按查询词截取。列权重按信息密度给定：
         标题最高，路径次之，内容与地址为基准。
         """
+        from libref.config import setting_or_default
+
         filters = []
-        params: list[Any] = [query]
+        safe = _safe_fts_query(query)
+        if not safe:
+            return []
+        weights = (
+            float(setting_or_default(self._settings, "fts_w_content")),
+            float(setting_or_default(self._settings, "fts_w_title")),
+            float(setting_or_default(self._settings, "fts_w_url")),
+            float(setting_or_default(self._settings, "fts_w_path")),
+        )
+        radius = int(setting_or_default(self._settings, "snippet_radius"))
+        cap = int(setting_or_default(self._settings, "snippet_cap"))
+        params: list[Any] = [safe]
         if library is not None:
             filters.append("l.name = ?")
             params.append(library)
@@ -85,10 +132,11 @@ class SearchService:
         where = ("AND " + " AND ".join(filters) + " ") if filters else ""
         params.append(limit)
         sql = (
-            "SELECT d.id, d.url, bm25(documents_fts, 1.0, 5.0, 1.0, 3.0) AS score, d.content, "
+            f"SELECT d.id, d.url, bm25(documents_fts, {weights[0]}, {weights[1]}, {weights[2]}, {weights[3]}) AS score, d.content, "
             "json_extract(d.metadata, '$.title') AS title, "
             "json_extract(d.metadata, '$.path') AS path, "
-            "l.name AS library, v.version AS version, d.metadata " 
+            "l.name AS library, v.version AS version, d.metadata, "
+            "d.page_id, d.sort_order "
             "FROM documents_fts "
             "JOIN documents d ON d.id = documents_fts.rowid "
             "JOIN versions v ON v.id = d.version_id "
@@ -113,13 +161,15 @@ class SearchService:
                     "id": r[0],
                     "url": r[1],
                     "score": r[2],
-                    "snippet": _make_snippet(r[3], query),
+                    "snippet": _make_snippet(r[3], query, radius=radius, cap=cap),
                     "title": r[4],
                     "path": r[5],
                     "library": r[6],
                     "version": r[7],
                     "source_group_id": meta.get("source_group_id", ""),
                     "chunk_id": meta.get("chunk_id", ""),
+                    "page_id": r[9],
+                    "sort_order": r[10],
                     "span_kind": meta.get("span_kind", "document_range"),
                     "merged_from": list(meta.get("merged_from", []) or []),
                     "overlap_from": meta.get("overlap_from"),
@@ -140,6 +190,8 @@ class SearchService:
         vec_store=None,
         embed=None,
         rerank=None,
+        expand_window: bool | None = None,
+        window_radius: int | None = None,
     ) -> tuple[list[dict[str, Any]], bool]:
         """混合检索，返回结果与降级标记；向量缺失时只走全文。"""
         from libref.store.retriever import HybridRetriever
@@ -154,6 +206,7 @@ class SearchService:
         return await retriever.search_async(
             query, library=library, version=version,
             ecosystem=ecosystem, limit=limit,
+            expand_window=expand_window, window_radius=window_radius,
         )
 
     async def reembed_library_async(
@@ -180,8 +233,8 @@ class SearchService:
         version_id = vids[0]
         vec.ensure_collection(
             self._conn,
-            getattr(settings, "embedding_model", ""),
-            getattr(settings, "embedding_dim", 0),
+            settings.embedding_model,
+            settings.embedding_dim,
         )
         vec.delete_version(version_id)
         rows = self._conn.execute(
@@ -201,8 +254,8 @@ class SearchService:
                 continue
             embeddable.append(r)
         upserted = 0
-        for i in range(0, len(embeddable), 64):
-            batch = embeddable[i:i + 64]
+        for i in range(0, len(embeddable), settings.embed_batch):
+            batch = embeddable[i:i + settings.embed_batch]
             texts = []
             for r in batch:
                 try:
