@@ -6,7 +6,10 @@ import json
 
 import pytest
 
-from libref.services.ingest import index_repo, mine_patterns
+from libref.services.code_ingest import index_repo
+from libref.services.mining_refresh import mine_patterns
+from libref.services.libraries import LibraryService
+from libref.services.mining_read import MiningReadService
 from libref.services.search import SearchService
 from tests.conftest import copy_mini_repo
 
@@ -14,8 +17,7 @@ pytestmark = pytest.mark.integration
 
 
 def _seed_calls(conn, library="demo", version="t", rows=()):
-    svc = SearchService(conn)
-    library_id, version_id = svc.ensure_library_version(library, version)
+    library_id, version_id = LibraryService(conn).ensure_library_version(library, version)
     for i, (callee, path, caller, line, order, start, conf, args) in enumerate(rows):
         conn.execute(
             "INSERT INTO call_instances(call_uid, callee_name, args, repo,"
@@ -82,7 +84,7 @@ def test_retrieval_queries_over_mined_data(conn, tmp_path):
     dst = copy_mini_repo(tmp_path)
     index_repo(conn, "demo", "0.1", str(dst), repos_dir=tmp_path / "repos")
     mine_patterns(conn, "demo", "0.1", minsup=2)
-    svc = SearchService(conn)
+    svc = MiningReadService(conn)
 
     usage = {u["api"]: u for u in svc.api_usage_counts("demo", "0.1")}
     assert usage["numpy.array"]["calls"] == 4

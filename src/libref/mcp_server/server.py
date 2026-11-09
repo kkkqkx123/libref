@@ -1,8 +1,4 @@
-"""MCP 出口：MCPServer 实例与工具注册（只调 services/）。
-
-工具体只做参数解析 + services 调用 + 结果格式化（module-layout §2 出口零业务逻辑）。
-传输（stdio / Streamable HTTP）由 CLI `serve-mcp` 选择启动；SSE 已被官方废弃，不提供。
-"""
+"""MCP exit: MCPServer instance and tool registration (services only)."""
 
 from __future__ import annotations
 
@@ -13,42 +9,26 @@ from mcp.server.mcpserver import MCPServer
 
 from libref.config import LibrefSettings, load_settings
 from libref.crawler.registry import RegistryError
-from libref.llm import LlmGateway
 from libref.observe import setup_logging
+from libref.services.factory import build_search_service
+from libref.services.libraries import LibraryService
+from libref.services.mining_read import MiningReadService
+from libref.services.pages import PageService
 from libref.services.resolver import resolve_package as _resolve_package
 from libref.services.review import ReviewService
-from libref.services.search import SearchService
-
-
-def _wired_search(conn, settings):
-    """按配置装配检索服务，无密钥时退化为纯全文。"""
-    gateway = LlmGateway(settings)
-    embed = gateway.embed_fn()
-    rerank_fn = None
-    try:
-        rerank_fn = gateway.rerank_fn()
-    except Exception:  # noqa: BLE001 —— 重排不可用即关闭，不阻塞全文
-        rerank_fn = None
-    vec_store = None
-    if embed is not None:
-        from libref.store.vec_store import QdrantVecStore, collection_for
-
-        vec_store = QdrantVecStore(
-            settings.qdrant_url,
-            collection_for(settings.qdrant_collection, settings.db_path),
-            timeout=settings.qdrant_timeout,
-        )
-    return SearchService(conn, settings, vec_store=vec_store, embed=embed, rerank=rerank_fn), gateway
 
 
 def build_mcp_server(
     conn: sqlite3.Connection, settings: LibrefSettings | None = None
 ) -> MCPServer:
-    """构建 MCPServer 实例并注册文档检索工具；连接由调用方管理生命周期。"""
+    """Build the MCPServer instance and register document tools."""
     resolve_settings = settings or load_settings()
     setup_logging(resolve_settings)
     mcp = MCPServer("libref")
-    search, gateway = _wired_search(conn, resolve_settings)
+    search, gateway = build_search_service(conn, resolve_settings)
+    pages = PageService(conn)
+    catalog = LibraryService(conn)
+    mining = MiningReadService(conn)
     review = ReviewService(conn)
 
     @mcp.tool()
@@ -58,35 +38,35 @@ def build_mcp_server(
         version: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        """全文检索文档库，返回按相关度排序的片段（url/title/path/snippet）。"""
+        """Full-text search over the document library ordered by relevance."""
         return search.search_docs(query, library=library, version=version, limit=limit)
 
     @mcp.tool()
     def read_page(url: str, library: str | None = None, version: str | None = None) -> dict[str, Any] | None:
-        """按 URL 读取整页文档内容（分块按序重组）。"""
-        return search.read_page(url, library=library, version=version)
+        """Read a full page reassembled from ordered blocks."""
+        return pages.read_page(url, library=library, version=version)
 
     @mcp.tool()
     def read_window(url: str, sort_order: int, radius: int = 1) -> dict[str, Any] | None:
-        """按序号取前后窗口，用于命中后扩展上下文。"""
-        return search.read_window(url, sort_order, radius)
+        """Read neighboring blocks around a hit for context expansion."""
+        return pages.read_window(url, sort_order, radius)
 
     @mcp.tool()
     def read_section(url: str, source_group_id: str) -> dict[str, Any] | None:
-        """按源分组取整节，用于由子块回溯父节。"""
-        return search.read_section(url, source_group_id)
+        """Read a whole source group to trace a sub-block to its section."""
+        return pages.read_section(url, source_group_id)
 
     @mcp.tool()
     def list_libraries() -> list[dict[str, Any]]:
-        """列出全部文档库及其版本数。"""
-        return search.list_libraries()
+        """List all libraries and their version counts."""
+        return catalog.list_libraries()
 
     @mcp.tool()
     def list_versions(
         library: str, ecosystem: str | None = None
     ) -> list[dict[str, Any]]:
-        """列出指定库的全部版本及页面数。"""
-        return search.list_versions(library, ecosystem)
+        """List all versions of a library with page counts."""
+        return catalog.list_versions(library, ecosystem)
 
     @mcp.tool()
     def api_usage(
@@ -94,8 +74,8 @@ def build_mcp_server(
         version: str | None = None,
         limit: int = 20,
     ) -> list[dict[str, Any]]:
-        """统计版本内各接口的调用次数与覆盖作用域数（频次查询）。"""
-        return search.api_usage_counts(library=library, version=version, limit=limit)
+        """Count calls and covering scopes per API (frequency query)."""
+        return mining.api_usage_counts(library=library, version=version, limit=limit)
 
     @mcp.tool()
     def related_apis(
@@ -104,8 +84,8 @@ def build_mcp_server(
         version: str | None = None,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
-        """查询与指定接口同作用域共现的接口（共现查询）。"""
-        return search.related_apis(api, library=library, version=version, limit=limit)
+        """Find APIs co-occurring in the same scopes (co-occurrence query)."""
+        return mining.related_apis(api, library=library, version=version, limit=limit)
 
     @mcp.tool()
     def pattern_evidence(
@@ -114,8 +94,8 @@ def build_mcp_server(
         version: str | None = None,
         limit: int = 5,
     ) -> list[dict[str, Any]]:
-        """按调用序列模式取来源证据（文件、外围调用者、行范围、实参、置信）。"""
-        return search.pattern_evidence(pattern, library=library, version=version, limit=limit)
+        """Fetch source evidence for a call sequence pattern."""
+        return mining.pattern_evidence(pattern, library=library, version=version, limit=limit)
 
     @mcp.tool()
     def feature_tree(
@@ -124,8 +104,8 @@ def build_mcp_server(
         prefix: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        """按前缀浏览分层特征节点。"""
-        return search.feature_tree(library=library, version=version, prefix=prefix, limit=limit)
+        """Browse hierarchical feature nodes by prefix."""
+        return mining.feature_tree(library=library, version=version, prefix=prefix, limit=limit)
 
     @mcp.tool()
     def api_clusters(
@@ -133,8 +113,8 @@ def build_mcp_server(
         version: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        """浏览接口分组。"""
-        return search.api_clusters(library=library, version=version, limit=limit)
+        """Browse API clusters."""
+        return mining.api_clusters(library=library, version=version, limit=limit)
 
     @mcp.tool()
     async def search_hybrid(
@@ -145,7 +125,7 @@ def build_mcp_server(
         window_radius: int | None = None,
         expand_window: bool = False,
     ) -> dict[str, Any]:
-        """混合检索文档库，与命令行 search --hybrid 同序，附降级标记。"""
+        """Hybrid retrieval matching CLI search --hybrid with degradation flag."""
         results, degraded = await search.search_hybrid_async(
             query, library=library, version=version, limit=limit,
             expand_window=expand_window or None, window_radius=window_radius,
@@ -162,7 +142,7 @@ def build_mcp_server(
         expand_window: bool = False,
         material_limit: int | None = None,
     ) -> dict[str, Any]:
-        """混合检索加问答生成，未启用时返回明确原因。"""
+        """Hybrid retrieval plus grounded generation, with clear failure reasons."""
         from libref.services.answer import answer_query_async
 
         try:
@@ -174,17 +154,17 @@ def build_mcp_server(
             )
         except ValueError as exc:
             return {"error": "unavailable", "message": str(exc)}
-        except Exception as exc:  # noqa: BLE001 —— 问答失败透出原因，不抛内部栈
+        except Exception as exc:  # noqa: BLE001
             return {"error": "failed", "message": str(exc)}
 
     @mcp.tool()
     def review_pending(limit: int = 50) -> list[dict[str, Any]]:
-        """列出待审核调用实例，与命令行 review list 同序。"""
+        """List pending call instances, same order as CLI review list."""
         return review.list_pending(limit=limit)
 
     @mcp.tool()
     def review_approve(entity_id: int) -> dict[str, Any]:
-        """待定转已核准，非法转移返回原因。"""
+        """Move pending to approved, returning the reason on illegal moves."""
         try:
             review.approve(entity_id)
         except ValueError as exc:
@@ -193,7 +173,7 @@ def build_mcp_server(
 
     @mcp.tool()
     def review_conflict(entity_id: int) -> dict[str, Any]:
-        """待定标冲突，非法转移返回原因。"""
+        """Mark pending as conflict, returning the reason on illegal moves."""
         try:
             review.mark_conflict(entity_id)
         except ValueError as exc:
@@ -202,7 +182,7 @@ def build_mcp_server(
 
     @mcp.tool()
     def review_reopen(entity_id: int) -> dict[str, Any]:
-        """冲突重开为待定，非冲突返回原因。"""
+        """Reopen a conflict to pending, returning the reason when not in conflict."""
         try:
             review.reopen(entity_id)
         except ValueError as exc:
@@ -211,7 +191,7 @@ def build_mcp_server(
 
     @mcp.tool()
     def job_show(job_id: int | None = None, limit: int = 20) -> dict[str, Any]:
-        """查看任务结论，缺标识时列出最近任务。"""
+        """Show job results, listing recent jobs when no id is given."""
         from libref.services.jobs import JobManager
 
         mgr = JobManager(conn)
@@ -234,7 +214,7 @@ def build_mcp_server(
         name: str,
         version: str | None = None,
     ) -> dict[str, Any]:
-        """按生态加名称解析文档源，只读，不触发抓取。"""
+        """Resolve a document source by ecosystem and name, read-only."""
         from libref.crawler.http import build_async_client
 
         try:
@@ -254,7 +234,7 @@ def build_mcp_server(
         name: str,
         version: str | None = None,
     ) -> dict[str, Any]:
-        """按生态加名称解析仓库地址，只读，不触发索引。"""
+        """Resolve a repo address by ecosystem and name, read-only."""
         from libref.crawler.http import build_async_client
         from libref.services.resolver import resolve_repo as _resolve_repo
 

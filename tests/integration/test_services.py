@@ -70,14 +70,16 @@ def test_read_page_reassembles(conn):
         Chunk(url="https://d.example/p.html", path="A", title="A", content="part one", sort_order=0),
         Chunk(url="https://d.example/p.html", path="A / B", title="B", content="part two", sort_order=1),
     ], raw_content="x")
-    page = SearchService(conn).read_page("https://d.example/p.html")
+    from libref.services.pages import PageService
+    page = PageService(conn).read_page("https://d.example/p.html")
     assert page is not None
     assert page["content"] == "part one\n\npart two"
     assert page["chunks"] == 2
 
 
 def test_list_libraries_and_versions(conn):
-    svc = SearchService(conn)
+    from libref.services.libraries import LibraryService
+    svc = LibraryService(conn)
     svc.ensure_library_version("docs", "1.0")
     svc.ensure_library_version("docs", "2.0")
     libs = svc.list_libraries()

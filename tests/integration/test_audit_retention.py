@@ -8,7 +8,8 @@ import httpx
 import pytest
 
 from libref.config import LibrefSettings
-from libref.services.ingest import index_repo, run_scrape_job_sync, start_scrape_job
+from libref.services.code_ingest import index_repo
+from libref.services.ingest import run_scrape_job_sync, start_scrape_job
 from libref.services.jobs import JobManager
 from libref.services.retention import (
     list_deletions,
@@ -66,7 +67,7 @@ def test_async_scrape_persists_result(conn) -> None:
 
 
 def test_repo_runner_persists_counts(conn, tmp_path) -> None:
-    from libref.services.ingest import INDEX_REPO_JOB_KIND, build_repo_runner
+    from libref.services.code_ingest import INDEX_REPO_JOB_KIND, build_repo_runner
 
     repo = copy_mini_repo(tmp_path)
     settings = LibrefSettings()
@@ -121,7 +122,7 @@ def test_snapshot_disabled_by_default(conn) -> None:
 def test_absent_sweep_logs_deletion(conn) -> None:
     settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=2)
     with mock_ingest(_handler):
-        from libref.services.ingest import IngestService
+        from libref.services.ingest import IngestService  # noqa
 
         first = IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/sitemap.xml"
@@ -153,7 +154,7 @@ def test_absent_sweep_logs_deletion(conn) -> None:
         raise AssertionError(path)
 
     with mock_ingest(_gone):
-        from libref.services.ingest import IngestService
+        from libref.services.ingest import IngestService  # noqa
 
         second = IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/sitemap.xml"

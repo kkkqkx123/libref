@@ -9,7 +9,10 @@ import pytest
 from libref.mining.cluster import cluster_apis
 from libref.mining.cooccur import build_scope_sets
 from libref.mining.feature_tree import build_feature_tree
-from libref.services.ingest import index_repo, mine_patterns
+from libref.services.code_ingest import index_repo
+from libref.services.mining_refresh import mine_patterns
+from libref.services.libraries import LibraryService
+from libref.services.mining_read import MiningReadService
 from libref.services.search import SearchService
 from tests.conftest import copy_mini_repo
 
@@ -51,7 +54,7 @@ def test_mine_persists_tree_and_clusters(conn, tmp_path):
     dst = copy_mini_repo(tmp_path)
     index_repo(conn, "demo", "0.1", str(dst), repos_dir=tmp_path / "repos")
     mine_patterns(conn, "demo", "0.1", minsup=2)
-    svc = SearchService(conn)
+    svc = MiningReadService(conn)
     tree = {n["path"]: n for n in svc.feature_tree("demo", "0.1")}
     assert tree["numpy"]["calls"] == 8
     assert tree["numpy"]["scopes"] == 4
@@ -66,8 +69,7 @@ def test_mine_persists_tree_and_clusters(conn, tmp_path):
 
 
 def test_mine_clears_derived_when_calls_gone(conn):
-    svc = SearchService(conn)
-    library_id, version_id = svc.ensure_library_version("demo", "t")
+    library_id, version_id = LibraryService(conn).ensure_library_version("demo", "t")
     conn.execute(
         "INSERT INTO call_instances(call_uid, callee_name, args, repo,"
         " caller_file, line_start, line_end, confidence,"

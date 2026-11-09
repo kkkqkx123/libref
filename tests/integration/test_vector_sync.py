@@ -10,7 +10,8 @@ from libref.config import LibrefSettings
 from libref.services.ingest import IngestService
 from libref.services.search import SearchService
 from libref.store.document_store import DocumentStore
-from libref.store.vec_store import QdrantVecStore, build_embed_text, collection_for
+from libref.store.vec_store import QdrantVecStore, collection_for
+from libref.text.embedding import build_embed_text
 from tests.conftest import mock_ingest, seed_library_version
 
 pytestmark = pytest.mark.integration

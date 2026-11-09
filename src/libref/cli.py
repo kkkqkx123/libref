@@ -16,23 +16,27 @@ from libref.config import (
 from libref.crawler.registry import REGISTRY_MIRRORS, RegistryError
 from libref.db import apply_migrations, open_db
 from libref.observe import setup_logging
-from libref.llm import LlmGateway
 from libref.services.answer import answer_query
-from libref.services.ingest import (
+from libref.services.code_ingest import (
     INDEX_REPO_JOB_KIND,
-    MINE_PATTERNS_JOB_KIND,
-    IngestService,
     build_repo_runner,
     index_repo,
-    mine_patterns,
+)
+from libref.services.factory import build_search_service, build_vector
+from libref.services.ingest import (
+    IngestService,
     run_scrape_job_sync,
     start_refresh_job,
     start_scrape_job,
 )
 from libref.services.jobs import JobManager
+from libref.services.libraries import LibraryService
+from libref.services.maintenance import MaintenanceService
+from libref.services.mining_read import MiningReadService
+from libref.services.mining_refresh import MINE_PATTERNS_JOB_KIND, mine_patterns
+from libref.services.pages import PageService
 from libref.services.review import ReviewService
 from libref.services.search import SearchService
-from libref.store.vec_store import QdrantVecStore, collection_for
 
 
 _config_parent = argparse.ArgumentParser(add_help=False)
@@ -111,17 +115,9 @@ def applied_count(conn) -> int:
     return len(applied_versions(conn) & {m.version for m in MIGRATIONS})
 
 
-def _build_vector(settings: LibrefSettings, gateway: LlmGateway | None = None):
-    """按配置构造向量存储与编码函数，无密钥时返回空，走纯全文路。"""
-    gw = gateway if gateway is not None else LlmGateway(settings)
-    embed = gw.embed_fn()
-    if embed is None:
-        return None, None
-    vec = QdrantVecStore(
-        settings.qdrant_url,
-        collection_for(settings.qdrant_collection, settings.db_path),
-        timeout=settings.qdrant_timeout,
-    )
+def _build_vector(settings: LibrefSettings, gateway=None):
+    """Assemble vector store and embed function via the composition root."""
+    vec, embed, _gw = build_vector(settings, gateway)
     return vec, embed
 
 
@@ -551,7 +547,9 @@ def cmd_answer(args: argparse.Namespace) -> int:
     settings = _load_settings(args, _window_overrides(args))
     conn = _connect(settings)
     try:
-        gateway = LlmGateway(settings)
+        from libref.services.factory import build_gateway
+
+        gateway = build_gateway(settings)
         vec_store, embed = _build_vector(settings, gateway)
         out = answer_query(
             conn,
@@ -582,7 +580,7 @@ def cmd_read_window(args: argparse.Namespace) -> int:
     import json as _json
     conn = _connect(_load_settings(args))
     try:
-        page = SearchService(conn).read_window(
+        page = PageService(conn).read_window(
             args.url, args.sort_order, radius=args.radius,
             library=args.library, version=args.version,
         )
@@ -599,7 +597,7 @@ def cmd_read_section(args: argparse.Namespace) -> int:
     import json as _json
     conn = _connect(_load_settings(args))
     try:
-        page = SearchService(conn).read_section(
+        page = PageService(conn).read_section(
             args.url, args.source_group_id,
             library=args.library, version=args.version,
         )
@@ -615,7 +613,7 @@ def cmd_read_section(args: argparse.Namespace) -> int:
 def cmd_read_page(args: argparse.Namespace) -> int:
     conn = _connect(_load_settings(args))
     try:
-        page = SearchService(conn).read_page(
+        page = PageService(conn).read_page(
             args.url,
             library=args.library,
             version=args.version,
@@ -634,7 +632,7 @@ def cmd_feature_tree(args: argparse.Namespace) -> int:
 
     conn = _connect(_load_settings(args))
     try:
-        rows = SearchService(conn).feature_tree(
+        rows = MiningReadService(conn).feature_tree(
             args.library,
             args.version,
             prefix=args.prefix,
@@ -653,7 +651,7 @@ def cmd_clusters(args: argparse.Namespace) -> int:
     conn = _connect(_load_settings(args))
     try:
         containing = args.containing.split(",") if args.containing else None
-        rows = SearchService(conn).api_clusters(
+        rows = MiningReadService(conn).api_clusters(
             args.library,
             args.version,
             containing=containing,
@@ -728,7 +726,7 @@ def cmd_reembed(args: argparse.Namespace) -> int:
         if vec_store is None or embed is None:
             print("embedding is not configured (missing key)", file=sys.stderr)
             return 1
-        out = SearchService(conn, settings, vec_store=vec_store, embed=embed).reembed_library(
+        out = MaintenanceService(conn, settings, vec_store=vec_store, embed=embed).reembed_library(
             args.library, args.version, ecosystem=args.ecosystem,
         )
     finally:
@@ -914,7 +912,9 @@ def cmd_serve_web(args: argparse.Namespace) -> int:
     from libref.web import build_web_app
 
     conn = _connect(settings, check_same_thread=False)
-    gateway = LlmGateway(settings)
+    from libref.services.factory import build_gateway
+
+    gateway = build_gateway(settings)
     vec_store, embed = _build_vector(settings, gateway)
     app = build_web_app(conn, settings, vec_store=vec_store, embed=embed,
                         rerank=gateway.rerank_fn(), chat=gateway.chat_fn())

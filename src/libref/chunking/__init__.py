@@ -13,13 +13,13 @@ from libref.chunking.splitter import (
     Chunk,
     DualChunks,
     chunk_content_hash,
-    clean_text_for_bm25,
     ensure_hard_limit,
     extract_keywords,
-    ident_snake_form,
     split_markdown,
     split_markdown_dual,
 )
+from libref.text.bm25 import clean_text_for_bm25
+from libref.text.ident import ident_snake_form
 
 __all__ = [
     "Chunk",

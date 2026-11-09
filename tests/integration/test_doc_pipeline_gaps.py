@@ -9,8 +9,10 @@ import pytest
 
 from libref.chunking import split_markdown_dual
 from libref.config import LibrefSettings
-from libref.services.ingest import IngestService, classify_content
+from libref.services.ingest import IngestService
+from libref.text.normalize import classify_content
 from libref.services.jobs import JobManager
+from libref.services.pages import PageService
 from libref.services.search import SearchService
 from tests.conftest import mock_ingest
 
@@ -95,10 +97,10 @@ def test_refresh_alias_and_window(conn) -> None:
         service = IngestService(settings, conn)
         counts = service.refresh_version("docs", "1.0", "https://d.example/")
     assert counts["stored"] == 1
-    window = SearchService(conn).read_window(
+    window = PageService(conn).read_window(
         "https://d.example/a.html", 0, radius=1)
     assert window is not None and window["docs"]
-    section = SearchService(conn).read_section(
+    section = PageService(conn).read_section(
         "https://d.example/a.html",
         window["docs"][0]["metadata"].get("source_group_id", ""))
     assert section is None or section["chunks"] >= 1

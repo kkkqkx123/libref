@@ -11,6 +11,9 @@ from libref.config import LibrefSettings, settings_fingerprint
 from libref.mcp_server.auth import verify_bearer
 from libref.services.ingest import IngestService
 from libref.services.jobs import JobManager
+from libref.services.libraries import LibraryService
+from libref.services.mining_read import MiningReadService
+from libref.services.pages import PageService
 from libref.services.review import ReviewService
 from libref.services.search import SearchService
 from libref.web.api import (
@@ -35,6 +38,9 @@ def build_web_app(
 ) -> FastAPI:
     """装配 Web 应用；连接由调用方管理生命周期。"""
     svc = SearchService(conn, settings, vec_store=vec_store, embed=embed, rerank=rerank)
+    pages = PageService(conn)
+    catalog = LibraryService(conn)
+    mining = MiningReadService(conn)
     review = ReviewService(conn)
     app = FastAPI(title="libref")
 
@@ -52,13 +58,13 @@ def build_web_app(
 
     @app.get("/libraries")
     def libraries(_: None = Depends(_guard)) -> dict[str, Any]:
-        return envelope(svc.list_libraries())
+        return envelope(catalog.list_libraries())
 
     @app.get("/versions")
     def versions(
         library: str, ecosystem: str | None = None, _: None = Depends(_guard)
     ) -> dict[str, Any]:
-        return envelope(svc.list_versions(library, ecosystem))
+        return envelope(catalog.list_versions(library, ecosystem))
 
     @app.get("/search")
     async def search(
@@ -96,7 +102,7 @@ def build_web_app(
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         params = ReadPageQuery(url=url, library=library, version=version, ecosystem=ecosystem)
-        page = svc.read_page(
+        page = pages.read_page(
             params.url, library=params.library, version=params.version,
             ecosystem=params.ecosystem,
         )
@@ -118,7 +124,7 @@ def build_web_app(
             url=url, sort_order=sort_order, radius=radius,
             library=library, version=version, ecosystem=ecosystem,
         )
-        page = svc.read_window(
+        page = pages.read_window(
             params.url, params.sort_order, radius=params.radius,
             library=params.library, version=params.version, ecosystem=params.ecosystem,
         )
@@ -139,7 +145,7 @@ def build_web_app(
             url=url, source_group_id=source_group_id,
             library=library, version=version, ecosystem=ecosystem,
         )
-        page = svc.read_section(
+        page = pages.read_section(
             params.url, params.source_group_id,
             library=params.library, version=params.version, ecosystem=params.ecosystem,
         )
@@ -157,7 +163,7 @@ def build_web_app(
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         return envelope(
-            svc.feature_tree(
+            mining.feature_tree(
                 library=library, version=version, ecosystem=ecosystem,
                 prefix=prefix, limit=limit,
             )
@@ -174,7 +180,7 @@ def build_web_app(
     ) -> dict[str, Any]:
         names = containing.split(",") if containing else None
         return envelope(
-            svc.api_clusters(
+            mining.api_clusters(
                 library=library, version=version, ecosystem=ecosystem,
                 containing=names, limit=limit,
             )

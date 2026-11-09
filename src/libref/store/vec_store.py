@@ -8,51 +8,10 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import sqlite3
 from typing import Any
 
 from qdrant_client import QdrantClient, models
-
-_FENCE_DELIM_RE = re.compile(r"^\s*(```|~~~)")
-_HEADING_MARK_RE = re.compile(r"^\s*#{1,6}\s+")
-_QUOTE_MARK_RE = re.compile(r"^\s*>\s?")
-_LIST_MARK_RE = re.compile(r"^(\s*)[-*+]\s+")
-_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
-_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-_BOLD_RE = re.compile(r"(\*\*|__)(.*?)\1")
-_TILDE_RE = re.compile(r"~~(.*?)~~")
-_CODE_SPAN_RE = re.compile(r"`([^`]+)`")
-
-
-def strip_markdown_for_embedding(text: str | None) -> str:
-    """去掉编码前正文里的标记，保留文字与代码内容。"""
-    if not text:
-        return ""
-    kept: list[str] = []
-    for line in text.splitlines():
-        if _FENCE_DELIM_RE.match(line):
-            continue
-        line = _IMAGE_RE.sub(r"\1", line)
-        line = _LINK_RE.sub(r"\1", line)
-        line = _HEADING_MARK_RE.sub("", line)
-        line = _QUOTE_MARK_RE.sub("", line)
-        line = _LIST_MARK_RE.sub(r"\1", line)
-        line = _CODE_SPAN_RE.sub(r"\1", line)
-        line = _BOLD_RE.sub(r"\2", line)
-        line = _TILDE_RE.sub(r"\1", line)
-        kept.append(line.rstrip())
-    out: list[str] = []
-    blank = 0
-    for line in kept:
-        if not line.strip():
-            blank += 1
-            if blank > 2:
-                continue
-        else:
-            blank = 0
-        out.append(line)
-    return "\n".join(out).strip()
 
 
 def collection_for(base: str, db_path: str | os.PathLike[str]) -> str:
@@ -62,13 +21,6 @@ def collection_for(base: str, db_path: str | os.PathLike[str]) -> str:
         return base
     digest = hashlib.sha1(os.path.abspath(raw).encode("utf-8")).hexdigest()[:12]
     return f"{base}_{digest}"
-
-
-def build_embed_text(title: str | None, path: str | None, content: str | None, keywords: list[str] | None = None) -> str:
-    """组装编码文本，标题路径在前、正文在后，正文先脱标记。"""
-    head = " / ".join(p for p in (title, path) if p)
-    body = strip_markdown_for_embedding(content)
-    return f"{head}\n{body}" if head else body
 
 
 class QdrantVecStore:

@@ -34,9 +34,9 @@ def _parse_args() -> argparse.Namespace:
 
 def _cleaned_text(raw: str, url: str, content_type: str | None) -> str:
     from libref.crawler.extract import extract_to_markdown
-    from libref.services.ingest import (
+    from libref.text.normalize import (
         classify_content,
-        normalize_text_content,
+        normalize_markdown as normalize_text_content,
         wrap_source_content,
     )
 

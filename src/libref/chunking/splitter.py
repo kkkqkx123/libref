@@ -23,51 +23,13 @@ from libref.chunking.budget import (
     split_lines_by_cost,
     truncate_to_cost,
 )
+from libref.text.bm25 import clean_text_for_bm25
+from libref.text.ident import ident_snake_form
 
 logger = logging.getLogger(__name__)
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _FENCE_RE = re.compile(r"^(```|~~~)")
-_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
-_LINK_RE = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-_BARE_URL_RE = re.compile(r"https?://[^\s)>\]]+")
-_ANGLE_URL_RE = re.compile(r"<(https?://[^<>\s]+)>")
-_QUOTE_CHARS_RE = re.compile(r"[\"'`]")
-_CAMEL_BOUND_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
-
-
-def ident_snake_form(name: str) -> str:
-    """驼峰转下划线，供跨命名风格对齐。"""
-    text = (name or "").strip()
-    if not text:
-        return ""
-    glued = _CAMEL_BOUND_RE.sub("_", text)
-    return glued.lower()
-
-
-def clean_text_for_bm25(text: str | None) -> str:
-    """全文索引前的轻量降噪，保留换行与围栏。"""
-    if not text:
-        return ""
-    out_lines: list[str] = []
-    for line in text.splitlines():
-        line = _IMAGE_RE.sub(r"\1", line)
-        line = _LINK_RE.sub(r"\1", line)
-        line = _ANGLE_URL_RE.sub(" ", line)
-        line = _BARE_URL_RE.sub(" ", line)
-        line = _QUOTE_CHARS_RE.sub("", line)
-        out_lines.append(line.rstrip())
-    out: list[str] = []
-    blank = 0
-    for line in out_lines:
-        if not line.strip():
-            blank += 1
-            if blank > 2:
-                continue
-        else:
-            blank = 0
-        out.append(line)
-    return "\n".join(out).strip()
 
 
 @dataclass

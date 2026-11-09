@@ -68,7 +68,7 @@ def test_answer_grounds_in_retrieved_material(conn, monkeypatch, tmp_path) -> No
     ]
     assert out["degraded"] is False
     assert out["model"] == s.chat_model
-    assert "材料" in seen["user"]
+    assert "Materials" in seen["user"]
     assert "https://d.example/a.html" in seen["user"]
 
 

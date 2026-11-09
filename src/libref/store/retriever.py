@@ -1,69 +1,18 @@
-"""混合检索编排，双路召回按排名融合；失败降级由调用方感知，不静默。"""
+"""Storage-level retrieval primitives and hybrid fusion over SQLite and Qdrant.
+
+SQL access stays here. String shaping lives in libref.text, mining
+weighting lives in libref.mining.scoring.
+"""
 
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from typing import Any
 
-_CAMEL_BOUND_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
-
-
-def _snake_variant(token: str) -> str:
-    """查询词的下划线变体，相同则返回空串。"""
-    snake = _CAMEL_BOUND_RE.sub("_", token).lower()
-    return snake if snake and snake != token.lower() else ""
-
-
-def _safe_fts_query(query: str) -> str:
-    """把用户输入转成无语法错的全文查询，无有效词元时返回空串。"""
-    latin = re.findall(r"[A-Za-z0-9_]+", query or "")
-    cjk = re.findall(r"[\u4e00-\u9fff]+", query or "")
-    seen: set[str] = set()
-    parts: list[str] = []
-    for token in latin:
-        lowered = token.lower()
-        if lowered and lowered not in seen:
-            seen.add(lowered)
-            parts.append(f'"{token}"')
-        snake = _snake_variant(token)
-        if snake and snake not in seen:
-            seen.add(snake)
-            parts.append(f'"{snake}"')
-    for token in cjk:
-        if token not in seen:
-            seen.add(token)
-            parts.append(f'"{token}"')
-    return " OR ".join(parts)
-
-
-def _make_snippet(content: str | None, query: str, *, radius: int, cap: int) -> str:
-    text = (content or "").strip()
-    if not text:
-        return ""
-    lowered = text.lower()
-    pos = -1
-    for token in re.findall(r"[\w-]+", query.lower()):
-        idx = lowered.find(token)
-        if idx >= 0 and (pos < 0 or idx < pos):
-            pos = idx
-    pos = max(pos, 0)
-    start = max(0, pos - radius)
-    end = min(len(text), pos + radius)
-    line_start = text.rfind("\n", 0, start)
-    start = line_start + 1 if line_start >= 0 else 0
-    line_end = text.find("\n", end)
-    end = line_end if line_end >= 0 else len(text)
-    if end - start > cap:
-        end = start + cap
-    prefix = "…" if start > 0 else ""
-    suffix = "…" if end < len(text) else ""
-    window = text[start:end]
-    for token in sorted(set(re.findall(r"[\w-]+", query)), key=len, reverse=True):
-        pattern = re.compile(re.escape(token), re.IGNORECASE)
-        window = pattern.sub(lambda m: f">>>{m.group(0)}<<<", window)
-    return f"{prefix}{window}{suffix}"
+from libref.mining.scoring import cluster_hit, support_for_content
+from libref.text.query import safe_fts_query
+from libref.text.snippet import make_snippet
 
 
 def _version_ids(
@@ -102,7 +51,7 @@ def _fts_candidates(
     *,
     weights: tuple[float, float, float, float],
 ) -> list[int]:
-    safe = _safe_fts_query(query)
+    safe = safe_fts_query(query)
     if not safe:
         return []
     filters = []
@@ -130,42 +79,7 @@ def _fts_candidates(
     return [int(r[0]) for r in rows]
 
 
-_IDENT_RE = re.compile(r"[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)+")
-_TOKEN_RE = re.compile(r"[A-Za-z_][\w]*")
 
-
-def _content_idents(content: str) -> tuple[set[str], set[str]]:
-    """抽取块内点分标识全名与词元集合，命中只认词元边界精确匹配。"""
-    full = set(_IDENT_RE.findall(content or ""))
-    toks = set(_TOKEN_RE.findall(content or ""))
-    return full, toks
-
-
-def _name_hit(name: str, full: set[str], toks: set[str]) -> bool:
-    if name in full or name in toks:
-        return True
-    short = name.rsplit(".", 1)[-1]
-    return short in toks
-
-
-def _support_for_content(content: str, plist: list[tuple[list[str], int]]) -> float:
-    """块归属取命中模式的最大支持度并按版本内最大值归一，无命中返回零。"""
-    if not plist:
-        return 0.0
-    ceiling = max(s for _, s in plist)
-    if ceiling <= 0:
-        return 0.0
-    full, toks = _content_idents(content)
-    hit = max(
-        (s for names, s in plist if any(_name_hit(n, full, toks) for n in names)),
-        default=0,
-    )
-    return hit / ceiling
-
-
-def _cluster_hit(content: str, members: set[str]) -> bool:
-    full, toks = _content_idents(content)
-    return sum(1 for n in members if _name_hit(n, full, toks)) >= 2
 
 
 def _fetch_details(
@@ -194,7 +108,7 @@ def _fetch_details(
         out[int(r[0])] = {
             "id": int(r[0]),
             "url": r[1],
-            "snippet": _make_snippet(r[2], query, radius=snippet_radius, cap=snippet_cap),
+            "snippet": make_snippet(r[2], query, radius=snippet_radius, cap=snippet_cap),
             "title": r[3],
             "path": r[4],
             "library": r[5],
@@ -441,13 +355,13 @@ class HybridRetriever:
                 continue
             base = rrf.get(doc, 0.0)
             plist = patterns.get(info["version_id"], [])
-            bonus = _support_for_content(info["content"], plist) if alpha > 0 else 0.0
+            bonus = support_for_content(info["content"], plist) if alpha > 0 else 0.0
             cluster_bonus = 0.0
             clist = clusters.get(info["version_id"], [])
             if clist and cluster_alpha > 0:
                 content = info["content"] or ""
                 for members in clist:
-                    if _cluster_hit(content, members):
+                    if cluster_hit(content, members):
                         cluster_bonus = 1.0
                         break
             final = base * (1.0 + alpha * bonus + cluster_alpha * cluster_bonus)

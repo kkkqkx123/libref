@@ -1,15 +1,43 @@
-"""业务工具层（三出口唯一调用面）。"""
+"""Business tool layer: the only call surface for the three exits."""
 
 from libref.services.answer import answer_query, answer_query_async
+from libref.services.answer_materials import (
+    SYSTEM_PROMPT,
+    build_citations,
+    build_messages,
+    material_block,
+)
+from libref.services.code_ingest import (
+    INDEX_REPO_JOB_KIND,
+    build_repo_runner,
+    call_uid,
+    entity_uid,
+    index_repo,
+    index_repo_by_name,
+    index_repo_by_name_async,
+    lookup_index_source_cached,
+)
+from libref.services.factory import build_search_service
 from libref.services.ingest import (
     SCRAPE_JOB_KIND,
     IngestService,
     build_scrape_runner,
     run_scrape_job_sync,
     scrape_job_params,
+    start_refresh_job,
     start_scrape_job,
 )
 from libref.services.jobs import JobManager
+from libref.services.libraries import LibraryService, mining_version_ids
+from libref.services.maintenance import MaintenanceService
+from libref.services.mining_read import MiningReadService, is_subsequence
+from libref.services.mining_refresh import (
+    MINE_PATTERNS_JOB_KIND,
+    mine_patterns,
+    refresh_clusters,
+    refresh_feature_tree,
+)
+from libref.services.pages import PageService
 from libref.services.resolver import infer_ecosystem, resolve_package
 from libref.services.retention import (
     REASON_ABSENT_SWEEP,
@@ -23,23 +51,47 @@ from libref.services.review import ReviewService
 from libref.services.search import SearchService
 
 __all__ = [
+    "INDEX_REPO_JOB_KIND",
+    "MINE_PATTERNS_JOB_KIND",
     "REASON_ABSENT_SWEEP",
     "REASON_PURGE",
     "SCRAPE_JOB_KIND",
+    "SYSTEM_PROMPT",
     "IngestService",
     "JobManager",
-    "check_quota",
-    "list_deletions",
+    "LibraryService",
+    "MaintenanceService",
+    "MiningReadService",
+    "PageService",
     "ReviewService",
     "SearchService",
     "answer_query",
     "answer_query_async",
+    "build_citations",
+    "build_messages",
+    "build_repo_runner",
     "build_scrape_runner",
+    "build_search_service",
+    "call_uid",
+    "check_quota",
+    "entity_uid",
+    "index_repo",
+    "index_repo_by_name",
+    "index_repo_by_name_async",
     "infer_ecosystem",
+    "is_subsequence",
+    "list_deletions",
+    "lookup_index_source_cached",
+    "material_block",
+    "mine_patterns",
+    "mining_version_ids",
     "prune_expired_logs",
     "purge_version",
+    "refresh_clusters",
+    "refresh_feature_tree",
     "resolve_package",
     "run_scrape_job_sync",
     "scrape_job_params",
+    "start_refresh_job",
     "start_scrape_job",
 ]

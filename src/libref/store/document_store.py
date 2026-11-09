@@ -12,13 +12,35 @@ import sqlite3
 from dataclasses import dataclass, field
 from typing import Any
 
-from libref.chunking.splitter import Chunk
-
 OUTCOMES = ("stored", "unchanged", "absent", "empty", "skipped", "failed")
 
 
 def content_hash(text: str | None) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+@dataclass
+class DocumentInput:
+    """Plain document block for storage, no chunking types cross the boundary."""
+
+    url: str
+    path: str
+    title: str
+    content: str
+    sort_order: int
+    chunk_path: str = "embedding"
+    source_group_id: str = ""
+    chunk_id: str = ""
+    span_kind: str = "document_range"
+    merged_from: list[str] = field(default_factory=list)
+    overlap_from: str | None = None
+    content_hash: str = ""
+    keywords: list[str] = field(default_factory=list)
+    content_type: str = "text/markdown"
+    start_char: int = -1
+    end_char: int = -1
+    prev_chunk_id: str | None = None
+    next_chunk_id: str | None = None
 
 
 @dataclass
@@ -142,7 +164,7 @@ class DocumentStore:
         url: str,
         outcome: str,
         *,
-        chunks: list[Chunk] | None = None,
+        chunks: list[DocumentInput] | None = None,
         raw_content: str | None = None,
         etag: str | None = None,
         last_modified: str | None = None,
@@ -193,7 +215,7 @@ class DocumentStore:
             inserted: list[int] = []
             reused: list[int] = []
             used_old: set[int] = set()
-            pending: list[tuple[Chunk, str]] = []
+            pending: list[tuple[DocumentInput, str]] = []
             for chunk in chunks or []:
                 digest = getattr(chunk, "content_hash", "") or content_hash(chunk.content)
                 candidates = by_hash.get(digest, [])

@@ -11,6 +11,8 @@ from urllib.parse import urljoin
 from markdownify import markdownify as md
 from selectolax.lexbor import LexborHTMLParser as HTMLParser
 
+from libref.text.normalize import normalize_markdown
+
 # 直接剔除的噪点标签
 _STRIP_TAGS = ("script", "style", "noscript", "nav", "footer", "aside", "form", "header")
 # 常见正文容器，按优先级选取
@@ -37,7 +39,7 @@ def extract_to_markdown(html: str, base_url: str | None = None) -> str:
 
     inner = root.html or ""
     markdown = md(inner, heading_style="ATX", strip=["img"])
-    return _normalize(markdown)
+    return normalize_markdown(markdown)
 
 
 def _absolutize_links(tree: HTMLParser, base_url: str) -> None:
@@ -105,16 +107,4 @@ def _prune_empty_nodes(root) -> None:
         node.decompose()
 
 
-def _normalize(markdown: str) -> str:
-    lines = [ln.rstrip() for ln in markdown.splitlines()]
-    out: list[str] = []
-    blank = 0
-    for ln in lines:
-        if ln == "":
-            blank += 1
-            if blank > 2:
-                continue
-        else:
-            blank = 0
-        out.append(ln)
-    return "\n".join(out).strip()
+

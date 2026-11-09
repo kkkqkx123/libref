@@ -48,7 +48,7 @@ def main() -> int:
     from export_review import export_repo
 
     from libref.db import apply_migrations, open_db
-    from libref.services.ingest import index_repo
+    from libref.services.code_ingest import index_repo
 
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     langs = args.lang or ["javascript", "java"]

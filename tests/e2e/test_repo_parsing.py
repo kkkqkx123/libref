@@ -36,7 +36,7 @@ def _confidence_dist(conn, library: str, version: str) -> dict[str, int]:
 
 
 def test_e2e_repo_index_invariants(tmp_path, conn):
-    from libref.services.ingest import index_repo
+    from libref.services.code_ingest import index_repo
 
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     report_lines: list[str] = []
