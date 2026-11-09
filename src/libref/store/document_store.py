@@ -34,6 +34,9 @@ class DocumentInput:
     span_kind: str = "document_range"
     merged_from: list[str] = field(default_factory=list)
     overlap_from: str | None = None
+    overlap_text: str = ""
+    chunk_index: int = 0
+    total_chunks: int = 1
     content_hash: str = ""
     keywords: list[str] = field(default_factory=list)
     content_type: str = "text/markdown"
@@ -249,6 +252,9 @@ class DocumentStore:
                         "span_kind": getattr(chunk, "span_kind", "document_range"),
                         "merged_from": list(getattr(chunk, "merged_from", []) or []),
                         "overlap_from": getattr(chunk, "overlap_from", None),
+                        "overlap_text": str(getattr(chunk, "overlap_text", "") or ""),
+                        "chunk_index": int(getattr(chunk, "chunk_index", 0) or 0),
+                        "total_chunks": max(1, int(getattr(chunk, "total_chunks", 1) or 1)),
                         "content_hash": getattr(chunk, "content_hash", "") or content_hash(chunk.content),
                         "keywords": list(getattr(chunk, "keywords", []) or []),
                         "content_type": getattr(chunk, "content_type", "text/markdown"),

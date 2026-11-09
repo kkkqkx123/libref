@@ -62,6 +62,9 @@ class PageService:
                 "span_kind": parsed.get("span_kind", "document_range"),
                 "merged_from": list(parsed.get("merged_from", []) or []),
                 "overlap_from": parsed.get("overlap_from"),
+                "overlap_text": str(parsed.get("overlap_text", "") or ""),
+                "chunk_index": int(parsed.get("chunk_index", 0) or 0),
+                "total_chunks": max(1, int(parsed.get("total_chunks", 1) or 1)),
             })
         return {
             "url": url,
@@ -154,6 +157,9 @@ class PageService:
                 "span_kind": parsed.get("span_kind", "document_range"),
                 "merged_from": list(parsed.get("merged_from", []) or []),
                 "overlap_from": parsed.get("overlap_from"),
+                "overlap_text": str(parsed.get("overlap_text", "") or ""),
+                "chunk_index": int(parsed.get("chunk_index", 0) or 0),
+                "total_chunks": max(1, int(parsed.get("total_chunks", 1) or 1)),
             })
         return {
             "url": url,

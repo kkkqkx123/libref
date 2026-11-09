@@ -122,6 +122,9 @@ def _fetch_details(
             "span_kind": meta.get("span_kind", "document_range"),
             "merged_from": list(meta.get("merged_from", []) or []),
             "overlap_from": meta.get("overlap_from"),
+            "overlap_text": str(meta.get("overlap_text", "") or ""),
+            "chunk_index": int(meta.get("chunk_index", 0) or 0),
+            "total_chunks": max(1, int(meta.get("total_chunks", 1) or 1)),
             "keywords": list(meta.get("keywords", []) or []),
             "content_type": meta.get("content_type", "text/markdown"),
             "entities": list(meta.get("entities", []) or []),
@@ -129,6 +132,23 @@ def _fetch_details(
             "sort_order": int(r[10]),
         }
     return out
+
+
+def alignment_key(meta: dict[str, Any] | None, url: str | None, doc_id: int) -> str:
+    """跨路对齐键：实体优先，文档节次之，块标识回退。"""
+    data = meta or {}
+    entities = data.get("entities") or []
+    if entities:
+        first = str(entities[0]).strip()
+        if first:
+            return f"e:{first}"
+    group = str(data.get("source_group_id") or "").strip()
+    if group:
+        return f"s:{url or ''}\x00{group}"
+    chunk_id = str(data.get("chunk_id") or "").strip()
+    if chunk_id:
+        return f"c:{chunk_id}"
+    return f"c:{doc_id}"
 
 
 def _collapse_by_group(
@@ -141,21 +161,17 @@ def _collapse_by_group(
     rows = conn.execute(
         f"SELECT id, url, metadata FROM documents WHERE id IN ({marks})", fused
     ).fetchall()
-    groups: dict[int, tuple] = {}
+    groups: dict[int, str] = {}
     for doc_id, url, raw in rows:
         try:
             meta = json.loads(raw) if raw else {}
         except ValueError:
             meta = {}
-        group = meta.get("source_group_id") or ""
-        if group:
-            groups[int(doc_id)] = (url, group)
-        else:
-            groups[int(doc_id)] = ("doc", int(doc_id))
-    seen: set[tuple] = set()
+        groups[int(doc_id)] = alignment_key(meta, url, int(doc_id))
+    seen: set[str] = set()
     out: list[int] = []
     for doc_id in fused:
-        key = groups.get(doc_id, ("doc", doc_id))
+        key = groups.get(doc_id, f"c:{doc_id}")
         if key in seen:
             continue
         seen.add(key)
@@ -432,6 +448,9 @@ class HybridRetriever:
                     "span_kind": info.get("span_kind", "document_range"),
                     "merged_from": list(info.get("merged_from", []) or []),
                     "overlap_from": info.get("overlap_from"),
+                    "overlap_text": str(info.get("overlap_text", "") or ""),
+                    "chunk_index": int(info.get("chunk_index", 0) or 0),
+                    "total_chunks": max(1, int(info.get("total_chunks", 1) or 1)),
                     "keywords": list(info.get("keywords", []) or []),
                     "content_type": info.get("content_type", "text/markdown"),
                     "entities": list(info.get("entities", []) or []),

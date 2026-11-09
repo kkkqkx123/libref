@@ -71,13 +71,14 @@ class SearchService:
         )
         rows = self._conn.execute(sql, params).fetchall()
         out = []
-        seen: set[tuple] = set()
+        from libref.store.retriever import alignment_key
+        seen: set[str] = set()
         for r in rows:
             try:
                 meta = json.loads(r[8]) if r[8] else {}
             except ValueError:
                 meta = {}
-            key = (r[1], meta.get("source_group_id") or f"doc:{r[0]}")
+            key = alignment_key(meta, r[1], int(r[0]))
             if key in seen:
                 continue
             seen.add(key)
@@ -98,6 +99,9 @@ class SearchService:
                     "span_kind": meta.get("span_kind", "document_range"),
                     "merged_from": list(meta.get("merged_from", []) or []),
                     "overlap_from": meta.get("overlap_from"),
+                    "overlap_text": str(meta.get("overlap_text", "") or ""),
+                    "chunk_index": int(meta.get("chunk_index", 0) or 0),
+                    "total_chunks": max(1, int(meta.get("total_chunks", 1) or 1)),
                     "keywords": list(meta.get("keywords", []) or []),
                     "content_type": meta.get("content_type", "text/markdown"),
                     "entities": list(meta.get("entities", []) or []),

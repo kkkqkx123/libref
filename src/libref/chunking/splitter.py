@@ -1,7 +1,8 @@
 """两阶段 Markdown 分块：结构切分、贪心合并、双路预算装配。
 
 同一批结构节按两路预算各产出一股块流，全文路块小，
-向量路块大，两路共享源分组标识以便对齐。
+向量路块大，分组标识在标题切分处一次冻结，合并只沿用首节标识，
+两路同源节标识一致以便对齐。
 重叠只向前携带并注明来源，超限截尾一律告警计数。
 """
 
@@ -45,6 +46,9 @@ class Chunk:
     span_kind: str = DOCUMENT_RANGE
     merged_from: list[str] = field(default_factory=list)
     overlap_from: str | None = None
+    overlap_text: str = ""
+    chunk_index: int = 0
+    total_chunks: int = 1
     start_char: int = -1
     end_char: int = -1
     prev_chunk_id: str | None = None
@@ -82,6 +86,8 @@ def split_markdown_dual(
     """一次切分产出两股块流，内容相同的孪生块只保留向量路一份。"""
     resolved = budgets or default_budgets()
     sections = [s for s in _split_by_headings(md_text) if s.content.strip()]
+    for idx, sec in enumerate(sections):
+        sec.group_id = f"sec_{idx}"
     bm25, bm25_dropped = _split_path(
         sections, url, ChunkPath.BM25, resolved[ChunkPath.BM25]
     )
@@ -105,6 +111,7 @@ class _Section:
     title: str
     content: str
     merged_from: list[str] = field(default_factory=list)
+    group_id: str = ""
 
 
 def _split_by_headings(md_text: str) -> list[_Section]:
@@ -157,11 +164,13 @@ def _split_path(
     merged = _merge_sections(sections, path, budget)
     chunks: list[Chunk] = []
     dropped = 0
-    for group_index, sec in enumerate(merged):
-        group_id = f"sec_{group_index}"
-        for part_index, part in enumerate(
-            _split_section_by_cost(sec.content, path, budget)
-        ):
+    for sec in merged:
+        group_id = sec.group_id
+        parts = _split_section_by_cost(sec.content, path, budget)
+        if path == ChunkPath.EMBEDDING:
+            parts = _repair_embed_parts(sec, parts, budget)
+        total = len(parts) if parts else 1
+        for part_index, part in enumerate(parts):
             if not part.strip():
                 dropped += 1
                 continue
@@ -181,6 +190,8 @@ def _split_path(
                     chunk_id=f"{group_id}_{path.value}_{part_index}",
                     span_kind=DOCUMENT_RANGE,
                     merged_from=sec.merged_from.copy(),
+                    chunk_index=part_index,
+                    total_chunks=total,
                     content_hash=chunk_content_hash(f"{sec.title}\0{sec.path}\0{index_part}"),
                     keywords=extract_keywords(index_part),
                 )
@@ -209,6 +220,7 @@ def _merge_sections(
                 title=prev.title,
                 content=prev.content + "\n\n" + sec.content,
                 merged_from=prev.merged_from + sec.merged_from,
+                group_id=prev.group_id,
             )
         else:
             merged.append(sec)
@@ -248,6 +260,50 @@ def _split_section_by_cost(
     return [p for p in out if p]
 
 
+def _embed_head_cost(sec: _Section, path: ChunkPath) -> int:
+    """标题路径头在编码组装中的实际占位，规划时保守扣除。"""
+    head = " / ".join(p for p in (sec.title, sec.path) if p)
+    if not head:
+        return 0
+    return cost(head + "\n", path)
+
+
+def _repair_embed_parts(sec: _Section, parts: list[str], budget: ChunkBudget) -> list[str]:
+    """装饰复检：头加正文超硬限则收紧正文重切，避免同步处截尾。"""
+    if budget.hard_limit <= 0:
+        return parts
+    head_cost = _embed_head_cost(sec, ChunkPath.EMBEDDING)
+    room = budget.hard_limit - head_cost - 1
+    if room < 1:
+        room = 1
+    out: list[str] = []
+    for part in parts:
+        if cost(part, ChunkPath.EMBEDDING) + head_cost + 1 <= budget.hard_limit:
+            out.append(part)
+        else:
+            out.extend(split_lines_by_cost(part, ChunkPath.EMBEDDING, room))
+    return [p for p in out if p]
+
+
+def _overlap_suffix(text: str, path: ChunkPath, limit: int) -> str:
+    """按本路口径取尾部原文，行累积超限则按字符兜底。"""
+    if limit <= 0 or not text.strip():
+        return ""
+    lines = text.splitlines()
+    kept: list[str] = []
+    used = 0
+    for line in reversed(lines):
+        line_cost = cost(line, path) + 1
+        if kept and used + line_cost > limit:
+            break
+        if not kept and line_cost > limit:
+            return truncate_to_cost(line, path, limit)
+        kept.append(line)
+        used += line_cost
+    kept.reverse()
+    return "\n".join(kept).strip()
+
+
 def _rechain(chunks: list[Chunk]) -> None:
     """过滤后重建序号与前后链，消除悬指。"""
     for order, chunk in enumerate(chunks):
@@ -255,16 +311,18 @@ def _rechain(chunks: list[Chunk]) -> None:
         chunk.prev_chunk_id = chunks[order - 1].chunk_id if order > 0 else None
         chunk.next_chunk_id = chunks[order + 1].chunk_id if order + 1 < len(chunks) else None
         chunk.overlap_from = None
+        chunk.overlap_text = ""
 
 
 def _attach_prev_overlap(
     chunks: list[Chunk], budget: ChunkBudget
 ) -> None:
-    """只向前记录前驱来源，不在正文内重复。"""
+    """只向前记录前驱来源与按口径计量的尾部实文，正文不重复。"""
     if budget.overlap <= 0:
         return
     for prev, cur in itertools.pairwise(chunks):
         cur.overlap_from = prev.chunk_id
+        cur.overlap_text = _overlap_suffix(prev.content, ChunkPath(cur.chunk_path), budget.overlap)
 
 
 def _fences_balanced(text: str) -> bool:
