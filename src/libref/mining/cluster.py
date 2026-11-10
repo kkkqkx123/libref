@@ -5,6 +5,8 @@ Pure in-memory algorithm; persistence is orchestrated by services.
 
 from __future__ import annotations
 
+from typing import Any
+
 __all__ = ["cluster_apis"]
 
 
@@ -13,7 +15,7 @@ def cluster_apis(
     *,
     threshold: float = 0.15,
     min_size: int = 2,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Group APIs from scope sets; connect an edge when overlap reaches the threshold, each connected component becomes a group.
 
     Overlap is the number of intersecting scopes divided by the union scope count; sorting and merging are fully deterministic.
@@ -53,7 +55,7 @@ def cluster_apis(
     groups: dict[str, list[str]] = {}
     for name in occ:
         groups.setdefault(find(name), []).append(name)
-    out = []
+    out: list[dict[str, Any]] = []
     for members in groups.values():
         if len(members) < min_size:
             continue
@@ -66,7 +68,7 @@ def cluster_apis(
                 "size": len(members),
             }
         )
-    out.sort(key=lambda g: (-g["size"], g["members"]))
+    out.sort(key=lambda g: (-int(g["size"]), g["members"]))
     for index, group in enumerate(out):
         group["cluster_id"] = index
     return out

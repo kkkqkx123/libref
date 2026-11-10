@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import httpx
 
 INDEX_REPO_JOB_KIND = "index_repo"
 
 
+@asynccontextmanager
 async def _client(settings) -> AsyncIterator[httpx.AsyncClient]:
     from libref.crawler.http import build_async_client
 
@@ -188,7 +191,7 @@ def _persist_entities(
 ) -> tuple[int, int]:
     import json as _decl_json
 
-    pending: dict[tuple[str, str], object] = {}
+    pending: dict[tuple[str, str], Any] = {}
     for decl in all_decls:
         pending[(decl.qualified_name, decl.kind)] = decl
     for qualified_name, kind in list(pending):

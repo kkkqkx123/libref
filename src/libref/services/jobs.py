@@ -80,6 +80,7 @@ class JobManager:
             (kind, json.dumps(params or {}, ensure_ascii=False)),
         )
         self._conn.commit()
+        assert cur.lastrowid is not None
         job_id = int(cur.lastrowid)
         self._queue.put_nowait(job_id)
         logger.debug("job submitted id=%d kind=%s", job_id, kind)

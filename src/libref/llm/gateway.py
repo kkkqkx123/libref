@@ -53,7 +53,7 @@ class LlmGateway:
             self._shared[key] = slot
         return slot
 
-    def embed_fn(self, transport: httpx.BaseTransport | None = None) -> EmbedFn | None:
+    def embed_fn(self, transport: httpx.AsyncBaseTransport | None = None) -> EmbedFn | None:
         """Embed function; returns None without a key, caller falls back to pure full-text."""
         config = EmbeddingConfig.from_settings(self._settings)
         if config is None:
@@ -83,7 +83,7 @@ class LlmGateway:
         return embed
 
     def rerank_fn(
-        self, transport: httpx.BaseTransport | None = None
+        self, transport: httpx.AsyncBaseTransport | None = None
     ) -> RerankFn | None:
         """Rerank function; returns None when not enabled, no model, or no key."""
         config = RerankConfig.from_settings(self._settings)
@@ -127,7 +127,7 @@ class LlmGateway:
             resilience=self.resilience_for(config.base),
         )
 
-    def chat_fn(self, transport: httpx.BaseTransport | None = None) -> ChatFn | None:
+    def chat_fn(self, transport: httpx.AsyncBaseTransport | None = None) -> ChatFn | None:
         """Chat function; returns None when not enabled, no model, or no key."""
         client = self._chat_client()
         if client is None:
@@ -147,7 +147,7 @@ class LlmGateway:
         return chat
 
     def chat_stream_fn(
-        self, transport: httpx.BaseTransport | None = None
+        self, transport: httpx.AsyncBaseTransport | None = None
     ) -> ChatStreamFn | None:
         """Streaming chat function; returns None when not enabled, no model, or no key."""
         client = self._chat_client()

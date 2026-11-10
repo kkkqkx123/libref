@@ -807,13 +807,13 @@ def cmd_dump_chunks(args: argparse.Namespace) -> int:
     )
     for group in groups:
         print(f"group {group.group_id} kind={group.kind} members={group.member_quals}")
-    for chunk in split.chunks:
+    for source_chunk in split.chunks:
         print(
-            f"[{chunk.chunk_id}] {chunk.qual} kind={chunk.span_kind} "
-            f"bytes={chunk.start_byte}-{chunk.end_byte} merged={chunk.merged_quals} "
-            f"overlap_from={chunk.overlap_from}"
+            f"[{source_chunk.chunk_id}] {source_chunk.qual} kind={source_chunk.span_kind} "
+            f"bytes={source_chunk.start_byte}-{source_chunk.end_byte} merged={source_chunk.merged_quals} "
+            f"overlap_from={source_chunk.overlap_from}"
         )
-        print(f"    {chunk.content[:160].replace(chr(10), ' ')}")
+        print(f"    {source_chunk.content[:160].replace(chr(10), ' ')}")
     print(f"chunks={len(split.chunks)} empty_dropped={split.empty_dropped}")
     return 0
 

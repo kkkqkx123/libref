@@ -214,7 +214,7 @@ class RerankClient:
 
 
 def build_rerank_fn(
-    settings: LibrefSettings, transport: httpx.BaseTransport | None = None
+    settings: LibrefSettings, transport: httpx.AsyncBaseTransport | None = None
 ):
     """Build the rerank function from settings; returns None when not enabled, no model, or no key."""
     config = RerankConfig.from_settings(settings)

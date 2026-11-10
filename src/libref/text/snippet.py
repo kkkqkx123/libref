@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
 _FENCE_RE = re.compile(r"^(```|~~~)")
 
@@ -60,7 +61,7 @@ def omitted_tag(units: int, tokens: int | None = None) -> str:
     return f'<omitted units="{int(units)}"/>'
 
 
-def unit_tag(attrs: dict[str, object], body: str) -> str:
+def unit_tag(attrs: Mapping[str, object], body: str) -> str:
     """Wrap a verbatim body with a self-locating unit tag."""
     rendered = "".join(
         f' {key}="{xml_escape_attr(value)}"' for key, value in attrs.items()

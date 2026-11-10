@@ -318,7 +318,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
     "logging": frozenset({"log_level", "log_file", "log_format"}),
 }
 
-RESERVED_SECTIONS = frozenset()
+RESERVED_SECTIONS: frozenset[str] = frozenset()
 
 PATH_FIELDS = frozenset(
     {

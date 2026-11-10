@@ -119,7 +119,7 @@ def registry_base_for(ecosystem: str, settings) -> str:
     """Resolve the ecosystem base URL: an explicit mapping wins per-key, else fall back to the preset entry for that ecosystem."""
     if ecosystem not in SUPPORTED_ECOSYSTEMS:
         raise ValueError(f"unsupported ecosystem: {ecosystem}")
-    fields_set = getattr(settings, "model_fields_set", set()) or set()
+    fields_set: set[str] = getattr(settings, "model_fields_set", set()) or set()
     if "registry_bases" in fields_set:
         bases = dict(getattr(settings, "registry_bases", None) or {})
         if ecosystem in bases and str(bases[ecosystem]).strip():
@@ -210,7 +210,9 @@ def pick_repo_url(
         return sanitize_http_url(value, allow_private=allow_private)
 
     def is_repo(url: str | None) -> bool:
-        return bool(url) and any(h in url for h in _REPO_HOSTS)
+        if not url:
+            return False
+        return any(h in url for h in _REPO_HOSTS)
 
     def skipped(key: str) -> bool:
         return any(s in key for s in _FUNDING_KEY_HINTS)

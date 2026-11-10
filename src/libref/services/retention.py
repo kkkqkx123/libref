@@ -46,6 +46,7 @@ def log_deletion(
         ),
     )
     conn.commit()
+    assert cur.lastrowid is not None
     return int(cur.lastrowid)
 
 

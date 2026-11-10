@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-import jieba
+import jieba  # type: ignore[import-untyped]
 
 CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]+")
 

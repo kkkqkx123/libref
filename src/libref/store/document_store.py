@@ -315,6 +315,7 @@ class DocumentStore:
                             chunk.sort_order,
                         ),
                     )
+                    assert cur.lastrowid is not None
                     inserted.append(int(cur.lastrowid))
             self._conn.commit()
             return StoreResult(

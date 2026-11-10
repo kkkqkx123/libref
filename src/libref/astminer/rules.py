@@ -438,7 +438,7 @@ def _python_aliases(
                 module_text = resolved
         if module_text.startswith(".") or ". " in module_text:
             return []
-        found: list[tuple[str, str]] = []
+        found = []
         seen_import = False
         for child in root.children:
             if child.type == "import":

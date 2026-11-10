@@ -80,7 +80,7 @@ def proxy_disabled(no_proxy_text: str) -> bool:
 
 
 def build_async_client(
-    settings, *, transport: httpx.BaseTransport | None = None
+    settings, *, transport: httpx.AsyncBaseTransport | None = None
 ) -> httpx.AsyncClient:
     """Build a fetch AsyncClient from settings; callers manage its lifetime with async with."""
     kwargs: dict = {

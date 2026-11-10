@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -195,7 +195,7 @@ class EmbeddingClient:
         return await self.encode_inputs(texts, client=client)
 
     async def encode_inputs(
-        self, inputs: list[EmbeddingInput], *, client: httpx.AsyncClient | None = None
+        self, inputs: Sequence[EmbeddingInput], *, client: httpx.AsyncClient | None = None
     ) -> EmbeddingResult:
         """Embed mixed inputs; image references are rejected outright without a call."""
         texts: list[str] = []
@@ -298,7 +298,7 @@ class EmbeddingClient:
 
 
 def build_embed_fn(
-    settings: LibrefSettings, transport: httpx.BaseTransport | None = None
+    settings: LibrefSettings, transport: httpx.AsyncBaseTransport | None = None
 ) -> EmbedFn | None:
     """Build the embed function from settings; returns None without an API key (caller falls back to pure full-text)."""
     config = EmbeddingConfig.from_settings(settings)

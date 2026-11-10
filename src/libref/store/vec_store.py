@@ -16,7 +16,7 @@ import sys
 import tempfile
 import threading
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol, cast, runtime_checkable
 
 
 def collection_for(base: str, db_path: str | os.PathLike[str]) -> str:
@@ -143,7 +143,7 @@ class QdrantVecStore(VectorStore):
         else:
             from qdrant_client import QdrantClient
 
-            self.client = QdrantClient(url=url, timeout=timeout)
+            self.client = QdrantClient(url=url, timeout=int(timeout))
 
     # ── Collection governance ──
 
@@ -233,7 +233,7 @@ class QdrantVecStore(VectorStore):
             return
         self.client.delete(
             collection_name=self.collection,
-            points_selector=models.PointIdsList(points=doc_ids),
+            points_selector=models.PointIdsList(points=cast(Any, doc_ids)),
         )
 
     def delete_version(self, version_id: int) -> None:

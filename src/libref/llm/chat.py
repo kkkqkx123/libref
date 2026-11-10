@@ -334,7 +334,7 @@ class ChatClient:
 
 
 def build_chat_fn(
-    settings: LibrefSettings, transport: httpx.BaseTransport | None = None
+    settings: LibrefSettings, transport: httpx.AsyncBaseTransport | None = None
 ):
     """Build the chat function from settings; returns None when not enabled, no model, or no key."""
     config = ChatConfig.from_settings(settings)
@@ -362,7 +362,7 @@ def build_chat_fn(
 
 
 def build_chat_stream_fn(
-    settings: LibrefSettings, transport: httpx.BaseTransport | None = None
+    settings: LibrefSettings, transport: httpx.AsyncBaseTransport | None = None
 ):
     """Build the streaming chat function from settings; returns None when not enabled, no model, or no key."""
     config = ChatConfig.from_settings(settings)
