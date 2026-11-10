@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-_CONFIDENCE_RANK = {"AMBIGUOUS": 0, "INFERRED": 1, "EXTRACTED": 2}
-
 
 class ReviewService:
     """Review orchestration; entity identity uses review_status rows for locating."""
@@ -38,6 +36,11 @@ class ReviewService:
             " FROM review_status rs"
             " JOIN call_instances ci ON ci.id = rs.entity_id"
             " WHERE rs.entity_type='call_instance' AND rs.status='pending'"
+            " ORDER BY CASE ci.confidence"
+            " WHEN 'AMBIGUOUS' THEN 0 WHEN 'INFERRED' THEN 1"
+            " WHEN 'EXTRACTED' THEN 2 ELSE 9 END,"
+            " rs.updated_at, rs.entity_id LIMIT ?",
+            (max(1, int(limit)),),
         ).fetchall()
         out = []
         for r in rows:
@@ -60,14 +63,7 @@ class ReviewService:
                     "line_end": r[9],
                 }
             )
-        out.sort(
-            key=lambda r: (
-                _CONFIDENCE_RANK.get(r["confidence"], 9),
-                r["updated_at"] or "",
-                r["entity_id"],
-            )
-        )
-        return out[:limit]
+        return out
 
     def approve(self, entity_id: int, *, entity_type: str = "call_instance") -> None:
         """Pending to approved; non-pending is rejected."""

@@ -78,6 +78,7 @@ class PageService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        limit: int | None = None,
     ) -> dict[str, Any] | None:
         """Fetch all document blocks for a URL ordered by sort_order."""
         filters = ["p.url = ?"]
@@ -91,6 +92,9 @@ class PageService:
         if version is not None:
             filters.append("v.version = ?")
             params.append(version)
+        tail = "" if limit is None else " LIMIT ?"
+        if limit is not None:
+            params.append(max(1, int(limit)))
         rows = self._conn.execute(
             "SELECT p.id, d.content, d.metadata, d.sort_order, l.name, v.version "
             "FROM pages p "
@@ -99,12 +103,17 @@ class PageService:
             "LEFT JOIN documents d ON d.page_id = p.id "
             "AND (json_extract(d.metadata, '$.chunk_path') IS NULL "
             "OR json_extract(d.metadata, '$.chunk_path') != 'bm25') "
-            f"WHERE {' AND '.join(filters)} ORDER BY d.sort_order",
+            f"WHERE {' AND '.join(filters)} ORDER BY d.sort_order{tail}",
             params,
         ).fetchall()
         if not rows:
             return None
-        meta = _parse_meta(rows[0][2])
+        meta: dict[str, Any] = {}
+        for r in rows:
+            parsed_head = _parse_meta(r[2])
+            if parsed_head:
+                meta = parsed_head
+                break
         units: list[str] = []
         details: list[dict[str, Any]] = []
         for content, raw, order in ((r[1], r[2], r[3]) for r in rows):
@@ -136,11 +145,6 @@ class PageService:
         ecosystem: str | None = None,
     ) -> dict[str, Any] | None:
         """Fetch neighboring blocks around a sort position for hit expansion."""
-        page = self.read_page(
-            url, library=library, version=version, ecosystem=ecosystem
-        )
-        if page is None:
-            return None
         filters = ["p.url = ?"]
         params: list[Any] = [url]
         if library is not None:
@@ -153,7 +157,8 @@ class PageService:
             filters.append("v.version = ?")
             params.append(version)
         row = self._conn.execute(
-            "SELECT p.id FROM pages p JOIN versions v ON v.id = p.version_id "
+            "SELECT p.id, l.name, v.version FROM pages p"
+            " JOIN versions v ON v.id = p.version_id "
             "JOIN libraries l ON l.id = v.library_id "
             f"WHERE {' AND '.join(filters)}",
             params,
@@ -162,9 +167,14 @@ class PageService:
             return None
         from libref.store.document_store import DocumentStore
 
-        rows = DocumentStore(self._conn).get_window(
-            int(row[0]), sort_order, radius, chunk_path="embedding"
-        )
+        store = DocumentStore(self._conn)
+        rows = store.get_window(int(row[0]), sort_order, radius, chunk_path="embedding")
+        head_meta: dict[str, Any] = {}
+        for entry in rows:
+            candidate = entry.get("metadata") or {}
+            if candidate.get("title") or candidate.get("path"):
+                head_meta = candidate
+                break
         units: list[str] = []
         docs: list[dict[str, Any]] = []
         for entry in rows:
@@ -184,7 +194,11 @@ class PageService:
             )
             docs.append(locator)
         content = _doc_envelope(
-            url, page.get("title"), page.get("path"), units, {"mode": "window"}
+            url,
+            head_meta.get("title"),
+            head_meta.get("path"),
+            units,
+            {"mode": "window"},
         )
         return {
             "url": url,
@@ -202,6 +216,7 @@ class PageService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        limit: int | None = None,
     ) -> dict[str, Any] | None:
         """Fetch a whole source group to trace a sub-block back to its section."""
         filters = ["d.url = ?", "json_extract(d.metadata, '$.source_group_id') = ?"]
@@ -215,11 +230,18 @@ class PageService:
         if version is not None:
             filters.append("v.version = ?")
             params.append(version)
+        filters.append(
+            "(json_extract(d.metadata, '$.chunk_path') IS NULL"
+            " OR json_extract(d.metadata, '$.chunk_path') != 'bm25')"
+        )
+        tail = "" if limit is None else " LIMIT ?"
+        if limit is not None:
+            params.append(max(1, int(limit)))
         rows = self._conn.execute(
             "SELECT d.content, d.metadata, d.sort_order FROM documents d "
             "JOIN versions v ON v.id = d.version_id "
             "JOIN libraries l ON l.id = d.library_id "
-            f"WHERE {' AND '.join(filters)} ORDER BY d.sort_order",
+            f"WHERE {' AND '.join(filters)} ORDER BY d.sort_order{tail}",
             params,
         ).fetchall()
         if not rows:

@@ -172,21 +172,18 @@ def _purge_inner(
                 version_id,
                 exc,
             )
-    doc_rows = conn.execute(
-        "SELECT id FROM documents WHERE version_id=?", (version_id,)
-    ).fetchall()
-    removed_docs = len(doc_rows)
+    count_row = conn.execute(
+        "SELECT count(*) FROM documents WHERE version_id=?", (version_id,)
+    ).fetchone()
+    removed_docs = int(count_row[0]) if count_row else 0
     conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM api_clusters WHERE version_id=?", (version_id,))
-    dead_calls = conn.execute(
-        "SELECT id FROM call_instances WHERE version_id=?", (version_id,)
-    ).fetchall()
-    for (dead_id,) in dead_calls:
-        conn.execute(
-            "DELETE FROM review_status WHERE entity_type='call_instance' AND entity_id=?",
-            (int(dead_id),),
-        )
+    conn.execute(
+        "DELETE FROM review_status WHERE entity_type='call_instance'"
+        " AND entity_id IN (SELECT id FROM call_instances WHERE version_id=?)",
+        (version_id,),
+    )
     conn.execute("DELETE FROM call_instances WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM api_entities WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM pages WHERE version_id=?", (version_id,))

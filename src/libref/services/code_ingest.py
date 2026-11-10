@@ -55,7 +55,6 @@ def _collect_repo(
     list,
     dict[str, int],
     dict[str, tuple[str, int]],
-    dict[str, bytes],
 ]:
     import hashlib
     from pathlib import Path
@@ -69,7 +68,6 @@ def _collect_repo(
     all_raw: list = []
     counts = {"files": 0, "parsed": 0, "cached": 0}
     live: dict[str, tuple[str, int]] = {}
-    sources: dict[str, bytes] = {}
     for rel in files:
         counts["files"] += 1
         cfg = ast_config.config_for_suffix(Path(rel).suffix)
@@ -78,7 +76,6 @@ def _collect_repo(
         fp = ast_config.grammar_fingerprint(cfg)
         live[rel] = (fp, cfg.config_version)
         data = (root / rel).read_bytes()
-        sources[rel] = data
         sha = hashlib.sha1(data).hexdigest()
         hit = ast_cache.lookup(conn, repo_name, rel, fp, cfg.config_version)
         if hit is not None and hit[0] == sha:
@@ -102,13 +99,39 @@ def _collect_repo(
             cfg.config_version,
             ast_cache.encode_records(decls, aliases, raw_calls),
         )
-    return all_decls, file_aliases, all_raw, counts, live, sources
+    return all_decls, file_aliases, all_raw, counts, live
+
+
+def _sweep_source_pages(conn, repo_name: str, live: set[str]) -> list[int]:
+    """Delete source pages whose files vanished; returns removed document ids."""
+    prefix = f"repo://{repo_name}/"
+    rows = conn.execute(
+        "SELECT id, url FROM pages WHERE url LIKE ? ESCAPE '\\'",
+        (prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%",),
+    ).fetchall()
+    removed: list[int] = []
+    for page_id, url in rows:
+        rel = str(url)[len(prefix) :]
+        if rel in live:
+            continue
+        row = conn.execute(
+            "SELECT version_id FROM pages WHERE id=?", (page_id,)
+        ).fetchone()
+        if row is None:
+            continue
+        docs = conn.execute(
+            "SELECT id FROM documents WHERE page_id=?", (page_id,)
+        ).fetchall()
+        removed.extend(int(r[0]) for r in docs)
+        conn.execute("DELETE FROM pages WHERE id=?", (page_id,))
+    return removed
 
 
 def _store_source_chunks(
     conn,
     repo_name: str,
-    sources: dict[str, bytes],
+    root,
+    live_files: list[str],
     all_decls,
     library_id: int,
     version_id: int,
@@ -129,11 +152,14 @@ def _store_source_chunks(
     dropped = 0
     removed_all: list[int] = []
     inserted_all: list[int] = []
-    for rel in sorted(sources):
+    for rel in sorted(live_files):
         decls = by_file.get(rel, [])
         if not decls:
             continue
-        data = sources[rel]
+        try:
+            data = (root / rel).read_bytes()
+        except OSError:
+            continue
         groups = _grouping.build_groups(decls, data, rel)
         by_qual = {d.qualified_name: d for d in decls}
         split = _source_chunk.build_source_chunks(
@@ -194,19 +220,17 @@ def _persist_entities(
     pending: dict[tuple[str, str], Any] = {}
     for decl in all_decls:
         pending[(decl.qualified_name, decl.kind)] = decl
-    for qualified_name, kind in list(pending):
-        decl = pending[(qualified_name, kind)]
-        uid = entity_uid(version_id, qualified_name, kind)
-        conn.execute(
-            "INSERT INTO api_entities(entity_uid, library_id, version_id,"
-            " qualified_name, kind, parent, signature, params, bases,"
-            " start_byte, end_byte, depth) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(entity_uid) DO UPDATE SET parent=excluded.parent,"
-            " signature=excluded.signature, params=excluded.params, bases=excluded.bases,"
-            " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
-            " depth=excluded.depth",
+    conn.executemany(
+        "INSERT INTO api_entities(entity_uid, library_id, version_id,"
+        " qualified_name, kind, parent, signature, params, bases,"
+        " start_byte, end_byte, depth) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        " ON CONFLICT(entity_uid) DO UPDATE SET parent=excluded.parent,"
+        " signature=excluded.signature, params=excluded.params, bases=excluded.bases,"
+        " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
+        " depth=excluded.depth",
+        [
             (
-                uid,
+                entity_uid(version_id, qualified_name, kind),
                 library_id,
                 version_id,
                 qualified_name,
@@ -218,35 +242,38 @@ def _persist_entities(
                 decl.start_byte,
                 decl.end_byte,
                 decl.depth,
-            ),
-        )
-    wanted = {entity_uid(version_id, q, k) for q, k in pending}
-    if wanted:
-        placeholders = ",".join("?" for _ in wanted)
-        dead = conn.execute(
-            f"SELECT entity_uid FROM api_entities WHERE version_id=?"
-            f" AND entity_uid NOT IN ({placeholders})",
-            (version_id, *sorted(wanted)),
-        ).fetchall()
-        if dead:
-            conn.execute(
-                f"DELETE FROM api_entities WHERE version_id=?"
-                f" AND entity_uid NOT IN ({placeholders})",
-                (version_id, *sorted(wanted)),
             )
-    else:
-        dead = conn.execute(
+            for (qualified_name, kind), decl in pending.items()
+        ],
+    )
+    wanted = sorted(entity_uid(version_id, q, k) for q, k in pending)
+    keep = set(wanted)
+    existing = [
+        r[0]
+        for r in conn.execute(
             "SELECT entity_uid FROM api_entities WHERE version_id=?", (version_id,)
         ).fetchall()
-        if dead:
-            conn.execute("DELETE FROM api_entities WHERE version_id=?", (version_id,))
-    return len(pending), len(dead)
+    ]
+    dead = [u for u in existing if u not in keep]
+    swept = 0
+    for start in range(0, len(dead), 500):
+        batch = dead[start : start + 500]
+        placeholders = ",".join("?" for _ in batch)
+        cur = conn.execute(
+            "DELETE FROM api_entities WHERE version_id=?"
+            f" AND entity_uid IN ({placeholders})",
+            (version_id, *batch),
+        )
+        swept += int(cur.rowcount or 0)
+    return len(pending), swept
 
 
 def _persist_calls(
     conn, library_id: int, version_id: int, resolved, commit_sha: str = ""
 ) -> tuple[int, int]:
     import json as _uid_json
+
+    from libref.mining import scope_key as _scope_key
 
     entity_ids = {
         r[0]: r[1]
@@ -257,6 +284,8 @@ def _persist_calls(
         )
     }
     kinds = ("function", "method", "class", "interface", "enum", "constructor")
+    batch: list[tuple] = []
+    review_uids: list[str] = []
     wanted: set[str] = set()
     for call in resolved:
         args_json = _uid_json.dumps(list(call.args), ensure_ascii=False)
@@ -274,20 +303,7 @@ def _persist_calls(
             ent_id = entity_ids.get(f"{call.callee}|{kind}")
             if ent_id is not None:
                 break
-        conn.execute(
-            "INSERT INTO call_instances(call_uid, callee_entity_id, callee_name, args,"
-            " repo, caller_file, line_start, line_end, confidence,"
-            " library_id, version_id, caller, receiver, func, argument_count,"
-            " call_order, start_byte, end_byte, commit_sha)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(call_uid) DO UPDATE SET callee_entity_id=excluded.callee_entity_id,"
-            " callee_name=excluded.callee_name, args=excluded.args,"
-            " confidence=excluded.confidence, library_id=excluded.library_id,"
-            " version_id=excluded.version_id, caller=excluded.caller,"
-            " receiver=excluded.receiver, func=excluded.func,"
-            " argument_count=excluded.argument_count, call_order=excluded.call_order,"
-            " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
-            " commit_sha=excluded.commit_sha",
+        batch.append(
             (
                 uid,
                 ent_id,
@@ -308,47 +324,74 @@ def _persist_calls(
                 call.start_byte,
                 call.end_byte,
                 commit_sha or call.commit_sha,
-            ),
+                _scope_key(str(call.caller_file), call.caller),
+            )
         )
         needs_review = call.confidence == "AMBIGUOUS" or (
             call.confidence == "INFERRED" and ent_id is None
         )
         if needs_review:
-            row = conn.execute(
-                "SELECT id FROM call_instances WHERE call_uid=?", (uid,)
-            ).fetchone()
-            if row is not None:
-                conn.execute(
-                    "INSERT INTO review_status(entity_type, entity_id, status)"
-                    " VALUES('call_instance', ?, 'pending')"
-                    " ON CONFLICT(entity_type, entity_id) DO NOTHING",
-                    (int(row[0]),),
-                )
-    if wanted:
-        placeholders = ",".join("?" for _ in wanted)
-        dead_rows = conn.execute(
-            f"SELECT id, call_uid FROM call_instances WHERE version_id=?"
-            f" AND call_uid NOT IN ({placeholders})",
-            (version_id, *sorted(wanted)),
-        ).fetchall()
-    else:
-        dead_rows = conn.execute(
+            review_uids.append(uid)
+    if batch:
+        conn.executemany(
+            "INSERT INTO call_instances(call_uid, callee_entity_id, callee_name, args,"
+            " repo, caller_file, line_start, line_end, confidence,"
+            " library_id, version_id, caller, receiver, func, argument_count,"
+            " call_order, start_byte, end_byte, commit_sha, scope)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(call_uid) DO UPDATE SET callee_entity_id=excluded.callee_entity_id,"
+            " callee_name=excluded.callee_name, args=excluded.args,"
+            " confidence=excluded.confidence, library_id=excluded.library_id,"
+            " version_id=excluded.version_id, caller=excluded.caller,"
+            " receiver=excluded.receiver, func=excluded.func,"
+            " argument_count=excluded.argument_count, call_order=excluded.call_order,"
+            " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
+            " commit_sha=excluded.commit_sha, scope=excluded.scope",
+            batch,
+        )
+    if review_uids:
+        pending_ids: list[int] = []
+        for start in range(0, len(review_uids), 500):
+            chunk = review_uids[start : start + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            pending_ids.extend(
+                int(r[0])
+                for r in conn.execute(
+                    f"SELECT id FROM call_instances WHERE call_uid IN ({placeholders})",
+                    chunk,
+                ).fetchall()
+            )
+        if pending_ids:
+            conn.executemany(
+                "INSERT INTO review_status(entity_type, entity_id, status)"
+                " VALUES('call_instance', ?, 'pending')"
+                " ON CONFLICT(entity_type, entity_id) DO NOTHING",
+                [(i,) for i in pending_ids],
+            )
+    keep = set(wanted)
+    existing = [
+        (int(r[0]), str(r[1]))
+        for r in conn.execute(
             "SELECT id, call_uid FROM call_instances WHERE version_id=?", (version_id,)
         ).fetchall()
-    for dead_id, _ in dead_rows:
+    ]
+    dead_rows = [(i, u) for i, u in existing if u not in keep]
+    swept = 0
+    for start in range(0, len(dead_rows), 500):
+        swept_chunk = dead_rows[start : start + 500]
+        placeholders = ",".join("?" for _ in swept_chunk)
         conn.execute(
-            "DELETE FROM review_status WHERE entity_type='call_instance' AND entity_id=?",
-            (int(dead_id),),
+            "DELETE FROM review_status WHERE entity_type='call_instance'"
+            f" AND entity_id IN ({placeholders})",
+            [i for i, _ in swept_chunk],
         )
-    if dead_rows:
-        dead_uids = sorted(uid for _, uid in dead_rows)
-        placeholders = ",".join("?" for _ in dead_uids)
-        conn.execute(
-            f"DELETE FROM call_instances WHERE version_id=?"
+        cur = conn.execute(
+            "DELETE FROM call_instances WHERE version_id=?"
             f" AND call_uid IN ({placeholders})",
-            (version_id, *dead_uids),
+            (version_id, *[u for _, u in swept_chunk]),
         )
-    return len(resolved), len(dead_rows)
+        swept += int(cur.rowcount or 0)
+    return len(resolved), swept
 
 
 def lookup_index_source_cached(
@@ -485,7 +528,7 @@ async def _index_repo_inner(
     root, commit = manager.ensure(conn, repo_name, source, update=update)
     conn.commit()
     files = [r for r in iter_source_files(root, ast_config.all_suffixes())]
-    all_decls, file_aliases, all_raw, counts, live, sources = _collect_repo(
+    all_decls, file_aliases, all_raw, counts, live = _collect_repo(
         conn,
         repo_name,
         root,
@@ -503,8 +546,11 @@ async def _index_repo_inner(
         conn, library_id, version_id, resolved, commit
     )
     n_chunks, chunk_dropped, removed_ids, inserted_ids = _store_source_chunks(
-        conn, repo_name, sources, all_decls, library_id, version_id
+        conn, repo_name, root, sorted(live), all_decls, library_id, version_id
     )
+    swept_pages = _sweep_source_pages(conn, repo_name, set(live))
+    removed_ids.extend(swept_pages)
+    counts["swept_pages"] = len(swept_pages)
     conn.commit()
     counts["entities"] = n_entities
     counts["calls"] = n_calls

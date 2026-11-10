@@ -58,9 +58,11 @@ class SearchService:
             filters.append("v.version = ?")
             params.append(version)
         where = ("AND " + " AND ".join(filters) + " ") if filters else ""
-        params.append(limit)
+        # Join filters apply after the match, so over-fetch under filters to recover recall.
+        budget = limit if not filters else max(limit, min(limit * 5, 500))
+        params.append(budget)
         sql = (
-            f"SELECT d.id, d.url, bm25(documents_fts, {weights[0]}, {weights[1]}, {weights[2]}, {weights[3]}) AS score, d.content, "
+            f"SELECT d.id, d.url, -bm25(documents_fts, {weights[0]}, {weights[1]}, {weights[2]}, {weights[3]}) AS score, d.content, "
             "json_extract(d.metadata, '$.title') AS title, "
             "json_extract(d.metadata, '$.path') AS path, "
             "l.name AS library, v.version AS version, d.metadata, "
@@ -70,7 +72,7 @@ class SearchService:
             "JOIN versions v ON v.id = d.version_id "
             "JOIN libraries l ON l.id = d.library_id "
             f"WHERE documents_fts MATCH ? {where}"
-            "ORDER BY score LIMIT ?"
+            "ORDER BY score DESC LIMIT ?"
         )
         rows = self._conn.execute(sql, params).fetchall()
         out = []
@@ -116,7 +118,7 @@ class SearchService:
                     "entities": list(meta.get("entities", []) or []),
                 }
             )
-        return out
+        return out[:limit]
 
     async def search_hybrid_async(
         self,

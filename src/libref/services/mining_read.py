@@ -9,6 +9,16 @@ from libref.services.libraries import mining_version_ids
 from libref.text.snippet import call_tag, gap_tag, unit_tag
 
 
+def _scope_of(table: str) -> str:
+    """Grouping identity of one call scope, preferring the persisted key."""
+    if table:
+        return (
+            f"COALESCE({table}.scope,"
+            f" {table}.caller_file || char(0) || COALESCE({table}.caller, ''))"
+        )
+    return "COALESCE(scope, caller_file || char(0) || COALESCE(caller, ''))"
+
+
 def is_subsequence(pattern: list[str], names: list[str]) -> bool:
     """Check whether pattern appears in order inside names."""
     pos = 0
@@ -99,7 +109,7 @@ class MiningReadService:
             conf = f"AND {base_filter} AND (call_instances.confidence != 'AMBIGUOUS' OR rs.status='approved')"
         sql = (
             "SELECT callee_name, count(*), "
-            "count(DISTINCT caller_file || char(0) || COALESCE(caller, '')) "
+            f"count(DISTINCT {_scope_of('call_instances')}) "
             "FROM call_instances LEFT JOIN review_status rs "
             "ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id "
             f"WHERE version_id IN ({placeholders}) {conf} "
@@ -170,17 +180,16 @@ class MiningReadService:
             conf = f"AND {no_conflict_c} AND (c.confidence != 'AMBIGUOUS' OR rc.status='approved')"
             tconf = f"AND {no_conflict_t} AND (call_instances.confidence != 'AMBIGUOUS' OR rt.status='approved')"
         rows = self._conn.execute(
-            "WITH target(file, caller_key) AS ("
-            " SELECT DISTINCT caller_file, COALESCE(caller, '')"
+            "WITH target(s) AS ("
+            f" SELECT DISTINCT {_scope_of('call_instances')}"
             " FROM call_instances LEFT JOIN review_status rt "
             "ON rt.entity_type='call_instance' AND rt.entity_id=call_instances.id"
             f" WHERE version_id IN ({placeholders}) AND callee_name = ? {tconf})"
             " SELECT c.callee_name,"
-            " count(DISTINCT c.caller_file || char(0) || COALESCE(c.caller, '')),"
+            f" count(DISTINCT {_scope_of('c')}),"
             " count(*) FROM call_instances c LEFT JOIN review_status rc "
             "ON rc.entity_type='call_instance' AND rc.entity_id=c.id"
-            " JOIN target t ON c.caller_file = t.file"
-            " AND COALESCE(c.caller, '') = t.caller_key"
+            f" JOIN target t ON {_scope_of('c')} = t.s"
             f" WHERE c.version_id IN ({placeholders}) AND c.callee_name != ? {conf}"
             " GROUP BY c.callee_name"
             " ORDER BY 2 DESC, 3 DESC, c.callee_name LIMIT ?",
@@ -202,14 +211,20 @@ class MiningReadService:
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
-        rows = self._conn.execute(
+        # Without a membership filter the database returns the top rows directly;
+        # with one the cursor stops as soon as enough matches are collected.
+        tail = "" if containing else " LIMIT ?"
+        params: list[Any] = list(vids)
+        if not containing:
+            params.append(max(1, int(limit)))
+        cursor = self._conn.execute(
             "SELECT pattern, support FROM seq_patterns"
             f" WHERE version_id IN ({placeholders})"
-            " ORDER BY support DESC, pattern",
-            tuple(vids),
-        ).fetchall()
+            f" ORDER BY support DESC, pattern{tail}",
+            params,
+        )
         out = []
-        for raw, support in rows:
+        for raw, support in cursor:
             try:
                 names = json.loads(raw)
             except ValueError:
@@ -260,24 +275,24 @@ class MiningReadService:
                 "AND (h.confidence != 'AMBIGUOUS' OR rh.status='approved')"
             )
         hit_rows = self._conn.execute(
-            "SELECT h.caller_file, COALESCE(h.caller, ''), h.callee_name"
+            f"SELECT {_scope_of('h')}, h.callee_name"
             " FROM call_instances h LEFT JOIN review_status rh"
             " ON rh.entity_type='call_instance' AND rh.entity_id=h.id"
-            " JOIN (SELECT caller_file AS hf, COALESCE(caller, '') AS hk"
+            f" JOIN (SELECT {_scope_of('h2')} AS hk"
             " FROM call_instances h2 LEFT JOIN review_status rh2"
             " ON rh2.entity_type='call_instance' AND rh2.entity_id=h2.id"
             f" WHERE h2.version_id IN ({placeholders}) AND h2.callee_name IN ({placeholders_w}) {inner_conf}"
-            " GROUP BY hf, hk"
+            " GROUP BY hk"
             f" HAVING COUNT(DISTINCT h2.callee_name) = {len(wanted)})"
-            " ON h.caller_file = hf AND COALESCE(h.caller, '') = hk"
+            f" ON {_scope_of('h')} = hk"
             f" WHERE h.version_id IN ({placeholders}) {outer_conf}",
             (*vids, *wanted, *vids),
         ).fetchall()
         if not hit_rows:
             return []
-        scopes: dict[tuple[str, str], set[str]] = {}
-        for path, caller, callee in hit_rows:
-            scopes.setdefault((str(path), str(caller)), set()).add(str(callee))
+        scopes: dict[str, set[str]] = {}
+        for scope, callee in hit_rows:
+            scopes.setdefault(str(scope), set()).add(str(callee))
         wanted_set = set(wanted)
         counter: dict[str, dict[str, int]] = {}
         for have in scopes.values():
@@ -327,6 +342,25 @@ class MiningReadService:
             conf = f"AND {base_filter}"
         else:
             conf = f"AND {base_filter} AND (ci.confidence != 'AMBIGUOUS' OR rs.status='approved')"
+        # Scopes missing any member can never contain the pattern as a subsequence,
+        # so only those scopes are loaded in the second phase.
+        members = sorted(set(pattern))
+        marks_w = ",".join("?" for _ in members)
+        scope_rows = self._conn.execute(
+            f"SELECT {_scope_of('ci')}"
+            " FROM call_instances ci LEFT JOIN review_status rs "
+            "ON rs.entity_type='call_instance' AND rs.entity_id=ci.id"
+            f" WHERE ci.version_id IN ({placeholders})"
+            f" AND ci.callee_name IN ({marks_w}) {conf}"
+            f" GROUP BY {_scope_of('ci')}"
+            f" HAVING COUNT(DISTINCT ci.callee_name) = {len(members)}"
+            " ORDER BY 1 LIMIT 1000",
+            (*vids, *members),
+        ).fetchall()
+        if not scope_rows:
+            return []
+        wanted_scopes = [r[0] for r in scope_rows]
+        scope_marks = ",".join("?" for _ in wanted_scopes)
         rows = self._conn.execute(
             "SELECT ci.version_id, l.name, v.version, ci.caller_file, ci.caller,"
             " ci.callee_name, ci.args, ci.line_start, ci.line_end, ci.confidence,"
@@ -336,9 +370,10 @@ class MiningReadService:
             " JOIN versions v ON v.id = ci.version_id"
             " JOIN libraries l ON l.id = v.library_id"
             f" WHERE ci.version_id IN ({placeholders}) {conf}"
+            f" AND {_scope_of('ci')} IN ({scope_marks})"
             " ORDER BY ci.version_id, ci.caller_file, ci.line_start,"
             " ci.start_byte, ci.call_order, ci.id",
-            tuple(vids),
+            (*vids, *wanted_scopes),
         ).fetchall()
         groups: dict[tuple, dict[str, Any]] = {}
         order: list[tuple] = []
@@ -432,17 +467,19 @@ class MiningReadService:
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
-        try:
-            rows = self._conn.execute(
-                "SELECT pattern, pattern_hash, model, prompt_version, name,"
-                " summary, category_path, workflow, related_apis, updated_at"
-                " FROM pattern_labels"
-                f" WHERE version_id IN ({placeholders})"
-                " ORDER BY updated_at DESC, pattern_hash, model, prompt_version",
-                tuple(vids),
-            ).fetchall()
-        except Exception:  # noqa: BLE001 -- labels are optional before migration
+        table = self._conn.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='pattern_labels'"
+        ).fetchone()
+        if not table or not table[0]:
             return []
+        rows = self._conn.execute(
+            "SELECT pattern, pattern_hash, model, prompt_version, name,"
+            " summary, category_path, workflow, related_apis, updated_at"
+            " FROM pattern_labels"
+            f" WHERE version_id IN ({placeholders})"
+            " ORDER BY updated_at DESC, pattern_hash, model, prompt_version",
+            tuple(vids),
+        ).fetchall()
         out = []
         seen: set[str] = set()
         for (

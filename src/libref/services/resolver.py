@@ -71,6 +71,36 @@ def write_cache(
     repo_url: str | None,
     fetched_at: float,
 ) -> None:
+    from libref.db.conn import write_lock
+
+    with write_lock(conn):
+        _write_cache_locked(
+            conn,
+            ecosystem=ecosystem,
+            name=name,
+            docs_url=docs_url,
+            candidates=candidates,
+            versions=versions,
+            stable=stable,
+            homepage=homepage,
+            repo_url=repo_url,
+            fetched_at=fetched_at,
+        )
+
+
+def _write_cache_locked(
+    conn: sqlite3.Connection,
+    *,
+    ecosystem: str,
+    name: str,
+    docs_url: str | None,
+    candidates: list[str],
+    versions: list[str],
+    stable: str | None,
+    homepage: str | None,
+    repo_url: str | None,
+    fetched_at: float,
+) -> None:
     conn.execute(
         "INSERT INTO registry_cache(ecosystem, name, docs_url, candidates, versions, "
         "stable, homepage, repo_url, fetched_at) VALUES(?,?,?,?,?,?,?,?,?) "

@@ -21,6 +21,38 @@ def content_hash(text: str | None) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
+def reuse_digest(chunk) -> str:
+    """Reuse identity for one chunk: content plus the lane it belongs to.
+
+    Lane fields keep the embedding and bm25 twins apart so a chunk only
+    ever reuses a row from its own lane. The explicit content hash stays
+    informational in metadata and out of the identity.
+    """
+    lane = "\0".join(
+        [
+            str(getattr(chunk, "chunk_path", "embedding") or "embedding"),
+            str(getattr(chunk, "source_group_id", "") or ""),
+            str(getattr(chunk, "chunk_id", "") or ""),
+        ]
+    )
+    return content_hash(f"{lane}\0{chunk.title}\0{chunk.path}\0{chunk.content}")
+
+
+def _stored_digest(row: dict[str, Any]) -> str:
+    """Reuse identity of an already stored row, mirrored against the lane-aware key."""
+    meta = row.get("metadata") or {}
+    lane = "\0".join(
+        [
+            str(meta.get("chunk_path", "embedding") or "embedding"),
+            str(meta.get("source_group_id", "") or ""),
+            str(meta.get("chunk_id", "") or ""),
+        ]
+    )
+    return content_hash(
+        f"{lane}\0{meta.get('title', '')}\0{meta.get('path', '')}\0{row.get('content')}"
+    )
+
+
 @dataclass
 class DocumentInput:
     """Plain document block for storage, no chunking types cross the boundary."""
@@ -196,6 +228,32 @@ class DocumentStore:
         """
         if outcome not in OUTCOMES:
             raise ValueError(f"unknown outcome: {outcome}")
+        from libref.db.conn import write_lock
+
+        with write_lock(self._conn):
+            return self._store_locked(
+                version_id,
+                library_id,
+                url,
+                outcome,
+                chunks=chunks,
+                raw_content=raw_content,
+                etag=etag,
+                last_modified=last_modified,
+            )
+
+    def _store_locked(
+        self,
+        version_id: int,
+        library_id: int,
+        url: str,
+        outcome: str,
+        *,
+        chunks: list[DocumentInput] | None = None,
+        raw_content: str | None = None,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> StoreResult:
         try:
             if outcome == "absent":
                 removed = self._delete_page(version_id, url)
@@ -215,8 +273,10 @@ class DocumentStore:
                 page = self.get_page(version_id, url)
                 if page is not None:
                     self._conn.execute(
-                        "UPDATE pages SET fetched_at=datetime('now') WHERE id=?",
-                        (page.page_id,),
+                        "UPDATE pages SET etag=COALESCE(?, etag),"
+                        " last_modified=COALESCE(?, last_modified),"
+                        " fetched_at=datetime('now') WHERE id=?",
+                        (etag, last_modified, page.page_id),
                     )
                 self._conn.commit()
                 return StoreResult(outcome)
@@ -226,26 +286,13 @@ class DocumentStore:
             existing = self.list_page_documents(page.page_id)
             by_hash: dict[str, list[dict[str, Any]]] = {}
             for row in existing:
-                try:
-                    meta = row.get("metadata") or {}
-                except AttributeError:
-                    meta = {}
-                stored = str(meta.get("content_hash") or "")
-                if stored:
-                    digest = stored
-                else:
-                    digest = content_hash(
-                        f"{meta.get('title', '')}\0{meta.get('path', '')}\0{row.get('content')}"
-                    )
-                by_hash.setdefault(digest, []).append(row)
+                by_hash.setdefault(_stored_digest(row), []).append(row)
             inserted: list[int] = []
             reused: list[int] = []
             used_old: set[int] = set()
             pending: list[tuple[DocumentInput, str]] = []
             for chunk in chunks or []:
-                digest = getattr(chunk, "content_hash", "") or content_hash(
-                    f"{chunk.title}\0{chunk.path}\0{chunk.content}"
-                )
+                digest = reuse_digest(chunk)
                 candidates = by_hash.get(digest, [])
                 hit = next((r for r in candidates if r["id"] not in used_old), None)
                 if hit is not None:
@@ -261,6 +308,14 @@ class DocumentStore:
                 marks = ",".join("?" for _ in leftover)
                 self._conn.execute(
                     f"DELETE FROM documents WHERE id IN ({marks})", leftover
+                )
+            # Stage reused rows on negative sort keys first so two rows swapping
+            # order never collide on the uniqueness of page plus sort order.
+            if reused:
+                marks = ",".join("?" for _ in reused)
+                self._conn.execute(
+                    f"UPDATE documents SET sort_order=-id WHERE id IN ({marks})",
+                    reused,
                 )
             for chunk, reuse_id in pending:
                 metadata = json.dumps(

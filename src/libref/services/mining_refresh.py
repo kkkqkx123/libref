@@ -38,12 +38,9 @@ def _clear_derived(conn, version_id: int) -> None:
 
 
 def _review_map(conn, version_id: int) -> dict[int, str]:
-    try:
-        from libref.services.review import ReviewService
+    from libref.services.review import ReviewService
 
-        return ReviewService(conn).review_map_for_version(version_id)
-    except Exception:  # noqa: BLE001 — review map is advisory; mining proceeds unfiltered
-        return {}
+    return ReviewService(conn).review_map_for_version(version_id)
 
 
 def _keep_call(confidence: str, status: str | None, include_ambiguous: bool) -> bool:
@@ -56,6 +53,51 @@ def _keep_call(confidence: str, status: str | None, include_ambiguous: bool) -> 
     return bool(include_ambiguous)
 
 
+def _load_kept_calls(conn, version_id: int, *, include_ambiguous: bool = False):
+    """Single shared scan of one version's calls with review filtering applied."""
+    rows = conn.execute(
+        "SELECT callee_name, caller_file, caller, confidence, id,"
+        " line_start, call_order, start_byte FROM call_instances"
+        " WHERE version_id=?",
+        (version_id,),
+    ).fetchall()
+    review = _review_map(conn, version_id)
+    return [
+        r
+        for r in rows
+        if _keep_call(str(r[3]), review.get(int(r[4])), include_ambiguous)
+    ]
+
+
+def _delete_not_in(conn, table: str, version_id: int, column: str, wanted: list) -> int:
+    """Set-difference cleanup; returns the removed row count.
+
+    The live set is read in one pass and the dead ids are deleted in bounded
+    batches. An empty wanted set clears the version.
+    """
+    if not wanted:
+        cur = conn.execute(f"DELETE FROM {table} WHERE version_id=?", (version_id,))
+        return int(cur.rowcount or 0)
+    keep = set(wanted)
+    existing = [
+        r[0]
+        for r in conn.execute(
+            f"SELECT {column} FROM {table} WHERE version_id=?", (version_id,)
+        ).fetchall()
+    ]
+    dead = [v for v in existing if v not in keep]
+    removed = 0
+    for start in range(0, len(dead), 500):
+        batch = dead[start : start + 500]
+        placeholders = ",".join("?" for _ in batch)
+        cur = conn.execute(
+            f"DELETE FROM {table} WHERE version_id=? AND {column} IN ({placeholders})",
+            (version_id, *batch),
+        )
+        removed += int(cur.rowcount or 0)
+    return removed
+
+
 def refresh_feature_tree(
     conn, library_id: int, version_id: int, *, include_ambiguous: bool = False
 ) -> int:
@@ -63,17 +105,7 @@ def refresh_feature_tree(
     from libref.mining import feature_tree as _tree
     from libref.mining import scope_key as _scope_key
 
-    rows = conn.execute(
-        "SELECT callee_name, caller_file, caller, confidence, id FROM call_instances"
-        " WHERE version_id=?",
-        (version_id,),
-    ).fetchall()
-    review = _review_map(conn, version_id)
-    rows = [
-        r
-        for r in rows
-        if _keep_call(str(r[3]), review.get(int(r[4])), include_ambiguous)
-    ]
+    rows = _load_kept_calls(conn, version_id, include_ambiguous=include_ambiguous)
     calls = [(str(r[0]), _scope_key(str(r[1]), r[2])) for r in rows if r[0]]
     if not calls:
         conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
@@ -87,13 +119,13 @@ def refresh_feature_tree(
     }
     nodes = _tree.build_feature_tree(calls, kinds)
     wanted = [n["path"] for n in nodes]
-    for node in nodes:
-        conn.execute(
-            "INSERT INTO feature_nodes(library_id, version_id, path, parent, depth, kind, calls, scopes)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(version_id, path) DO UPDATE SET parent=excluded.parent,"
-            " depth=excluded.depth, kind=excluded.kind,"
-            " calls=excluded.calls, scopes=excluded.scopes",
+    conn.executemany(
+        "INSERT INTO feature_nodes(library_id, version_id, path, parent, depth, kind, calls, scopes)"
+        " VALUES(?, ?, ?, ?, ?, ?, ?, ?)"
+        " ON CONFLICT(version_id, path) DO UPDATE SET parent=excluded.parent,"
+        " depth=excluded.depth, kind=excluded.kind,"
+        " calls=excluded.calls, scopes=excluded.scopes",
+        [
             (
                 library_id,
                 version_id,
@@ -103,17 +135,11 @@ def refresh_feature_tree(
                 node["kind"],
                 int(node["calls"]),
                 int(node["scopes"]),
-            ),
-        )
-    if wanted:
-        placeholders = ",".join("?" for _ in wanted)
-        conn.execute(
-            "DELETE FROM feature_nodes WHERE version_id=?"
-            f" AND path NOT IN ({placeholders})",
-            (version_id, *wanted),
-        )
-    else:
-        conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
+            )
+            for node in nodes
+        ],
+    )
+    _delete_not_in(conn, "feature_nodes", version_id, "path", wanted)
     return len(nodes)
 
 
@@ -132,17 +158,7 @@ def refresh_clusters(
 
     threshold, min_size = _cluster_defaults(threshold, min_size)
 
-    rows = conn.execute(
-        "SELECT callee_name, caller_file, caller, confidence, id FROM call_instances"
-        " WHERE version_id=?",
-        (version_id,),
-    ).fetchall()
-    review = _review_map(conn, version_id)
-    rows = [
-        r
-        for r in rows
-        if _keep_call(str(r[3]), review.get(int(r[4])), include_ambiguous)
-    ]
+    rows = _load_kept_calls(conn, version_id, include_ambiguous=include_ambiguous)
     triplets = [(str(r[0]), str(r[1]), r[2]) for r in rows if r[0]]
     sets = _scope_sets(triplets)
     groups = _cluster_fn(sets, threshold=threshold, min_size=min_size)
@@ -150,28 +166,25 @@ def refresh_clusters(
     if not wanted:
         conn.execute("DELETE FROM api_clusters WHERE version_id=?", (version_id,))
         return 0
-    for group in groups:
-        for member in group["members"]:
-            conn.execute(
-                "INSERT INTO api_clusters(library_id, version_id, cluster_id, member, size, representative)"
-                " VALUES(?, ?, ?, ?, ?, ?)"
-                " ON CONFLICT(version_id, member) DO UPDATE SET cluster_id=excluded.cluster_id,"
-                " size=excluded.size, representative=excluded.representative",
-                (
-                    library_id,
-                    version_id,
-                    int(group["cluster_id"]),
-                    member,
-                    int(group["size"]),
-                    group["representative"],
-                ),
+    conn.executemany(
+        "INSERT INTO api_clusters(library_id, version_id, cluster_id, member, size, representative)"
+        " VALUES(?, ?, ?, ?, ?, ?)"
+        " ON CONFLICT(version_id, member) DO UPDATE SET cluster_id=excluded.cluster_id,"
+        " size=excluded.size, representative=excluded.representative",
+        [
+            (
+                library_id,
+                version_id,
+                int(group["cluster_id"]),
+                member,
+                int(group["size"]),
+                group["representative"],
             )
-    placeholders = ",".join("?" for _ in wanted)
-    conn.execute(
-        "DELETE FROM api_clusters WHERE version_id=?"
-        f" AND member NOT IN ({placeholders})",
-        (version_id, *wanted),
+            for group in groups
+            for member in group["members"]
+        ],
     )
+    _delete_not_in(conn, "api_clusters", version_id, "member", wanted)
     return len(groups)
 
 
@@ -204,28 +217,13 @@ def mine_patterns(
         )
     else:
         library_id, version_id = catalog.ensure_library_version(library, version)
-    rows = conn.execute(
-        "SELECT callee_name, caller_file, line_start, caller, confidence,"
-        " call_order, start_byte, id FROM call_instances"
-        " WHERE version_id=?",
-        (version_id,),
-    ).fetchall()
-    if not rows:
-        _clear_derived(conn, version_id)
-        conn.commit()
-        return []
-    review = _review_map(conn, version_id)
-    rows = [
-        r
-        for r in rows
-        if _keep_call(str(r[4]), review.get(int(r[7])), include_ambiguous)
-    ]
+    rows = _load_kept_calls(conn, version_id, include_ambiguous=include_ambiguous)
     if not rows:
         _clear_derived(conn, version_id)
         conn.commit()
         return []
     groups: dict[str, list[tuple[int, int, int, int, str]]] = {}
-    for callee, caller_file, line_start, caller, _conf, order, start, row_id in rows:
+    for callee, caller_file, caller, _conf, row_id, line_start, order, start in rows:
         key = _scope_key(str(caller_file), caller)
         groups.setdefault(key, []).append(
             (int(line_start), int(start), int(order), int(row_id), str(callee))
@@ -241,7 +239,7 @@ def mine_patterns(
         cleaned.append(seq)
     str_seqs = cleaned
     if not str_seqs:
-        conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
+        _clear_derived(conn, version_id)
         refresh_feature_tree(
             conn, library_id, version_id, include_ambiguous=include_ambiguous
         )
@@ -261,7 +259,7 @@ def mine_patterns(
         str_seqs = [[n for n in seq if n in allowed] for seq in str_seqs]
         str_seqs = [seq for seq in str_seqs if seq]
         if not str_seqs:
-            conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
+            _clear_derived(conn, version_id)
             refresh_feature_tree(
                 conn, library_id, version_id, include_ambiguous=include_ambiguous
             )
@@ -284,35 +282,24 @@ def mine_patterns(
     mined = miner.frequent(minsup, closed=True)
     results: list[dict] = []
     wanted: list[str] = []
+    batch: list[tuple] = []
     for support, pattern in mined or []:
         names = _norm.decode_pattern(list(pattern), reverse)
         payload = _json.dumps(names, ensure_ascii=False)
         wanted.append(payload)
-        conn.execute(
+        batch.append((library_id, version_id, payload, int(support)))
+        results.append({"pattern": names, "support": int(support), "is_closed": 1})
+    if batch:
+        conn.executemany(
             "INSERT INTO seq_patterns(library_id, version_id, pattern, support, is_closed)"
             " VALUES(?, ?, ?, ?, 1)"
             " ON CONFLICT(version_id, pattern) DO UPDATE SET support=excluded.support,"
             " is_closed=1",
-            (library_id, version_id, payload, int(support)),
+            batch,
         )
-        results.append({"pattern": names, "support": int(support), "is_closed": 1})
-    if wanted:
-        placeholders = ",".join("?" for _ in wanted)
-        conn.execute(
-            f"DELETE FROM seq_patterns WHERE version_id=?"
-            f" AND pattern NOT IN ({placeholders})",
-            (version_id, *wanted),
-        )
-        if _label_table_ready(conn):
-            conn.execute(
-                f"DELETE FROM pattern_labels WHERE version_id=?"
-                f" AND pattern NOT IN ({placeholders})",
-                (version_id, *wanted),
-            )
-    else:
-        conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
-        if _label_table_ready(conn):
-            conn.execute("DELETE FROM pattern_labels WHERE version_id=?", (version_id,))
+    _delete_not_in(conn, "seq_patterns", version_id, "pattern", wanted)
+    if _label_table_ready(conn):
+        _delete_not_in(conn, "pattern_labels", version_id, "pattern", wanted)
     refresh_feature_tree(
         conn, library_id, version_id, include_ambiguous=include_ambiguous
     )
@@ -477,6 +464,48 @@ async def induce_labels(
     patterns = reader.list_patterns(
         library, version, ecosystem, limit=max(1, want_topn)
     )
+    # One grouped shapes query for every API in the batch instead of one per API.
+    wanted_apis = sorted(
+        {a for entry in patterns for a in (entry.get("pattern") or []) if a}
+    )
+    prefetched: dict[str, list[dict[str, Any]]] = {a: [] for a in wanted_apis}
+    if wanted_apis:
+        from libref.services.libraries import mining_version_ids
+
+        scope_ids = mining_version_ids(conn, library, version, ecosystem)
+        if scope_ids:
+            base = "(rs.status IS NULL OR rs.status != 'conflict')"
+            shape_filter = (
+                base
+                if include_ambiguous
+                else (
+                    f"{base} AND (call_instances.confidence != 'AMBIGUOUS'"
+                    " OR rs.status='approved')"
+                )
+            )
+            in_v = ",".join("?" for _ in scope_ids)
+            in_a = ",".join("?" for _ in wanted_apis)
+            try:
+                shape_rows = conn.execute(
+                    "SELECT callee_name, args, count(*) FROM call_instances"
+                    " LEFT JOIN review_status rs ON rs.entity_type='call_instance'"
+                    " AND rs.entity_id=call_instances.id"
+                    f" WHERE version_id IN ({in_v}) AND callee_name IN ({in_a})"
+                    f" AND {shape_filter}"
+                    " GROUP BY callee_name, args ORDER BY callee_name, 3 DESC",
+                    (*scope_ids, *wanted_apis),
+                ).fetchall()
+            except Exception:  # noqa: BLE001 -- shapes are advisory for prompts
+                shape_rows = []
+            for api_name, raw, count in shape_rows:
+                slot = prefetched.get(str(api_name))
+                if slot is None or len(slot) >= 2:
+                    continue
+                try:
+                    parsed = _json.loads(raw) if raw else []
+                except ValueError:
+                    parsed = [raw]
+                slot.append({"args": parsed, "count": int(count)})
     labeled = 0
     failed = 0
     skipped = 0
@@ -495,18 +524,7 @@ async def induce_labels(
         shapes: list[dict[str, Any]] = []
         siblings: list[str] = []
         for api in names:
-            try:
-                api_shapes = reader.arg_shapes(
-                    api,
-                    library,
-                    version,
-                    ecosystem,
-                    limit=2,
-                    include_ambiguous=include_ambiguous,
-                )
-            except Exception:  # noqa: BLE001 -- shapes are advisory for prompts
-                api_shapes = []
-            for shape in api_shapes:
+            for shape in prefetched.get(api, []):
                 shapes.append(
                     {
                         "api": api,

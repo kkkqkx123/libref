@@ -159,14 +159,15 @@ def sweep_repo(
     rows = conn.execute(
         "SELECT path, fp, cfg_version FROM ast_cache WHERE repo=?", (repo,)
     ).fetchall()
-    dead: list[tuple[str, str, int]] = []
-    for path, fp, cfg_version in rows:
-        want = live.get(path)
-        if want is None or want != (fp, int(cfg_version)):
-            dead.append((path, fp, int(cfg_version)))
-    for path, fp, cfg_version in dead:
-        conn.execute(
+    dead = [
+        (path, fp, int(cfg_version))
+        for path, fp, cfg_version in rows
+        if live.get(path) != (fp, int(cfg_version))
+    ]
+    for start in range(0, len(dead), 200):
+        chunk = dead[start : start + 200]
+        conn.executemany(
             "DELETE FROM ast_cache WHERE repo=? AND path=? AND fp=? AND cfg_version=?",
-            (repo, path, fp, cfg_version),
+            [(repo, path, fp, cfg_version) for path, fp, cfg_version in chunk],
         )
     return len(dead)

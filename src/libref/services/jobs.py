@@ -37,6 +37,11 @@ _STALE_AFTER = 600.0
 
 
 def summarize_result(value: object) -> object:
+    """Summarize a job payload for storage; long lists are truncated.
+
+    The persisted job result is a summary for status display, not the full
+    output. Full outputs live in their domain tables.
+    """
     if isinstance(value, dict):
         return {str(k): summarize_result(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
@@ -75,11 +80,14 @@ class JobManager:
     # ── submit / query ──
 
     def submit(self, kind: str, params: dict[str, Any] | None = None) -> int:
-        cur = self._conn.execute(
-            "INSERT INTO jobs(kind, params) VALUES(?, ?)",
-            (kind, json.dumps(params or {}, ensure_ascii=False)),
-        )
-        self._conn.commit()
+        from libref.db.conn import write_lock
+
+        with write_lock(self._conn):
+            cur = self._conn.execute(
+                "INSERT INTO jobs(kind, params) VALUES(?, ?)",
+                (kind, json.dumps(params or {}, ensure_ascii=False)),
+            )
+            self._conn.commit()
         assert cur.lastrowid is not None
         job_id = int(cur.lastrowid)
         self._queue.put_nowait(job_id)
@@ -256,7 +264,7 @@ class JobManager:
             r[0]
             for r in self._conn.execute(
                 "SELECT id FROM jobs WHERE status='running' AND ("
-                "heartbeat_at IS NULL OR ? - heartbeat_at > ?)",
+                "heartbeat_at IS NULL OR ? - heartbeat_at > ?) ORDER BY id",
                 (time.time(), self._stale_after),
             )
         ]
@@ -274,8 +282,11 @@ class JobManager:
     # ── internal ──
 
     def _update(self, job_id: int, **fields: Any) -> None:
+        from libref.db.conn import write_lock
+
         sets = ", ".join(f"{k}=?" for k in fields)
-        self._conn.execute(
-            f"UPDATE jobs SET {sets} WHERE id=?", (*fields.values(), job_id)
-        )
-        self._conn.commit()
+        with write_lock(self._conn):
+            self._conn.execute(
+                f"UPDATE jobs SET {sets} WHERE id=?", (*fields.values(), job_id)
+            )
+            self._conn.commit()

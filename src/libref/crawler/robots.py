@@ -129,13 +129,16 @@ class RobotsChecker:
         return body
 
     def _store(self, key: str, body: str) -> None:
-        self._conn.execute(
-            "INSERT INTO robots_cache(host, body, body_md5, fetched_at) VALUES(?,?,?,?) "
-            "ON CONFLICT(host) DO UPDATE SET body=excluded.body, body_md5=excluded.body_md5, "
-            "fetched_at=excluded.fetched_at",
-            (key, body, hashlib.md5(body.encode()).hexdigest(), time.time()),
-        )
-        self._conn.commit()
+        from libref.db.conn import write_lock
+
+        with write_lock(self._conn):
+            self._conn.execute(
+                "INSERT INTO robots_cache(host, body, body_md5, fetched_at) VALUES(?,?,?,?) "
+                "ON CONFLICT(host) DO UPDATE SET body=excluded.body, body_md5=excluded.body_md5, "
+                "fetched_at=excluded.fetched_at",
+                (key, body, hashlib.md5(body.encode()).hexdigest(), time.time()),
+            )
+            self._conn.commit()
 
     async def _fetch_body(self, url: str) -> str | None:
         import httpx

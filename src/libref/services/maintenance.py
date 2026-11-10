@@ -147,11 +147,11 @@ def check_fts(conn, *, sample: int = 20) -> dict[str, int]:
         if token is None:
             continue
         sampled += 1
-        hits = conn.execute(
-            "SELECT rowid FROM documents_fts WHERE documents_fts MATCH ? LIMIT -1",
-            (token,),
-        ).fetchall()
-        if int(doc_id) not in {int(r[0]) for r in hits}:
+        hit = conn.execute(
+            "SELECT 1 FROM documents_fts WHERE rowid=? AND documents_fts MATCH ? LIMIT 1",
+            (int(doc_id), token),
+        ).fetchone()
+        if hit is None:
             missing += 1
     return {
         "documents": docs,
@@ -182,16 +182,18 @@ async def reconcile_version(conn, settings, vec_store, embed, version_id: int) -
         vec_store.delete_version(version_id)
         rows = conn.execute(
             "SELECT id, library_id, version_id, content, metadata "
-            "FROM documents WHERE version_id=? ORDER BY id",
+            "FROM documents WHERE version_id=?"
+            " AND (json_extract(metadata, '$.chunk_path') IS NULL"
+            " OR json_extract(metadata, '$.chunk_path') != 'bm25')"
+            " ORDER BY id",
             (version_id,),
         ).fetchall()
-        embeddable = [r for r in rows if _row_embeddable(r[4])]
-        points = await _embed_rows(embeddable, settings, embed)
+        points = await _embed_rows(rows, settings, embed)
         if points:
             vec_store.upsert_batch(points)
         _record_version(conn, version_id, model, dim)
         return {
-            "sqlite_embeddable": len(embeddable),
+            "sqlite_embeddable": len(rows),
             "vector_before": 0,
             "vector_after": len(points),
             "missing": len(points),
@@ -400,9 +402,15 @@ class MaintenanceService:
             settings.embedding_dim,
         )
         vec.delete_version(version_id)
+        total = self._conn.execute(
+            "SELECT count(*) FROM documents WHERE version_id=?", (version_id,)
+        ).fetchone()
         rows = self._conn.execute(
             "SELECT id, library_id, version_id, content, metadata "
-            "FROM documents WHERE version_id=? ORDER BY id",
+            "FROM documents WHERE version_id=?"
+            " AND (json_extract(metadata, '$.chunk_path') IS NULL"
+            " OR json_extract(metadata, '$.chunk_path') != 'bm25')"
+            " ORDER BY id",
             (version_id,),
         ).fetchall()
         if not rows:
@@ -412,8 +420,8 @@ class MaintenanceService:
                 settings.embedding_model,
                 int(settings.embedding_dim),
             )
-            return {"docs": 0, "upserted": 0}
-        embeddable = [r for r in rows if _row_embeddable(r[4])]
+            return {"docs": int(total[0]) if total else 0, "upserted": 0}
+        embeddable = rows
         upserted = 0
         hard = int(settings.chunk_embed_max_tokens)
         for i in range(0, len(embeddable), settings.embed_batch):
@@ -438,7 +446,7 @@ class MaintenanceService:
             settings.embedding_model,
             int(settings.embedding_dim),
         )
-        return {"docs": len(rows), "upserted": upserted}
+        return {"docs": int(total[0]) if total else 0, "upserted": upserted}
 
     def reembed_library(
         self,

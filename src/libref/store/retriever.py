@@ -43,7 +43,7 @@ def _version_ids(
         params.append(version)
     where = ("WHERE " + " AND ".join(filters)) if filters else ""
     rows = conn.execute(
-        f"SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id {where}",
+        f"SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id {where} ORDER BY v.id",
         params,
     ).fetchall()
     return [int(r[0]) for r in rows]
@@ -74,7 +74,10 @@ def _fts_candidates(
         filters.append("v.version = ?")
         params.append(version)
     where = ("AND " + " AND ".join(filters) + " ") if filters else ""
-    params.append(limit)
+    # Join filters apply after the match, so a selective filter can starve the
+    # limit even when more matches exist. Over-fetch under filters to recover recall.
+    budget = limit if not filters else max(limit, min(limit * 5, 500))
+    params.append(budget)
     rows = conn.execute(
         "SELECT d.id FROM documents_fts "
         "JOIN documents d ON d.id = documents_fts.rowid "
@@ -148,19 +151,23 @@ def _fetch_details(
 
 
 def alignment_key(meta: dict[str, Any] | None, url: str | None, doc_id: int) -> str:
-    """Cross-path alignment key: entities first, document section next, chunk id as fallback."""
+    """Cross-path alignment key: document section first, chunk id next, entity as fallback.
+
+    Section-first keeps twin chunks from both lanes together while unrelated
+    sections sharing one entity no longer collapse each other.
+    """
     data = meta or {}
-    entities = data.get("entities") or []
-    if entities:
-        first = str(entities[0]).strip()
-        if first:
-            return f"e:{first}"
     group = str(data.get("source_group_id") or "").strip()
     if group:
         return f"s:{url or ''}\x00{group}"
     chunk_id = str(data.get("chunk_id") or "").strip()
     if chunk_id:
         return f"c:{chunk_id}"
+    entities = data.get("entities") or []
+    if entities:
+        first = str(entities[0]).strip()
+        if first:
+            return f"e:{first}"
     return f"c:{doc_id}"
 
 
@@ -237,17 +244,26 @@ def _cluster_sets(
 def _current_vids(conn, settings, vids: list[int]) -> tuple[list[int], bool]:
     """Split version ids into vector-searchable ones; drifted ones are skipped."""
     from libref.config import setting_or_default
-    from libref.store.vec_store import read_version_meta
 
+    if not vids:
+        return [], False
     model = setting_or_default(settings, "embedding_model")
     dim = int(setting_or_default(settings, "embedding_dim"))
+    marks = ",".join("?" for _ in vids)
+    known = {
+        int(r[0]): (r[1], int(r[2]))
+        for r in conn.execute(
+            f"SELECT version_id, model, dim FROM vec_version_meta WHERE version_id IN ({marks})",
+            [int(v) for v in vids],
+        ).fetchall()
+    }
     current: list[int] = []
     skipped = False
     for vid in vids:
-        old_model, old_dim = read_version_meta(conn, int(vid))
-        if old_model is None and old_dim is None:
+        record = known.get(int(vid))
+        if record is None:
             current.append(int(vid))
-        elif (old_model, old_dim) != (model, dim):
+        elif (record[0], record[1]) != (model, dim):
             skipped = True
         else:
             current.append(int(vid))
@@ -444,9 +460,14 @@ class HybridRetriever:
         details = _fetch_details(
             self._conn, head, query, snippet_radius=radius, snippet_cap=cap
         )
-        texts = [details[d]["content"] for d in head if d in details]
-        if len(texts) != len(head):
-            return fused, degraded, {}
+        # Drop vanished rows only; one vector orphan no longer blocks the whole window.
+        vanished = {d for d in head if d not in details}
+        if vanished:
+            head = [d for d in head if d in details]
+            tail = [d for d in tail if d not in vanished]
+        if not head:
+            return head + tail, degraded, {}
+        texts = [details[d]["content"] for d in head]
         try:
             scored = await self._rerank(query, texts, len(head))
         except Exception:  # noqa: BLE001 -- rerank failure marks degraded, keep fused order
@@ -480,8 +501,9 @@ class HybridRetriever:
         cluster_alpha = float(setting_or_default(self._settings, "cluster_alpha"))
         rrf = self._rrf_scores(fts_ids, vec_ids)
         vids = sorted({details[d]["version_id"] for d in fused if d in details})
-        patterns = _pattern_supports(self._conn, vids)
-        clusters = _cluster_sets(self._conn, vids)
+        # Skip the mining side tables entirely when both bonuses are disabled.
+        patterns = _pattern_supports(self._conn, vids) if raw_alpha > 0 else {}
+        clusters = _cluster_sets(self._conn, vids) if cluster_alpha > 0 else {}
         health_rows = [{"support": s} for plist in patterns.values() for _, s in plist]
         health = reuse_diversity(
             health_rows,
@@ -591,26 +613,65 @@ class HybridRetriever:
             return results
         preview_cap = int(setting_or_default(self._settings, "window_preview_cap"))
         try:
-            from libref.store.document_store import DocumentStore
-
-            store = DocumentStore(self._conn)
-            by_id = {
-                int(r["id"]): r
+            locs = {
+                int(r[0]): (int(r[1]), int(r[2]), str(r[3] or "embedding"))
                 for r in self._conn.execute(
-                    f"SELECT id, page_id, sort_order FROM documents WHERE id IN ({','.join('?' for _ in results)})",
+                    f"SELECT d.id, d.page_id, d.sort_order,"
+                    f" COALESCE(json_extract(d.metadata, '$.chunk_path'), 'embedding')"
+                    f" FROM documents d WHERE d.id IN ({','.join('?' for _ in results)})",
                     [r["id"] for r in results],
                 ).fetchall()
             }
+            by_page: dict[int, list[int]] = {}
+            for doc_id, (page_id, _order, _lane) in locs.items():
+                by_page.setdefault(page_id, []).append(doc_id)
+            windows: dict[int, list[dict[str, Any]]] = {}
+            for page_id, doc_ids in by_page.items():
+                orders = sorted(locs[d][1] for d in doc_ids)
+                lanes = {locs[d][2] for d in doc_ids}
+                lo, hi = orders[0] - radius, orders[-1] + radius
+                marks = ",".join("?" for _ in lanes)
+                rows = self._conn.execute(
+                    "SELECT id, url, content, metadata, sort_order FROM documents "
+                    "WHERE page_id=? AND sort_order BETWEEN ? AND ? "
+                    f"AND COALESCE(json_extract(metadata, '$.chunk_path'), 'embedding') IN ({marks}) "
+                    "ORDER BY sort_order",
+                    (page_id, lo, hi, *sorted(lanes)),
+                ).fetchall()
+                import json as _json
+
+                by_order: dict[int, list[dict[str, Any]]] = {}
+                for wid, wurl, wcontent, wmeta, worder in rows:
+                    try:
+                        parsed = _json.loads(wmeta) if wmeta else {}
+                    except ValueError:
+                        parsed = {}
+                    by_order.setdefault(int(worder), []).append(
+                        {
+                            "id": int(wid),
+                            "url": wurl,
+                            "content": wcontent,
+                            "metadata": parsed,
+                            "sort_order": int(worder),
+                        }
+                    )
+                for doc_id in doc_ids:
+                    order = locs[doc_id][1]
+                    lane = locs[doc_id][2]
+                    picked = [
+                        w
+                        for o in range(order - radius, order + radius + 1)
+                        for w in by_order.get(o, [])
+                        if str(
+                            (w["metadata"] or {}).get("chunk_path", "embedding")
+                            or "embedding"
+                        )
+                        == lane
+                    ]
+                    windows[doc_id] = picked
             expanded: list[dict[str, Any]] = []
             for item in results:
-                loc = by_id.get(int(item["id"]))
-                if loc is None:
-                    expanded.append(item)
-                    continue
-                hit_path = str(item.get("chunk_path", "embedding") or "embedding")
-                window = store.get_window(
-                    int(loc[1]), int(loc[2]), radius, chunk_path=hit_path
-                )
+                window = windows.get(int(item["id"]), [])
                 if len(window) > 1:
                     item = dict(item)
                     item["window"] = [

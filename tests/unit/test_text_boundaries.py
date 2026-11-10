@@ -128,7 +128,7 @@ def test_pattern_evidence_marks_gaps_and_hits():
         "CREATE TABLE call_instances(id INTEGER PRIMARY KEY, version_id INTEGER,"
         " callee_name TEXT, args TEXT, caller_file TEXT, caller TEXT,"
         " confidence TEXT, line_start INTEGER, line_end INTEGER,"
-        " call_order INTEGER, start_byte INTEGER)"
+        " call_order INTEGER, start_byte INTEGER, scope TEXT)"
     )
     conn.execute(
         "CREATE TABLE review_status(entity_type TEXT, entity_id INTEGER, status TEXT)"
@@ -144,8 +144,8 @@ def test_pattern_evidence_marks_gaps_and_hits():
     for idx, (callee, ls, le) in enumerate(calls):
         conn.execute(
             "INSERT INTO call_instances(version_id, callee_name, args, caller_file,"
-            " caller, confidence, line_start, line_end, call_order, start_byte)"
-            " VALUES(1, ?, '[]', 'f.py', 'm.f', 'EXTRACTED', ?, ?, ?, 0)",
+            " caller, confidence, line_start, line_end, call_order, start_byte, scope)"
+            " VALUES(1, ?, '[]', 'f.py', 'm.f', 'EXTRACTED', ?, ?, ?, 0, 'f.py' || char(0) || 'm.f')",
             (callee, ls, le, idx),
         )
     conn.commit()

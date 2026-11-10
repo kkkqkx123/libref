@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from libref.db.schema import (
     AST_CHUNK_RELATION_SQL,
+    CALL_SCOPE_SQL,
     FEATURE_TREE_CLUSTER_SQL,
     GOVERNANCE_SQL,
     INITIAL_SCHEMA_SQL,
@@ -15,6 +16,7 @@ from libref.db.schema import (
     MINING_REVIEW_SCHEMA_SQL,
     PAGES_CONTENT_HASH_SQL,
     PATTERN_LABEL_SQL,
+    QUERY_SUPPORT_SQL,
     REPOS_ASTCACHE_SQL,
     VEC_VERSION_META_SQL,
     VECTOR_META_SQL,
@@ -40,6 +42,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(8, "governance-tables", GOVERNANCE_SQL),
     Migration(9, "vec-version-meta", VEC_VERSION_META_SQL),
     Migration(10, "pattern-labels", PATTERN_LABEL_SQL),
+    Migration(11, "query-support", QUERY_SUPPORT_SQL),
+    Migration(12, "call-scope", CALL_SCOPE_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

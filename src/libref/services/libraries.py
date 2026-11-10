@@ -105,6 +105,36 @@ class LibraryService:
         registry_confirmed: bool = True,
     ) -> tuple[int, int]:
         """Ensure library/version rows exist, return (library_id, version_id)."""
+        from libref.db.conn import write_lock
+
+        guard = write_lock(self._conn)
+        guard.acquire()
+        try:
+            return self._ensure_locked(
+                library,
+                version,
+                ecosystem,
+                homepage=homepage,
+                docs_url=docs_url,
+                repo_url=repo_url,
+                resolved_from=resolved_from,
+                registry_confirmed=registry_confirmed,
+            )
+        finally:
+            guard.release()
+
+    def _ensure_locked(
+        self,
+        library: str,
+        version: str,
+        ecosystem: str = "custom",
+        *,
+        homepage: str | None = None,
+        docs_url: str | None = None,
+        repo_url: str | None = None,
+        resolved_from: str | None = None,
+        registry_confirmed: bool = True,
+    ) -> tuple[int, int]:
         self._conn.execute(
             "INSERT INTO libraries(ecosystem, name) VALUES(?,?) "
             "ON CONFLICT(ecosystem, name) DO NOTHING",

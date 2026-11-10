@@ -77,28 +77,36 @@ class VersionGuard:
                 self._beat_task.cancel()
         finally:
             try:
-                self._conn.execute(
-                    "DELETE FROM version_locks WHERE version_key=? AND owner=?",
-                    (self._key, self._owner),
-                )
-                self._conn.commit()
+                from libref.db.conn import write_lock as _guard
+
+                with _guard(self._conn):
+                    self._conn.execute(
+                        "DELETE FROM version_locks WHERE version_key=? AND owner=?",
+                        (self._key, self._owner),
+                    )
+                    self._conn.commit()
             except Exception:  # noqa: BLE001, S110 — best-effort lock cleanup; release follows regardless
                 pass
             self._mem.release()
         return False
 
     async def _claim(self) -> None:
+        import sqlite3 as _sqlite3
+
+        from libref.db.conn import write_lock as _guard
+
         ensure_version_locks(self._conn)
         while True:
             now = time.time()
             try:
-                self._conn.execute(
-                    "INSERT INTO version_locks(version_key, owner, heartbeat_at) VALUES(?,?,?)",
-                    (self._key, self._owner, now),
-                )
-                self._conn.commit()
+                with _guard(self._conn):
+                    self._conn.execute(
+                        "INSERT INTO version_locks(version_key, owner, heartbeat_at) VALUES(?,?,?)",
+                        (self._key, self._owner, now),
+                    )
+                    self._conn.commit()
                 return
-            except Exception:  # noqa: BLE001 — lock contention is expected; retry via the loop below
+            except _sqlite3.IntegrityError:
                 try:
                     self._conn.rollback()
                 except Exception:  # noqa: BLE001, S110 — nothing left to roll back
@@ -113,25 +121,29 @@ class VersionGuard:
             if owner == self._owner:
                 return
             if now - heartbeat > self._stale_after:
-                cur = self._conn.execute(
-                    "UPDATE version_locks SET owner=?, heartbeat_at=? WHERE version_key=? AND heartbeat_at=?",
-                    (self._owner, now, self._key, heartbeat),
-                )
-                self._conn.commit()
+                with _guard(self._conn):
+                    cur = self._conn.execute(
+                        "UPDATE version_locks SET owner=?, heartbeat_at=? WHERE version_key=? AND heartbeat_at=?",
+                        (self._owner, now, self._key, heartbeat),
+                    )
+                    self._conn.commit()
                 if cur.rowcount > 0:
                     return
             await asyncio.sleep(0.2)
 
     async def _beat_loop(self) -> None:
+        from libref.db.conn import write_lock as _guard
+
         try:
             while True:
                 await asyncio.sleep(max(1.0, self._stale_after / 6.0))
                 try:
-                    self._conn.execute(
-                        "UPDATE version_locks SET heartbeat_at=? WHERE version_key=? AND owner=?",
-                        (time.time(), self._key, self._owner),
-                    )
-                    self._conn.commit()
+                    with _guard(self._conn):
+                        self._conn.execute(
+                            "UPDATE version_locks SET heartbeat_at=? WHERE version_key=? AND owner=?",
+                            (time.time(), self._key, self._owner),
+                        )
+                        self._conn.commit()
                 except Exception:  # noqa: BLE001, S112 — heartbeat failure retries on the next tick
                     continue
         except asyncio.CancelledError:
@@ -160,11 +172,14 @@ class VersionGuardSync:
     def __exit__(self, *exc):
         try:
             try:
-                self._conn.execute(
-                    "DELETE FROM version_locks WHERE version_key=? AND owner=?",
-                    (self._key, self._owner),
-                )
-                self._conn.commit()
+                from libref.db.conn import write_lock as _guard
+
+                with _guard(self._conn):
+                    self._conn.execute(
+                        "DELETE FROM version_locks WHERE version_key=? AND owner=?",
+                        (self._key, self._owner),
+                    )
+                    self._conn.commit()
             except Exception:  # noqa: BLE001, S110 — best-effort lock cleanup; release follows regardless
                 pass
         finally:
@@ -172,17 +187,22 @@ class VersionGuardSync:
         return False
 
     def _claim(self) -> None:
+        import sqlite3 as _sqlite3
+
+        from libref.db.conn import write_lock as _guard
+
         ensure_version_locks(self._conn)
         while True:
             now = time.time()
             try:
-                self._conn.execute(
-                    "INSERT INTO version_locks(version_key, owner, heartbeat_at) VALUES(?,?,?)",
-                    (self._key, self._owner, now),
-                )
-                self._conn.commit()
+                with _guard(self._conn):
+                    self._conn.execute(
+                        "INSERT INTO version_locks(version_key, owner, heartbeat_at) VALUES(?,?,?)",
+                        (self._key, self._owner, now),
+                    )
+                    self._conn.commit()
                 return
-            except Exception:  # noqa: BLE001 — lock contention is expected; retry via the loop below
+            except _sqlite3.IntegrityError:
                 try:
                     self._conn.rollback()
                 except Exception:  # noqa: BLE001, S110 — nothing left to roll back
@@ -197,11 +217,12 @@ class VersionGuardSync:
             if owner == self._owner:
                 return
             if now - heartbeat > self._stale_after:
-                cur = self._conn.execute(
-                    "UPDATE version_locks SET owner=?, heartbeat_at=? WHERE version_key=? AND heartbeat_at=?",
-                    (self._owner, now, self._key, heartbeat),
-                )
-                self._conn.commit()
+                with _guard(self._conn):
+                    cur = self._conn.execute(
+                        "UPDATE version_locks SET owner=?, heartbeat_at=? WHERE version_key=? AND heartbeat_at=?",
+                        (self._owner, now, self._key, heartbeat),
+                    )
+                    self._conn.commit()
                 if cur.rowcount > 0:
                     return
             time.sleep(0.2)

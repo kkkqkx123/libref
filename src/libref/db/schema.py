@@ -302,6 +302,27 @@ CREATE TABLE api_clusters(
 CREATE INDEX idx_api_clusters_version ON api_clusters(version_id, cluster_id);
 """
 
+# ── Query support: url lookups, review state scan, job recovery, embeddable filter ──
+QUERY_SUPPORT_SQL = """
+CREATE INDEX IF NOT EXISTS idx_pages_url ON pages(url);
+CREATE INDEX IF NOT EXISTS idx_documents_url ON documents(url);
+CREATE INDEX IF NOT EXISTS idx_documents_group
+  ON documents(url, json_extract(metadata, '$.source_group_id'));
+CREATE INDEX IF NOT EXISTS idx_documents_chunk_path
+  ON documents(version_id, json_extract(metadata, '$.chunk_path'));
+CREATE INDEX IF NOT EXISTS idx_review_pending
+  ON review_status(entity_type, status, updated_at, entity_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_recovery ON jobs(status, heartbeat_at);
+"""
+
+# ── Call scope key: persisted grouping identity so reads never recompute it per row ──
+CALL_SCOPE_SQL = """
+ALTER TABLE call_instances ADD COLUMN scope TEXT;
+UPDATE call_instances SET scope = caller_file || char(0) || COALESCE(caller, '')
+  WHERE scope IS NULL;
+CREATE INDEX IF NOT EXISTS idx_call_instances_scope_key ON call_instances(version_id, scope);
+"""
+
 # ── Pattern-level semantic labels: rebuildable model output, never mixed with static facts ──
 PATTERN_LABEL_SQL = """
 CREATE TABLE pattern_labels(
