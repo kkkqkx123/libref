@@ -1,0 +1,10 @@
+[
+  {
+    "id": "blank-runs",
+    "raw": "Registry description.\n\n\n\nSecond paragraph after blanks.\n\nThird."
+  },
+  {
+    "id": "trailing-spaces",
+    "raw": "Line with trailing spaces   \nSecond line   \n"
+  }
+]

@@ -1,0 +1,11 @@
+{
+  "pattern": ["a.open", "a.write"],
+  "caller_file": "f.py",
+  "caller": "m.f",
+  "calls": [
+    {"callee": "a.open", "args": ["\"x\""], "line_start": 1, "line_end": 1, "confidence": "EXTRACTED"},
+    {"callee": "a.noise", "args": ["1"], "line_start": 2, "line_end": 2, "confidence": "EXTRACTED"},
+    {"callee": "a.skip", "args": ["2"], "line_start": 3, "line_end": 3, "confidence": "EXTRACTED"},
+    {"callee": "a.write", "args": ["\"y\""], "line_start": 4, "line_end": 4, "confidence": "EXTRACTED"}
+  ]
+}

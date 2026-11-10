@@ -1,0 +1,30 @@
+[
+  {
+    "id": "hit-basic",
+    "content": "hello libref world, libref helps manage dependencies",
+    "query": "libref",
+    "radius": 12,
+    "cap": 120
+  },
+  {
+    "id": "hit-truncated",
+    "content": "alpha\nbeta gamma delta epsilon zeta eta theta iota kappa\nlibref tail marker here",
+    "query": "tail",
+    "radius": 8,
+    "cap": 90
+  },
+  {
+    "id": "empty-content",
+    "content": "   ",
+    "query": "libref",
+    "radius": 8,
+    "cap": 40
+  },
+  {
+    "id": "multi-token",
+    "content": "use uv sync then uv run pytest to verify the setup",
+    "query": "uv pytest",
+    "radius": 16,
+    "cap": 100
+  }
+]

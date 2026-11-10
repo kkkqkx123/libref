@@ -18,15 +18,18 @@ def material_block(
 ) -> str:
     """Render one numbered material as a self-locating unit with verbatim body."""
     body = truncate_material(full, limit) if full else (item.get("snippet") or "")
+    doc = item.get("id")
+    page_id = item.get("page_id")
+    order = item.get("sort_order")
     attrs = {
         "n": str(index),
         "url": str(item.get("url") or ""),
         "title": str(item.get("title") or item.get("url") or ""),
-        "doc": str(item.get("id") or ""),
+        "doc": "" if doc is None else str(doc),
         "chunk": str(item.get("chunk_id", "") or ""),
         "group": str(item.get("source_group_id", "") or ""),
-        "page": str(item.get("page_id") or ""),
-        "order": str(item.get("sort_order") or ""),
+        "page": "" if page_id is None else str(page_id),
+        "order": "" if order is None else str(order),
     }
     return unit_tag(attrs, body)
 

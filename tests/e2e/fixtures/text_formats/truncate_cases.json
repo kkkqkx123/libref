@@ -1,0 +1,17 @@
+[
+  {
+    "id": "fence-cut-inside",
+    "limit": 30,
+    "body": "intro\n```python\nprint(1)\nprint(2)\nprint(3)\n```\ntail words here"
+  },
+  {
+    "id": "plain-long",
+    "limit": 40,
+    "body": "first line stays\nsecond line stays\nthird line is cut away entirely\nfourth line gone"
+  },
+  {
+    "id": "short-no-cut",
+    "limit": 200,
+    "body": "short body\n```bash\nuv run pytest\n```"
+  }
+]
