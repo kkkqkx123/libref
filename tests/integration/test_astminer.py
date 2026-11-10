@@ -242,6 +242,145 @@ def test_tie_without_signal_is_ambiguous():
     assert conf == "AMBIGUOUS"
 
 
+def test_param_shadow_blocks_global_match():
+    from libref.astminer.models import ApiDeclRecord, RawCall
+
+    def _decl(qual, path, params=()):
+        return ApiDeclRecord(
+            qualified_name=qual,
+            kind="function",
+            file=path,
+            line_start=1,
+            line_end=2,
+            params=list(params),
+        )
+
+    decls = [_decl("b.foo", "b.py"), _decl("b.caller", "b.py", params=["foo"])]
+    raw = [
+        RawCall(
+            raw_callee="foo",
+            caller_file="b.py",
+            caller="b.caller",
+            line_start=1,
+            line_end=1,
+        )
+    ]
+    resolved = ast_resolution.resolve_calls(decls, {}, raw, "r")
+    assert resolved[0].confidence == "AMBIGUOUS"
+
+
+def test_directory_affinity_picks_unique_winner():
+    from libref.astminer.models import ApiDeclRecord, RawCall
+
+    def _decl(qual, path):
+        return ApiDeclRecord(
+            qualified_name=qual,
+            kind="function",
+            file=path,
+            line_start=1,
+            line_end=2,
+        )
+
+    decls = [
+        _decl("pkg.mod_a.foo", "pkg/mod_a.py"),
+        _decl("other.mod_b.foo", "other/mod_b.py"),
+    ]
+    raw = [
+        RawCall(
+            raw_callee="foo",
+            caller_file="pkg/caller.py",
+            caller="pkg.caller",
+            line_start=1,
+            line_end=1,
+        )
+    ]
+    resolved = ast_resolution.resolve_calls(decls, {}, raw, "r")
+    assert resolved[0].callee == "pkg.mod_a.foo"
+    assert resolved[0].confidence == "INFERRED"
+
+
+def test_stdlib_alias_target_is_ambiguous():
+    from libref.astminer.models import ApiDeclRecord, RawCall
+
+    decls = [
+        ApiDeclRecord(
+            qualified_name="m.f",
+            kind="function",
+            file="m.py",
+            line_start=1,
+            line_end=2,
+        )
+    ]
+    raw = [
+        RawCall(
+            raw_callee="os.path.join",
+            caller_file="m.py",
+            caller="m.f",
+            line_start=1,
+            line_end=1,
+        )
+    ]
+    resolved = ast_resolution.resolve_calls(decls, {"m.py": [("os", "os")]}, raw, "r")
+    assert resolved[0].callee == "os.path.join"
+    assert resolved[0].confidence == "AMBIGUOUS"
+    third = [
+        RawCall(
+            raw_callee="np.array",
+            caller_file="m.py",
+            caller="m.f",
+            line_start=2,
+            line_end=2,
+        )
+    ]
+    kept = ast_resolution.resolve_calls(decls, {"m.py": [("np", "numpy")]}, third, "r")
+    assert kept[0].callee == "numpy.array"
+    assert kept[0].confidence == "INFERRED"
+
+
+def test_receiver_param_type_resolves_method():
+    from libref.astminer.models import ApiDeclRecord, RawCall
+
+    decls = [
+        ApiDeclRecord(
+            qualified_name="m.Foo",
+            kind="class",
+            file="m.py",
+            line_start=1,
+            line_end=10,
+        ),
+        ApiDeclRecord(
+            qualified_name="m.Foo.bar",
+            kind="method",
+            file="m.py",
+            line_start=2,
+            line_end=4,
+        ),
+        ApiDeclRecord(
+            qualified_name="m.func",
+            kind="function",
+            file="m.py",
+            line_start=5,
+            line_end=8,
+            params=["x"],
+            param_types=["Foo"],
+        ),
+    ]
+    raw = [
+        RawCall(
+            raw_callee="x.bar",
+            receiver="x",
+            func="bar",
+            caller_file="m.py",
+            caller="m.func",
+            line_start=6,
+            line_end=6,
+        )
+    ]
+    resolved = ast_resolution.resolve_calls(decls, {}, raw, "r")
+    assert resolved[0].callee == "m.Foo.bar"
+    assert resolved[0].confidence == "EXTRACTED"
+
+
 def test_reexport_closure_expands_package_alias():
     mapping = {
         "pkg/__init__.py": {"start": "pkg.core.start"},
