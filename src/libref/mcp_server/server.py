@@ -10,7 +10,7 @@ from mcp.server.mcpserver import MCPServer
 from libref.config import LibrefSettings, load_settings
 from libref.crawler.registry import RegistryError
 from libref.observe import setup_logging
-from libref.services.factory import build_search_service
+from libref.services.factory import build_discovery_service, build_search_service
 from libref.services.libraries import LibraryService
 from libref.services.mining_read import MiningReadService
 from libref.services.pages import PageService
@@ -54,6 +54,7 @@ def build_mcp_server(
     setup_logging(resolve_settings)
     mcp = MCPServer("libref")
     search_svc, _gateway = build_search_service(conn, resolve_settings)
+    discovery_svc = build_discovery_service(conn, resolve_settings)
     pages = PageService(conn)
     catalog_svc = LibraryService(conn)
     mining = MiningReadService(conn)
@@ -69,6 +70,7 @@ def build_mcp_server(
         mode: Literal["hybrid", "precise"] = "hybrid",
         window_radius: int | None = None,
         expand_window: bool = False,
+        suggest: bool = False,
     ) -> dict[str, Any]:
         """Hybrid fused recall with degraded flag; precise uses exact full-text only."""
         if not query.strip():
@@ -100,7 +102,45 @@ def build_mcp_server(
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
             return _failed(str(exc))
-        return {"items": results, "count": len(results), "degraded": degraded}
+        out: dict[str, Any] = {
+            "items": results,
+            "count": len(results),
+            "degraded": degraded,
+        }
+        if suggest and not results:
+            try:
+                out["suggestions"] = await discovery_svc.search_async(
+                    library or query, ecosystem, limit
+                )
+            except ValueError as exc:
+                return _invalid(str(exc))
+            except RegistryError as exc:
+                out["suggestions"] = []
+                out["suggest_error"] = f"{exc.kind}: {exc}"
+            except Exception as exc:  # noqa: BLE001
+                return _failed(str(exc))
+        return out
+
+    @mcp.tool()
+    async def library_search(
+        query: str,
+        ecosystem: str | None = None,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        """Fuzzy library discovery across registries; reads and refreshes the discovery cache."""
+        if not query.strip():
+            return _invalid("query is empty")
+        bad = _check_limit(limit, low=1, high=100)
+        if bad is not None:
+            return _invalid(bad)
+        try:
+            return _items(await discovery_svc.search_async(query, ecosystem, limit))
+        except ValueError as exc:
+            return _invalid(str(exc))
+        except RegistryError as exc:
+            return {"error": exc.kind, "message": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            return _failed(str(exc))
 
     @mcp.tool()
     async def answer(

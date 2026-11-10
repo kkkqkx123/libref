@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from libref.db.schema import (
     AST_CHUNK_RELATION_SQL,
     CALL_SCOPE_SQL,
+    DISCOVERY_CACHE_SQL,
     FEATURE_TREE_CLUSTER_SQL,
     GOVERNANCE_SQL,
     INITIAL_SCHEMA_SQL,
@@ -44,6 +45,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(10, "pattern-labels", PATTERN_LABEL_SQL),
     Migration(11, "query-support", QUERY_SUPPORT_SQL),
     Migration(12, "call-scope", CALL_SCOPE_SQL),
+    Migration(13, "discovery-cache", DISCOVERY_CACHE_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

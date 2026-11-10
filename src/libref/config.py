@@ -107,6 +107,13 @@ class LibrefSettings(BaseSettings):
     )
     registry_overrides_file: Path | None = None
     registry_override_ttl_days: float = Field(default=180.0, ge=0)
+    # Library discovery config: fuzzy name search across registries; ranking is deterministic, no model involved.
+    # Auth tokens travel via environment variables only, never via files.
+    discovery_enabled: bool = True
+    discovery_topn: int = Field(default=10, ge=1, le=100)
+    discovery_cache_ttl_days: float = Field(default=1.0, ge=0)
+    discovery_offline: bool = False
+    discovery_github_token: str | None = None
     chat_model: str = "Qwen/Qwen3.5-4B"
     chat_enabled: bool = False
     chat_api_base: str = "https://api.siliconflow.cn/v1"
@@ -191,7 +198,9 @@ class LibrefSettings(BaseSettings):
         return self
 
 
-SECRET_FIELDS = frozenset({"embedding_api_key", "chat_api_key", "mcp_token"})
+SECRET_FIELDS = frozenset(
+    {"embedding_api_key", "chat_api_key", "mcp_token", "discovery_github_token"}
+)
 
 
 def setting_or_default(settings: LibrefSettings | None, name: str):
@@ -301,6 +310,14 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "registry_bases",
             "registry_overrides_file",
             "registry_override_ttl_days",
+        }
+    ),
+    "discovery": frozenset(
+        {
+            "discovery_enabled",
+            "discovery_topn",
+            "discovery_cache_ttl_days",
+            "discovery_offline",
         }
     ),
     "chat": frozenset(

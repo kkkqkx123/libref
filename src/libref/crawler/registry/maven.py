@@ -8,6 +8,7 @@ group:artifact, with case preserved to keep repository paths correct.
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from typing import Any
 
 from libref.crawler.registry import is_repo_host_url, sanitize_http_url
 
@@ -32,6 +33,39 @@ def normalize_maven_name(name: str) -> str:
 def split_maven_name(name: str) -> tuple[str, str]:
     group, _, artifact = normalize_maven_name(name).partition(":")
     return group, artifact
+
+
+MAVEN_SEARCH_URL = "https://search.maven.org/solrsearch/select"
+
+
+def maven_search_url(query: str, rows: int) -> str:
+    from urllib.parse import urlencode
+
+    return f"{MAVEN_SEARCH_URL}?{urlencode({'q': query.strip(), 'rows': max(1, rows), 'wt': 'json'})}"
+
+
+def parse_maven_search(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten Solr docs into ranking inputs; native order carries relevance."""
+    out: list[dict[str, Any]] = []
+    response = payload.get("response") or {}
+    for position, doc in enumerate(response.get("docs") or []):
+        group = str(doc.get("g") or "").strip()
+        artifact = str(doc.get("a") or "").strip()
+        if not group or not artifact:
+            continue
+        out.append(
+            {
+                "name": f"{group}:{artifact}",
+                "version": str(doc.get("latestVersion") or ""),
+                "description": "",
+                "homepage": None,
+                "repo_url": None,
+                "popularity": doc.get("versionCount", 0),
+                "updated": doc.get("timestamp"),
+                "position": position,
+            }
+        )
+    return out
 
 
 def maven_metadata_url(base: str, group: str, artifact: str) -> str:

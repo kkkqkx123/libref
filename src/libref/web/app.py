@@ -50,7 +50,10 @@ def build_web_app(
     chat=None,
 ) -> FastAPI:
     """Assemble the web app; the caller manages the connection lifecycle."""
+    from libref.services.discovery import DiscoveryService
+
     svc = SearchService(conn, settings, vec_store=vec_store, embed=embed, rerank=rerank)
+    discovery = DiscoveryService(conn, settings)
     pages = PageService(conn)
     catalog = LibraryService(conn)
     mining = MiningReadService(conn)
@@ -87,6 +90,7 @@ def build_web_app(
         mode: Literal["hybrid", "precise"] = "hybrid",
         expand_window: bool = False,
         window_radius: int | None = None,
+        suggest: bool = False,
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         params = SearchQuery(
@@ -98,6 +102,7 @@ def build_web_app(
             mode=mode,
             expand_window=expand_window,
             window_radius=window_radius,
+            suggest=suggest,
         )
         try:
             results, degraded = await svc.search_with_mode(
@@ -112,7 +117,38 @@ def build_web_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return envelope(results, degraded=degraded)
+        out = envelope(results, degraded=degraded)
+        if params.suggest and not results:
+            try:
+                out["suggestions"] = await discovery.search_async(
+                    params.library or params.query, params.ecosystem, params.limit
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except RegistryError as exc:
+                out["suggestions"] = []
+                out["suggest_error"] = f"{exc.kind}: {exc}"
+        return out
+
+    @app.get("/library-search")
+    async def library_search(
+        query: str,
+        ecosystem: str | None = None,
+        limit: int = 10,
+        _: None = Depends(_guard),
+    ) -> dict[str, Any]:
+        from libref.web.api import LibrarySearchQuery
+
+        params = LibrarySearchQuery(query=query, ecosystem=ecosystem, limit=limit)
+        try:
+            items = await discovery.search_async(
+                params.query, params.ecosystem, params.limit
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RegistryError as exc:
+            raise HTTPException(status_code=502, detail=f"{exc.kind}: {exc}") from exc
+        return envelope(items)
 
     @app.get("/answer")
     async def answer(

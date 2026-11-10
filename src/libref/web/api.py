@@ -16,6 +16,13 @@ class SearchQuery(BaseModel):
     mode: Literal["hybrid", "precise"] = "hybrid"
     expand_window: bool = False
     window_radius: int | None = None
+    suggest: bool = False
+
+
+class LibrarySearchQuery(BaseModel):
+    query: str = Field(min_length=1)
+    ecosystem: str | None = None
+    limit: int = Field(default=10, ge=1, le=100)
 
 
 class AnswerQuery(BaseModel):

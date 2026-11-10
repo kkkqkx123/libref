@@ -68,6 +68,13 @@ def build_search_service(
     return service, gw
 
 
+def build_discovery_service(conn, settings):
+    """Assemble the fuzzy library discovery service; no vectors or gateway needed."""
+    from libref.services.discovery import DiscoveryService
+
+    return DiscoveryService(conn, settings)
+
+
 def build_ingest_service(conn, settings, *, gateway=None, vec_store=None, embed=None):
     """Assemble the doc scrape service; degrades to pure source-of-truth storage when vectors are missing."""
     from libref.services.ingest import IngestService

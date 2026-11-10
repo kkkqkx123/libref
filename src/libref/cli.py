@@ -23,6 +23,7 @@ from libref.services.code_ingest import (
     index_repo,
 )
 from libref.services.factory import (
+    build_discovery_service,
     build_ingest_service,
     build_maintenance_service,
     build_search_service,
@@ -577,17 +578,57 @@ def cmd_search(args: argparse.Namespace) -> int:
         )
         if degraded:
             print("(degraded: partial retrieval)", file=sys.stderr)
+        if not results:
+            print("(no results)")
+            if getattr(args, "suggest", False):
+                return _print_suggestions(conn, settings, args)
+            return 0
     finally:
         conn.close()
-    if not results:
-        print("(no results)")
-        return 0
     for r in results:
         print(f"[{r['score']:.3f}] {r['title'] or '(untitled)'} — {r['url']}")
         print(f"    {r['snippet']}")
         if r.get("window"):
             print(f"    window: {_json.dumps(r['window'], ensure_ascii=False)[:300]}")
     return 0
+
+
+def _print_suggestions(conn, settings, args: argparse.Namespace) -> int:
+    import asyncio as _asyncio
+    import json as _json
+
+    from libref.crawler.registry import RegistryError
+
+    try:
+        candidates = _asyncio.run(
+            build_discovery_service(conn, settings).search_async(
+                getattr(args, "library", None) or args.query,
+                getattr(args, "ecosystem", None),
+                args.limit,
+            )
+        )
+    except ValueError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return 2
+    except RegistryError as exc:
+        print(f"discovery failed [{exc.kind}]: {exc}", file=sys.stderr)
+        return 1
+    if not candidates:
+        print("(no suggestions)")
+        return 0
+    print("suggestions:")
+    for c in candidates:
+        print(_json.dumps(c, ensure_ascii=False))
+    return 0
+
+
+def cmd_discover(args: argparse.Namespace) -> int:
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        return _print_suggestions(conn, settings, args)
+    finally:
+        conn.close()
 
 
 def cmd_answer(args: argparse.Namespace) -> int:
@@ -1394,7 +1435,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Expand the surrounding window on hits",
     )
     p_search.add_argument("--window-radius", type=int, default=None)
+    p_search.add_argument(
+        "--suggest",
+        action="store_true",
+        help="Suggest unindexed libraries from registries when local hits are empty",
+    )
     p_search.set_defaults(func=cmd_search)
+
+    p_discover = sub.add_parser(
+        "discover",
+        help="Fuzzy library discovery across registries",
+        parents=[_config_parent],
+    )
+    p_discover.add_argument("query")
+    p_discover.add_argument("--library", default=None)
+    p_discover.add_argument("--ecosystem", default=None)
+    p_discover.add_argument("--limit", type=int, default=10)
+    p_discover.set_defaults(func=cmd_discover)
 
     p_answer = sub.add_parser(
         "answer",

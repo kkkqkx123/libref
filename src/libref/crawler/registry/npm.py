@@ -37,3 +37,40 @@ def parse_npm_payload(
 
 def npm_snapshot_url(base: str, name: str) -> str:
     return f"{base.rstrip('/')}/{name}"
+
+
+NPM_SEARCH_URL = "https://registry.npmjs.org/-/v1/search"
+
+
+def npm_search_url(query: str, size: int) -> str:
+    from urllib.parse import urlencode
+
+    return (
+        f"{NPM_SEARCH_URL}?{urlencode({'text': query.strip(), 'size': max(1, size)})}"
+    )
+
+
+def parse_npm_search(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Flatten search objects into ranking inputs; native order carries relevance."""
+    out: list[dict[str, Any]] = []
+    for position, obj in enumerate(payload.get("objects") or []):
+        package = obj.get("package") or {}
+        name = str(package.get("name") or "").strip()
+        if not name:
+            continue
+        score = obj.get("score") or {}
+        links = package.get("links") or {}
+        downloads = obj.get("downloads") or {}
+        out.append(
+            {
+                "name": name,
+                "version": str(package.get("version") or ""),
+                "description": str(package.get("description") or ""),
+                "homepage": links.get("homepage"),
+                "repo_url": links.get("repository"),
+                "popularity": downloads.get("monthly", score.get("final", 0.0)),
+                "updated": package.get("date"),
+                "position": position,
+            }
+        )
+    return out

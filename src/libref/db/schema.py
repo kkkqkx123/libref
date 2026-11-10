@@ -323,6 +323,17 @@ UPDATE call_instances SET scope = caller_file || char(0) || COALESCE(caller, '')
 CREATE INDEX IF NOT EXISTS idx_call_instances_scope_key ON call_instances(version_id, scope);
 """
 
+# ── Discovery cache: ranked fuzzy-search conclusions, rebuildable from registries ──
+DISCOVERY_CACHE_SQL = """
+CREATE TABLE discovery_cache(
+  ecosystem TEXT NOT NULL,
+  query TEXT NOT NULL,
+  candidates JSON NOT NULL DEFAULT '[]',
+  fetched_at REAL NOT NULL,
+  PRIMARY KEY(ecosystem, query)
+);
+"""
+
 # ── Pattern-level semantic labels: rebuildable model output, never mixed with static facts ──
 PATTERN_LABEL_SQL = """
 CREATE TABLE pattern_labels(

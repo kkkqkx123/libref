@@ -40,6 +40,11 @@ def test_defaults(tmp_path, monkeypatch) -> None:
     assert s.vector_backend == "simvec"
     assert s.simvec_dir is None
     assert s.simvec_lib is None
+    assert s.discovery_enabled is True
+    assert s.discovery_topn == 10
+    assert s.discovery_cache_ttl_days == 1.0
+    assert s.discovery_offline is False
+    assert s.discovery_github_token is None
 
 
 def test_dotenv_file(tmp_path, monkeypatch) -> None:
@@ -164,6 +169,17 @@ def test_reserved_sections_now_enabled(monkeypatch, tmp_path) -> None:
     empty = tmp_path / "c.toml"
     empty.write_text("[web]\n", encoding="utf-8")
     assert load_settings(empty).fetch_concurrency == 4
+
+
+def test_discovery_section_and_secret_rejected(monkeypatch, tmp_path) -> None:
+    _isolated_env(monkeypatch, tmp_path)
+    conf = tmp_path / "a.toml"
+    conf.write_text("[discovery]\ndiscovery_topn = 5\n", encoding="utf-8")
+    assert load_settings(conf).discovery_topn == 5
+    bad = tmp_path / "b.toml"
+    bad.write_text('[discovery]\ndiscovery_github_token = "tok"\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="discovery_github_token"):
+        load_settings(bad)
 
 
 def test_mcp_token_in_file_rejected(monkeypatch, tmp_path) -> None:
