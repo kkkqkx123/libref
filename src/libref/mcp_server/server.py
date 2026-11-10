@@ -246,6 +246,8 @@ def build_mcp_server(
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int | None = None,
+        per_file_limit: int | None = None,
+        dedup: bool | None = None,
     ) -> dict[str, Any]:
         """Sequence and structure insight: patterns, evidence, feature tree, clusters."""
         if view not in (
@@ -263,6 +265,9 @@ def build_mcp_server(
         bad = _check_limit(limit, low=1, high=500)
         if bad is not None:
             return _invalid(bad)
+        bad = _check_limit(per_file_limit, low=1, high=20)
+        if bad is not None:
+            return _invalid(bad)
         try:
             return _items(
                 mining.pattern_insight(
@@ -274,6 +279,8 @@ def build_mcp_server(
                     version=version,
                     ecosystem=ecosystem,
                     limit=limit,
+                    per_file_limit=per_file_limit,
+                    dedup=dedup,
                 )
             )
         except ValueError as exc:

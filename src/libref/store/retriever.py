@@ -208,6 +208,9 @@ def _pattern_supports(
         except ValueError:
             continue
         out.setdefault(int(vid), []).append((names, int(support)))
+    for vid in list(out):
+        out[vid].sort(key=lambda item: (-item[1], item[0]))
+        del out[vid][500:]
     return out
 
 

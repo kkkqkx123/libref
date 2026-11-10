@@ -41,8 +41,9 @@ class ReadQuery(BaseModel):
 
 
 class ApiInsightQuery(BaseModel):
-    view: Literal["usage", "related", "args"]
+    view: Literal["usage", "related", "args", "common"]
     api: str | None = None
+    apis: str | None = None
     library: str | None = None
     version: str | None = None
     ecosystem: str | None = None
@@ -50,7 +51,15 @@ class ApiInsightQuery(BaseModel):
 
 
 class PatternInsightQuery(BaseModel):
-    view: Literal["patterns", "evidence", "tree", "clusters"]
+    view: Literal[
+        "patterns",
+        "evidence",
+        "tree",
+        "clusters",
+        "health",
+        "labels",
+        "snippets",
+    ]
     pattern: str | None = None
     containing: str | None = None
     prefix: str | None = None
@@ -58,6 +67,8 @@ class PatternInsightQuery(BaseModel):
     version: str | None = None
     ecosystem: str | None = None
     limit: int | None = Field(default=None, ge=1, le=500)
+    per_file_limit: int | None = Field(default=None, ge=1, le=20)
+    dedup: bool | None = None
 
 
 class ReviewQuery(BaseModel):

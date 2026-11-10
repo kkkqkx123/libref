@@ -199,8 +199,9 @@ def build_web_app(
 
     @app.get("/api-insight")
     def api_insight(
-        view: Literal["usage", "related", "args"],
+        view: Literal["usage", "related", "args", "common"],
         api: str | None = None,
+        apis: str | None = None,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
@@ -210,6 +211,7 @@ def build_web_app(
         params = ApiInsightQuery(
             view=view,
             api=api,
+            apis=apis,
             library=library,
             version=version,
             ecosystem=ecosystem,
@@ -220,6 +222,7 @@ def build_web_app(
                 mining.api_insight(
                     params.view,
                     params.api,
+                    apis=_split_list(params.apis),
                     library=params.library,
                     version=params.version,
                     ecosystem=params.ecosystem,
@@ -231,7 +234,15 @@ def build_web_app(
 
     @app.get("/pattern-insight")
     def pattern_insight(
-        view: Literal["patterns", "evidence", "tree", "clusters"],
+        view: Literal[
+            "patterns",
+            "evidence",
+            "tree",
+            "clusters",
+            "health",
+            "labels",
+            "snippets",
+        ],
         pattern: str | None = None,
         containing: str | None = None,
         prefix: str | None = None,
@@ -239,6 +250,8 @@ def build_web_app(
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int | None = None,
+        per_file_limit: int | None = None,
+        dedup: bool | None = None,
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         params = PatternInsightQuery(
@@ -250,6 +263,8 @@ def build_web_app(
             version=version,
             ecosystem=ecosystem,
             limit=limit,
+            per_file_limit=per_file_limit,
+            dedup=dedup,
         )
         try:
             return envelope(
@@ -262,6 +277,8 @@ def build_web_app(
                     version=params.version,
                     ecosystem=params.ecosystem,
                     limit=params.limit,
+                    per_file_limit=params.per_file_limit,
+                    dedup=params.dedup,
                 )
             )
         except ValueError as exc:

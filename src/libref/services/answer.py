@@ -65,9 +65,27 @@ async def answer_query_async(
     try:
         from libref.services.mining_read import MiningReadService
 
-        labels = MiningReadService(conn).list_labels(
-            library=library, version=version, ecosystem=ecosystem, limit=3
+        candidates = MiningReadService(conn).list_labels(
+            library=library, version=version, ecosystem=ecosystem, limit=20
         )
+        entities = {str(e) for r in results for e in (r.get("entities") or []) if e}
+        if entities and candidates:
+            ranked = sorted(
+                enumerate(candidates),
+                key=lambda kv: (
+                    -len(
+                        (
+                            set(kv[1].get("pattern") or [])
+                            | set(kv[1].get("related_apis") or [])
+                        )
+                        & entities
+                    ),
+                    kv[0],
+                ),
+            )
+            labels = [item for _, item in ranked[:3]]
+        else:
+            labels = candidates[:3]
     except Exception:  # noqa: BLE001 — labels are display-only enrichment
         labels = []
     messages = build_messages(query, results, full_by_id, cap, labels=labels)

@@ -244,23 +244,44 @@ class MiningReadService:
             conf = f"AND {base_filter}"
         else:
             conf = f"AND {base_filter} AND (call_instances.confidence != 'AMBIGUOUS' OR rs.status='approved')"
-        rows = self._conn.execute(
-            "SELECT caller_file, COALESCE(caller, ''), callee_name"
-            " FROM call_instances LEFT JOIN review_status rs"
-            " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
-            f" WHERE version_id IN ({placeholders}) {conf}",
-            tuple(vids),
+        placeholders_w = ",".join("?" for _ in wanted)
+        no_conflict_inner = "(rh2.status IS NULL OR rh2.status != 'conflict')"
+        no_conflict_outer = "(rh.status IS NULL OR rh.status != 'conflict')"
+        if include_ambiguous:
+            inner_conf = f"AND {no_conflict_inner}"
+            outer_conf = f"AND {no_conflict_outer}"
+        else:
+            inner_conf = (
+                f"AND {no_conflict_inner} "
+                "AND (h2.confidence != 'AMBIGUOUS' OR rh2.status='approved')"
+            )
+            outer_conf = (
+                f"AND {no_conflict_outer} "
+                "AND (h.confidence != 'AMBIGUOUS' OR rh.status='approved')"
+            )
+        hit_rows = self._conn.execute(
+            "SELECT h.caller_file, COALESCE(h.caller, ''), h.callee_name"
+            " FROM call_instances h LEFT JOIN review_status rh"
+            " ON rh.entity_type='call_instance' AND rh.entity_id=h.id"
+            " JOIN (SELECT caller_file AS hf, COALESCE(caller, '') AS hk"
+            " FROM call_instances h2 LEFT JOIN review_status rh2"
+            " ON rh2.entity_type='call_instance' AND rh2.entity_id=h2.id"
+            f" WHERE h2.version_id IN ({placeholders}) AND h2.callee_name IN ({placeholders_w}) {inner_conf}"
+            " GROUP BY hf, hk"
+            f" HAVING COUNT(DISTINCT h2.callee_name) = {len(wanted)})"
+            " ON h.caller_file = hf AND COALESCE(h.caller, '') = hk"
+            f" WHERE h.version_id IN ({placeholders}) {outer_conf}",
+            (*vids, *wanted, *vids),
         ).fetchall()
+        if not hit_rows:
+            return []
         scopes: dict[tuple[str, str], set[str]] = {}
-        for path, caller, callee in rows:
+        for path, caller, callee in hit_rows:
             scopes.setdefault((str(path), str(caller)), set()).add(str(callee))
         wanted_set = set(wanted)
-        hit_keys = {k for k, have in scopes.items() if wanted_set <= have}
-        if not hit_keys:
-            return []
         counter: dict[str, dict[str, int]] = {}
-        for key in hit_keys:
-            for name in scopes[key]:
+        for have in scopes.values():
+            for name in have:
                 if name in wanted_set:
                     continue
                 slot = counter.setdefault(name, {"scopes": 0, "calls": 0})
