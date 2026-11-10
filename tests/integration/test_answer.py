@@ -63,7 +63,14 @@ def test_answer_grounds_in_retrieved_material(conn, monkeypatch, tmp_path) -> No
 
     out = answer_query(conn, s, "uv", chat=_chat_fn(s, handler))
     assert out["answer"] == "用 uv 管理依赖"
-    assert out["citations"] == [{"url": "https://d.example/a.html", "title": "G"}]
+    assert len(out["citations"]) == 1
+    cite = out["citations"][0]
+    assert cite["url"] == "https://d.example/a.html"
+    assert cite["title"] == "G"
+    assert cite["library"] == "docs"
+    assert cite["version"] == "1.0"
+    assert cite["page_id"] == 1
+    assert cite["sort_order"] == 0
     assert out["degraded"] is False
     assert out["model"] == s.chat_model
     assert "Materials" in seen["user"]

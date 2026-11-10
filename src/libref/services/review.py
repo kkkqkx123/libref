@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 _CONFIDENCE_RANK = {"AMBIGUOUS": 0, "INFERRED": 1, "EXTRACTED": 2}
@@ -38,21 +39,27 @@ class ReviewService:
             " JOIN call_instances ci ON ci.id = rs.entity_id"
             " WHERE rs.entity_type='call_instance' AND rs.status='pending'"
         ).fetchall()
-        out = [
-            {
-                "entity_id": int(r[0]),
-                "status": r[1],
-                "updated_at": r[2],
-                "callee": r[3],
-                "caller_file": r[4],
-                "caller": r[5],
-                "confidence": r[6],
-                "args": r[7],
-                "line_start": r[8],
-                "line_end": r[9],
-            }
-            for r in rows
-        ]
+        out = []
+        for r in rows:
+            raw = r[7]
+            try:
+                parsed = json.loads(raw) if raw else []
+            except ValueError:
+                parsed = [raw]
+            out.append(
+                {
+                    "entity_id": int(r[0]),
+                    "status": r[1],
+                    "updated_at": r[2],
+                    "callee": r[3],
+                    "caller_file": r[4],
+                    "caller": r[5],
+                    "confidence": r[6],
+                    "args": parsed,
+                    "line_start": r[8],
+                    "line_end": r[9],
+                }
+            )
         out.sort(
             key=lambda r: (
                 _CONFIDENCE_RANK.get(r["confidence"], 9),

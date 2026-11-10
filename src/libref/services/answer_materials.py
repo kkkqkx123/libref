@@ -37,5 +37,20 @@ def build_messages(
 
 
 def build_citations(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Extract url and title citations preserving retrieval order."""
-    return [{"url": item["url"], "title": item.get("title")} for item in results]
+    """Extract citations with replay locators preserving retrieval order."""
+    cites = []
+    for item in results:
+        cites.append(
+            {
+                "url": item["url"],
+                "title": item.get("title"),
+                "id": int(item["id"]),
+                "library": item.get("library"),
+                "version": item.get("version"),
+                "source_group_id": str(item.get("source_group_id", "") or ""),
+                "chunk_id": str(item.get("chunk_id", "") or ""),
+                "page_id": item.get("page_id"),
+                "sort_order": item.get("sort_order"),
+            }
+        )
+    return cites
