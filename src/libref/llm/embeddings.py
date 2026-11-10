@@ -195,7 +195,10 @@ class EmbeddingClient:
         return await self.encode_inputs(texts, client=client)
 
     async def encode_inputs(
-        self, inputs: Sequence[EmbeddingInput], *, client: httpx.AsyncClient | None = None
+        self,
+        inputs: Sequence[EmbeddingInput],
+        *,
+        client: httpx.AsyncClient | None = None,
     ) -> EmbeddingResult:
         """Embed mixed inputs; image references are rejected outright without a call."""
         texts: list[str] = []

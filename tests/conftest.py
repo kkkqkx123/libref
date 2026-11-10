@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import shutil
 import sqlite3
 from collections.abc import Iterator
@@ -12,6 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 
+from libref.config import LibrefSettings
 from libref.db import apply_migrations, open_db
 
 
@@ -32,6 +34,65 @@ def conn(tmp_path) -> sqlite3.Connection:
     apply_migrations(c)
     yield c
     c.close()
+
+
+def clear_libref_env(monkeypatch, tmp_path) -> None:
+    """Hermetic shell for settings construction: clean cwd plus no LIBREF_* leak."""
+    monkeypatch.chdir(tmp_path)
+    for name in [n for n in os.environ if n.startswith("LIBREF_")]:
+        monkeypatch.delenv(name, raising=False)
+
+
+def make_settings(monkeypatch, tmp_path, **overrides) -> LibrefSettings:
+    """Canonical test settings: hermetic construction plus explicit overrides only."""
+    clear_libref_env(monkeypatch, tmp_path)
+    return LibrefSettings(**overrides)
+
+
+def make_crawler_settings(monkeypatch, tmp_path, **overrides) -> LibrefSettings:
+    """Fast local-crawl bundle: no politeness delays, short timeouts; MockTransport supplies the bytes."""
+    base = {
+        "request_timeout": 5.0,
+        "fetch_concurrency": 2,
+        "crawl_delay_default": 0.0,
+        "robots_cache_ttl_days": 1.0,
+    }
+    base.update(overrides)
+    return make_settings(monkeypatch, tmp_path, **base)
+
+
+def make_registry_settings(monkeypatch, tmp_path, **overrides) -> LibrefSettings:
+    """Registry resolution bundle: short cache TTL, explicit offline and privacy toggles."""
+    base = {
+        "request_timeout": 5.0,
+        "registry_cache_ttl_days": 1.0,
+        "registry_offline": False,
+        "registry_allow_private": False,
+    }
+    base.update(overrides)
+    return make_settings(monkeypatch, tmp_path, **base)
+
+
+def make_discovery_settings(monkeypatch, tmp_path, **overrides) -> LibrefSettings:
+    """Library discovery bundle: short cache TTL, explicit offline and enable toggles."""
+    base = {
+        "request_timeout": 5.0,
+        "discovery_cache_ttl_days": 1.0,
+        "discovery_offline": False,
+        "discovery_enabled": True,
+    }
+    base.update(overrides)
+    return make_settings(monkeypatch, tmp_path, **base)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_libref_env(request, tmp_path, monkeypatch):
+    """Hermetic LIBREF_* environment for integration tests: the repo-root .env must not leak in."""
+    if "/tests/integration/" not in str(getattr(request.node, "fspath", "")):
+        yield
+        return
+    clear_libref_env(monkeypatch, tmp_path)
+    yield
 
 
 @pytest.fixture(autouse=True)

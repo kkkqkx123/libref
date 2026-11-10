@@ -7,7 +7,6 @@ import asyncio
 import httpx
 import pytest
 
-from libref.config import LibrefSettings
 from libref.services.code_ingest import index_repo
 from libref.services.ingest import run_scrape_job_sync, start_scrape_job
 from libref.services.jobs import JobManager
@@ -19,7 +18,12 @@ from libref.services.retention import (
 )
 from libref.services.search import SearchService
 from libref.store.snapshots import SnapshotStore
-from tests.conftest import copy_mini_repo, mock_ingest
+from tests.conftest import (
+    copy_mini_repo,
+    make_crawler_settings,
+    make_settings,
+    mock_ingest,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -52,8 +56,8 @@ def _handler(request: httpx.Request) -> httpx.Response:
     raise AssertionError(path)
 
 
-def test_async_scrape_persists_result(conn) -> None:
-    settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=2)
+def test_async_scrape_persists_result(conn, monkeypatch, tmp_path) -> None:
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     mgr = JobManager(conn)
     job_id = start_scrape_job(mgr, "docs", "1.0", "https://d.example/sitemap.xml")
     with mock_ingest(_handler):
@@ -66,11 +70,11 @@ def test_async_scrape_persists_result(conn) -> None:
     assert fresh is not None and fresh.result.get("stored", 0) >= 1
 
 
-def test_repo_runner_persists_counts(conn, tmp_path) -> None:
+def test_repo_runner_persists_counts(conn, tmp_path, monkeypatch) -> None:
     from libref.services.code_ingest import INDEX_REPO_JOB_KIND, build_repo_runner
 
     repo = copy_mini_repo(tmp_path)
-    settings = LibrefSettings()
+    settings = make_settings(monkeypatch, tmp_path)
     mgr = JobManager(conn)
     job_id = mgr.submit(
         INDEX_REPO_JOB_KIND,
@@ -94,10 +98,10 @@ def test_repo_runner_persists_counts(conn, tmp_path) -> None:
     assert job.result.get("calls", 0) >= 1
 
 
-def test_snapshot_written_when_enabled(conn, tmp_path) -> None:
-    settings = LibrefSettings(
-        crawl_delay_default=0.0,
-        fetch_concurrency=2,
+def test_snapshot_written_when_enabled(conn, tmp_path, monkeypatch) -> None:
+    settings = make_crawler_settings(
+        monkeypatch,
+        tmp_path,
         snapshot_enabled=True,
         snapshot_dir=tmp_path / "snaps",
         snapshot_quota_mb=64,
@@ -112,8 +116,8 @@ def test_snapshot_written_when_enabled(conn, tmp_path) -> None:
     assert len(store.version_files("custom", "docs", "1.0")) >= 1
 
 
-def test_snapshot_disabled_by_default(conn) -> None:
-    settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=2)
+def test_snapshot_disabled_by_default(conn, monkeypatch, tmp_path) -> None:
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     assert settings.snapshot_enabled is False
     mgr = JobManager(conn)
     job_id = start_scrape_job(mgr, "docs", "1.0", "https://d.example/sitemap.xml")
@@ -123,8 +127,8 @@ def test_snapshot_disabled_by_default(conn) -> None:
     assert job.result.get("snapshot_written", 0) == 0
 
 
-def test_absent_sweep_logs_deletion(conn) -> None:
-    settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=2)
+def test_absent_sweep_logs_deletion(conn, monkeypatch, tmp_path) -> None:
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     with mock_ingest(_handler):
         from libref.services.ingest import IngestService
 
@@ -168,7 +172,7 @@ def test_absent_sweep_logs_deletion(conn) -> None:
     assert any(r["reason"] == "absent-sweep" for r in rows)
 
 
-def test_purge_version_clears_and_logs(conn, tmp_path) -> None:
+def test_purge_version_clears_and_logs(conn, tmp_path, monkeypatch) -> None:
     repo = copy_mini_repo(tmp_path)
     counts = index_repo(conn, "demo", "0.1", str(repo), repos_dir=tmp_path / "repos")
     assert counts["calls"] >= 1
@@ -186,7 +190,7 @@ def test_purge_version_clears_and_logs(conn, tmp_path) -> None:
     assert any(r["reason"] == "purge" for r in rows)
 
 
-def test_deletion_log_prune(conn) -> None:
+def test_deletion_log_prune(conn, monkeypatch, tmp_path) -> None:
     log_deletion(conn, library="docs", version="9.9", reason="purge", detail={})
     assert prune_expired_logs(conn, ttl_days=30.0) == 0
     assert prune_expired_logs(conn, ttl_days=-1) >= 1

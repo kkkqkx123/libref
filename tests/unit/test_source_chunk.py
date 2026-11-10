@@ -14,7 +14,7 @@ def _extract(path: str, source: bytes):
     return ast_engine.extract_file(path, cfg, source)
 
 
-def test_python_docstring_marks_has_doc():
+def test_python_docstring_marks_has_doc(monkeypatch, tmp_path):
     decls, _aliases, _raw = _extract(
         "m.py",
         b'def bare():\n    pass\n\n\ndef documented():\n    """Do things."""\n    return 1\n',
@@ -24,13 +24,13 @@ def test_python_docstring_marks_has_doc():
     assert by_qual["m.documented"].has_doc is True
 
 
-def test_leading_comment_marks_has_doc():
+def test_leading_comment_marks_has_doc(monkeypatch, tmp_path):
     decls, _aliases, _raw = _extract("m.py", b"# leading note\ndef f():\n    pass\n")
     by_qual = {d.qualified_name: d for d in decls}
     assert by_qual["m.f"].has_doc is True
 
 
-def test_java_javadoc_marks_has_doc():
+def test_java_javadoc_marks_has_doc(monkeypatch, tmp_path):
     cfg = ast_config.JAVA_CONFIG
     decls, _aliases, _raw = ast_engine.extract_file(
         "A.java",
@@ -42,7 +42,7 @@ def test_java_javadoc_marks_has_doc():
     assert by_qual["A.bar"].has_doc is False
 
 
-def test_class_group_absorbs_methods():
+def test_class_group_absorbs_methods(monkeypatch, tmp_path):
     decls, _aliases, _raw = _extract(
         "m.py",
         b'class A:\n    """Class docs."""\n    def f(self):\n        pass\n    def g(self):\n        pass\n\n\ndef top():\n    pass\n',
@@ -54,7 +54,7 @@ def test_class_group_absorbs_methods():
     assert class_group.doc_members["m.A.f"] is False
 
 
-def test_self_contained_member_survives_merge():
+def test_self_contained_member_survives_merge(monkeypatch, tmp_path):
     decls, _aliases, _raw = _extract(
         "m.py",
         b'def tiny():\n    """Documented tiny."""\n    pass\n',
@@ -68,7 +68,7 @@ def test_self_contained_member_survives_merge():
     assert all(c.qual == "m.tiny" for c in split.chunks if c.qual is not None)
 
 
-def test_blank_member_source_skipped_and_counted():
+def test_blank_member_source_skipped_and_counted(monkeypatch, tmp_path):
     decls, _aliases, _raw = _extract("m.py", b"def f():\n    pass\n")
     groups = ast_grouping.build_groups(decls, b"", "m.py")
     by_qual = {d.qualified_name: d for d in decls}
@@ -77,7 +77,7 @@ def test_blank_member_source_skipped_and_counted():
     assert split.empty_dropped >= 1
 
 
-def test_source_chunks_share_group_across_paths():
+def test_source_chunks_share_group_across_paths(monkeypatch, tmp_path):
     source = (
         b"class Service:\n"
         b'    """Runs things."""\n'
@@ -100,7 +100,7 @@ def test_source_chunks_share_group_across_paths():
     assert all(c.chunk_id.startswith(f"{c.group_id}::") for c in split.chunks)
 
 
-def test_source_chunk_converts_to_document_chunk():
+def test_source_chunk_converts_to_document_chunk(monkeypatch, tmp_path):
     decls, _aliases, _raw = _extract("m.py", b"def f():\n    pass\n")
     groups = ast_grouping.build_groups(decls, b"def f():\n    pass\n", "m.py")
     by_qual = {d.qualified_name: d for d in decls}
@@ -115,7 +115,7 @@ def test_source_chunk_converts_to_document_chunk():
     assert chunk.chunk_path in ("bm25", "embedding")
 
 
-def test_large_member_splits_with_enclosing_kind():
+def test_large_member_splits_with_enclosing_kind(monkeypatch, tmp_path):
     source = b"def big():\n" + b"    step(1)\n" * 200
     decls, _aliases, _raw = _extract("m.py", source)
     groups = ast_grouping.build_groups(decls, source, "m.py")

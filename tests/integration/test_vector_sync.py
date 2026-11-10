@@ -6,13 +6,12 @@ import httpx
 import pytest
 
 from libref.chunking import Chunk
-from libref.config import LibrefSettings
 from libref.services.ingest import IngestService
 from libref.services.search import SearchService
 from libref.store.document_store import DocumentStore
 from libref.store.vec_store import QdrantVecStore, collection_for
 from libref.text.embedding import build_embed_text
-from tests.conftest import mock_ingest, seed_library_version
+from tests.conftest import make_crawler_settings, mock_ingest, seed_library_version
 
 pytestmark = pytest.mark.integration
 
@@ -93,7 +92,7 @@ async def _fake_embed(texts: list[str]) -> list[list[float]]:
     return [[1.0, 0.0] for _ in texts]
 
 
-def test_collection_for_isolates_db_files(tmp_path):
+def test_collection_for_isolates_db_files(tmp_path, monkeypatch):
     a = collection_for("libref_chunks", tmp_path / "a.db")
     b = collection_for("libref_chunks", tmp_path / "b.db")
     assert a != b
@@ -102,13 +101,13 @@ def test_collection_for_isolates_db_files(tmp_path):
     assert collection_for("libref_chunks", ":memory:") == "libref_chunks"
 
 
-def test_build_embed_text_variants():
+def test_build_embed_text_variants(monkeypatch, tmp_path):
     assert build_embed_text("T", "P", "C") == "T / P\nC"
     assert build_embed_text(None, None, "C") == "C"
     assert build_embed_text("T", None, None) == "T\n"
 
 
-def test_unknown_collection_shape_triggers_rebuild(conn):
+def test_unknown_collection_shape_triggers_rebuild(conn, monkeypatch, tmp_path):
     client = _ShapeClient(vectors={"named": "unexpected"})
     store = QdrantVecStore("http://localhost:6333", "c", client=client)
     store.ensure_collection(conn, "m", 4)
@@ -135,16 +134,7 @@ def _handler(body: str):
     return handle
 
 
-def _settings():
-    return LibrefSettings(
-        request_timeout=5.0,
-        fetch_concurrency=2,
-        crawl_delay_default=0.0,
-        robots_cache_ttl_days=1.0,
-    )
-
-
-def test_scrape_syncs_vectors(conn):
+def test_scrape_syncs_vectors(conn, monkeypatch, tmp_path):
     body = (
         "<html><body><main><h1>Install</h1>"
         "<p>use uv to install libref quetzalvec</p></main></body></html>"
@@ -152,7 +142,10 @@ def test_scrape_syncs_vectors(conn):
     vec = _FakeVec()
     with mock_ingest(_handler(body)):
         counts = IngestService(
-            _settings(), conn, vec_store=vec, embed=_fake_embed
+            make_crawler_settings(monkeypatch, tmp_path),
+            conn,
+            vec_store=vec,
+            embed=_fake_embed,
         ).scrape_docs("docs", "1.0", "https://d.example/", max_pages=5)
     assert counts["stored"] == 1
     assert counts["vector_failed"] == 0
@@ -162,7 +155,7 @@ def test_scrape_syncs_vectors(conn):
     assert all(p[1] == 1 and p[2] == 1 and p[3] == [1.0, 0.0] for p in vec.upserted)
 
 
-def test_rescrape_replaces_vectors(conn):
+def test_rescrape_replaces_vectors(conn, monkeypatch, tmp_path):
     first = "<html><body><main><p>first body quetzalre</p></main></body></html>"
     second = "<html><body><main><p>second body quetzalre</p></main></body></html>"
     current = [first]
@@ -172,7 +165,12 @@ def test_rescrape_replaces_vectors(conn):
 
     vec = _FakeVec()
     with mock_ingest(dynamic):
-        svc = IngestService(_settings(), conn, vec_store=vec, embed=_fake_embed)
+        svc = IngestService(
+            make_crawler_settings(monkeypatch, tmp_path),
+            conn,
+            vec_store=vec,
+            embed=_fake_embed,
+        )
         svc.scrape_docs("docs", "1.0", "https://d.example/", max_pages=5)
         old_points = list(vec.upserted)
         vec.upserted.clear()
@@ -186,7 +184,7 @@ def test_rescrape_replaces_vectors(conn):
     )
 
 
-def test_embed_failure_counts_without_losing_truth(conn):
+def test_embed_failure_counts_without_losing_truth(conn, monkeypatch, tmp_path):
     async def boom(texts: list[str]):
         raise RuntimeError("encoder down")
 
@@ -195,14 +193,17 @@ def test_embed_failure_counts_without_losing_truth(conn):
         _handler("<html><body><main><p>truth body quetzalboom</p></main></body></html>")
     ):
         counts = IngestService(
-            _settings(), conn, vec_store=vec, embed=boom
+            make_crawler_settings(monkeypatch, tmp_path),
+            conn,
+            vec_store=vec,
+            embed=boom,
         ).scrape_docs("docs", "1.0", "https://d.example/", max_pages=5)
     assert counts["stored"] == 1
     assert counts["vector_failed"] == 1
     assert SearchService(conn).search_docs("quetzalboom")
 
 
-def test_search_results_carry_row_id(conn):
+def test_search_results_carry_row_id(conn, monkeypatch, tmp_path):
     _seed_lv(conn)
     store = DocumentStore(conn)
     result = store.store_page(
@@ -226,7 +227,7 @@ def test_search_results_carry_row_id(conn):
     assert hits[0]["id"] == result.inserted_ids[0]
 
 
-def test_reconcile_repairs_orphans_and_missing(conn):
+def test_reconcile_repairs_orphans_and_missing(conn, monkeypatch, tmp_path):
     import asyncio
 
     from libref.services.maintenance import (
@@ -271,7 +272,7 @@ def test_reconcile_repairs_orphans_and_missing(conn):
         ],
         raw_content="b",
     )
-    settings = _settings()
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     write_version_meta(conn, 1, settings.embedding_model, settings.embedding_dim)
     vec = _FakeVec()
     only_id = kept.inserted_ids[0]
@@ -287,7 +288,7 @@ def test_reconcile_repairs_orphans_and_missing(conn):
     assert other.inserted_ids[0] not in vec.list_ids(1)
 
 
-def test_model_only_drift_rebuilds_single_version(conn):
+def test_model_only_drift_rebuilds_single_version(conn, monkeypatch, tmp_path):
     import asyncio
 
     from libref.services.maintenance import reconcile_version
@@ -308,18 +309,14 @@ def test_model_only_drift_rebuilds_single_version(conn):
             chunks=[Chunk(url=url, path="G", title="G", content="body", sort_order=0)],
             raw_content=url,
         )
-    settings = _settings()
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     vec = _FakeVec()
     asyncio.run(reconcile_version(conn, settings, vec, _fake_embed, 1))
     asyncio.run(reconcile_version(conn, settings, vec, _fake_embed, 2))
     before_other = list(vec.list_ids(2))
     assert before_other
-    settings = LibrefSettings(
-        request_timeout=5.0,
-        fetch_concurrency=2,
-        crawl_delay_default=0.0,
-        robots_cache_ttl_days=1.0,
-        embedding_model="other-model",
+    settings = make_crawler_settings(
+        monkeypatch, tmp_path, embedding_model="other-model"
     )
     stats = asyncio.run(reconcile_version(conn, settings, vec, _fake_embed, 1))
     assert stats["rebuilt"] == 1
@@ -327,7 +324,7 @@ def test_model_only_drift_rebuilds_single_version(conn):
     assert vec.list_ids(2) == before_other
 
 
-def test_purge_clears_vectors_after_truth_commit(conn):
+def test_purge_clears_vectors_after_truth_commit(conn, monkeypatch, tmp_path):
     from libref.services.retention import purge_version
 
     _seed_lv(conn)
@@ -357,7 +354,7 @@ def test_purge_clears_vectors_after_truth_commit(conn):
     assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 0
 
 
-def test_title_match_outranks_content_only(conn):
+def test_title_match_outranks_content_only(conn, monkeypatch, tmp_path):
     _seed_lv(conn)
     store = DocumentStore(conn)
     store.store_page(

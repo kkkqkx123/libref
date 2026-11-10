@@ -24,7 +24,7 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def test_llms_txt_preferred_over_sitemap():
+def test_llms_txt_preferred_over_sitemap(monkeypatch, tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/llms.txt":
             return httpx.Response(
@@ -39,7 +39,7 @@ def test_llms_txt_preferred_over_sitemap():
     assert result.urls == ["https://docs.example.com/install.html"]
 
 
-def test_sitemap_gz_and_index():
+def test_sitemap_gz_and_index(monkeypatch, tmp_path):
     child_sitemap = gzip.compress(
         b"<?xml version='1.0'?><urlset><url><loc>https://d.example/a.html</loc></url>"
         b"<url><loc>https://d.example/b.html</loc></url></urlset>"
@@ -68,7 +68,7 @@ def test_sitemap_gz_and_index():
     assert result.urls == ["https://d.example/a.html", "https://d.example/b.html"]
 
 
-def test_discover_filters_and_dedup():
+def test_discover_filters_and_dedup(monkeypatch, tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         p = request.url.path
         if p == "/llms.txt":
@@ -95,7 +95,7 @@ def test_discover_filters_and_dedup():
     conn.close()
 
 
-def test_discover_head_prefilter():
+def test_discover_head_prefilter(monkeypatch, tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         p = request.url.path
         if p == "/llms.txt":

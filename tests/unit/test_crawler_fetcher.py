@@ -13,7 +13,7 @@ def _client(handler) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
-def test_penalty_applies_after_rate_limit() -> None:
+def test_penalty_applies_after_rate_limit(monkeypatch, tmp_path) -> None:
     calls: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -33,7 +33,7 @@ def test_penalty_applies_after_rate_limit() -> None:
     assert len(calls) == 2
 
 
-def test_repeated_rate_limit_penalizes_host() -> None:
+def test_repeated_rate_limit_penalizes_host(monkeypatch, tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(429, text="slow down")
 
@@ -47,7 +47,7 @@ def test_repeated_rate_limit_penalizes_host() -> None:
     assert asyncio.run(_run()) == ["d.example"]
 
 
-def test_bypass_skips_conditional_headers() -> None:
+def test_bypass_skips_conditional_headers(monkeypatch, tmp_path) -> None:
     seen: dict[str, str] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:

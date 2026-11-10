@@ -50,7 +50,7 @@ def _match(conn: sqlite3.Connection, query: str) -> list[int]:
     ]
 
 
-def test_insert_visible_in_fts(conn: sqlite3.Connection) -> None:
+def test_insert_visible_in_fts(conn: sqlite3.Connection, monkeypatch, tmp_path) -> None:
     _, page_id = _add_library(conn)
     doc_id = _insert_doc(conn, page_id, "Use requests.get to fetch pages")
     conn.commit()
@@ -60,7 +60,7 @@ def test_insert_visible_in_fts(conn: sqlite3.Connection) -> None:
     assert _match(conn, "path:start") == [doc_id]
 
 
-def test_update_resync(conn: sqlite3.Connection) -> None:
+def test_update_resync(conn: sqlite3.Connection, monkeypatch, tmp_path) -> None:
     _, page_id = _add_library(conn)
     doc_id = _insert_doc(conn, page_id, "alpha content")
     conn.commit()
@@ -70,7 +70,9 @@ def test_update_resync(conn: sqlite3.Connection) -> None:
     assert _match(conn, "beta") == [doc_id]
 
 
-def test_delete_removes_from_fts(conn: sqlite3.Connection) -> None:
+def test_delete_removes_from_fts(
+    conn: sqlite3.Connection, monkeypatch, tmp_path
+) -> None:
     _, page_id = _add_library(conn)
     doc_id = _insert_doc(conn, page_id, "unique zebra term")
     conn.commit()
@@ -79,7 +81,7 @@ def test_delete_removes_from_fts(conn: sqlite3.Connection) -> None:
     assert _match(conn, "zebra") == []
 
 
-def test_cjk_substring_recall(conn: sqlite3.Connection) -> None:
+def test_cjk_substring_recall(conn: sqlite3.Connection, monkeypatch, tmp_path) -> None:
     _, page_id = _add_library(conn)
     doc_id = _insert_doc(conn, page_id, clean_text_for_bm25("媒体服务器安装指南"))
     conn.commit()
@@ -87,7 +89,7 @@ def test_cjk_substring_recall(conn: sqlite3.Connection) -> None:
     assert _match(conn, safe_fts_query("安装")) == [doc_id]
 
 
-def test_fts_vocab_consistency(conn: sqlite3.Connection) -> None:
+def test_fts_vocab_consistency(conn: sqlite3.Connection, monkeypatch, tmp_path) -> None:
     """fts5vocab view: document tokens match the FTS index."""
     _, page_id = _add_library(conn)
     _insert_doc(conn, page_id, "alpha beta alpha")

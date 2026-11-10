@@ -10,10 +10,10 @@ from datetime import date
 import httpx
 import pytest
 
-from libref.config import LibrefSettings
 from libref.crawler.registry import RegistryError, normalize_name, sanitize_http_url
 from libref.crawler.registry import overrides as _overrides_state
 from libref.services.resolver import resolve_package
+from tests.conftest import make_registry_settings
 
 pytestmark = pytest.mark.integration
 
@@ -23,17 +23,6 @@ def _clean_file_overrides():
     _overrides_state.clear_file_overrides()
     yield
     _overrides_state.clear_file_overrides()
-
-
-def make_settings(**kw) -> LibrefSettings:
-    base = {
-        "request_timeout": 5.0,
-        "registry_cache_ttl_days": 1.0,
-        "registry_offline": False,
-        "registry_allow_private": False,
-    }
-    base.update(kw)
-    return LibrefSettings(**base)
 
 
 def run(coro):
@@ -72,8 +61,8 @@ def pypi_handler(payload=None, status=200):
     return handler
 
 
-def test_pypi_resolves_docs_and_versions(conn):
-    settings = make_settings()
+def test_pypi_resolves_docs_and_versions(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
     try:
         res = run(resolve_package(conn, client, settings, "pypi", "requests"))
@@ -86,8 +75,8 @@ def test_pypi_resolves_docs_and_versions(conn):
     assert "2.30.0" in [v for v in res.candidates] or True
 
 
-def test_pypi_normalizes_name(conn):
-    settings = make_settings()
+def test_pypi_normalizes_name(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -103,8 +92,8 @@ def test_pypi_normalizes_name(conn):
     assert seen == ["/pypi/requests/json"]
 
 
-def test_npm_resolves_homepage(conn):
-    settings = make_settings()
+def test_npm_resolves_homepage(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.host == "registry.npmjs.org"
@@ -119,8 +108,8 @@ def test_npm_resolves_homepage(conn):
     assert res.version == "5.0.0"
 
 
-def test_scoped_name_infers_npm(conn):
-    settings = make_settings()
+def test_scoped_name_infers_npm(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -140,8 +129,8 @@ def test_scoped_name_infers_npm(conn):
     assert res.ecosystem == "npm"
 
 
-def test_bare_name_requires_ecosystem(conn):
-    settings = make_settings()
+def test_bare_name_requires_ecosystem(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
     try:
         with pytest.raises(ValueError, match="ecosystem required"):
@@ -150,8 +139,8 @@ def test_bare_name_requires_ecosystem(conn):
         run(client.aclose())
 
 
-def test_requested_version_unconfirmed_still_resolves(conn):
-    settings = make_settings()
+def test_requested_version_unconfirmed_still_resolves(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
     try:
         res = run(
@@ -164,8 +153,8 @@ def test_requested_version_unconfirmed_still_resolves(conn):
     assert res.docs_url is not None
 
 
-def test_not_found_maps(conn):
-    settings = make_settings()
+def test_not_found_maps(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler(status=404)))
     try:
         with pytest.raises(RegistryError) as exc:
@@ -175,8 +164,8 @@ def test_not_found_maps(conn):
     assert exc.value.kind == "not_found"
 
 
-def test_no_docs_returns_hint(conn):
-    settings = make_settings()
+def test_no_docs_returns_hint(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     payload = {
         "info": {
             "version": "1.0",
@@ -195,7 +184,7 @@ def test_no_docs_returns_hint(conn):
     assert "repo_url" in exc.value.hint
 
 
-def test_override_wins_over_registry(conn, monkeypatch):
+def test_override_wins_over_registry(conn, monkeypatch, tmp_path):
     from libref.crawler.registry import overrides as ov
 
     monkeypatch.setitem(
@@ -207,7 +196,7 @@ def test_override_wins_over_registry(conn, monkeypatch):
             "verified_at": "2026-11-01",
         },
     )
-    settings = make_settings()
+    settings = make_registry_settings(monkeypatch, tmp_path)
     client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
     try:
         res = run(resolve_package(conn, client, settings, "pypi", "requests"))
@@ -217,8 +206,8 @@ def test_override_wins_over_registry(conn, monkeypatch):
     assert res.source == "override"
 
 
-def test_cache_hit_produces_no_network(conn):
-    settings = make_settings()
+def test_cache_hit_produces_no_network(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
     try:
         first = run(resolve_package(conn, client, settings, "pypi", "requests"))
@@ -237,8 +226,8 @@ def test_cache_hit_produces_no_network(conn):
     assert second.docs_url == first.docs_url
 
 
-def test_stale_falls_back_with_stale_source(conn):
-    settings = make_settings()
+def test_stale_falls_back_with_stale_source(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
     try:
         run(resolve_package(conn, client, settings, "pypi", "requests"))
@@ -262,15 +251,15 @@ def test_stale_falls_back_with_stale_source(conn):
     assert res.docs_url == "https://requests.readthedocs.io/"
 
 
-def test_offline_miss_fails_and_hit_succeeds(conn):
-    online = make_settings()
+def test_offline_miss_fails_and_hit_succeeds(conn, monkeypatch, tmp_path):
+    online = make_registry_settings(monkeypatch, tmp_path)
     client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
     try:
         run(resolve_package(conn, client, online, "pypi", "requests"))
     finally:
         run(client.aclose())
 
-    offline = make_settings(registry_offline=True)
+    offline = make_registry_settings(monkeypatch, tmp_path, registry_offline=True)
 
     def boom(request: httpx.Request) -> httpx.Response:
         raise AssertionError("offline must not hit network")
@@ -285,8 +274,8 @@ def test_offline_miss_fails_and_hit_succeeds(conn):
         run(client2.aclose())
 
 
-def test_explicit_address_bypasses_network(conn):
-    settings = make_settings()
+def test_explicit_address_bypasses_network(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
 
     def boom(request: httpx.Request) -> httpx.Response:
         raise AssertionError("explicit must not hit network")
@@ -310,15 +299,15 @@ def test_explicit_address_bypasses_network(conn):
     assert res.docs_url == "https://docs.example/custom/"
 
 
-def test_private_address_rejected_by_default():
+def test_private_address_rejected_by_default(monkeypatch, tmp_path):
     assert sanitize_http_url("http://127.0.0.1/docs", allow_private=False) is None
     assert sanitize_http_url("http://127.0.0.1/docs", allow_private=True) is not None
     assert sanitize_http_url("ftp://example.com/x", allow_private=True) is None
     assert normalize_name("pypi", "Requests__x") == "requests-x"
 
 
-def test_pypi_skips_repo_hosts_in_candidates(conn):
-    settings = make_settings()
+def test_pypi_skips_repo_hosts_in_candidates(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     payload = {
         "info": {
             "version": "0.28.1",
@@ -342,8 +331,8 @@ def test_pypi_skips_repo_hosts_in_candidates(conn):
     assert res.repo_url == "https://github.com/encode/httpx"
 
 
-def test_pypi_repo_url_skips_funding(conn):
-    settings = make_settings()
+def test_pypi_repo_url_skips_funding(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     payload = {
         "info": {
             "version": "2.14.3",
@@ -364,8 +353,8 @@ def test_pypi_repo_url_skips_funding(conn):
     assert res.repo_url == "https://github.com/pydantic/pydantic"
 
 
-def test_best_effort_skips_prerelease_without_stable(conn):
-    settings = make_settings()
+def test_best_effort_skips_prerelease_without_stable(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     payload = {
         "dist-tags": {},
         "versions": {"1.0.0": {}, "2.0.0-canary-1": {}, "1.5.0": {}},
@@ -384,7 +373,7 @@ def test_best_effort_skips_prerelease_without_stable(conn):
     assert res.registry_confirmed is True
 
 
-def test_overrides_have_verification_dates():
+def test_overrides_have_verification_dates(monkeypatch, tmp_path):
     from libref.crawler.registry.overrides import all_overrides
 
     for key, item in all_overrides().items():
@@ -392,12 +381,14 @@ def test_overrides_have_verification_dates():
         assert item.get("verified_at"), key
 
 
-def test_registry_bases_mirror_routes_to_custom_host(conn):
-    settings = make_settings(
+def test_registry_bases_mirror_routes_to_custom_host(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(
+        monkeypatch,
+        tmp_path,
         registry_bases={
             "pypi": "https://mirror.example/pypi",
             "npm": "https://registry.npmjs.org",
-        }
+        },
     )
     seen: list[str] = []
 
@@ -414,8 +405,8 @@ def test_registry_bases_mirror_routes_to_custom_host(conn):
     assert res.docs_url == "https://requests.readthedocs.io/"
 
 
-def test_registry_mirror_cn_routes_to_preset_hosts(conn):
-    settings = make_settings(registry_mirror="cn")
+def test_registry_mirror_cn_routes_to_preset_hosts(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path, registry_mirror="cn")
     seen: list[str] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -431,8 +422,10 @@ def test_registry_mirror_cn_routes_to_preset_hosts(conn):
     assert res.docs_url == "https://expressjs.com/"
 
 
-def test_registry_bases_explicit_wins_over_mirror(conn):
-    settings = make_settings(
+def test_registry_bases_explicit_wins_over_mirror(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(
+        monkeypatch,
+        tmp_path,
         registry_mirror="cn",
         registry_bases={"npm": "https://custom.example/npm"},
     )
@@ -450,10 +443,10 @@ def test_registry_bases_explicit_wins_over_mirror(conn):
     assert seen == ["custom.example/npm/express"]
 
 
-def test_unknown_registry_mirror_rejected():
+def test_unknown_registry_mirror_rejected(monkeypatch, tmp_path):
     from libref.crawler.registry import registry_base_for
 
-    settings = make_settings(registry_mirror="nope")
+    settings = make_registry_settings(monkeypatch, tmp_path, registry_mirror="nope")
     with pytest.raises(ValueError, match="unknown registry mirror"):
         registry_base_for("npm", settings)
 
@@ -485,7 +478,9 @@ def test_file_override_wins_over_builtin(conn, tmp_path, monkeypatch):
         ),
         encoding="utf-8",
     )
-    settings = make_settings(registry_overrides_file=override_file)
+    settings = make_registry_settings(
+        monkeypatch, tmp_path, registry_overrides_file=override_file
+    )
     client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
     try:
         res = run(resolve_package(conn, client, settings, "pypi", "requests"))
@@ -495,7 +490,7 @@ def test_file_override_wins_over_builtin(conn, tmp_path, monkeypatch):
     assert res.source == "override"
 
 
-def test_overrides_file_invalid_rejected(tmp_path):
+def test_overrides_file_invalid_rejected(tmp_path, monkeypatch):
     from libref.crawler.registry.overrides import load_overrides_file
 
     bad = tmp_path / "bad.json"
@@ -516,7 +511,7 @@ def test_overrides_file_invalid_rejected(tmp_path):
         load_overrides_file(bad)
 
 
-def test_stale_overrides_gate_lists_expired():
+def test_stale_overrides_gate_lists_expired(monkeypatch, tmp_path):
     from libref.crawler.registry.overrides import (
         find_stale_overrides,
         is_override_stale,
@@ -565,8 +560,8 @@ def maven_handler(request: httpx.Request) -> httpx.Response:
     raise AssertionError(request.url.path)
 
 
-def test_maven_resolves_docs_and_versions(conn):
-    settings = make_settings()
+def test_maven_resolves_docs_and_versions(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     client = httpx.AsyncClient(transport=httpx.MockTransport(maven_handler))
     try:
         res = run(
@@ -583,8 +578,8 @@ def test_maven_resolves_docs_and_versions(conn):
     assert res.source == "registry"
 
 
-def test_maven_infers_from_colon_and_rejects_bare(conn):
-    settings = make_settings()
+def test_maven_infers_from_colon_and_rejects_bare(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
     client = httpx.AsyncClient(transport=httpx.MockTransport(maven_handler))
     try:
         res = run(
@@ -599,8 +594,8 @@ def test_maven_infers_from_colon_and_rejects_bare(conn):
         run(resolve_package(conn, client, settings, "maven", "spring-core"))
 
 
-def test_npm_repo_homepage_excluded_from_candidates(conn):
-    settings = make_settings()
+def test_npm_repo_homepage_excluded_from_candidates(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(

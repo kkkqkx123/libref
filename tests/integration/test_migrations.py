@@ -20,23 +20,23 @@ def _user_tables(conn: sqlite3.Connection) -> set[str]:
     }
 
 
-def test_replay_is_noop(conn: sqlite3.Connection) -> None:
+def test_replay_is_noop(conn: sqlite3.Connection, monkeypatch, tmp_path) -> None:
     assert apply_migrations(conn) == []
     assert applied_versions(conn) == {m.version for m in MIGRATIONS}
 
 
-def test_fresh_db_applies_all_migrations(tmp_path) -> None:
+def test_fresh_db_applies_all_migrations(tmp_path, monkeypatch) -> None:
     c = open_db(tmp_path / "fresh.db")
     assert apply_migrations(c) == [m.version for m in MIGRATIONS]
     c.close()
 
 
-def test_all_tables_created(conn: sqlite3.Connection) -> None:
+def test_all_tables_created(conn: sqlite3.Connection, monkeypatch, tmp_path) -> None:
     tables = _user_tables(conn)
     assert CORE_TABLES | EXT_TABLES | {"schema_migrations"} <= tables
 
 
-def test_reopen_replay_noop(tmp_path) -> None:
+def test_reopen_replay_noop(tmp_path, monkeypatch) -> None:
     path = tmp_path / "reopen.db"
     c1 = open_db(path)
     apply_migrations(c1)

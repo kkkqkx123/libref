@@ -31,14 +31,14 @@ def _llms_handler(request: httpx.Request) -> httpx.Response:
     raise AssertionError(request.url.path)
 
 
-def test_nonsense_urls_filtered() -> None:
+def test_nonsense_urls_filtered(monkeypatch, tmp_path) -> None:
     _SEED_CACHE.clear()
     seeder = UrlSeeder(_client(_llms_handler), None, cache_ttl_hours=0)  # type: ignore[arg-type]
     result = _run(seeder.discover("https://docs.example.com/"))
     assert result.urls == ["https://docs.example.com/a.html"]
 
 
-def test_query_scoring_orders_and_filters() -> None:
+def test_query_scoring_orders_and_filters(monkeypatch, tmp_path) -> None:
     _SEED_CACHE.clear()
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -63,7 +63,7 @@ def test_query_scoring_orders_and_filters() -> None:
     assert filtered.urls == ["https://docs.example.com/install/pip.html"]
 
 
-def test_result_cache_avoids_refetch() -> None:
+def test_result_cache_avoids_refetch(monkeypatch, tmp_path) -> None:
     _SEED_CACHE.clear()
     calls: list[str] = []
 

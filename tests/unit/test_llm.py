@@ -8,7 +8,6 @@ import math
 import httpx
 import pytest
 
-from libref.config import LibrefSettings
 from libref.llm import (
     ChatClient,
     ChatConfig,
@@ -42,15 +41,11 @@ from libref.llm import (
     with_resilience,
 )
 from libref.llm.retry import execute_with_retry
-
-
-def _isolated_settings(monkeypatch, tmp_path, **kwargs) -> LibrefSettings:
-    monkeypatch.chdir(tmp_path)
-    return LibrefSettings(**kwargs)
+from tests.conftest import make_settings
 
 
 def test_new_defaults(monkeypatch, tmp_path) -> None:
-    s = _isolated_settings(monkeypatch, tmp_path)
+    s = make_settings(monkeypatch, tmp_path)
     assert s.rerank_model == "BAAI/bge-reranker-v2-m3"
     assert s.rerank_enabled is False
     assert s.rerank_candidate_limit == 30
@@ -62,7 +57,7 @@ def test_new_defaults(monkeypatch, tmp_path) -> None:
 
 
 def test_builders_skip_without_key(monkeypatch, tmp_path) -> None:
-    s = _isolated_settings(monkeypatch, tmp_path)
+    s = make_settings(monkeypatch, tmp_path)
     assert s.embedding_api_key is None
     assert build_embed_fn(s) is None
     assert build_rerank_fn(s) is None
@@ -85,7 +80,7 @@ def _client(handler) -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
-def test_embedding_roundtrip_sorted_and_normalized() -> None:
+def test_embedding_roundtrip_sorted_and_normalized(monkeypatch, tmp_path) -> None:
     c = EmbeddingClient(
         base="https://api.siliconflow.cn/v1", api_key="k", model="BAAI/bge-m3", dim=2
     )
@@ -95,7 +90,7 @@ def test_embedding_roundtrip_sorted_and_normalized() -> None:
     assert math.isclose(vecs[1][0], 1.0, rel_tol=1e-6)
 
 
-def test_embedding_empty_makes_no_request() -> None:
+def test_embedding_empty_makes_no_request(monkeypatch, tmp_path) -> None:
     def boom(request: httpx.Request) -> httpx.Response:
         raise AssertionError("must not call network")
 
@@ -103,7 +98,7 @@ def test_embedding_empty_makes_no_request() -> None:
     assert asyncio.run(c.encode([], client=_client(boom))) == []
 
 
-def test_embedding_dim_mismatch_raises() -> None:
+def test_embedding_dim_mismatch_raises(monkeypatch, tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"data": [{"index": 0, "embedding": [1.0]}]})
 
@@ -112,7 +107,7 @@ def test_embedding_dim_mismatch_raises() -> None:
         asyncio.run(c.encode(["x"], client=_client(handler)))
 
 
-def test_embedding_retries_429_then_succeeds() -> None:
+def test_embedding_retries_429_then_succeeds(monkeypatch, tmp_path) -> None:
     calls = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -130,13 +125,13 @@ def test_embedding_retries_429_then_succeeds() -> None:
 
 
 def test_rerank_disabled_by_default(monkeypatch, tmp_path) -> None:
-    s = _isolated_settings(
+    s = make_settings(
         monkeypatch, tmp_path, embedding_api_key="k", rerank_enabled=False
     )
     assert build_rerank_fn(s) is None
 
 
-def test_rerank_scores_sorted() -> None:
+def test_rerank_scores_sorted(monkeypatch, tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/rerank")
         return httpx.Response(
@@ -154,7 +149,7 @@ def test_rerank_scores_sorted() -> None:
     assert out == [(1, 0.9), (0, 0.2)]
 
 
-def test_rerank_empty_docs_no_request() -> None:
+def test_rerank_empty_docs_no_request(monkeypatch, tmp_path) -> None:
     def boom(request: httpx.Request) -> httpx.Response:
         raise AssertionError("must not call network")
 
@@ -162,7 +157,7 @@ def test_rerank_empty_docs_no_request() -> None:
     assert asyncio.run(c.score("q", [], client=_client(boom))) == []
 
 
-def test_rerank_missing_results_raises() -> None:
+def test_rerank_missing_results_raises(monkeypatch, tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={})
 
@@ -172,18 +167,16 @@ def test_rerank_missing_results_raises() -> None:
 
 
 def test_chat_disabled_by_default(monkeypatch, tmp_path) -> None:
-    s = _isolated_settings(monkeypatch, tmp_path)
+    s = make_settings(monkeypatch, tmp_path)
     assert build_chat_fn(s) is None
 
 
 def test_chat_builder_uses_embedding_key_fallback(monkeypatch, tmp_path) -> None:
-    s = _isolated_settings(
-        monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True
-    )
+    s = make_settings(monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True)
     assert build_chat_fn(s) is not None
 
 
-def test_chat_complete() -> None:
+def test_chat_complete(monkeypatch, tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path.endswith("/chat/completions")
         body = __import__("json").loads(request.content.decode())
@@ -202,13 +195,13 @@ def test_chat_complete() -> None:
     )
 
 
-def test_chat_empty_messages_rejected() -> None:
+def test_chat_empty_messages_rejected(monkeypatch, tmp_path) -> None:
     c = ChatClient(base="https://b", api_key="k", model="m")
     with pytest.raises(ValueError, match="empty"):
         asyncio.run(c.complete([]))
 
 
-def test_error_classification() -> None:
+def test_error_classification(monkeypatch, tmp_path) -> None:
     err400 = LlmProviderError(400, "bad")
     assert err400.is_retryable() is False
     assert err400.is_network_failure() is False
@@ -223,14 +216,14 @@ def test_error_classification() -> None:
         EmbeddingClient(base="https://b", api_key="", model="m", dim=2)
 
 
-def test_retry_after_parsing() -> None:
+def test_retry_after_parsing(monkeypatch, tmp_path) -> None:
     assert parse_retry_after_ms(None) is None
     assert parse_retry_after_ms("") is None
     assert parse_retry_after_ms("2") == 2000
     assert parse_retry_after_ms("nope") is None
 
 
-def test_retry_policy_floor_and_observer() -> None:
+def test_retry_policy_floor_and_observer(monkeypatch, tmp_path) -> None:
     p = RetryPolicy(max_retries=2, base_delay=0.01)
     assert p.delay_for_attempt(1, 500) >= 0.5
     seen: list = []
@@ -259,7 +252,7 @@ def test_retry_policy_floor_and_observer() -> None:
     assert len(seen) == 2
 
 
-def test_embedding_duplicate_index_raises() -> None:
+def test_embedding_duplicate_index_raises(monkeypatch, tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -276,7 +269,7 @@ def test_embedding_duplicate_index_raises() -> None:
         asyncio.run(c.encode(["a", "b"], client=_client(handler)))
 
 
-def test_embedding_rejected_no_retry() -> None:
+def test_embedding_rejected_no_retry(monkeypatch, tmp_path) -> None:
     calls: list = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -290,7 +283,7 @@ def test_embedding_rejected_no_retry() -> None:
     assert len(calls) == 1
 
 
-def test_rerank_duplicate_and_range_rejected() -> None:
+def test_rerank_duplicate_and_range_rejected(monkeypatch, tmp_path) -> None:
     c = RerankClient(base="https://b", api_key="k", model="r")
 
     def dup(request: httpx.Request) -> httpx.Response:
@@ -322,7 +315,7 @@ def test_rerank_duplicate_and_range_rejected() -> None:
         asyncio.run(c.score("q", ["a", "b"], client=_client(far)))
 
 
-def test_rerank_truncates_long_document() -> None:
+def test_rerank_truncates_long_document(monkeypatch, tmp_path) -> None:
     seen: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -338,7 +331,7 @@ def test_rerank_truncates_long_document() -> None:
     assert truncate_content("short", 500) == "short"
 
 
-def test_chat_stream_assembles_deltas() -> None:
+def test_chat_stream_assembles_deltas(monkeypatch, tmp_path) -> None:
     body = (
         'data: {"choices": [{"delta": {"content": "hel"}}]}\n\n'
         'data: {"choices": [{"delta": {"content": "lo"}}]}\n\n'
@@ -365,36 +358,30 @@ def test_chat_stream_assembles_deltas() -> None:
 
 
 def test_chat_stream_builder_gating(monkeypatch, tmp_path) -> None:
-    s = _isolated_settings(monkeypatch, tmp_path)
+    s = make_settings(monkeypatch, tmp_path)
     assert build_chat_stream_fn(s) is None
-    on = _isolated_settings(
-        monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True
-    )
+    on = make_settings(monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True)
     assert build_chat_stream_fn(on) is not None
 
 
-def test_chat_invalid_message_rejected() -> None:
+def test_chat_invalid_message_rejected(monkeypatch, tmp_path) -> None:
     c = ChatClient(base="https://b", api_key="k", model="m")
     with pytest.raises(ValueError, match="role"):
         asyncio.run(c.complete([{"role": "user", "content": ""}]))
 
 
 def test_config_bridge_gating(monkeypatch, tmp_path) -> None:
-    assert (
-        EmbeddingConfig.from_settings(_isolated_settings(monkeypatch, tmp_path)) is None
-    )
+    assert EmbeddingConfig.from_settings(make_settings(monkeypatch, tmp_path)) is None
     assert (
         RerankConfig.from_settings(
-            _isolated_settings(
+            make_settings(
                 monkeypatch, tmp_path, embedding_api_key="k", rerank_enabled=False
             )
         )
         is None
     )
-    assert ChatConfig.from_settings(_isolated_settings(monkeypatch, tmp_path)) is None
-    on = _isolated_settings(
-        monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True
-    )
+    assert ChatConfig.from_settings(make_settings(monkeypatch, tmp_path)) is None
+    on = make_settings(monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True)
     chat = ChatConfig.from_settings(on)
     assert chat is not None
     assert chat.api_key == "k"
@@ -404,9 +391,7 @@ def test_config_bridge_gating(monkeypatch, tmp_path) -> None:
 def test_config_bridge_fails_fast(monkeypatch, tmp_path) -> None:
     with pytest.raises(LlmConfigError, match="dim"):
         EmbeddingConfig.from_settings(
-            _isolated_settings(
-                monkeypatch, tmp_path, embedding_api_key="k", embedding_dim=0
-            )
+            make_settings(monkeypatch, tmp_path, embedding_api_key="k", embedding_dim=0)
         )
     with pytest.raises(LlmConfigError, match="base"):
         EmbeddingClient(base="  ", api_key="k", model="m", dim=2)
@@ -416,13 +401,11 @@ def test_config_bridge_fails_fast(monkeypatch, tmp_path) -> None:
         ChatClient(base="", api_key="k", model="m")
     with pytest.raises(LlmConfigError, match="dim"):
         build_embed_fn(
-            _isolated_settings(
-                monkeypatch, tmp_path, embedding_api_key="k", embedding_dim=0
-            )
+            make_settings(monkeypatch, tmp_path, embedding_api_key="k", embedding_dim=0)
         )
 
 
-def test_rate_limiter_burst_passes() -> None:
+def test_rate_limiter_burst_passes(monkeypatch, tmp_path) -> None:
     async def drain() -> None:
         limiter = RateLimiter(1000.0, 3)
         for _ in range(3):
@@ -433,7 +416,7 @@ def test_rate_limiter_burst_passes() -> None:
         RateLimiter(0.0, 1)
 
 
-def test_breaker_opens_and_recovers() -> None:
+def test_breaker_opens_and_recovers(monkeypatch, tmp_path) -> None:
     async def drive() -> None:
         breaker = CircuitBreaker(failure_threshold=2, cooldown=0.05)
         assert breaker.allow() is True
@@ -449,7 +432,7 @@ def test_breaker_opens_and_recovers() -> None:
     asyncio.run(drive())
 
 
-def test_breaker_short_circuits_client() -> None:
+def test_breaker_short_circuits_client(monkeypatch, tmp_path) -> None:
     calls: list = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -476,14 +459,14 @@ def test_breaker_short_circuits_client() -> None:
     assert len(calls) == 1
 
 
-def test_with_resilience_passthrough() -> None:
+def test_with_resilience_passthrough(monkeypatch, tmp_path) -> None:
     async def op() -> str:
         return "ok"
 
     assert asyncio.run(with_resilience(None, op)) == "ok"
 
 
-def test_preprocessor_modes() -> None:
+def test_preprocessor_modes(monkeypatch, tmp_path) -> None:
     assert Preprocessor().apply_batch(["a"]) == ["a"]
     assert Preprocessor("prefix", "q: ").apply("a") == "q: a"
     assert Preprocessor("template", "[{{text}}]").apply("a") == "[a]"
@@ -491,7 +474,7 @@ def test_preprocessor_modes() -> None:
         Preprocessor("suffix", "x")
 
 
-def test_preprocessor_applied_before_send() -> None:
+def test_preprocessor_applied_before_send(monkeypatch, tmp_path) -> None:
     seen: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -510,7 +493,7 @@ def test_preprocessor_applied_before_send() -> None:
     assert seen["input"] == ["q: a"]
 
 
-def test_image_input_rejected_without_network() -> None:
+def test_image_input_rejected_without_network(monkeypatch, tmp_path) -> None:
     def boom(request: httpx.Request) -> httpx.Response:
         raise AssertionError("must not call network")
 
@@ -521,7 +504,7 @@ def test_image_input_rejected_without_network() -> None:
         )
 
 
-def test_embedding_usage_sums_batches() -> None:
+def test_embedding_usage_sums_batches(monkeypatch, tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         body = __import__("json").loads(request.content.decode())
         n = len(body["input"])
@@ -540,7 +523,7 @@ def test_embedding_usage_sums_batches() -> None:
     assert result.usage == {"prompt_tokens": 10, "total_tokens": 14}
 
 
-def test_chat_result_tools_and_usage() -> None:
+def test_chat_result_tools_and_usage(monkeypatch, tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -584,7 +567,7 @@ def test_chat_result_tools_and_usage() -> None:
     }
 
 
-def test_chat_bad_tool_arguments_rejected() -> None:
+def test_chat_bad_tool_arguments_rejected(monkeypatch, tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
@@ -614,7 +597,7 @@ def test_chat_bad_tool_arguments_rejected() -> None:
         )
 
 
-def test_model_catalog() -> None:
+def test_model_catalog(monkeypatch, tmp_path) -> None:
     assert embedding_dim_for("BAAI/bge-m3") == 1024
     assert embedding_dim_for("unknown-model") is None
 
@@ -622,14 +605,14 @@ def test_model_catalog() -> None:
 def test_known_model_dim_mismatch_rejected(monkeypatch, tmp_path) -> None:
     with pytest.raises(LlmConfigError, match="dim mismatch"):
         EmbeddingConfig.from_settings(
-            _isolated_settings(
+            make_settings(
                 monkeypatch, tmp_path, embedding_api_key="k", embedding_dim=512
             )
         )
 
 
 def test_gateway_shares_resilience(monkeypatch, tmp_path) -> None:
-    s = _isolated_settings(monkeypatch, tmp_path, embedding_api_key="k")
+    s = make_settings(monkeypatch, tmp_path, embedding_api_key="k")
     gw = LlmGateway(s)
     assert gw.resilience_for("https://a/v1") is gw.resilience_for("https://a/v1/")
     assert gw.resilience_for("https://a/v1") is not gw.resilience_for("https://b/v1")
@@ -644,7 +627,7 @@ def test_gateway_embed_end_to_end(monkeypatch, tmp_path) -> None:
             200, json={"data": [{"index": 0, "embedding": [1.0] * 1024}]}
         )
 
-    s = _isolated_settings(monkeypatch, tmp_path, embedding_api_key="k")
+    s = make_settings(monkeypatch, tmp_path, embedding_api_key="k")
     gw = LlmGateway(s)
     fn = gw.embed_fn(transport=httpx.MockTransport(handler))
     assert fn is not None

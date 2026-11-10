@@ -10,7 +10,6 @@ import pytest
 
 from tests.conftest import seed_mcp_db
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 SERVER_BIN = Path(sys.executable).parent / "libref"
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_binary]
@@ -23,7 +22,7 @@ def _seed_db(db_path: Path) -> None:
     seed_mcp_db(db_path, _MARKER, _PAGE_URL)
 
 
-async def _handshake(db_path: Path) -> None:
+async def _handshake(db_path: Path, workdir: Path) -> None:
     from mcp.client.session import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
 
@@ -31,7 +30,7 @@ async def _handshake(db_path: Path) -> None:
         command=str(SERVER_BIN),
         args=["serve-mcp"],
         env={"LIBREF_DB_PATH": str(db_path)},
-        cwd=str(REPO_ROOT),
+        cwd=str(workdir),
     )
     async with (
         stdio_client(params) as (read, write),
@@ -60,9 +59,9 @@ async def _handshake(db_path: Path) -> None:
         assert "docs" in libs.model_dump_json()
 
 
-def test_serve_mcp_stdio_handshake(tmp_path):
+def test_serve_mcp_stdio_handshake(tmp_path, monkeypatch):
     if not SERVER_BIN.exists():
         pytest.skip(f"server binary missing: {SERVER_BIN}")
     db_path = tmp_path / "stdio.db"
     _seed_db(db_path)
-    asyncio.run(_handshake(db_path))
+    asyncio.run(_handshake(db_path, tmp_path))

@@ -332,7 +332,11 @@ def _build_decls(
 
 
 def _build_aliases(
-    cfg, source, dep_matches, module: str | None = None, importer_file: str | None = None
+    cfg,
+    source,
+    dep_matches,
+    module: str | None = None,
+    importer_file: str | None = None,
 ) -> list[tuple[str, str]]:
     aliases: list[tuple[str, str]] = []
     for node, captures in _merge_matches(dep_matches):

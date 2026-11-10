@@ -19,7 +19,7 @@ def _seed_demo(conn, tmp_path):
     return MiningReadService(conn)
 
 
-def test_evidence_snippet_and_per_file_dedup(conn, tmp_path):
+def test_evidence_snippet_and_per_file_dedup(conn, tmp_path, monkeypatch):
     svc = _seed_demo(conn, tmp_path)
     raw = svc.pattern_evidence(
         ["numpy.array", "numpy.zeros"],
@@ -51,7 +51,7 @@ def test_evidence_snippet_and_per_file_dedup(conn, tmp_path):
     assert len(files) == len(set(files))
 
 
-def test_intersection_prescreen_matches_precise(conn, tmp_path):
+def test_intersection_prescreen_matches_precise(conn, tmp_path, monkeypatch):
     svc = _seed_demo(conn, tmp_path)
     strict = svc.related_common(["numpy.array", "numpy.zeros"], "demo", "0.1")
     assert strict == []
@@ -65,7 +65,7 @@ def test_intersection_prescreen_matches_precise(conn, tmp_path):
     assert any("numpy.zeros" in p["pattern"] for p in patterns)
 
 
-def test_health_and_labels_roundtrip(conn, tmp_path):
+def test_health_and_labels_roundtrip(conn, tmp_path, monkeypatch):
     svc = _seed_demo(conn, tmp_path)
     health = svc.mining_health("demo", "0.1")
     assert health["patterns"] >= 1
@@ -95,7 +95,7 @@ def test_health_and_labels_roundtrip(conn, tmp_path):
     assert again["labeled"] == 0
 
 
-def test_eval_closure_tasks_resolve_and_execute(conn, tmp_path):
+def test_eval_closure_tasks_resolve_and_execute(conn, tmp_path, monkeypatch):
     svc = _seed_demo(conn, tmp_path)
     tasks = [
         {

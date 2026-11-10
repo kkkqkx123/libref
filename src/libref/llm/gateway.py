@@ -53,7 +53,9 @@ class LlmGateway:
             self._shared[key] = slot
         return slot
 
-    def embed_fn(self, transport: httpx.AsyncBaseTransport | None = None) -> EmbedFn | None:
+    def embed_fn(
+        self, transport: httpx.AsyncBaseTransport | None = None
+    ) -> EmbedFn | None:
         """Embed function; returns None without a key, caller falls back to pure full-text."""
         config = EmbeddingConfig.from_settings(self._settings)
         if config is None:
@@ -127,7 +129,9 @@ class LlmGateway:
             resilience=self.resilience_for(config.base),
         )
 
-    def chat_fn(self, transport: httpx.AsyncBaseTransport | None = None) -> ChatFn | None:
+    def chat_fn(
+        self, transport: httpx.AsyncBaseTransport | None = None
+    ) -> ChatFn | None:
         """Chat function; returns None when not enabled, no model, or no key."""
         client = self._chat_client()
         if client is None:

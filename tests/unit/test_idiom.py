@@ -12,7 +12,7 @@ from libref.mining.idiom import (
 from libref.mining.scoring import capped_alpha, pattern_contains_all
 
 
-def test_mask_arg_keyword_shape():
+def test_mask_arg_keyword_shape(monkeypatch, tmp_path):
     assert mask_arg("path='a.py'") == "path='...'"
     assert mask_arg("count=3") == "count=0"
     assert mask_arg("verbose=True") == "verbose=True"
@@ -20,7 +20,7 @@ def test_mask_arg_keyword_shape():
     assert mask_arg("data") == "_"
 
 
-def test_synthesize_snippet_keeps_order_and_holes():
+def test_synthesize_snippet_keeps_order_and_holes(monkeypatch, tmp_path):
     calls = [
         {
             "callee": "a",
@@ -53,7 +53,7 @@ def test_synthesize_snippet_keeps_order_and_holes():
     assert any(line.get("gap") for line in out["lines"])
 
 
-def test_deduplicate_keeps_one_per_file_and_merges_signatures():
+def test_deduplicate_keeps_one_per_file_and_merges_signatures(monkeypatch, tmp_path):
     def _group(path, caller):
         calls = [
             {
@@ -86,7 +86,7 @@ def test_deduplicate_keeps_one_per_file_and_merges_signatures():
     assert len(kept) == 3
 
 
-def test_normalize_signature_stable():
+def test_normalize_signature_stable(monkeypatch, tmp_path):
     calls = [
         {"callee": "a.b", "args": ["x", "y"]},
         {"callee": "c", "args": []},
@@ -94,7 +94,7 @@ def test_normalize_signature_stable():
     assert normalize_signature(calls, [0, 1]) == "a.b(_,_)|c()"
 
 
-def test_reuse_diversity_logs():
+def test_reuse_diversity_logs(monkeypatch, tmp_path):
     health = reuse_diversity(
         [{"support": 4}, {"support": 2}], [{"members": {"a"}}, {"members": {"b"}}]
     )
@@ -106,7 +106,7 @@ def test_reuse_diversity_logs():
     assert single["reusability"] == 0.0
 
 
-def test_pattern_contains_all_and_capped_alpha():
+def test_pattern_contains_all_and_capped_alpha(monkeypatch, tmp_path):
     assert pattern_contains_all(["a", "b"], ["a"])
     assert not pattern_contains_all(["a"], ["a", "b"])
     assert pattern_contains_all(["a"], [])

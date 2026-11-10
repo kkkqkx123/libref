@@ -31,14 +31,14 @@ def _candidate(name: str, **overrides) -> DiscoveryCandidate:
     return DiscoveryCandidate(**base)
 
 
-def test_npm_search_url_encodes_query() -> None:
+def test_npm_search_url_encodes_query(monkeypatch, tmp_path) -> None:
     url = npm_search_url("react hooks", 5)
     assert url.startswith("https://registry.npmjs.org/-/v1/search?")
     assert "text=react+hooks" in url or "text=react%20hooks" in url
     assert "size=5" in url
 
 
-def test_parse_npm_search_flattens_objects() -> None:
+def test_parse_npm_search_flattens_objects(monkeypatch, tmp_path) -> None:
     payload = {
         "objects": [
             {
@@ -66,14 +66,14 @@ def test_parse_npm_search_flattens_objects() -> None:
     assert items[0]["position"] == 0
 
 
-def test_maven_search_url_targets_solr() -> None:
+def test_maven_search_url_targets_solr(monkeypatch, tmp_path) -> None:
     url = maven_search_url("group:artifact", 3)
     assert url.startswith("https://search.maven.org/solrsearch/select?")
     assert "wt=json" in url
     assert "rows=3" in url
 
 
-def test_parse_maven_search_builds_coordinates() -> None:
+def test_parse_maven_search_builds_coordinates(monkeypatch, tmp_path) -> None:
     payload = {
         "response": {
             "docs": [
@@ -95,14 +95,14 @@ def test_parse_maven_search_builds_coordinates() -> None:
     assert items[0]["popularity"] == 70
 
 
-def test_github_search_headers_bearer_only_with_token() -> None:
+def test_github_search_headers_bearer_only_with_token(monkeypatch, tmp_path) -> None:
     assert "Authorization" not in github_search_headers(None)
     assert "Authorization" not in github_search_headers("  ")
     assert github_search_headers("tok")["Authorization"] == "Bearer tok"
     assert "per_page=" in github_search_url("react", 200)
 
 
-def test_parse_github_search_keeps_docs_like_homepage() -> None:
+def test_parse_github_search_keeps_docs_like_homepage(monkeypatch, tmp_path) -> None:
     payload = {
         "items": [
             {
@@ -130,28 +130,28 @@ def test_parse_github_search_keeps_docs_like_homepage() -> None:
     assert items[1]["repo_url"] == "https://github.com/o/r"
 
 
-def test_rank_docs_availability_first() -> None:
+def test_rank_docs_availability_first(monkeypatch, tmp_path) -> None:
     without_docs = _candidate("react", popularity=999.0)
     with_docs = _candidate("react-dom", docs_url="https://react.dev/", popularity=1.0)
     ranked = rank_candidates([without_docs, with_docs], "react")
     assert ranked[0].name == "react-dom"
 
 
-def test_rank_exact_match_before_popular() -> None:
+def test_rank_exact_match_before_popular(monkeypatch, tmp_path) -> None:
     popular = _candidate("react-dom", popularity=999.0)
     exact = _candidate("React", docs_url="https://react.dev/", popularity=1.0)
     ranked = rank_candidates([popular, exact], "react")
     assert ranked[0].name == "React"
 
 
-def test_rank_native_order_beats_popularity() -> None:
+def test_rank_native_order_beats_popularity(monkeypatch, tmp_path) -> None:
     low = _candidate("a-one", docs_url="https://x.dev/", popularity=1.0, rank=0)
     high = _candidate("a-two", docs_url="https://x.dev/", popularity=900.0, rank=1)
     ranked = rank_candidates([high, low], "zzz")
     assert [c.name for c in ranked] == ["a-one", "a-two"]
 
 
-def test_rank_popularity_breaks_cross_source_tie() -> None:
+def test_rank_popularity_breaks_cross_source_tie(monkeypatch, tmp_path) -> None:
     npm = _candidate("n-one", docs_url="https://x.dev/", popularity=1.0, rank=0)
     maven = _candidate(
         "m-one",

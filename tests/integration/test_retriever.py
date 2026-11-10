@@ -8,10 +8,9 @@ import json
 import pytest
 
 from libref.chunking import Chunk
-from libref.config import LibrefSettings
 from libref.store.document_store import DocumentStore
 from libref.store.retriever import HybridRetriever
-from tests.conftest import seed_library_version
+from tests.conftest import make_settings, seed_library_version
 
 pytestmark = pytest.mark.integration
 
@@ -65,7 +64,7 @@ def _seed(conn) -> dict[str, int]:
 
 def test_rrf_missing_road_contributes_zero(conn, tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    s = LibrefSettings()
+    s = make_settings(monkeypatch, tmp_path)
     r = HybridRetriever(conn, s)
     assert r._rrf([1], []) == [1]
     assert r._rrf([1, 2], [2, 3]) == [2, 1, 3]
@@ -88,7 +87,7 @@ def test_multi_version_fanout_capped(conn, tmp_path, monkeypatch) -> None:
         )
     conn.commit()
     monkeypatch.chdir(tmp_path)
-    s = LibrefSettings(retrieval_max_versions=2)
+    s = make_settings(monkeypatch, tmp_path, retrieval_max_versions=2)
     vec = _VersionVec()
     _, degraded = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
@@ -104,7 +103,7 @@ def test_hybrid_marks_sources_and_fused_score_sorted(
 ) -> None:
     ids = _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = LibrefSettings(freq_alpha=0.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
     vec = _FakeVec([ids["pattern"], ids["plain"]])
     results, degraded = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
@@ -121,7 +120,7 @@ def test_hybrid_marks_sources_and_fused_score_sorted(
 def test_freq_alpha_zero_is_noop(conn, tmp_path, monkeypatch) -> None:
     ids = _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = LibrefSettings(freq_alpha=0.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
     vec = _FakeVec([ids["plain"], ids["pattern"]])
     rec = HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed)
     rrf_order = rec._rrf([ids["plain"], ids["pattern"]], [ids["plain"], ids["pattern"]])
@@ -132,7 +131,7 @@ def test_freq_alpha_zero_is_noop(conn, tmp_path, monkeypatch) -> None:
 def test_freq_bonus_promotes_pattern_doc(conn, tmp_path, monkeypatch) -> None:
     ids = _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = LibrefSettings(freq_alpha=5.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0, cluster_alpha=0.0)
     vec = _FakeVec([ids["plain"], ids["pattern"]])
     results, _ = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
@@ -145,7 +144,7 @@ def test_freq_bonus_promotes_pattern_doc(conn, tmp_path, monkeypatch) -> None:
 def test_degraded_on_embed_failure(conn, tmp_path, monkeypatch) -> None:
     _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = LibrefSettings()
+    s = make_settings(monkeypatch, tmp_path)
 
     async def boom(texts: list[str]):
         raise RuntimeError("encoder down")
@@ -162,7 +161,7 @@ def test_degraded_on_embed_failure(conn, tmp_path, monkeypatch) -> None:
 def test_fts_only_without_vec_is_not_degraded(conn, tmp_path, monkeypatch) -> None:
     _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = LibrefSettings()
+    s = make_settings(monkeypatch, tmp_path)
     results, degraded = asyncio.run(
         HybridRetriever(conn, s).search_async("quetzalhybrid")
     )
@@ -213,7 +212,7 @@ def test_precise_attribution_ignores_substring(conn, tmp_path, monkeypatch) -> N
     )
     conn.commit()
     monkeypatch.chdir(tmp_path)
-    s = LibrefSettings(freq_alpha=5.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0, cluster_alpha=0.0)
     vec = _FakeVec([miss.inserted_ids[0], hit.inserted_ids[0]])
     results, _ = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
@@ -227,7 +226,7 @@ def test_precise_attribution_ignores_substring(conn, tmp_path, monkeypatch) -> N
 def test_dual_track_gate_records_both_roads(conn, tmp_path, monkeypatch) -> None:
     ids = _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = LibrefSettings(freq_alpha=5.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0, cluster_alpha=0.0)
     vec = _FakeVec([ids["pattern"], ids["plain"]])
     fts_only, _ = asyncio.run(
         HybridRetriever(conn, s).search_async("quetzalhybrid", limit=8)
@@ -281,7 +280,7 @@ def test_quality_gate_mrr_recall_no_regression(conn, tmp_path, monkeypatch) -> N
         ("quickstart meadow", {ids["quick"]}),
     ]
     monkeypatch.chdir(tmp_path)
-    settings = LibrefSettings(freq_alpha=0.0, cluster_alpha=0.0)
+    settings = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
     fts_mrrs: list[float] = []
     fts_recalls: list[float] = []
     for query, relevant in cases:

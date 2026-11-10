@@ -13,7 +13,6 @@ import pytest
 
 from tests.conftest import seed_mcp_db
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 SERVER_BIN = Path(sys.executable).parent / "libref"
 
 pytestmark = [pytest.mark.integration, pytest.mark.requires_binary]
@@ -67,7 +66,7 @@ async def _handshake(port: int) -> None:
     raise AssertionError(f"http handshake failed: {last}")
 
 
-def test_serve_mcp_http_handshake(tmp_path):
+def test_serve_mcp_http_handshake(tmp_path, monkeypatch):
     if not SERVER_BIN.exists():
         pytest.skip(f"server binary missing: {SERVER_BIN}")
     db_path = tmp_path / "http.db"
@@ -77,7 +76,7 @@ def test_serve_mcp_http_handshake(tmp_path):
     proc = subprocess.Popen(
         [str(SERVER_BIN), "serve-mcp", "--http", "--port", str(port)],
         env=env,
-        cwd=str(REPO_ROOT),
+        cwd=str(tmp_path),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )

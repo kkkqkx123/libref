@@ -64,7 +64,9 @@ def _seed_docs(conn: sqlite3.Connection, sample: str) -> tuple[int, str]:
             total_chunks=1,
         ),
     ]
-    DocumentStore(conn).store_page(1, 1, url, "stored", chunks=chunks, raw_content=sample)
+    DocumentStore(conn).store_page(
+        1, 1, url, "stored", chunks=chunks, raw_content=sample
+    )
     return 1, url
 
 
@@ -194,7 +196,8 @@ def main() -> int:
                 json.dump(build_citations(results), fh, ensure_ascii=False, indent=2)
 
             evidence = mining.pattern_evidence(
-                evidence_case["pattern"], library="docs"  # type: ignore[index]
+                evidence_case["pattern"],
+                library="docs",  # type: ignore[index]
             )
             with (out_dir / "07-evidence.json").open("w", encoding="utf-8") as fh:
                 json.dump(evidence, fh, ensure_ascii=False, indent=2)

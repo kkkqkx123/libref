@@ -27,7 +27,7 @@ NAV_PAGE = """<html><head><title>Guide</title>
 </body></html>"""
 
 
-def test_pruning_keeps_article_drops_nav_footer() -> None:
+def test_pruning_keeps_article_drops_nav_footer(monkeypatch, tmp_path) -> None:
     md = extract_to_markdown(NAV_PAGE, "https://docs.example.com/guide/")
     assert "Run the installer" in md
     assert "Home" not in md
@@ -35,7 +35,7 @@ def test_pruning_keeps_article_drops_nav_footer() -> None:
     assert "var x" not in md
 
 
-def test_structured_links_and_metadata() -> None:
+def test_structured_links_and_metadata(monkeypatch, tmp_path) -> None:
     res = scrape_html(NAV_PAGE, "https://docs.example.com/guide/")
     assert res.title == "Guide"
     assert res.description == "Install guide"
@@ -46,7 +46,7 @@ def test_structured_links_and_metadata() -> None:
     assert "Flag" in res.markdown and "--fast" in res.markdown
 
 
-def test_noindex_page_reports_flag() -> None:
+def test_noindex_page_reports_flag(monkeypatch, tmp_path) -> None:
     res = scrape_html(
         '<html><head><meta name="robots" content="noindex, nofollow"></head>'
         "<body><main><p>body text here and more words to pass</p></main></body></html>",
@@ -55,7 +55,7 @@ def test_noindex_page_reports_flag() -> None:
     assert res.noindex and res.nofollow
 
 
-def test_data_table_detection() -> None:
+def test_data_table_detection(monkeypatch, tmp_path) -> None:
     from selectolax.lexbor import LexborHTMLParser
 
     tree = LexborHTMLParser("<table><tr><td>a</td></tr></table>")
@@ -66,7 +66,7 @@ def test_data_table_detection() -> None:
     assert is_data_table(tree.css_first("table"))
 
 
-def test_citations_format() -> None:
+def test_citations_format(monkeypatch, tmp_path) -> None:
     converted, refs = convert_links_to_citations(
         "See [docs](https://d.example/a) and [docs](https://d.example/a).",
         "https://d.example/",
@@ -76,6 +76,6 @@ def test_citations_format() -> None:
     assert "https://d.example/a" in refs
 
 
-def test_malformed_html_yields_empty() -> None:
+def test_malformed_html_yields_empty(monkeypatch, tmp_path) -> None:
     assert scrape_html("", None).markdown == ""
     assert extract_to_markdown("", None) == ""

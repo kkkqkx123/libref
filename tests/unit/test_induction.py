@@ -12,12 +12,12 @@ from libref.mining.induction import (
 )
 
 
-def test_pattern_hash_stable():
+def test_pattern_hash_stable(monkeypatch, tmp_path):
     assert pattern_hash(["b", "a"]) == pattern_hash(["b", "a"])
     assert pattern_hash(["a"]) != pattern_hash(["b"])
 
 
-def test_build_label_prompt_never_includes_source():
+def test_build_label_prompt_never_includes_source(monkeypatch, tmp_path):
     item = InductionInput(pattern=["numpy.array", "numpy.zeros"], support=3)
     messages = build_label_prompt(item)
     assert len(messages) == 2
@@ -25,7 +25,7 @@ def test_build_label_prompt_never_includes_source():
     assert "def " not in messages[1]["content"]
 
 
-def test_parse_label_payload_rejects_unknown_api():
+def test_parse_label_payload_rejects_unknown_api(monkeypatch, tmp_path):
     raw = (
         '{"name": "init", "summary": "create arrays", '
         '"category_path": ["array", "create"], "workflow": "build then fill", '
@@ -35,7 +35,7 @@ def test_parse_label_payload_rejects_unknown_api():
         parse_label_payload(raw, {"numpy.array"})
 
 
-def test_parse_label_payload_accepts_known_api():
+def test_parse_label_payload_accepts_known_api(monkeypatch, tmp_path):
     raw = (
         '{"name": "init", "summary": "create arrays", '
         '"category_path": ["array", "create"], "workflow": "", '
@@ -46,7 +46,7 @@ def test_parse_label_payload_accepts_known_api():
     assert label.category_path == ["array", "create"]
 
 
-def test_build_label_prompt_aggregates_whole_pattern():
+def test_build_label_prompt_aggregates_whole_pattern(monkeypatch, tmp_path):
     item = InductionInput(
         pattern=["numpy.array", "numpy.zeros"],
         support=3,
@@ -66,7 +66,7 @@ def test_build_label_prompt_aggregates_whole_pattern():
     assert "Allowed related APIs:" in content
 
 
-def test_parse_label_payload_rejects_boundary_markers():
+def test_parse_label_payload_rejects_boundary_markers(monkeypatch, tmp_path):
     raw = (
         '{"name": "init", "summary": "see </unit> here", '
         '"category_path": ["array"], "workflow": "", '

@@ -55,7 +55,7 @@ def _budgets(embed=None, bm25=None):
     return budgets
 
 
-def test_heading_paths():
+def test_heading_paths(monkeypatch, tmp_path):
     chunks = split_markdown(SAMPLE, "https://docs.example.com/guide")
     paths = {c.path for c in chunks}
     assert "Guide" in paths
@@ -64,7 +64,7 @@ def test_heading_paths():
     assert all(c.url == "https://docs.example.com/guide" for c in chunks)
 
 
-def test_fence_hash_not_heading():
+def test_fence_hash_not_heading(monkeypatch, tmp_path):
     chunks = split_markdown(SAMPLE, "u")
     usage = [c for c in chunks if c.path == "Guide / Usage"]
     assert usage, "Usage section missing"
@@ -72,13 +72,13 @@ def test_fence_hash_not_heading():
     assert not any(c.title == "this is a comment, not a heading" for c in chunks)
 
 
-def test_greedy_merge_small_same_path_sections():
+def test_greedy_merge_small_same_path_sections(monkeypatch, tmp_path):
     chunks = split_markdown("# A\nxx\n# A\nyy\n", "u")
     assert len(chunks) == 1
     assert chunks[0].merged_from == ["A", "A"]
 
 
-def test_fence_balanced_invariant():
+def test_fence_balanced_invariant(monkeypatch, tmp_path):
     budgets = _budgets(embed={"hard_limit": 100, "min_limit": 10, "overlap": 5})
     long_md = "## Big\n\n" + "```python\nprint(1)\n```\n\n" + "word line. " * 300
     chunks = split_markdown(long_md, "u", budgets=budgets)
@@ -90,12 +90,12 @@ def test_fence_balanced_invariant():
         assert fences % 2 == 0, f"unbalanced fences in chunk {c.sort_order}"
 
 
-def test_sort_order_sequential():
+def test_sort_order_sequential(monkeypatch, tmp_path):
     chunks = split_markdown(SAMPLE, "u")
     assert [c.sort_order for c in chunks] == list(range(len(chunks)))
 
 
-def test_dual_streams_share_source_group():
+def test_dual_streams_share_source_group(monkeypatch, tmp_path):
     body = "alpha beta gamma delta epsilon zeta eta theta.\n\n" * 12
     md_text = f"# Long\n\n{body}"
     budgets = _budgets(
@@ -111,7 +111,7 @@ def test_dual_streams_share_source_group():
     assert all(c.chunk_id.startswith(f"{c.source_group_id}_") for c in dual.bm25)
 
 
-def test_overlap_is_previous_only_with_source():
+def test_overlap_is_previous_only_with_source(monkeypatch, tmp_path):
     body = "alpha beta gamma delta epsilon zeta eta theta.\n\n" * 12
     budgets = _budgets(bm25={"hard_limit": 40, "min_limit": 5, "overlap": 5})
     dual = split_markdown_dual(f"# Long\n\n{body}", "u", budgets=budgets)
@@ -120,19 +120,19 @@ def test_overlap_is_previous_only_with_source():
     assert dual.bm25[1].overlap_from == dual.bm25[0].chunk_id
 
 
-def test_span_kind_is_document_range():
+def test_span_kind_is_document_range(monkeypatch, tmp_path):
     for chunk in split_markdown(SAMPLE, "u"):
         assert chunk.span_kind == "document_range"
 
 
-def test_twin_chunks_deduped_to_embedding():
+def test_twin_chunks_deduped_to_embedding(monkeypatch, tmp_path):
     dual = split_markdown_dual(SAMPLE, "u")
     assert dual.embedding
     assert dual.deduped >= 1
     assert dual.empty_dropped == 0
 
 
-def test_terms_count_cjk_beyond_one():
+def test_terms_count_cjk_beyond_one(monkeypatch, tmp_path):
     assert count_terms("hello world") == 2
     assert count_terms("get_or_init") == 1
     assert count_terms("媒体服务器") > 1
@@ -140,7 +140,7 @@ def test_terms_count_cjk_beyond_one():
     assert estimate_tokens("   ") == 0
 
 
-def test_chunks_respect_body_limit():
+def test_chunks_respect_body_limit(monkeypatch, tmp_path):
     budgets = _budgets(
         embed={"hard_limit": 120, "min_limit": 10, "overlap": 5},
         bm25={"hard_limit": 30, "min_limit": 5, "overlap": 2},

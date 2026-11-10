@@ -110,9 +110,15 @@ output repeatedly, redirect to a file first, then read it.
   `integration` (needs sqlite/subprocess/external service), `e2e` (needs real
   network, skipped unless `LIBREF_RUN_E2E=1`), `requires_qdrant` (needs local
   Qdrant), `requires_binary` (needs built entrypoint).
-- **Golden samples.** Every borrowed algorithm keeps golden cases with annotated
-  provenance (upstream README/paper). Retrieval quality baselines (MRR/Recall@k)
-  are CI gates — never silently loosen thresholds.
+- **Test settings.** Unit and integration tests build settings through
+  `tests/conftest.py` only (e2e drives real runs and is exempt):
+  core `make_settings` plus the closed preset set (`make_crawler_settings`,
+  `make_registry_settings`, `make_discovery_settings`). Never construct
+  `LibrefSettings` directly in tests, except `test_config.py` which tests the
+  config machinery itself. Hermetic shell (clean cwd, no `LIBREF_*` leak) comes
+  from the autouse fixture for integration tests and from the factory itself
+  for unit tests. New subsystems add a preset only when at least two test
+  files share the same base; single-file bases stay inline at the call site.
 - Changes touching retrieval or mining logic must come with golden or
   differential (cross-check) tests.
 

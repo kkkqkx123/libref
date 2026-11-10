@@ -56,7 +56,9 @@ def _meta(conn: sqlite3.Connection, key: str) -> str | None:
     return row[0] if row else None
 
 
-def test_ensure_collection_and_meta(store: QdrantVecStore, conn) -> None:
+def test_ensure_collection_and_meta(
+    store: QdrantVecStore, conn, monkeypatch, tmp_path
+) -> None:
     store.ensure_collection(conn, "BAAI/bge-small-zh", 4)
     assert store.client.collection_exists(COLLECTION)
     assert _meta(conn, "vec_model") == "BAAI/bge-small-zh"
@@ -64,7 +66,9 @@ def test_ensure_collection_and_meta(store: QdrantVecStore, conn) -> None:
     store.ensure_collection(conn, "BAAI/bge-small-zh", 4)  # idempotent
 
 
-def test_upsert_search_version_filter(store: QdrantVecStore, conn) -> None:
+def test_upsert_search_version_filter(
+    store: QdrantVecStore, conn, monkeypatch, tmp_path
+) -> None:
     store.ensure_collection(conn, "m", 4)
     store.upsert_batch(
         [
@@ -79,7 +83,9 @@ def test_upsert_search_version_filter(store: QdrantVecStore, conn) -> None:
     assert len(results) == 2
 
 
-def test_delete_docs_and_version(store: QdrantVecStore, conn) -> None:
+def test_delete_docs_and_version(
+    store: QdrantVecStore, conn, monkeypatch, tmp_path
+) -> None:
     store.ensure_collection(conn, "m", 4)
     store.upsert_batch(
         [
@@ -95,7 +101,9 @@ def test_delete_docs_and_version(store: QdrantVecStore, conn) -> None:
     assert store.count(20) == 1  # other versions unaffected
 
 
-def test_dim_change_invalidates(store: QdrantVecStore, conn) -> None:
+def test_dim_change_invalidates(
+    store: QdrantVecStore, conn, monkeypatch, tmp_path
+) -> None:
     store.ensure_collection(conn, "m1", 4)
     store.upsert_batch([(1, 1, 10, [1.0, 0.0, 0.0, 0.0])])
     assert store.count(10) == 1
@@ -106,7 +114,9 @@ def test_dim_change_invalidates(store: QdrantVecStore, conn) -> None:
     assert _meta(conn, "vec_dim") == "8"
 
 
-def test_model_only_change_keeps_collection(store: QdrantVecStore, conn) -> None:
+def test_model_only_change_keeps_collection(
+    store: QdrantVecStore, conn, monkeypatch, tmp_path
+) -> None:
     """Model-name drift never wipes other versions; per-version repair owns it."""
     store.ensure_collection(conn, "m1", 4)
     store.upsert_batch(
@@ -121,7 +131,7 @@ def test_model_only_change_keeps_collection(store: QdrantVecStore, conn) -> None
     assert _meta(conn, "vec_model") == "m2"
 
 
-def test_list_ids_roundtrip(store: QdrantVecStore, conn) -> None:
+def test_list_ids_roundtrip(store: QdrantVecStore, conn, monkeypatch, tmp_path) -> None:
     store.ensure_collection(conn, "m", 4)
     store.upsert_batch(
         [
@@ -135,7 +145,9 @@ def test_list_ids_roundtrip(store: QdrantVecStore, conn) -> None:
     assert store.list_ids(99) == []
 
 
-def test_reconcile_count_consistency(store: QdrantVecStore, conn) -> None:
+def test_reconcile_count_consistency(
+    store: QdrantVecStore, conn, monkeypatch, tmp_path
+) -> None:
     """Reconciliation baseline is the embeddable subset; bm25 chunks stay FTS-only."""
     import json as _json
 

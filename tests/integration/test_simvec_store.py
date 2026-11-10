@@ -11,7 +11,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from libref.config import LibrefSettings
 from libref.db import apply_migrations, open_db
 from libref.services.factory import build_vector
 from libref.store.vec_store import (
@@ -21,6 +20,7 @@ from libref.store.vec_store import (
     simvec_available,
     simvec_root_for,
 )
+from tests.conftest import make_settings
 
 COLLECTION = "libref_test_chunks"
 
@@ -57,7 +57,7 @@ def _gateway():
 @pytest.mark.integration
 @pytest.mark.requires_simvec
 @needs_lib
-def test_simvec_root_derivation(tmp_path) -> None:
+def test_simvec_root_derivation(tmp_path, monkeypatch) -> None:
     assert simvec_root_for(tmp_path / "a.db").name == "a.db.simvec"
     assert simvec_root_for(":memory:").exists()
     assert (
@@ -68,7 +68,9 @@ def test_simvec_root_derivation(tmp_path) -> None:
 @pytest.mark.integration
 @pytest.mark.requires_simvec
 @needs_lib
-def test_ensure_collection_and_meta(store: SimvecVecStore, conn) -> None:
+def test_ensure_collection_and_meta(
+    store: SimvecVecStore, conn, monkeypatch, tmp_path
+) -> None:
     store.ensure_collection(conn, "BAAI/bge-small-zh", 4)
     assert store._engine.collection_exists(COLLECTION)
     assert _meta(conn, "vec_model") == "BAAI/bge-small-zh"
@@ -79,7 +81,9 @@ def test_ensure_collection_and_meta(store: SimvecVecStore, conn) -> None:
 @pytest.mark.integration
 @pytest.mark.requires_simvec
 @needs_lib
-def test_upsert_search_version_filter(store: SimvecVecStore, conn) -> None:
+def test_upsert_search_version_filter(
+    store: SimvecVecStore, conn, monkeypatch, tmp_path
+) -> None:
     store.ensure_collection(conn, "m", 4)
     store.upsert_batch(
         [
@@ -97,7 +101,9 @@ def test_upsert_search_version_filter(store: SimvecVecStore, conn) -> None:
 @pytest.mark.integration
 @pytest.mark.requires_simvec
 @needs_lib
-def test_delete_docs_and_version(store: SimvecVecStore, conn) -> None:
+def test_delete_docs_and_version(
+    store: SimvecVecStore, conn, monkeypatch, tmp_path
+) -> None:
     store.ensure_collection(conn, "m", 4)
     store.upsert_batch(
         [
@@ -116,7 +122,9 @@ def test_delete_docs_and_version(store: SimvecVecStore, conn) -> None:
 @pytest.mark.integration
 @pytest.mark.requires_simvec
 @needs_lib
-def test_dim_change_invalidates(store: SimvecVecStore, conn) -> None:
+def test_dim_change_invalidates(
+    store: SimvecVecStore, conn, monkeypatch, tmp_path
+) -> None:
     store.ensure_collection(conn, "m1", 4)
     store.upsert_batch([(1, 1, 10, [1.0, 0.0, 0.0, 0.0])])
     assert store.count(10) == 1
@@ -130,7 +138,9 @@ def test_dim_change_invalidates(store: SimvecVecStore, conn) -> None:
 @pytest.mark.integration
 @pytest.mark.requires_simvec
 @needs_lib
-def test_model_only_change_keeps_collection(store: SimvecVecStore, conn) -> None:
+def test_model_only_change_keeps_collection(
+    store: SimvecVecStore, conn, monkeypatch, tmp_path
+) -> None:
     """Model-name drift never wipes other versions; per-version repair owns it."""
     store.ensure_collection(conn, "m1", 4)
     store.upsert_batch(
@@ -148,7 +158,7 @@ def test_model_only_change_keeps_collection(store: SimvecVecStore, conn) -> None
 @pytest.mark.integration
 @pytest.mark.requires_simvec
 @needs_lib
-def test_list_ids_roundtrip(store: SimvecVecStore, conn) -> None:
+def test_list_ids_roundtrip(store: SimvecVecStore, conn, monkeypatch, tmp_path) -> None:
     store.ensure_collection(conn, "m", 4)
     store.upsert_batch(
         [
@@ -165,7 +175,9 @@ def test_list_ids_roundtrip(store: SimvecVecStore, conn) -> None:
 @pytest.mark.integration
 @pytest.mark.requires_simvec
 @needs_lib
-def test_reconcile_count_consistency(store: SimvecVecStore, conn) -> None:
+def test_reconcile_count_consistency(
+    store: SimvecVecStore, conn, monkeypatch, tmp_path
+) -> None:
     """Reconciliation baseline is the embeddable subset; bm25 chunks stay FTS-only."""
     import json as _json
 
@@ -196,9 +208,11 @@ def test_reconcile_count_consistency(store: SimvecVecStore, conn) -> None:
 
 
 @pytest.mark.integration
-def test_build_vector_dispatch(tmp_path) -> None:
+def test_build_vector_dispatch(tmp_path, monkeypatch) -> None:
     """Factory returns the configured backend; the remote choice needs no server."""
-    remote = LibrefSettings(db_path=tmp_path / "r.db", vector_backend="qdrant")
+    remote = make_settings(
+        monkeypatch, tmp_path, db_path=tmp_path / "r.db", vector_backend="qdrant"
+    )
     vec, _, _ = build_vector(remote, gateway=_gateway())
     assert isinstance(vec, QdrantVecStore)
 
@@ -206,8 +220,10 @@ def test_build_vector_dispatch(tmp_path) -> None:
 @pytest.mark.integration
 @pytest.mark.requires_simvec
 @needs_lib
-def test_build_vector_dispatch_simvec(tmp_path) -> None:
-    local = LibrefSettings(db_path=tmp_path / "l.db", vector_backend="simvec")
+def test_build_vector_dispatch_simvec(tmp_path, monkeypatch) -> None:
+    local = make_settings(
+        monkeypatch, tmp_path, db_path=tmp_path / "l.db", vector_backend="simvec"
+    )
     vec, _, _ = build_vector(local, gateway=_gateway())
     try:
         assert isinstance(vec, SimvecVecStore)

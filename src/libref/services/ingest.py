@@ -894,9 +894,7 @@ class IngestService:
         if not await robots.can_fetch(url):
             return StoreResult("skipped"), 0, False, stage_ms, _FetchDetail()
         delay = await robots.crawl_delay(url)
-        cache_mode = (
-            "bypass" if (scope or {}).get("bypass_cache", False) else "enabled"
-        )
+        cache_mode = "bypass" if (scope or {}).get("bypass_cache", False) else "enabled"
         result = await fetcher.fetch(
             url,
             etag=page.etag if page else None,

@@ -6,18 +6,12 @@ import httpx
 import pytest
 
 from libref.chunking import Chunk
-from libref.config import LibrefSettings
 from libref.llm import LlmConfigError, build_chat_fn
 from libref.services.answer import answer_query
 from libref.store.document_store import DocumentStore
-from tests.conftest import seed_library_version
+from tests.conftest import make_settings, seed_library_version
 
 pytestmark = pytest.mark.integration
-
-
-def _isolated_settings(monkeypatch, tmp_path, **kwargs) -> LibrefSettings:
-    monkeypatch.chdir(tmp_path)
-    return LibrefSettings(**kwargs)
 
 
 def _seed_docs(conn) -> None:
@@ -49,9 +43,7 @@ def _chat_fn(settings, handler):
 
 def test_answer_grounds_in_retrieved_material(conn, monkeypatch, tmp_path) -> None:
     _seed_docs(conn)
-    s = _isolated_settings(
-        monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True
-    )
+    s = make_settings(monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True)
     seen: dict = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -79,9 +71,7 @@ def test_answer_grounds_in_retrieved_material(conn, monkeypatch, tmp_path) -> No
 
 def test_answer_empty_without_evidence(conn, monkeypatch, tmp_path) -> None:
     _seed_docs(conn)
-    s = _isolated_settings(
-        monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True
-    )
+    s = make_settings(monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True)
 
     def boom(request: httpx.Request) -> httpx.Response:
         raise AssertionError("must not call chat without evidence")
@@ -92,15 +82,13 @@ def test_answer_empty_without_evidence(conn, monkeypatch, tmp_path) -> None:
 
 def test_answer_rejects_when_chat_disabled(conn, monkeypatch, tmp_path) -> None:
     _seed_docs(conn)
-    s = _isolated_settings(monkeypatch, tmp_path)
+    s = make_settings(monkeypatch, tmp_path)
     with pytest.raises(LlmConfigError, match="chat is not enabled"):
         answer_query(conn, s, "uv")
 
 
 def test_answer_rejects_empty_query(conn, monkeypatch, tmp_path) -> None:
     _seed_docs(conn)
-    s = _isolated_settings(
-        monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True
-    )
+    s = make_settings(monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True)
     with pytest.raises(ValueError, match="empty"):
         answer_query(conn, s, "  ")

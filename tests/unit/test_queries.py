@@ -9,19 +9,19 @@ from libref.astminer import engine as ast_engine
 from libref.astminer import queries as ast_queries
 
 
-def test_all_queries_compile():
+def test_all_queries_compile(monkeypatch, tmp_path):
     for cfg in (ast_config.PYTHON_CONFIG, ast_config.JAVA_CONFIG):
         language = ast_config.load_language(cfg)
         for kind in ast_queries.KINDS:
             Query(language, ast_queries.get(cfg.name, kind))
 
 
-def test_check_config_compiles_queries():
+def test_check_config_compiles_queries(monkeypatch, tmp_path):
     ast_config.check_config(ast_config.PYTHON_CONFIG)
     ast_config.check_config(ast_config.JAVA_CONFIG)
 
 
-def test_python_decorated_and_async_shapes():
+def test_python_decorated_and_async_shapes(monkeypatch, tmp_path):
     cfg = ast_config.PYTHON_CONFIG
     source = (
         b"import functools\n\n\n"
@@ -37,7 +37,7 @@ def test_python_decorated_and_async_shapes():
     assert {c.raw_callee for c in raw} == {"functools.lru_cache", "get"}
 
 
-def test_python_chained_and_super_shapes():
+def test_python_chained_and_super_shapes(monkeypatch, tmp_path):
     cfg = ast_config.PYTHON_CONFIG
     source = (
         b"class A(B):\n"
@@ -56,7 +56,7 @@ def test_python_chained_and_super_shapes():
     assert by_raw["super().m"].caller == "m.A.f"
 
 
-def test_python_wildcard_and_relative_yield_no_alias():
+def test_python_wildcard_and_relative_yield_no_alias(monkeypatch, tmp_path):
     cfg = ast_config.PYTHON_CONFIG
     _decls, aliases, _raw = ast_engine.extract_file(
         "m.py", cfg, b"from m import *\nfrom . import x\n"
@@ -64,11 +64,11 @@ def test_python_wildcard_and_relative_yield_no_alias():
     assert aliases == []
 
 
-def test_javascript_queries_compile():
+def test_javascript_queries_compile(monkeypatch, tmp_path):
     ast_config.check_config(ast_config.JAVASCRIPT_CONFIG)
 
 
-def test_javascript_class_method_calls():
+def test_javascript_class_method_calls(monkeypatch, tmp_path):
     cfg = ast_config.JAVASCRIPT_CONFIG
     decls, _aliases, raw = ast_engine.extract_file(
         "m.js",
@@ -91,7 +91,7 @@ def test_javascript_class_method_calls():
     assert by_raw["g"].caller == "m.f"
 
 
-def test_javascript_import_require_aliases():
+def test_javascript_import_require_aliases(monkeypatch, tmp_path):
     cfg = ast_config.JAVASCRIPT_CONFIG
     _decls, aliases, raw = ast_engine.extract_file(
         "m.js",
@@ -115,7 +115,7 @@ def test_javascript_import_require_aliases():
     assert "import" not in {c.raw_callee for c in raw}
 
 
-def test_javascript_arrow_and_object_method():
+def test_javascript_arrow_and_object_method(monkeypatch, tmp_path):
     cfg = ast_config.JAVASCRIPT_CONFIG
     decls, _aliases, raw = ast_engine.extract_file(
         "m.js",
@@ -129,7 +129,7 @@ def test_javascript_arrow_and_object_method():
     assert by_raw["helper"].caller == "m.arrow"
 
 
-def test_java_extends_implements_and_calls():
+def test_java_extends_implements_and_calls(monkeypatch, tmp_path):
     cfg = ast_config.JAVA_CONFIG
     decls, aliases, raw = ast_engine.extract_file(
         "A.java",

@@ -46,7 +46,7 @@ def _seed_call(conn, callee: str, confidence: str) -> int:
     return call_id
 
 
-def test_pending_orders_ambiguous_first(conn) -> None:
+def test_pending_orders_ambiguous_first(conn, monkeypatch, tmp_path) -> None:
     ids = {c: _seed_call(conn, c, c) for c in ("EXTRACTED", "INFERRED", "AMBIGUOUS")}
     rows = ReviewService(conn).list_pending()
     assert [r["entity_id"] for r in rows] == [
@@ -57,7 +57,7 @@ def test_pending_orders_ambiguous_first(conn) -> None:
     assert all(r["status"] == "pending" for r in rows)
 
 
-def test_approve_conflict_reopen_transitions(conn) -> None:
+def test_approve_conflict_reopen_transitions(conn, monkeypatch, tmp_path) -> None:
     svc = ReviewService(conn)
     approved = _seed_call(conn, "a", "AMBIGUOUS")
     svc.approve(approved)

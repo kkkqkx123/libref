@@ -7,30 +7,30 @@ from libref.text.cjk import expand_cjk_run
 from libref.text.query import safe_fts_query
 
 
-def test_expand_keeps_original_first():
+def test_expand_keeps_original_first(monkeypatch, tmp_path):
     assert expand_cjk_run("媒体服务器")[0] == "媒体服务器"
 
 
-def test_expand_covers_jieba_words_and_cross_boundary_bigrams():
+def test_expand_covers_jieba_words_and_cross_boundary_bigrams(monkeypatch, tmp_path):
     expanded = expand_cjk_run("媒体服务器")
     assert "服务器" in expanded
     assert "服务" in expanded
     assert "体服" in expanded
 
 
-def test_expand_single_char_and_empty():
+def test_expand_single_char_and_empty(monkeypatch, tmp_path):
     assert expand_cjk_run("服") == ["服"]
     assert expand_cjk_run("") == []
 
 
-def test_query_expands_substring_terms():
+def test_query_expands_substring_terms(monkeypatch, tmp_path):
     query = safe_fts_query("服务器")
     assert '"服务器"' in query
     assert '"服务"' in query
     assert '"务器"' in query
 
 
-def test_cleaning_and_query_share_vocabulary():
+def test_cleaning_and_query_share_vocabulary(monkeypatch, tmp_path):
     cleaned = clean_text_for_bm25("媒体服务器")
     for term in expand_cjk_run("服务器"):
         assert term in cleaned

@@ -7,7 +7,7 @@ import pytest
 pytestmark = pytest.mark.unit
 
 
-def test_xml_attr_escapes_only_mandatory_chars():
+def test_xml_attr_escapes_only_mandatory_chars(monkeypatch, tmp_path):
     from libref.text.snippet import xml_escape_attr
 
     assert xml_escape_attr("a&b<\"c'>") == "a&amp;b&lt;&quot;c'>"
@@ -15,7 +15,7 @@ def test_xml_attr_escapes_only_mandatory_chars():
     assert xml_escape_attr("plain") == "plain"
 
 
-def test_snippet_uses_hit_and_gap_markers():
+def test_snippet_uses_hit_and_gap_markers(monkeypatch, tmp_path):
     from libref.text.snippet import make_snippet
 
     out = make_snippet("hello libref world", "libref", radius=8, cap=120)
@@ -25,7 +25,7 @@ def test_snippet_uses_hit_and_gap_markers():
     assert out.endswith("</excerpt>")
 
 
-def test_snippet_truncation_emits_gap_marker():
+def test_snippet_truncation_emits_gap_marker(monkeypatch, tmp_path):
     from libref.text.snippet import make_snippet
 
     body = "alpha\n" + ("x " * 200) + "\nlibref tail"
@@ -34,7 +34,7 @@ def test_snippet_truncation_emits_gap_marker():
     assert "..." not in out.replace("<gap/>", "")
 
 
-def test_truncate_material_keeps_fences_balanced():
+def test_truncate_material_keeps_fences_balanced(monkeypatch, tmp_path):
     from libref.text.snippet import fences_balanced, truncate_material
 
     body = "intro\n```python\nprint(1)\nprint(2)\nprint(3)\n```\n tail words here"
@@ -44,7 +44,7 @@ def test_truncate_material_keeps_fences_balanced():
     assert "..." not in cut
 
 
-def test_material_block_is_self_locating_unit():
+def test_material_block_is_self_locating_unit(monkeypatch, tmp_path):
     from libref.services.answer_materials import build_messages
 
     item = {
@@ -65,7 +65,7 @@ def test_material_block_is_self_locating_unit():
     assert "body text" in user
 
 
-def test_gap_uses_span_attr():
+def test_gap_uses_span_attr(monkeypatch, tmp_path):
     from libref.text.snippet import gap_tag
 
     assert gap_tag() == "<gap/>"
@@ -75,7 +75,7 @@ def test_gap_uses_span_attr():
     assert "range=" not in out
 
 
-def test_tokens_rendered_plain():
+def test_tokens_rendered_plain(monkeypatch, tmp_path):
     from libref.text.snippet import omitted_tag, reference_tag
 
     assert reference_tag("p", "1-2", "budget", 12).endswith('tokens="12"/>')
@@ -83,7 +83,7 @@ def test_tokens_rendered_plain():
     assert "~" not in omitted_tag(3, 9)
 
 
-def test_call_tag_escapes_attrs():
+def test_call_tag_escapes_attrs(monkeypatch, tmp_path):
     from libref.text.snippet import call_tag
 
     out = call_tag(
@@ -95,7 +95,7 @@ def test_call_tag_escapes_attrs():
     assert out.endswith(">x, y</call>")
 
 
-def test_pom_body_stays_verbatim_inside_unit():
+def test_pom_body_stays_verbatim_inside_unit(monkeypatch, tmp_path):
     from libref.text.snippet import unit_tag
 
     pom = (
@@ -114,7 +114,7 @@ def test_pom_body_stays_verbatim_inside_unit():
     assert "&lt;project" not in out
 
 
-def test_pattern_evidence_marks_gaps_and_hits():
+def test_pattern_evidence_marks_gaps_and_hits(monkeypatch, tmp_path):
     import sqlite3
 
     from libref.services.mining_read import MiningReadService

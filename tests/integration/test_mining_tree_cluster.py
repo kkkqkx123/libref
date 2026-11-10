@@ -18,7 +18,7 @@ from tests.conftest import copy_mini_repo
 pytestmark = pytest.mark.integration
 
 
-def test_feature_tree_hand_computed():
+def test_feature_tree_hand_computed(monkeypatch, tmp_path):
     calls = [
         ("a.b", "f1"),
         ("a.b", "f1"),
@@ -37,7 +37,7 @@ def test_feature_tree_hand_computed():
     assert nodes["a.b"]["kind"] == "function"
 
 
-def test_cluster_hand_computed():
+def test_cluster_hand_computed(monkeypatch, tmp_path):
     sets = [{"a", "b"}, {"a", "b"}, {"a", "c"}, {"b", "c"}]
     groups = cluster_apis(sets, threshold=0.15, min_size=2)
     assert len(groups) == 1
@@ -46,13 +46,13 @@ def test_cluster_hand_computed():
     assert single == []
 
 
-def test_scope_sets_share_scope_key_with_ingest():
+def test_scope_sets_share_scope_key_with_ingest(monkeypatch, tmp_path):
     rows = [("a", "f.py", "g"), ("b", "f.py", "g"), ("a", "h.py", None)]
     sets = build_scope_sets(rows)
     assert sorted([sorted(s) for s in sets]) == [["a"], ["a", "b"]]
 
 
-def test_mine_persists_tree_and_clusters(conn, tmp_path):
+def test_mine_persists_tree_and_clusters(conn, tmp_path, monkeypatch):
     dst = copy_mini_repo(tmp_path)
     index_repo(conn, "demo", "0.1", str(dst), repos_dir=tmp_path / "repos")
     mine_patterns(conn, "demo", "0.1", minsup=2)
@@ -75,7 +75,7 @@ def test_mine_persists_tree_and_clusters(conn, tmp_path):
     assert len(diversified) >= 1
 
 
-def test_mine_clears_derived_when_calls_gone(conn):
+def test_mine_clears_derived_when_calls_gone(conn, monkeypatch, tmp_path):
     library_id, version_id = LibraryService(conn).ensure_library_version("demo", "t")
     conn.execute(
         "INSERT INTO call_instances(call_uid, callee_name, args, repo,"

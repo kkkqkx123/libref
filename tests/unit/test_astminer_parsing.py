@@ -57,7 +57,7 @@ def _simple_calls(raw) -> set[str]:
     return out
 
 
-def test_python_sampling_matches_stdlib():
+def test_python_sampling_matches_stdlib(monkeypatch, tmp_path):
     import json
 
     sampling = json.loads((FIXTURES / "sampling.json").read_text(encoding="utf-8"))
@@ -77,7 +77,7 @@ def test_python_sampling_matches_stdlib():
         assert _simple_calls(raw) == _dotted_calls(data)
 
 
-def test_python_minimal_fixture_shapes():
+def test_python_minimal_fixture_shapes(monkeypatch, tmp_path):
     data = (FIXTURES / "python_async_decorator.py").read_bytes()
     decls, aliases, raw = ast_engine.extract_file(
         "python_async_decorator.py", ast_config.PYTHON_CONFIG, data
@@ -90,7 +90,7 @@ def test_python_minimal_fixture_shapes():
     assert {"functools.lru_cache", "get", "np.array", "np.zeros", "self.step"} <= by_raw
 
 
-def test_javascript_minimal_fixture_shapes():
+def test_javascript_minimal_fixture_shapes(monkeypatch, tmp_path):
     data = (FIXTURES / "js_chain_import.js").read_bytes()
     decls, aliases, raw = ast_engine.extract_file(
         "js_chain_import.js", ast_config.JAVASCRIPT_CONFIG, data
@@ -106,7 +106,7 @@ def test_javascript_minimal_fixture_shapes():
     assert "require" not in by_raw and "import" not in by_raw
 
 
-def test_java_minimal_fixture_shapes():
+def test_java_minimal_fixture_shapes(monkeypatch, tmp_path):
     data = (FIXTURES / "java_shapes.java").read_bytes()
     decls, aliases, raw = ast_engine.extract_file(
         "java_shapes.java", ast_config.JAVA_CONFIG, data
@@ -120,7 +120,7 @@ def test_java_minimal_fixture_shapes():
     assert by_raw["this.baz"].caller == "java_shapes.Mapper.run"
 
 
-def test_alias_scope_and_confidence_fixed():
+def test_alias_scope_and_confidence_fixed(monkeypatch, tmp_path):
     decls, aliases, raw = ast_engine.extract_file(
         "python_async_decorator.py",
         ast_config.PYTHON_CONFIG,
@@ -134,7 +134,7 @@ def test_alias_scope_and_confidence_fixed():
     assert by_raw[("python_async_decorator.py", "self.step")].confidence == "EXTRACTED"
 
 
-def test_empty_source_yields_empty():
+def test_empty_source_yields_empty(monkeypatch, tmp_path):
     for cfg, path in (
         (ast_config.PYTHON_CONFIG, "empty.py"),
         (ast_config.JAVASCRIPT_CONFIG, "empty.js"),

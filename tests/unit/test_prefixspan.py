@@ -71,14 +71,14 @@ def is_closed(db: list[list[int]], patt: tuple[int, ...], sup: int) -> bool:
     return True
 
 
-def test_frequent_readme_golden():
+def test_frequent_readme_golden(monkeypatch, tmp_path):
     ps = PrefixSpan(DB)
     ps.minlen, ps.maxlen = 1, 1000
     got = {(sup, tuple(patt)) for sup, patt in ps.frequent(2)}
     assert got == README_FREQUENT_2
 
 
-def test_closed_readme_golden_and_definition():
+def test_closed_readme_golden_and_definition(monkeypatch, tmp_path):
     ps = PrefixSpan(DB)
     ps.minlen, ps.maxlen = 1, 1000
     got = {(sup, tuple(patt)) for sup, patt in ps.frequent(2, closed=True)}
@@ -87,7 +87,7 @@ def test_closed_readme_golden_and_definition():
         assert is_closed(DB, patt, sup)
 
 
-def test_topk_readme_golden():
+def test_topk_readme_golden(monkeypatch, tmp_path):
     ps = PrefixSpan(DB)
     ps.minlen, ps.maxlen = 1, 1000
     got = ps.topk(5)
@@ -98,7 +98,7 @@ def test_topk_readme_golden():
     assert sups == sorted(sups, reverse=True)
 
 
-def test_minlen_maxlen_window():
+def test_minlen_maxlen_window(monkeypatch, tmp_path):
     ps = PrefixSpan(DB)  # custom default minlen=2, maxlen=10
     got = {(sup, tuple(patt)) for sup, patt in ps.frequent(2)}
     assert all(len(patt) >= 2 for _, patt in got)
@@ -111,7 +111,7 @@ def test_minlen_maxlen_window():
     assert (2, (1, 3, 4)) not in got2
 
 
-def test_callback_streams_without_results():
+def test_callback_streams_without_results(monkeypatch, tmp_path):
     ps = PrefixSpan(DB)
     ps.minlen, ps.maxlen = 1, 1000
     seen: list[tuple[int, tuple[int, ...]]] = []
@@ -123,7 +123,7 @@ def test_callback_streams_without_results():
     assert {(s, p) for s, p in seen} == README_FREQUENT_2
 
 
-def test_weighted_key_with_anti_monotone_bound():
+def test_weighted_key_with_anti_monotone_bound(monkeypatch, tmp_path):
     # Customization point 4: weighted key (weighted by matched sequence length); bound defaults to the key itself
     # (weighted support is anti-monotone: superpattern match set ⊆ subpattern match set)
     ps = PrefixSpan(DB)
@@ -136,7 +136,7 @@ def test_weighted_key_with_anti_monotone_bound():
     assert [sup for sup, _ in got] == [20, 15, 15]
 
 
-def test_filter_excludes_pattern():
+def test_filter_excludes_pattern(monkeypatch, tmp_path):
     ps = PrefixSpan(DB)
     ps.minlen, ps.maxlen = 1, 1000
     got = ps.frequent(2, filter=lambda patt, matches: all(i != 0 for i, _ in matches))
@@ -150,7 +150,7 @@ def contains(seq: list[int], patt: list[int]) -> bool:
     return all(item in it for item in patt)
 
 
-def test_random_against_bruteforce():
+def test_random_against_bruteforce(monkeypatch, tmp_path):
     """Cross-check against brute-force enumeration on random small databases (frequent and closed semantics)."""
     import itertools
     import random

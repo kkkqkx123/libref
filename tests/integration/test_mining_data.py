@@ -45,7 +45,7 @@ def _seed_calls(conn, library="demo", version="t", rows=()):
     return library_id, version_id
 
 
-def test_sequence_order_uses_byte_offset_not_just_line(conn):
+def test_sequence_order_uses_byte_offset_not_just_line(conn, monkeypatch, tmp_path):
     _seed_calls(
         conn,
         rows=[
@@ -59,7 +59,7 @@ def test_sequence_order_uses_byte_offset_not_just_line(conn):
     assert [r["pattern"] for r in results] == [["first", "second"]]
 
 
-def test_ambiguous_excluded_by_default(conn):
+def test_ambiguous_excluded_by_default(conn, monkeypatch, tmp_path):
     _seed_calls(
         conn,
         rows=[
@@ -74,7 +74,7 @@ def test_ambiguous_excluded_by_default(conn):
     assert ["real.a", "mystery"] in [r["pattern"] for r in results]
 
 
-def test_stale_patterns_swept(conn):
+def test_stale_patterns_swept(conn, monkeypatch, tmp_path):
     _seed_calls(
         conn,
         rows=[
@@ -91,7 +91,7 @@ def test_stale_patterns_swept(conn):
     assert conn.execute("SELECT count(*) FROM seq_patterns").fetchone()[0] == 0
 
 
-def test_topn_keeps_exact_frequent_names(conn):
+def test_topn_keeps_exact_frequent_names(conn, monkeypatch, tmp_path):
     rows = []
     for f in ("a.py", "b.py"):
         rows.append(("aa.bb.cc.dd", f, "f", 1, 1, 10, "INFERRED", []))
@@ -103,7 +103,7 @@ def test_topn_keeps_exact_frequent_names(conn):
     assert mine_patterns(conn, "demo", "t", minsup=2, topn=1) == []
 
 
-def test_retrieval_queries_over_mined_data(conn, tmp_path):
+def test_retrieval_queries_over_mined_data(conn, tmp_path, monkeypatch):
     dst = copy_mini_repo(tmp_path)
     index_repo(conn, "demo", "0.1", str(dst), repos_dir=tmp_path / "repos")
     mine_patterns(conn, "demo", "0.1", minsup=2)
@@ -136,7 +136,7 @@ def test_retrieval_queries_over_mined_data(conn, tmp_path):
     assert all(c["confidence"] != "AMBIGUOUS" for c in first["calls"])
 
 
-def test_minlen_filters_short_patterns(conn):
+def test_minlen_filters_short_patterns(conn, monkeypatch, tmp_path):
     _seed_calls(
         conn,
         rows=[

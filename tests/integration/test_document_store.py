@@ -34,7 +34,7 @@ def make_chunks(url: str = "https://d.example/a.html") -> list[Chunk]:
     ]
 
 
-def test_stored_creates_page_documents_and_fts(conn):
+def test_stored_creates_page_documents_and_fts(conn, monkeypatch, tmp_path):
     seed_lv(conn)
     store = DocumentStore(conn)
     result = store.store_page(
@@ -56,7 +56,7 @@ def test_stored_creates_page_documents_and_fts(conn):
     assert hits[0] == 2
 
 
-def test_unchanged_keeps_documents(conn):
+def test_unchanged_keeps_documents(conn, monkeypatch, tmp_path):
     seed_lv(conn)
     store = DocumentStore(conn)
     store.store_page(
@@ -78,7 +78,7 @@ def test_unchanged_keeps_documents(conn):
     assert before == after == 2
 
 
-def test_unchanged_updates_fetched_at_only(conn):
+def test_unchanged_updates_fetched_at_only(conn, monkeypatch, tmp_path):
     seed_lv(conn)
     store = DocumentStore(conn)
     store.store_page(
@@ -93,7 +93,7 @@ def test_unchanged_updates_fetched_at_only(conn):
     assert result.outcome == "unchanged"
 
 
-def test_absent_deletes_page_and_documents(conn):
+def test_absent_deletes_page_and_documents(conn, monkeypatch, tmp_path):
     seed_lv(conn)
     store = DocumentStore(conn)
     first = store.store_page(
@@ -116,7 +116,7 @@ def test_absent_deletes_page_and_documents(conn):
     assert hits == 0
 
 
-def test_restored_reports_replaced_ids(conn):
+def test_restored_reports_replaced_ids(conn, monkeypatch, tmp_path):
     seed_lv(conn)
     store = DocumentStore(conn)
     first = store.store_page(
@@ -149,7 +149,7 @@ def test_restored_reports_replaced_ids(conn):
     assert set(second.removed_ids).isdisjoint(second.inserted_ids)
 
 
-def test_empty_keeps_page_without_documents(conn):
+def test_empty_keeps_page_without_documents(conn, monkeypatch, tmp_path):
     seed_lv(conn)
     store = DocumentStore(conn)
     first = store.store_page(
@@ -168,7 +168,7 @@ def test_empty_keeps_page_without_documents(conn):
     assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 0
 
 
-def test_skipped_and_failed_are_noop_writes(conn):
+def test_skipped_and_failed_are_noop_writes(conn, monkeypatch, tmp_path):
     seed_lv(conn)
     store = DocumentStore(conn)
     assert store.store_page(1, 1, "u1", "skipped").outcome == "skipped"
@@ -176,7 +176,7 @@ def test_skipped_and_failed_are_noop_writes(conn):
     assert conn.execute("SELECT count(*) FROM pages").fetchone()[0] == 0
 
 
-def test_unknown_outcome_rejected(conn):
+def test_unknown_outcome_rejected(conn, monkeypatch, tmp_path):
     import pytest
 
     seed_lv(conn)
@@ -185,7 +185,7 @@ def test_unknown_outcome_rejected(conn):
         store.store_page(1, 1, "u", "exploded")
 
 
-def test_get_documents_batch_roundtrip(conn):
+def test_get_documents_batch_roundtrip(conn, monkeypatch, tmp_path):
     seed_lv(conn)
     store = DocumentStore(conn)
     result = store.store_page(
@@ -207,6 +207,6 @@ def test_get_documents_batch_roundtrip(conn):
     assert store.get_documents([]) == []
 
 
-def test_content_hash_stability():
+def test_content_hash_stability(monkeypatch, tmp_path):
     assert content_hash("abc") == content_hash("abc")
     assert content_hash("abc") != content_hash("abd")

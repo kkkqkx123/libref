@@ -5,11 +5,10 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from libref.config import LibrefSettings
 from libref.crawler.url_seeder import _SEED_CACHE
 from libref.services.ingest import IngestService
 from libref.services.search import SearchService
-from tests.conftest import mock_ingest
+from tests.conftest import make_crawler_settings, mock_ingest
 
 pytestmark = pytest.mark.integration
 
@@ -53,9 +52,9 @@ def _handler(request: httpx.Request) -> httpx.Response:
     raise AssertionError(path)
 
 
-def test_follow_off_by_default(conn) -> None:
+def test_follow_off_by_default(conn, monkeypatch, tmp_path) -> None:
     _SEED_CACHE.clear()
-    settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=2)
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     with mock_ingest(_handler):
         counts = IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/"
@@ -66,9 +65,9 @@ def test_follow_off_by_default(conn) -> None:
     assert "https://d.example/deep.html" not in urls
 
 
-def test_follow_discovers_deep_page(conn) -> None:
+def test_follow_discovers_deep_page(conn, monkeypatch, tmp_path) -> None:
     _SEED_CACHE.clear()
-    settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=2)
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     with mock_ingest(_handler):
         counts = IngestService(settings, conn).scrape_docs(
             "docs",
@@ -82,9 +81,9 @@ def test_follow_discovers_deep_page(conn) -> None:
     assert hits and hits[0]["url"].endswith("/deep.html")
 
 
-def test_follow_respects_max_pages(conn) -> None:
+def test_follow_respects_max_pages(conn, monkeypatch, tmp_path) -> None:
     _SEED_CACHE.clear()
-    settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=2)
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     with mock_ingest(_handler):
         counts = IngestService(settings, conn).scrape_docs(
             "docs",

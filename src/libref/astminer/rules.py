@@ -31,10 +31,32 @@ CALLABLE_DECL_KINDS = frozenset(
 
 BUILTIN_BARE_CALLS = frozenset(
     {
-        "str", "int", "float", "bool", "list", "dict", "set", "tuple",
-        "len", "range", "print", "open", "isinstance", "type", "super",
-        "String", "Number", "Boolean", "Object", "Array", "Promise",
-        "Map", "Set", "JSON", "Math", "console",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "list",
+        "dict",
+        "set",
+        "tuple",
+        "len",
+        "range",
+        "print",
+        "open",
+        "isinstance",
+        "type",
+        "super",
+        "String",
+        "Number",
+        "Boolean",
+        "Object",
+        "Array",
+        "Promise",
+        "Map",
+        "Set",
+        "JSON",
+        "Math",
+        "console",
     }
 )
 
@@ -42,6 +64,7 @@ BUILTIN_BARE_CALLS = frozenset(
 def is_builtin_bare(raw: str, alias_map: dict[str, str]) -> bool:
     head = raw.partition(".")[0]
     return bool(head) and head in BUILTIN_BARE_CALLS and head not in alias_map
+
 
 _ENTITY_KIND_BY_ROOT = {
     "entity.class": "class",

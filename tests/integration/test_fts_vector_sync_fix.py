@@ -8,9 +8,8 @@ import sqlite3
 import pytest
 
 from libref.chunking import Chunk
-from libref.config import LibrefSettings
 from libref.store.document_store import DocumentStore
-from tests.conftest import seed_library_version
+from tests.conftest import make_crawler_settings, seed_library_version
 
 pytestmark = pytest.mark.integration
 
@@ -52,16 +51,7 @@ async def _fake_embed(texts: list[str]) -> list[list[float]]:
     return [[1.0, 0.0] for _ in texts]
 
 
-def _settings() -> LibrefSettings:
-    return LibrefSettings(
-        request_timeout=5.0,
-        fetch_concurrency=2,
-        crawl_delay_default=0.0,
-        robots_cache_ttl_days=1.0,
-    )
-
-
-def test_verify_catches_same_count_divergence(conn) -> None:
+def test_verify_catches_same_count_divergence(conn, monkeypatch, tmp_path) -> None:
     from libref.services.maintenance import sync_vectors_for_docs
     from libref.store.vec_store import write_version_meta
 
@@ -83,7 +73,7 @@ def test_verify_catches_same_count_divergence(conn) -> None:
         ],
         raw_content="a",
     )
-    settings = _settings()
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     write_version_meta(conn, 1, settings.embedding_model, settings.embedding_dim)
     vec = _FakeVec()
     vec.points[9999] = (9999, 1, 1, [1.0, 0.0])
@@ -127,7 +117,7 @@ def test_retriever_skips_drifted_version(conn, tmp_path, monkeypatch) -> None:
             ],
             raw_content=url,
         )
-    settings = _settings()
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     write_version_meta(conn, 1, settings.embedding_model, settings.embedding_dim)
     write_version_meta(conn, 2, "other-model", settings.embedding_dim)
     vec = _FakeVec()
@@ -147,7 +137,7 @@ def test_retriever_skips_drifted_version(conn, tmp_path, monkeypatch) -> None:
     assert results
 
 
-def test_fts_rebuild_repairs_direct_delete(conn) -> None:
+def test_fts_rebuild_repairs_direct_delete(conn, monkeypatch, tmp_path) -> None:
     from libref.services.maintenance import check_fts, rebuild_fts
     from libref.services.search import SearchService
 
@@ -190,7 +180,7 @@ def test_fts_rebuild_repairs_direct_delete(conn) -> None:
     assert len(SearchService(conn).search_docs("quetzalfts")) == 1
 
 
-def test_purge_deletes_truth_when_vectors_fail(conn) -> None:
+def test_purge_deletes_truth_when_vectors_fail(conn, monkeypatch, tmp_path) -> None:
     from libref.services.retention import purge_version
 
     seed_library_version(conn)
@@ -221,12 +211,12 @@ def test_purge_deletes_truth_when_vectors_fail(conn) -> None:
     assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 0
 
 
-def test_version_drifted_never_embedded_is_current(conn) -> None:
+def test_version_drifted_never_embedded_is_current(conn, monkeypatch, tmp_path) -> None:
     from libref.services.maintenance import version_drifted
     from libref.store.vec_store import write_version_meta
 
     seed_library_version(conn)
-    settings = _settings()
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     assert version_drifted(conn, settings, 1) is False
     write_version_meta(conn, 1, settings.embedding_model, settings.embedding_dim)
     assert version_drifted(conn, settings, 1) is False

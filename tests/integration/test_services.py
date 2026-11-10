@@ -9,7 +9,6 @@ import httpx
 import pytest
 
 from libref.chunking import Chunk
-from libref.config import LibrefSettings
 from libref.services import (
     IngestService,
     JobManager,
@@ -19,7 +18,7 @@ from libref.services import (
     start_scrape_job,
 )
 from libref.store.document_store import DocumentStore
-from tests.conftest import mock_ingest, seed_library_version
+from tests.conftest import make_crawler_settings, mock_ingest, seed_library_version
 
 pytestmark = pytest.mark.integration
 
@@ -65,7 +64,7 @@ def seed_docs(conn: sqlite3.Connection) -> None:
     )
 
 
-def test_search_docs_bm25_hits_and_snippet(conn):
+def test_search_docs_bm25_hits_and_snippet(conn, monkeypatch, tmp_path):
     seed_docs(conn)
     results = SearchService(conn).search_docs("libref")
     assert len(results) == 1
@@ -75,7 +74,7 @@ def test_search_docs_bm25_hits_and_snippet(conn):
     assert ">>>" not in results[0]["snippet"]
 
 
-def test_search_docs_library_version_filter(conn):
+def test_search_docs_library_version_filter(conn, monkeypatch, tmp_path):
     seed_docs(conn)
     svc = SearchService(conn)
     assert svc.search_docs("libref", library="nosuch") == []
@@ -85,7 +84,7 @@ def test_search_docs_library_version_filter(conn):
     conn.commit()
 
 
-def test_read_page_reassembles(conn):
+def test_read_page_reassembles(conn, monkeypatch, tmp_path):
     seed_lv(conn)
     store = DocumentStore(conn)
     store.store_page(
@@ -123,7 +122,7 @@ def test_read_page_reassembles(conn):
     assert page["chunk_details"][0]["length"] == len("part one")
 
 
-def test_list_libraries_and_versions(conn):
+def test_list_libraries_and_versions(conn, monkeypatch, tmp_path):
     from libref.services.libraries import LibraryService
 
     svc = LibraryService(conn)
@@ -135,7 +134,7 @@ def test_list_libraries_and_versions(conn):
     assert {v["version"] for v in versions} == {"1.0", "2.0"}
 
 
-def test_jobs_submit_run_and_recover(conn):
+def test_jobs_submit_run_and_recover(conn, monkeypatch, tmp_path):
     ran: list[int] = []
 
     def runner(job):
@@ -167,7 +166,7 @@ def test_jobs_submit_run_and_recover(conn):
     assert mgr.get(job_id).status == "failed"
 
 
-def test_jobs_failure_recorded(conn):
+def test_jobs_failure_recorded(conn, monkeypatch, tmp_path):
     def runner(job):
         raise RuntimeError("boom")
 
@@ -187,7 +186,7 @@ def test_jobs_failure_recorded(conn):
     assert "boom" in (job.error or "")
 
 
-def test_scrape_docs_end_to_end_with_mock(conn, tmp_path):
+def test_scrape_docs_end_to_end_with_mock(conn, tmp_path, monkeypatch):
     page_html = (
         "<html><head><title>Install</title></head><body>"
         "<nav>skip me</nav><main><h1>Install</h1><p>use uv to install libref</p></main>"
@@ -213,12 +212,7 @@ def test_scrape_docs_end_to_end_with_mock(conn, tmp_path):
             return httpx.Response(404)
         raise AssertionError(request.url.path)
 
-    settings = LibrefSettings(
-        request_timeout=5.0,
-        fetch_concurrency=2,
-        crawl_delay_default=0.0,
-        robots_cache_ttl_days=1.0,
-    )
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     service = IngestService(settings, conn)
 
     with mock_ingest(handler):
@@ -231,7 +225,7 @@ def test_scrape_docs_end_to_end_with_mock(conn, tmp_path):
     assert results[0]["url"] == "https://d.example/install.html"
 
 
-def test_scrape_sweeps_pages_missing_from_seed_to_absent(conn):
+def test_scrape_sweeps_pages_missing_from_seed_to_absent(conn, monkeypatch, tmp_path):
     seed_lv(conn)
     store = DocumentStore(conn)
     keep_url = "https://d.example/keep.html"
@@ -261,12 +255,7 @@ def test_scrape_sweeps_pages_missing_from_seed_to_absent(conn):
             )
         raise AssertionError(request.url.path)
 
-    settings = LibrefSettings(
-        request_timeout=5.0,
-        fetch_concurrency=2,
-        crawl_delay_default=0.0,
-        robots_cache_ttl_days=1.0,
-    )
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     with mock_ingest(handler):
         counts = IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/"
@@ -278,7 +267,7 @@ def test_scrape_sweeps_pages_missing_from_seed_to_absent(conn):
     assert SearchService(conn).search_docs("quetzalstale") == []
 
 
-def test_scrape_skips_sweep_when_seed_truncated(conn):
+def test_scrape_skips_sweep_when_seed_truncated(conn, monkeypatch, tmp_path):
     seed_lv(conn)
     store = DocumentStore(conn)
     other_url = "https://d.example/other.html"
@@ -311,12 +300,7 @@ def test_scrape_skips_sweep_when_seed_truncated(conn):
             )
         raise AssertionError(request.url.path)
 
-    settings = LibrefSettings(
-        request_timeout=5.0,
-        fetch_concurrency=2,
-        crawl_delay_default=0.0,
-        robots_cache_ttl_days=1.0,
-    )
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     with mock_ingest(handler):
         # max_pages=1 truncates the discovery set: absent-page cleanup must be skipped to avoid deleting uncovered pages
         IngestService(settings, conn).scrape_docs(
@@ -326,7 +310,7 @@ def test_scrape_skips_sweep_when_seed_truncated(conn):
     assert store.get_page(1, other_url) is not None
 
 
-def test_scrape_falls_back_to_start_url_without_seed(conn):
+def test_scrape_falls_back_to_start_url_without_seed(conn, monkeypatch, tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
             return httpx.Response(200, text="")
@@ -337,12 +321,7 @@ def test_scrape_falls_back_to_start_url_without_seed(conn):
             )
         return httpx.Response(404)
 
-    settings = LibrefSettings(
-        request_timeout=5.0,
-        fetch_concurrency=2,
-        crawl_delay_default=0.0,
-        robots_cache_ttl_days=1.0,
-    )
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     with mock_ingest(handler):
         counts = IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/javadoc/index.html"
@@ -351,7 +330,7 @@ def test_scrape_falls_back_to_start_url_without_seed(conn):
     assert SearchService(conn).search_docs("javadoc") != []
 
 
-def test_start_scrape_job_runs_through_queue(conn):
+def test_start_scrape_job_runs_through_queue(conn, monkeypatch, tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
             return httpx.Response(200, text="")
@@ -366,12 +345,7 @@ def test_start_scrape_job_runs_through_queue(conn):
             )
         raise AssertionError(request.url.path)
 
-    settings = LibrefSettings(
-        request_timeout=5.0,
-        fetch_concurrency=2,
-        crawl_delay_default=0.0,
-        robots_cache_ttl_days=1.0,
-    )
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     mgr = JobManager(conn)
     assert mgr.recover() == []
     job_id = start_scrape_job(mgr, "docs", "1.0", "https://d.example/", max_pages=5)
@@ -384,8 +358,8 @@ def test_start_scrape_job_runs_through_queue(conn):
     assert SearchService(conn).search_docs("libref") != []
 
 
-def test_scrape_runner_rejects_unknown_kind(conn):
-    settings = LibrefSettings(crawl_delay_default=0.0)
+def test_scrape_runner_rejects_unknown_kind(conn, monkeypatch, tmp_path):
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     mgr = JobManager(conn)
     job_id = mgr.submit("nope", {})
 

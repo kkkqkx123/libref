@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 
 import pytest
 
 from libref.chunking import Chunk
-from libref.config import LibrefSettings
 from libref.db import apply_migrations, open_db
 from libref.store.document_store import DocumentStore
 from libref.web import build_web_app
+from tests.conftest import make_settings
 
 pytestmark = pytest.mark.integration
 
@@ -46,10 +45,8 @@ def _seed(conn) -> None:
     )
 
 
-def _client(conn, **overrides):
-    for name in [n for n in os.environ if n.startswith("LIBREF_")]:
-        os.environ.pop(name)
-    settings = LibrefSettings(**overrides)
+def _client(conn, monkeypatch, tmp_path, **overrides):
+    settings = make_settings(monkeypatch, tmp_path, **overrides)
     app = build_web_app(conn, settings)
     from fastapi.testclient import TestClient
 
@@ -61,7 +58,7 @@ def test_health_and_search_and_read(tmp_path, monkeypatch) -> None:
     conn = _open(tmp_path)
     try:
         _seed(conn)
-        client = _client(conn)
+        client = _client(conn, monkeypatch, tmp_path)
         assert client.get("/health").json()["ok"] is True
         res = client.get("/search", params={"query": "quetzalweb"})
         assert res.status_code == 200
@@ -123,7 +120,7 @@ def test_review_flow(tmp_path, monkeypatch) -> None:
             (call_id,),
         )
         conn.commit()
-        client = _client(conn)
+        client = _client(conn, monkeypatch, tmp_path)
         pending = client.get("/review", params={"action": "list"}).json()
         assert pending["count"] == 1
         assert client.post(
@@ -139,7 +136,7 @@ def test_unauthorized_when_token_set(tmp_path, monkeypatch) -> None:
     conn = _open(tmp_path, "auth.db")
     try:
         _seed(conn)
-        client = _client(conn, mcp_token="tok-secret")
+        client = _client(conn, monkeypatch, tmp_path, mcp_token="tok-secret")
         assert client.get("/catalog").status_code == 401
         assert (
             client.get(

@@ -28,7 +28,7 @@ def _resolve(decls, aliases_by_file: dict | list, raw, repo="test/repo"):
     return ast_resolution.resolve_calls(decls, aliases_by_file, raw, repo)
 
 
-def test_extract_call_shape():
+def test_extract_call_shape(monkeypatch, tmp_path):
     source = b"import numpy as np\n\n\ndef load():\n    np.array([1])\n    np.zeros(3, dtype=int)\n"
     _decls, aliases, raw = _parse("a.py", source)
     assert ("np", "numpy") in aliases
@@ -44,7 +44,7 @@ def test_extract_call_shape():
     assert zeros_call.args[1].startswith("dtype=")
 
 
-def test_two_pass_confidence_levels(tmp_path):
+def test_two_pass_confidence_levels(tmp_path, monkeypatch):
     repo = "test/repo"
     decls, aliases, raw = _parse(
         "d.py", b"def helper():\n    return 1\n\n\ndef use_it():\n    helper()\n"
@@ -63,7 +63,7 @@ def test_two_pass_confidence_levels(tmp_path):
     assert resolved3[0].confidence == "AMBIGUOUS"
 
 
-def test_self_receiver_resolves_to_enclosing_class():
+def test_self_receiver_resolves_to_enclosing_class(monkeypatch, tmp_path):
     source = b"class A:\n    def f(self):\n        self.g()\n    def g(self):\n        pass\n"
     decls, aliases, raw = _parse("cls.py", source)
     resolved = _resolve(decls, {"cls.py": aliases}, raw, "r")
@@ -71,7 +71,7 @@ def test_self_receiver_resolves_to_enclosing_class():
     assert resolved[0].confidence == "EXTRACTED"
 
 
-def test_cache_hit_miss_and_fingerprint_change(conn):
+def test_cache_hit_miss_and_fingerprint_change(conn, monkeypatch, tmp_path):
     cfg = ast_config.PYTHON_CONFIG
     fp = ast_config.grammar_fingerprint(cfg)
     assert ast_cache.lookup(conn, "r", "a.py", fp, cfg.config_version) is None
@@ -83,8 +83,9 @@ def test_cache_hit_miss_and_fingerprint_change(conn):
     assert ast_cache.lookup(conn, "other-repo", "a.py", fp, cfg.config_version) is None
 
 
-def test_stdlib_ast_cross_check():
-    fixture = Path("tests/fixtures/mini_repo/a.py").read_bytes()
+def test_stdlib_ast_cross_check(monkeypatch, tmp_path):
+    repo_root = Path(__file__).resolve().parents[2]
+    fixture = (repo_root / "tests/fixtures/mini_repo/a.py").read_bytes()
     _decls, _aliases, raw = _parse("a.py", fixture)
     tree = ast.parse(fixture.decode())
     dotted: set[str] = set()
@@ -108,27 +109,27 @@ def test_stdlib_ast_cross_check():
     assert {c.raw_callee for c in raw} == dotted
 
 
-def test_grammar_fingerprint_stable():
+def test_grammar_fingerprint_stable(monkeypatch, tmp_path):
     first = ast_config.grammar_fingerprint(ast_config.PYTHON_CONFIG)
     second = ast_config.grammar_fingerprint(ast_config.PYTHON_CONFIG)
     assert first == second and len(first) == hashlib.sha1(b"x").hexdigest().__len__()
 
 
-def test_multi_import_all_bindings():
+def test_multi_import_all_bindings(monkeypatch, tmp_path):
     _decls, aliases, _raw = _parse("m.py", b"import os, sys\nimport numpy as np\n")
     assert ("os", "os") in aliases
     assert ("sys", "sys") in aliases
     assert ("np", "numpy") in aliases
 
 
-def test_from_import_list_and_alias():
+def test_from_import_list_and_alias(monkeypatch, tmp_path):
     _decls, aliases, _raw = _parse("m.py", b"from m import a, b as c\n")
     by_alias = dict(aliases)
     assert by_alias.get("a") == "m.a"
     assert by_alias.get("c") == "m.b"
 
 
-def test_relative_import_resolves_against_module_path():
+def test_relative_import_resolves_against_module_path(monkeypatch, tmp_path):
     _decls, aliases, _raw = _parse("m.py", b"from . import x\n")
     assert aliases == []
     _decls, aliases, _raw = _parse("m.py", b"from .pkg import mod\n")
@@ -139,7 +140,7 @@ def test_relative_import_resolves_against_module_path():
     assert aliases == [("start", "pkg.core.start")]
 
 
-def test_arg_shapes_preserved():
+def test_arg_shapes_preserved(monkeypatch, tmp_path):
     _d, _a, raw = _parse("m.py", b"def f():\n    g(x, k=v, *args, **kw)\n")
     assert raw[0].args[0] == "x"
     assert raw[0].args[1] == "k=v"
@@ -147,7 +148,7 @@ def test_arg_shapes_preserved():
     assert raw[0].args[3] == "**kw"
 
 
-def test_alias_is_file_scoped():
+def test_alias_is_file_scoped(monkeypatch, tmp_path):
     decls_a, aliases_a, raw_a = _parse(
         "a.py", b"import numpy as np\ndef f():\n    np.array(1)\n"
     )
@@ -165,7 +166,7 @@ def test_alias_is_file_scoped():
     assert by_raw[("b.py", "np.graph")].callee == "networkx.graph"
 
 
-def test_java_receiver_and_import():
+def test_java_receiver_and_import(monkeypatch, tmp_path):
     cfg = ast_config.JAVA_CONFIG
     decls, aliases, raw = ast_engine.extract_file(
         "A.java",
@@ -184,7 +185,7 @@ def test_java_receiver_and_import():
     assert by_res[("A.java", "this.baz")].callee == "A.baz"
 
 
-def test_cache_encode_decode_roundtrip():
+def test_cache_encode_decode_roundtrip(monkeypatch, tmp_path):
     decls, aliases, raw = _parse(
         "a.py", b"import numpy as np\ndef load():\n    np.array([1])\n"
     )
@@ -199,7 +200,7 @@ def test_cache_encode_decode_roundtrip():
     ]
 
 
-def test_param_types_and_return_shape():
+def test_param_types_and_return_shape(monkeypatch, tmp_path):
     decls, _, _ = _parse("m.py", b"def f(a: int, b: str) -> bool:\n    pass\n")
     by_qual = {d.qualified_name: d for d in decls}
     assert by_qual["m.f"].params == ["a", "b"]
@@ -207,7 +208,7 @@ def test_param_types_and_return_shape():
     assert by_qual["m.f"].return_type == "bool"
 
 
-def test_var_alias_resolves_to_declared():
+def test_var_alias_resolves_to_declared(monkeypatch, tmp_path):
     decls, aliases, raw = _parse(
         "m.py",
         b"class Foo:\n    def bar(self):\n        pass\nobj = Foo()\nobj.bar()\n",
@@ -224,7 +225,7 @@ def test_var_alias_resolves_to_declared():
     assert by_raw["obj.bar"].confidence == "EXTRACTED"
 
 
-def test_tie_without_signal_is_ambiguous():
+def test_tie_without_signal_is_ambiguous(monkeypatch, tmp_path):
     decls_a, _, _ = _parse("a.py", b"def foo():\n    pass\n")
     decls_b, _, _ = _parse("b.py", b"def foo():\n    pass\n")
     decls = decls_a + decls_b
@@ -242,7 +243,7 @@ def test_tie_without_signal_is_ambiguous():
     assert conf == "AMBIGUOUS"
 
 
-def test_param_shadow_blocks_global_match():
+def test_param_shadow_blocks_global_match(monkeypatch, tmp_path):
     from libref.astminer.models import ApiDeclRecord, RawCall
 
     def _decl(qual, path, params=()):
@@ -269,7 +270,7 @@ def test_param_shadow_blocks_global_match():
     assert resolved[0].confidence == "AMBIGUOUS"
 
 
-def test_directory_affinity_picks_unique_winner():
+def test_directory_affinity_picks_unique_winner(monkeypatch, tmp_path):
     from libref.astminer.models import ApiDeclRecord, RawCall
 
     def _decl(qual, path):
@@ -299,7 +300,7 @@ def test_directory_affinity_picks_unique_winner():
     assert resolved[0].confidence == "INFERRED"
 
 
-def test_stdlib_alias_target_is_ambiguous():
+def test_stdlib_alias_target_is_ambiguous(monkeypatch, tmp_path):
     from libref.astminer.models import ApiDeclRecord, RawCall
 
     decls = [
@@ -337,7 +338,7 @@ def test_stdlib_alias_target_is_ambiguous():
     assert kept[0].confidence == "INFERRED"
 
 
-def test_receiver_param_type_resolves_method():
+def test_receiver_param_type_resolves_method(monkeypatch, tmp_path):
     from libref.astminer.models import ApiDeclRecord, RawCall
 
     decls = [
@@ -381,7 +382,7 @@ def test_receiver_param_type_resolves_method():
     assert resolved[0].confidence == "EXTRACTED"
 
 
-def test_reexport_closure_expands_package_alias():
+def test_reexport_closure_expands_package_alias(monkeypatch, tmp_path):
     mapping = {
         "pkg/__init__.py": {"start": "pkg.core.start"},
         "a.py": {"start": "pkg.start"},
@@ -390,7 +391,7 @@ def test_reexport_closure_expands_package_alias():
     assert mapping["a.py"]["start"] == "pkg.core.start"
 
 
-def test_cache_sweep_removes_stale(conn):
+def test_cache_sweep_removes_stale(conn, monkeypatch, tmp_path):
     cfg = ast_config.PYTHON_CONFIG
     fp = ast_config.grammar_fingerprint(cfg)
     ast_cache.store(conn, "r", "keep.py", "s1", fp, cfg.config_version, [])

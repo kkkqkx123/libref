@@ -142,14 +142,10 @@ class UrlSeeder:
                 feed = await self._collect_feed(start_url)
                 result = feed if feed.urls else sitemap
                 attempted = list(
-                    dict.fromkeys(
-                        llms.attempted + sitemap.attempted + feed.attempted
-                    )
+                    dict.fromkeys(llms.attempted + sitemap.attempted + feed.attempted)
                 )
                 errors = {**llms.errors, **sitemap.errors, **feed.errors}
-                truncated = (
-                    llms.truncated or sitemap.truncated or feed.truncated
-                )
+                truncated = llms.truncated or sitemap.truncated or feed.truncated
                 transient = llms.failed or sitemap.failed or feed.failed
 
         seen: set[str] = set()

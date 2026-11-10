@@ -12,7 +12,7 @@ from libref.crawler.scope import (
 START = "https://docs.example.com/guide/"
 
 
-def test_defaults_reject_binaries_and_keep_docs() -> None:
+def test_defaults_reject_binaries_and_keep_docs(monkeypatch, tmp_path) -> None:
     policy = build_scope(START, None)
     assert policy.accept("https://docs.example.com/guide/install.html")
     assert not policy.accept("https://docs.example.com/logo.png")
@@ -20,7 +20,7 @@ def test_defaults_reject_binaries_and_keep_docs() -> None:
     assert not policy.accept("https://other.example.com/x.html")
 
 
-def test_suffix_blocklist_overridable() -> None:
+def test_suffix_blocklist_overridable(monkeypatch, tmp_path) -> None:
     policy = build_scope(START, {"excluded_suffixes": []})
     assert policy.accept("https://docs.example.com/logo.png")
     policy = build_scope(START, {"allowed_suffixes": [".png"]})
@@ -28,14 +28,14 @@ def test_suffix_blocklist_overridable() -> None:
     assert not policy.accept("https://docs.example.com/guide/a.html")
 
 
-def test_content_type_helper() -> None:
+def test_content_type_helper(monkeypatch, tmp_path) -> None:
     assert content_type_allowed("https://h/a.html", "text/html")
     assert not content_type_allowed("https://h/a.png", None)
     assert not content_type_allowed("https://h/a", "image/png")
     assert content_type_allowed("https://h/a", None)
 
 
-def test_relevance_scoring_and_sort() -> None:
+def test_relevance_scoring_and_sort(monkeypatch, tmp_path) -> None:
     urls = [
         "https://docs.example.com/about/team.html",
         "https://docs.example.com/install/pip.html",
@@ -49,7 +49,7 @@ def test_relevance_scoring_and_sort() -> None:
     )
 
 
-def test_filter_stats_counts() -> None:
+def test_filter_stats_counts(monkeypatch, tmp_path) -> None:
     policy = build_scope(START, None)
     accepted, rejected, stats = policy.filter_with_stats(
         [

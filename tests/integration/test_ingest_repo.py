@@ -13,7 +13,7 @@ from tests.conftest import copy_mini_repo
 pytestmark = pytest.mark.integration
 
 
-def test_ingest_repo_end_to_end(conn, tmp_path):
+def test_ingest_repo_end_to_end(conn, tmp_path, monkeypatch):
     repo = copy_mini_repo(tmp_path)
     repos_dir = tmp_path / "repos"
     counts = index_repo(

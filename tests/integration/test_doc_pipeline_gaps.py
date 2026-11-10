@@ -8,18 +8,17 @@ import httpx
 import pytest
 
 from libref.chunking import split_markdown_dual
-from libref.config import LibrefSettings
 from libref.services.ingest import IngestService
 from libref.services.jobs import JobManager
 from libref.services.pages import PageService
 from libref.services.search import SearchService
 from libref.text.normalize import classify_content
-from tests.conftest import mock_ingest
+from tests.conftest import make_crawler_settings, mock_ingest
 
 pytestmark = pytest.mark.integration
 
 
-def test_classify_content_dispatch() -> None:
+def test_classify_content_dispatch(monkeypatch, tmp_path) -> None:
     assert classify_content("text/html", "https://h/a") == "html"
     assert classify_content("text/markdown", "https://h/a") == "markdown"
     assert classify_content("text/plain", "https://h/a") == "text"
@@ -28,7 +27,7 @@ def test_classify_content_dispatch() -> None:
     assert classify_content("application/javascript", "https://h/a") == "source"
 
 
-def test_chunk_relations_keywords_offsets() -> None:
+def test_chunk_relations_keywords_offsets(monkeypatch, tmp_path) -> None:
     dual = split_markdown_dual(
         "# A\n\nfirst body here\n\n# B\n\nsecond body here\n", "u"
     )
@@ -42,7 +41,7 @@ def test_chunk_relations_keywords_offsets() -> None:
         assert dual.embedding[1].prev_chunk_id == dual.embedding[0].chunk_id
 
 
-def test_scrape_mime_markdown_and_observability(conn) -> None:
+def test_scrape_mime_markdown_and_observability(conn, monkeypatch, tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.endswith(("llms.txt", "llms-full.txt")):
@@ -68,7 +67,7 @@ def test_scrape_mime_markdown_and_observability(conn) -> None:
             return httpx.Response(404)
         raise AssertionError(path)
 
-    settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=2)
+    settings = make_crawler_settings(monkeypatch, tmp_path)
     with mock_ingest(handler):
         counts = IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/sitemap.xml"
@@ -87,7 +86,7 @@ def test_scrape_mime_markdown_and_observability(conn) -> None:
     assert hits and hits[0]["url"].endswith("/b.md")
 
 
-def test_refresh_alias_and_window(conn) -> None:
+def test_refresh_alias_and_window(conn, monkeypatch, tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.endswith(("llms.txt", "llms-full.txt")):
@@ -115,7 +114,7 @@ def test_refresh_alias_and_window(conn) -> None:
             return httpx.Response(404)
         raise AssertionError(path)
 
-    settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=1)
+    settings = make_crawler_settings(monkeypatch, tmp_path, fetch_concurrency=1)
     with mock_ingest(handler):
         service = IngestService(settings, conn)
         counts = service.refresh_version("docs", "1.0", "https://d.example/")
@@ -129,7 +128,7 @@ def test_refresh_alias_and_window(conn) -> None:
     assert section is None or section["chunks"] >= 1
 
 
-def test_job_heartbeat_ticks(conn) -> None:
+def test_job_heartbeat_ticks(conn, monkeypatch, tmp_path) -> None:
     seen: list[float] = []
 
     async def runner(job):
@@ -158,7 +157,7 @@ def test_job_heartbeat_ticks(conn) -> None:
     assert row[0] is not None
 
 
-def test_render_skipped_counted(conn) -> None:
+def test_render_skipped_counted(conn, monkeypatch, tmp_path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path.endswith(("llms.txt", "llms-full.txt")):
@@ -186,7 +185,7 @@ def test_render_skipped_counted(conn) -> None:
             return httpx.Response(404)
         raise AssertionError(path)
 
-    settings = LibrefSettings(crawl_delay_default=0.0, fetch_concurrency=1)
+    settings = make_crawler_settings(monkeypatch, tmp_path, fetch_concurrency=1)
     with mock_ingest(handler):
         counts = IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/"
