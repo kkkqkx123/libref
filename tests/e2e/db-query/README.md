@@ -1,6 +1,6 @@
 # 数据库查询审计离线核对
 
-本目录对应 `docs/plan/db-query-audit.md` 的落地核对，全部离线运行，
+本目录对应 `docs/features/db/` 现状与 `docs/archive/db-query-decisions.md` 决策的落地核对，全部离线运行，
 不需要真实网络、向量后端与语言模型。
 
 ## 运行
