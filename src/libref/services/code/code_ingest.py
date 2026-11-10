@@ -421,7 +421,7 @@ def lookup_index_source_cached(
     if eco in ("pypi", "npm", "maven"):
         try:
             from libref.crawler.registry import normalize_name
-            from libref.services.resolver import read_cache
+            from libref.services.registry.resolver import read_cache
 
             norm = normalize_name(eco, library)
             cached = read_cache(conn, eco, norm)
@@ -449,7 +449,7 @@ async def index_repo_async(
     embed=None,
 ) -> dict[str, int]:
     """Lock one version across doc and code writers, then run the ingest."""
-    from libref.services.version_lock import version_lock
+    from libref.services.infra.version_lock import version_lock
 
     async with version_lock(conn, ecosystem, library, version):
         return await _index_repo_inner(
@@ -489,7 +489,7 @@ async def _index_repo_inner(
     from libref.astminer import config as ast_config
     from libref.astminer import resolution as ast_resolution
     from libref.astminer.repos import RepoManager, iter_source_files
-    from libref.services.libraries import LibraryService
+    from libref.services.registry.libraries import LibraryService
 
     settings_dir = Path(repos_dir)
     if not source:
@@ -514,7 +514,7 @@ async def _index_repo_inner(
         registry_confirmed=registry_confirmed,
     )
     if repos_quota_mb is not None:
-        from libref.services.retention import check_quota
+        from libref.services.ops.retention import check_quota
 
         check_quota(settings_dir, int(repos_quota_mb), "repos")
     manager = RepoManager(settings_dir)
@@ -564,7 +564,7 @@ async def _index_repo_inner(
     counts["vector_failed"] = 0
     counts["chunk_truncated"] = 0
     if settings is not None and vec_store is not None and embed is not None:
-        from libref.services.maintenance import sync_vectors_for_docs
+        from libref.services.ops.maintenance import sync_vectors_for_docs
         from libref.store.document_store import DocumentStore
 
         await sync_vectors_for_docs(
@@ -652,7 +652,7 @@ async def index_repo_by_name_async(
     repos_dir=None,
     explicit_source: str | None = None,
 ) -> dict[str, int]:
-    from libref.services.resolver import resolve_repo
+    from libref.services.registry.resolver import resolve_repo
 
     if explicit_source is not None:
         if version is None:
@@ -661,7 +661,7 @@ async def index_repo_by_name_async(
         vec_store = None
         embed = None
         try:
-            from libref.services.factory import build_vector as _build_vector
+            from libref.services.infra.vectors import build_vector as _build_vector
 
             vec_store, embed, _ = _build_vector(settings)
         except Exception:  # noqa: BLE001 — vector stack is optional; indexing continues without it
@@ -695,7 +695,7 @@ async def index_repo_by_name_async(
     vec_store = None
     embed = None
     try:
-        from libref.services.factory import build_vector as _build_vector
+        from libref.services.infra.vectors import build_vector as _build_vector
 
         vec_store, embed, _ = _build_vector(settings)
     except Exception:  # noqa: BLE001 — vector stack is optional; indexing continues without it
@@ -731,7 +731,7 @@ def build_repo_runner(settings, conn, repos_dir=None, vec_store=None, embed=None
         local_vec, local_embed = vec_store, embed
         if local_vec is None or local_embed is None:
             try:
-                from libref.services.factory import build_vector as _build_vector
+                from libref.services.infra.vectors import build_vector as _build_vector
 
                 built_vec, built_embed, _ = _build_vector(settings)
                 if local_vec is None:

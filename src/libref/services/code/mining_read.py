@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from libref.services.libraries import mining_version_ids
+from libref.services.registry.libraries import mining_version_ids
 from libref.text.snippet import call_tag, gap_tag, unit_tag
 
 

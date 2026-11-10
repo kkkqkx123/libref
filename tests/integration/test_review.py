@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from libref.services.review import ReviewService
+from libref.services.ops.review import ReviewService
 
 pytestmark = pytest.mark.integration
 

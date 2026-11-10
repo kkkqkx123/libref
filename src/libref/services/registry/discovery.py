@@ -16,7 +16,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from libref.crawler.registry import SUPPORTED_ECOSYSTEMS, RegistryError
-from libref.services.resolver import is_fresh
+from libref.services.registry.resolver import is_fresh
 
 
 class DiscoveryCandidate(BaseModel):

@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from libref.crawler.registry import RegistryError
-from libref.services.discovery import DiscoveryService
+from libref.services.registry.discovery import DiscoveryService
 from tests.conftest import make_discovery_settings
 
 pytestmark = pytest.mark.integration

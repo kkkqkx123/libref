@@ -31,13 +31,13 @@ def _check(name: str, cond: bool, detail: str = "") -> None:
 def main() -> int:
     from libref.chunking import Chunk
     from libref.db import apply_migrations, open_db
-    from libref.services.code_ingest import _sweep_source_pages
-    from libref.services.maintenance import check_fts, rebuild_fts
-    from libref.services.mining_read import MiningReadService
-    from libref.services.mining_refresh import mine_patterns
-    from libref.services.pages import PageService
-    from libref.services.review import ReviewService
-    from libref.services.search import SearchService
+    from libref.services.code.code_ingest import _sweep_source_pages
+    from libref.services.code.mining_read import MiningReadService
+    from libref.services.code.mining_refresh import mine_patterns
+    from libref.services.docs.pages import PageService
+    from libref.services.docs.search import SearchService
+    from libref.services.ops.maintenance import check_fts, rebuild_fts
+    from libref.services.ops.review import ReviewService
     from libref.store.document_store import DocumentStore
 
     tmp = Path(tempfile.mkdtemp(prefix="libref-dbq-"))

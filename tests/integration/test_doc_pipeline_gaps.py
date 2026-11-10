@@ -8,10 +8,10 @@ import httpx
 import pytest
 
 from libref.chunking import split_markdown_dual
-from libref.services.ingest import IngestService
-from libref.services.jobs import JobManager
-from libref.services.pages import PageService
-from libref.services.search import SearchService
+from libref.services.docs.ingest import IngestService
+from libref.services.docs.pages import PageService
+from libref.services.docs.search import SearchService
+from libref.services.infra.jobs import JobManager
 from libref.text.normalize import classify_content
 from tests.conftest import make_crawler_settings, mock_ingest
 

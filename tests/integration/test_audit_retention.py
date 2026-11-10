@@ -7,16 +7,16 @@ import asyncio
 import httpx
 import pytest
 
-from libref.services.code_ingest import index_repo
-from libref.services.ingest import run_scrape_job_sync, start_scrape_job
-from libref.services.jobs import JobManager
-from libref.services.retention import (
+from libref.services.code.code_ingest import index_repo
+from libref.services.docs.ingest import run_scrape_job_sync, start_scrape_job
+from libref.services.docs.search import SearchService
+from libref.services.infra.jobs import JobManager
+from libref.services.ops.retention import (
     list_deletions,
     log_deletion,
     prune_expired_logs,
     purge_version,
 )
-from libref.services.search import SearchService
 from libref.store.snapshots import SnapshotStore
 from tests.conftest import (
     copy_mini_repo,
@@ -71,7 +71,7 @@ def test_async_scrape_persists_result(conn, monkeypatch, tmp_path) -> None:
 
 
 def test_repo_runner_persists_counts(conn, tmp_path, monkeypatch) -> None:
-    from libref.services.code_ingest import INDEX_REPO_JOB_KIND, build_repo_runner
+    from libref.services.code.code_ingest import INDEX_REPO_JOB_KIND, build_repo_runner
 
     repo = copy_mini_repo(tmp_path)
     settings = make_settings(monkeypatch, tmp_path)
@@ -130,7 +130,7 @@ def test_snapshot_disabled_by_default(conn, monkeypatch, tmp_path) -> None:
 def test_absent_sweep_logs_deletion(conn, monkeypatch, tmp_path) -> None:
     settings = make_crawler_settings(monkeypatch, tmp_path)
     with mock_ingest(_handler):
-        from libref.services.ingest import IngestService
+        from libref.services.docs.ingest import IngestService
 
         first = IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/sitemap.xml"
@@ -162,7 +162,7 @@ def test_absent_sweep_logs_deletion(conn, monkeypatch, tmp_path) -> None:
         raise AssertionError(path)
 
     with mock_ingest(_gone):
-        from libref.services.ingest import IngestService
+        from libref.services.docs.ingest import IngestService
 
         second = IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/sitemap.xml"

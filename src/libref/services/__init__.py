@@ -1,13 +1,6 @@
 """Business tool layer: the only call surface for the three exits."""
 
-from libref.services.answer import answer_query, answer_query_async
-from libref.services.answer_materials import (
-    SYSTEM_PROMPT,
-    build_citations,
-    build_messages,
-    material_block,
-)
-from libref.services.code_ingest import (
+from libref.services.code.code_ingest import (
     INDEX_REPO_JOB_KIND,
     build_repo_runner,
     call_uid,
@@ -17,12 +10,23 @@ from libref.services.code_ingest import (
     index_repo_by_name_async,
     lookup_index_source_cached,
 )
-from libref.services.factory import (
-    build_ingest_service,
-    build_maintenance_service,
-    build_search_service,
+from libref.services.code.mining_read import MiningReadService, is_subsequence
+from libref.services.code.mining_refresh import (
+    MINE_PATTERNS_JOB_KIND,
+    build_mine_runner,
+    mine_job_params,
+    mine_patterns,
+    refresh_clusters,
+    refresh_feature_tree,
 )
-from libref.services.ingest import (
+from libref.services.docs.answer import answer_query, answer_query_async
+from libref.services.docs.answer_materials import (
+    SYSTEM_PROMPT,
+    build_citations,
+    build_messages,
+    material_block,
+)
+from libref.services.docs.ingest import (
     SCRAPE_JOB_KIND,
     IngestService,
     build_scrape_runner,
@@ -31,9 +35,15 @@ from libref.services.ingest import (
     start_refresh_job,
     start_scrape_job,
 )
-from libref.services.jobs import JobManager
-from libref.services.libraries import LibraryService, mining_version_ids
-from libref.services.maintenance import (
+from libref.services.docs.pages import PageService
+from libref.services.docs.search import SearchService
+from libref.services.factory import (
+    build_ingest_service,
+    build_maintenance_service,
+    build_search_service,
+)
+from libref.services.infra.jobs import JobManager
+from libref.services.ops.maintenance import (
     MaintenanceService,
     check_fts,
     embeddable_doc_ids,
@@ -43,18 +53,7 @@ from libref.services.maintenance import (
     sync_vectors_for_docs,
     version_drifted,
 )
-from libref.services.mining_read import MiningReadService, is_subsequence
-from libref.services.mining_refresh import (
-    MINE_PATTERNS_JOB_KIND,
-    build_mine_runner,
-    mine_job_params,
-    mine_patterns,
-    refresh_clusters,
-    refresh_feature_tree,
-)
-from libref.services.pages import PageService
-from libref.services.resolver import infer_ecosystem, resolve_package, resolve_repo
-from libref.services.retention import (
+from libref.services.ops.retention import (
     REASON_ABSENT_SWEEP,
     REASON_PURGE,
     check_quota,
@@ -62,8 +61,14 @@ from libref.services.retention import (
     prune_expired_logs,
     purge_version,
 )
-from libref.services.review import ReviewService
-from libref.services.search import SearchService
+from libref.services.ops.review import ReviewService
+from libref.services.registry.discovery import DiscoveryService
+from libref.services.registry.libraries import LibraryService, mining_version_ids
+from libref.services.registry.resolver import (
+    infer_ecosystem,
+    resolve_package,
+    resolve_repo,
+)
 
 __all__ = [
     "INDEX_REPO_JOB_KIND",
@@ -72,6 +77,7 @@ __all__ = [
     "REASON_PURGE",
     "SCRAPE_JOB_KIND",
     "SYSTEM_PROMPT",
+    "DiscoveryService",
     "IngestService",
     "JobManager",
     "LibraryService",

@@ -45,7 +45,7 @@ def test_truncate_material_keeps_fences_balanced(monkeypatch, tmp_path):
 
 
 def test_material_block_is_self_locating_unit(monkeypatch, tmp_path):
-    from libref.services.answer_materials import build_messages
+    from libref.services.docs.answer_materials import build_messages
 
     item = {
         "id": 7,
@@ -117,7 +117,7 @@ def test_pom_body_stays_verbatim_inside_unit(monkeypatch, tmp_path):
 def test_pattern_evidence_marks_gaps_and_hits(monkeypatch, tmp_path):
     import sqlite3
 
-    from libref.services.mining_read import MiningReadService
+    from libref.services.code.mining_read import MiningReadService
 
     conn = sqlite3.connect(":memory:")
     conn.execute("CREATE TABLE libraries(id INTEGER PRIMARY KEY, name TEXT)")

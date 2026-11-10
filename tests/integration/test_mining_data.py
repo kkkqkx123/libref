@@ -6,10 +6,10 @@ import json
 
 import pytest
 
-from libref.services.code_ingest import index_repo
-from libref.services.libraries import LibraryService
-from libref.services.mining_read import MiningReadService
-from libref.services.mining_refresh import mine_patterns
+from libref.services.code.code_ingest import index_repo
+from libref.services.code.mining_read import MiningReadService
+from libref.services.code.mining_refresh import mine_patterns
+from libref.services.registry.libraries import LibraryService
 from tests.conftest import copy_mini_repo
 
 pytestmark = pytest.mark.integration

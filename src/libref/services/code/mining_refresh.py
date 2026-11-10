@@ -38,7 +38,7 @@ def _clear_derived(conn, version_id: int) -> None:
 
 
 def _review_map(conn, version_id: int) -> dict[int, str]:
-    from libref.services.review import ReviewService
+    from libref.services.ops.review import ReviewService
 
     return ReviewService(conn).review_map_for_version(version_id)
 
@@ -208,7 +208,7 @@ def mine_patterns(
     from libref.mining import frequency as _freq
     from libref.mining import normalize as _norm
     from libref.mining import scope_key as _scope_key
-    from libref.services.libraries import LibraryService
+    from libref.services.registry.libraries import LibraryService
 
     catalog = LibraryService(conn)
     if ecosystem is not None:
@@ -428,15 +428,15 @@ async def induce_labels(
         parse_label_payload,
         pattern_hash,
     )
-    from libref.services.libraries import LibraryService
-    from libref.services.mining_read import MiningReadService
+    from libref.services.code.mining_read import MiningReadService
+    from libref.services.registry.libraries import LibraryService
 
     if not bool(setting_or_default(settings, "induction_enabled")):
         return {"disabled": True, "labeled": 0, "failed": 0, "skipped": 0}
     resolve_chat = chat
     if resolve_chat is None:
         try:
-            from libref.services.factory import build_gateway
+            from libref.services.infra.vectors import build_gateway
 
             resolve_chat = build_gateway(settings).chat_fn()
         except Exception:  # noqa: BLE001 -- missing key disables induction
@@ -470,7 +470,7 @@ async def induce_labels(
     )
     prefetched: dict[str, list[dict[str, Any]]] = {a: [] for a in wanted_apis}
     if wanted_apis:
-        from libref.services.libraries import mining_version_ids
+        from libref.services.registry.libraries import mining_version_ids
 
         scope_ids = mining_version_ids(conn, library, version, ecosystem)
         if scope_ids:

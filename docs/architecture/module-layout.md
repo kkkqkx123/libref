@@ -75,12 +75,30 @@ libref/
 │   │   └── retriever.py        # [P3] FTS5 BM25 + 向量 KNN → RRF → 频次重排 → 段落重组
 │   │
 │   ├── services/               # ── 业务工具层（三出口唯一调用面）──
-│   │   ├── __init__.py
-│   │   ├── search.py           # [P1/P3] search_docs / read_page / list_libraries …
-│   │   ├── answer.py           # 问答编排：混合检索加 grounded 生成
-│   │   ├── ingest.py           # [P1/P2] scrape_docs / refresh_version / 索引源码仓库
-│   │   ├── jobs.py             # [P1] 内存队列 + versions 表 write-through + 心跳恢复
-│   │   └── review.py           # [P3] 审核工作流：pending/approved/conflict
+│   │   ├── __init__.py         # 立面重导出；出口只调立面或子包显式路径
+│   │   ├── factory.py          # 装配根：gateway/向量与各服务装配
+│   │   ├── infra/              # 进程级基础设施：无领域依赖
+│   │   │   ├── jobs.py         # [P1] 内存队列 + jobs 表 write-through + 心跳恢复
+│   │   │   ├── version_lock.py # 版本互斥：DB 行仲裁 + 进程内锁
+│   │   │   └── vectors.py      # 网关/向量装配：无向量时降级
+│   │   ├── registry/           # 注册表前置：元数据 + 快照缓存 + 模糊发现
+│   │   │   ├── libraries.py    # libraries/versions 唯一写点
+│   │   │   ├── resolver.py     # 注册表快照缓存与解析
+│   │   │   └── discovery.py    # 模糊搜索与确定性排序
+│   │   ├── docs/               # 文档分支：抓取编排 + 文档检索问答
+│   │   │   ├── ingest.py       # [P1/P2] scrape_docs / refresh_version
+│   │   │   ├── search.py       # [P1/P3] search_docs 检索编排
+│   │   │   ├── pages.py        # read_page/window/section
+│   │   │   ├── answer.py       # 问答编排：混合检索加 grounded 生成
+│   │   │   └── answer_materials.py # 引用块与消息组装
+│   │   ├── code/               # 源码分支：仓库摄取 + 用法挖掘读写
+│   │   │   ├── code_ingest.py  # 克隆/抽取/实体落块
+│   │   │   ├── mining_read.py  # 频次/共现/模式/树/聚类读模型
+│   │   │   └── mining_refresh.py # 序列模式/树/聚类重算
+│   │   └── ops/                # 治理与向量运维：被 docs/code 依赖，不反向依赖
+│   │       ├── maintenance.py  # 向量对账/重嵌/reconcile
+│   │       ├── retention.py    # 整版本 purge/配额/删除日志
+│   │       └── review.py       # [P3] 审核工作流：pending/approved/conflict
 │   │
 │   ├── mcp_server/             # ── MCP 出口 ──
 │   │   ├── __init__.py

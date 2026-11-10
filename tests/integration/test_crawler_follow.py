@@ -6,8 +6,8 @@ import httpx
 import pytest
 
 from libref.crawler.url_seeder import _SEED_CACHE
-from libref.services.ingest import IngestService
-from libref.services.search import SearchService
+from libref.services.docs.ingest import IngestService
+from libref.services.docs.search import SearchService
 from tests.conftest import make_crawler_settings, mock_ingest
 
 pytestmark = pytest.mark.integration

@@ -37,7 +37,7 @@ def _stored_total(conn, library: str, version: str) -> int:
 
 def test_e2e_doc_index_invariants(tmp_path, conn):
     from libref.config import LibrefSettings
-    from libref.services.ingest import IngestService
+    from libref.services.docs.ingest import IngestService
 
     manifest = json.loads(DOC_MANIFEST.read_text(encoding="utf-8"))
     settings = LibrefSettings(

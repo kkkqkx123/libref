@@ -13,7 +13,7 @@ import logging
 import threading
 
 from libref.chunking import ChunkPath, ensure_hard_limit
-from libref.services.libraries import mining_version_ids
+from libref.services.registry.libraries import mining_version_ids
 from libref.text.embedding import build_embed_text, is_embeddable_metadata
 
 logger = logging.getLogger(__name__)

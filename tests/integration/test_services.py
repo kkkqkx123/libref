@@ -110,7 +110,7 @@ def test_read_page_reassembles(conn, monkeypatch, tmp_path):
         ],
         raw_content="x",
     )
-    from libref.services.pages import PageService
+    from libref.services.docs.pages import PageService
 
     page = PageService(conn).read_page("https://d.example/p.html")
     assert page is not None
@@ -123,7 +123,7 @@ def test_read_page_reassembles(conn, monkeypatch, tmp_path):
 
 
 def test_list_libraries_and_versions(conn, monkeypatch, tmp_path):
-    from libref.services.libraries import LibraryService
+    from libref.services.registry.libraries import LibraryService
 
     svc = LibraryService(conn)
     svc.ensure_library_version("docs", "1.0")

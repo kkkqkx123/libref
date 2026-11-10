@@ -115,7 +115,7 @@ def purge_version(
     vec_store: Any | None = None,
 ) -> dict[str, int]:
     """Resolve the version, hold the version lock, then purge."""
-    from libref.services.version_lock import version_lock_sync
+    from libref.services.infra.version_lock import version_lock_sync
 
     ensure_deletion_log(conn)
     if ecosystem is not None:

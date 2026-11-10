@@ -147,7 +147,7 @@ def main() -> int:
     args = _parse_args()
     from libref.config import LibrefSettings
     from libref.db import apply_migrations, open_db
-    from libref.services.ingest import IngestService
+    from libref.services.docs.ingest import IngestService
 
     manifest = json.loads(DOC_MANIFEST.read_text(encoding="utf-8"))
     sites = args.site or list(manifest)

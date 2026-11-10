@@ -166,7 +166,7 @@ def mock_ingest(handler) -> Iterator[httpx.AsyncClient]:
     async def fake(_settings):
         yield client
 
-    import libref.services.ingest as mod
+    import libref.services.docs.ingest as mod
 
     original = mod._client
     mod._client = fake

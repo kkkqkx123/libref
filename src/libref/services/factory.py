@@ -6,48 +6,23 @@ constructing vector stores and LlmGateway inline.
 
 from __future__ import annotations
 
+from libref.services.infra.vectors import build_gateway, build_vector
 
-def build_gateway(settings):
-    """Build the shared LLM gateway for the given settings."""
-    from libref.llm import LlmGateway
-
-    return LlmGateway(settings)
-
-
-def build_vector(settings, gateway=None):
-    """Build vector store and embed function, returning (None, None) when disabled."""
-    from libref.llm import LlmGateway
-    from libref.store.vec_store import (
-        QdrantVecStore,
-        SimvecVecStore,
-        collection_for,
-        simvec_root_for,
-    )
-
-    gw = gateway if gateway is not None else LlmGateway(settings)
-    embed = gw.embed_fn()
-    if embed is None:
-        return None, None, gw
-    if settings.vector_backend == "simvec":
-        vec = SimvecVecStore(
-            simvec_root_for(settings.db_path, settings.simvec_dir),
-            collection_for(settings.vector_collection, settings.db_path),
-            lib=settings.simvec_lib,
-        )
-    else:
-        vec = QdrantVecStore(
-            settings.qdrant_url,
-            collection_for(settings.vector_collection, settings.db_path),
-            timeout=settings.qdrant_timeout,
-        )
-    return vec, embed, gw
+__all__ = [
+    "build_discovery_service",
+    "build_gateway",
+    "build_ingest_service",
+    "build_maintenance_service",
+    "build_search_service",
+    "build_vector",
+]
 
 
 def build_search_service(
     conn, settings, *, gateway=None, vec_store=None, embed=None, rerank=None
 ):
     """Wire a SearchService with vectors when keys are present, else pure FTS."""
-    from libref.services.search import SearchService
+    from libref.services.docs.search import SearchService
 
     gw = gateway if gateway is not None else build_gateway(settings)
     vec = vec_store
@@ -70,14 +45,14 @@ def build_search_service(
 
 def build_discovery_service(conn, settings):
     """Assemble the fuzzy library discovery service; no vectors or gateway needed."""
-    from libref.services.discovery import DiscoveryService
+    from libref.services.registry.discovery import DiscoveryService
 
     return DiscoveryService(conn, settings)
 
 
 def build_ingest_service(conn, settings, *, gateway=None, vec_store=None, embed=None):
     """Assemble the doc scrape service; degrades to pure source-of-truth storage when vectors are missing."""
-    from libref.services.ingest import IngestService
+    from libref.services.docs.ingest import IngestService
 
     gw = gateway if gateway is not None else build_gateway(settings)
     vec = vec_store
@@ -95,7 +70,7 @@ def build_maintenance_service(
     conn, settings, *, gateway=None, vec_store=None, embed=None
 ):
     """Assemble the vector re-ingest service; callers no longer hand-wire the gateway and vectors."""
-    from libref.services.maintenance import MaintenanceService
+    from libref.services.ops.maintenance import MaintenanceService
 
     gw = gateway if gateway is not None else build_gateway(settings)
     vec = vec_store

@@ -7,7 +7,7 @@ from typing import Any
 
 from libref.llm.chat import ChatFn, build_chat_fn
 from libref.llm.errors import LlmConfigError
-from libref.services.answer_materials import (
+from libref.services.docs.answer_materials import (
     build_citations,
     build_messages,
 )
@@ -31,7 +31,7 @@ async def answer_query_async(
     material_limit: int | None = None,
 ) -> dict[str, Any]:
     """Retrieve candidates then generate an answer grounded in those materials."""
-    from libref.services.search import SearchService
+    from libref.services.docs.search import SearchService
     from libref.store.document_store import DocumentStore
 
     if not query.strip():
@@ -63,7 +63,7 @@ async def answer_query_async(
     cap = settings.material_limit if material_limit is None else material_limit
     labels: list[dict[str, Any]] = []
     try:
-        from libref.services.mining_read import MiningReadService
+        from libref.services.code.mining_read import MiningReadService
 
         candidates = MiningReadService(conn).list_labels(
             library=library, version=version, ecosystem=ecosystem, limit=20

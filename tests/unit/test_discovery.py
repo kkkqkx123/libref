@@ -15,7 +15,7 @@ from libref.crawler.registry.npm import (
     npm_search_url,
     parse_npm_search,
 )
-from libref.services.discovery import DiscoveryCandidate, rank_candidates
+from libref.services.registry.discovery import DiscoveryCandidate, rank_candidates
 
 
 def _candidate(name: str, **overrides) -> DiscoveryCandidate:

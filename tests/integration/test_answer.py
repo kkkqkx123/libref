@@ -7,7 +7,7 @@ import pytest
 
 from libref.chunking import Chunk
 from libref.llm import LlmConfigError, build_chat_fn
-from libref.services.answer import answer_query
+from libref.services.docs.answer import answer_query
 from libref.store.document_store import DocumentStore
 from tests.conftest import make_settings, seed_library_version
 

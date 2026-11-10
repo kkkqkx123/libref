@@ -151,7 +151,7 @@ def test_reconcile_count_consistency(
     """Reconciliation baseline is the embeddable subset; bm25 chunks stay FTS-only."""
     import json as _json
 
-    from libref.services.maintenance import sqlite_embeddable_count
+    from libref.services.ops.maintenance import sqlite_embeddable_count
 
     conn.execute("INSERT INTO libraries(name) VALUES('l')")
     conn.execute("INSERT INTO versions(library_id, version) VALUES(1, '1.0')")

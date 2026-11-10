@@ -16,12 +16,26 @@ from libref.config import (
 from libref.crawler.registry import REGISTRY_MIRRORS, RegistryError
 from libref.db import apply_migrations, open_db
 from libref.observe import setup_logging
-from libref.services.answer import answer_query
-from libref.services.code_ingest import (
+from libref.services.code.code_ingest import (
     INDEX_REPO_JOB_KIND,
     build_repo_runner,
     index_repo,
 )
+from libref.services.code.mining_read import MiningReadService
+from libref.services.code.mining_refresh import (
+    MINE_PATTERNS_JOB_KIND,
+    build_mine_runner,
+    mine_job_params,
+    mine_patterns,
+)
+from libref.services.docs.answer import answer_query
+from libref.services.docs.ingest import (
+    IngestService,
+    run_scrape_job_sync,
+    start_refresh_job,
+    start_scrape_job,
+)
+from libref.services.docs.pages import PageService
 from libref.services.factory import (
     build_discovery_service,
     build_ingest_service,
@@ -29,22 +43,8 @@ from libref.services.factory import (
     build_search_service,
     build_vector,
 )
-from libref.services.ingest import (
-    IngestService,
-    run_scrape_job_sync,
-    start_refresh_job,
-    start_scrape_job,
-)
-from libref.services.jobs import JobManager
-from libref.services.mining_read import MiningReadService
-from libref.services.mining_refresh import (
-    MINE_PATTERNS_JOB_KIND,
-    build_mine_runner,
-    mine_job_params,
-    mine_patterns,
-)
-from libref.services.pages import PageService
-from libref.services.review import ReviewService
+from libref.services.infra.jobs import JobManager
+from libref.services.ops.review import ReviewService
 
 _config_parent = argparse.ArgumentParser(add_help=False)
 _config_parent.add_argument(
@@ -268,7 +268,7 @@ def _resolve_for_cli(settings, conn, ecosystem, library, requested_version):
     import asyncio
 
     from libref.crawler.http import build_async_client
-    from libref.services.resolver import resolve
+    from libref.services.registry.resolver import resolve
 
     async def _run():
         async with build_async_client(settings) as client:
@@ -419,7 +419,7 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
 
                 async def _resolve():
                     from libref.crawler.http import build_async_client
-                    from libref.services.resolver import resolve
+                    from libref.services.registry.resolver import resolve
 
                     async with build_async_client(settings) as client:
                         return await resolve(
@@ -704,7 +704,7 @@ def cmd_read(args: argparse.Namespace) -> int:
 def cmd_catalog(args: argparse.Namespace) -> int:
     import json
 
-    from libref.services.libraries import LibraryService
+    from libref.services.registry.libraries import LibraryService
 
     conn = _connect(_load_settings(args))
     try:
@@ -723,7 +723,7 @@ def cmd_induce_labels(args: argparse.Namespace) -> int:
     import asyncio
     import json as _json
 
-    from libref.services.mining_refresh import (
+    from libref.services.code.mining_refresh import (
         INDUCE_LABELS_JOB_KIND,
         build_induce_runner,
         induce_job_params,
@@ -835,7 +835,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     import json as _json
 
     from libref.crawler.http import build_async_client
-    from libref.services.resolver import resolve
+    from libref.services.registry.resolver import resolve
 
     settings = _load_settings(args)
     conn = _connect(settings)
@@ -947,8 +947,8 @@ def cmd_reembed(args: argparse.Namespace) -> int:
 def cmd_reconcile(args: argparse.Namespace) -> int:
     import asyncio as _asyncio
 
-    from libref.services.libraries import mining_version_ids
-    from libref.services.maintenance import reconcile_version
+    from libref.services.ops.maintenance import reconcile_version
+    from libref.services.registry.libraries import mining_version_ids
 
     settings = _load_settings(args)
     conn = _connect(settings)
@@ -976,7 +976,7 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
 
 
 def cmd_fts_rebuild(args: argparse.Namespace) -> int:
-    from libref.services.maintenance import rebuild_fts
+    from libref.services.ops.maintenance import rebuild_fts
 
     settings = _load_settings(args)
     conn = _connect(settings)
@@ -992,7 +992,7 @@ def cmd_fts_rebuild(args: argparse.Namespace) -> int:
 
 
 def cmd_fts_check(args: argparse.Namespace) -> int:
-    from libref.services.maintenance import check_fts
+    from libref.services.ops.maintenance import check_fts
 
     settings = _load_settings(args)
     conn = _connect(settings)
@@ -1078,7 +1078,7 @@ def cmd_job_show(args: argparse.Namespace) -> int:
 
 
 def cmd_purge(args: argparse.Namespace) -> int:
-    from libref.services.retention import purge_version
+    from libref.services.ops.retention import purge_version
 
     settings = _load_settings(args)
     conn = _connect(settings)
@@ -1106,7 +1106,7 @@ def cmd_purge(args: argparse.Namespace) -> int:
 def cmd_deletions(args: argparse.Namespace) -> int:
     import json as _json
 
-    from libref.services.retention import list_deletions, prune_expired_logs
+    from libref.services.ops.retention import list_deletions, prune_expired_logs
 
     settings = _load_settings(args)
     conn = _connect(settings)

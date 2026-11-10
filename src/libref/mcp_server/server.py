@@ -10,12 +10,12 @@ from mcp.server.mcpserver import MCPServer
 from libref.config import LibrefSettings, load_settings
 from libref.crawler.registry import RegistryError
 from libref.observe import setup_logging
+from libref.services.code.mining_read import MiningReadService
+from libref.services.docs.pages import PageService
 from libref.services.factory import build_discovery_service, build_search_service
-from libref.services.libraries import LibraryService
-from libref.services.mining_read import MiningReadService
-from libref.services.pages import PageService
-from libref.services.resolver import resolve as _resolve
-from libref.services.review import ReviewService
+from libref.services.ops.review import ReviewService
+from libref.services.registry.libraries import LibraryService
+from libref.services.registry.resolver import resolve as _resolve
 
 
 def _invalid(message: str) -> dict[str, Any]:
@@ -154,7 +154,7 @@ def build_mcp_server(
         material_limit: int | None = None,
     ) -> dict[str, Any]:
         """Hybrid retrieval plus grounded generation, with clear failure reasons."""
-        from libref.services.answer import answer_query_async
+        from libref.services.docs.answer import answer_query_async
 
         if not query.strip():
             return _invalid("query is empty")
@@ -374,7 +374,7 @@ def build_mcp_server(
     @mcp.tool()
     def job_show(job_id: int | None = None, limit: int = 20) -> dict[str, Any]:
         """Show job results, listing recent jobs when no id is given."""
-        from libref.services.jobs import JobManager
+        from libref.services.infra.jobs import JobManager
 
         bad = _check_limit(limit, low=1, high=200)
         if bad is not None:

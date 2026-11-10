@@ -9,10 +9,10 @@ import pytest
 from libref.mining.cluster import cluster_apis
 from libref.mining.cooccur import build_scope_sets
 from libref.mining.feature_tree import build_feature_tree
-from libref.services.code_ingest import index_repo
-from libref.services.libraries import LibraryService
-from libref.services.mining_read import MiningReadService
-from libref.services.mining_refresh import mine_patterns
+from libref.services.code.code_ingest import index_repo
+from libref.services.code.mining_read import MiningReadService
+from libref.services.code.mining_refresh import mine_patterns
+from libref.services.registry.libraries import LibraryService
 from tests.conftest import copy_mini_repo
 
 pytestmark = pytest.mark.integration

@@ -12,7 +12,7 @@ import pytest
 
 from libref.crawler.registry import RegistryError, normalize_name, sanitize_http_url
 from libref.crawler.registry import overrides as _overrides_state
-from libref.services.resolver import resolve_package
+from libref.services.registry.resolver import resolve_package
 from tests.conftest import make_registry_settings
 
 pytestmark = pytest.mark.integration

@@ -29,9 +29,9 @@ from libref.crawler import (
 from libref.crawler.extract import ScrapeResult
 from libref.crawler.scope import sort_by_relevance
 from libref.llm import EmbedFn
-from libref.services.jobs import Job, JobManager
-from libref.services.libraries import LibraryService
-from libref.services.version_lock import version_lock as _version_lock
+from libref.services.infra.jobs import Job, JobManager
+from libref.services.infra.version_lock import version_lock as _version_lock
+from libref.services.registry.libraries import LibraryService
 from libref.store.document_store import DocumentInput, DocumentStore, StoreResult
 from libref.store.vec_store import VectorStore
 from libref.text.normalize import (
@@ -478,7 +478,7 @@ class IngestService:
         scope: dict[str, Any] | None = None,
     ) -> dict[str, int]:
         """Async entry for scraping after name resolution, reused by the job worker."""
-        from libref.services.resolver import resolve_package
+        from libref.services.registry.resolver import resolve_package
 
         async with _client(self._settings) as client:
             resolution = await resolve_package(
@@ -760,7 +760,7 @@ class IngestService:
         *,
         version_id: int | None = None,
     ) -> None:
-        from libref.services.maintenance import sync_vectors_for_docs
+        from libref.services.ops.maintenance import sync_vectors_for_docs
 
         await sync_vectors_for_docs(
             self._conn,
@@ -803,7 +803,10 @@ class IngestService:
                 counts["absent"] = counts.get("absent", 0) + 1
         if removed_urls and snapshot_ctx is not None:
             try:
-                from libref.services.retention import REASON_ABSENT_SWEEP, log_deletion
+                from libref.services.ops.retention import (
+                    REASON_ABSENT_SWEEP,
+                    log_deletion,
+                )
 
                 ecosystem, library, version = snapshot_ctx
                 log_deletion(

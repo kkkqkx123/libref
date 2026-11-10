@@ -52,7 +52,7 @@ async def _fake_embed(texts: list[str]) -> list[list[float]]:
 
 
 def test_verify_catches_same_count_divergence(conn, monkeypatch, tmp_path) -> None:
-    from libref.services.maintenance import sync_vectors_for_docs
+    from libref.services.ops.maintenance import sync_vectors_for_docs
     from libref.store.vec_store import write_version_meta
 
     seed_library_version(conn)
@@ -138,8 +138,8 @@ def test_retriever_skips_drifted_version(conn, tmp_path, monkeypatch) -> None:
 
 
 def test_fts_rebuild_repairs_direct_delete(conn, monkeypatch, tmp_path) -> None:
-    from libref.services.maintenance import check_fts, rebuild_fts
-    from libref.services.search import SearchService
+    from libref.services.docs.search import SearchService
+    from libref.services.ops.maintenance import check_fts, rebuild_fts
 
     seed_library_version(conn)
     store = DocumentStore(conn)
@@ -181,7 +181,7 @@ def test_fts_rebuild_repairs_direct_delete(conn, monkeypatch, tmp_path) -> None:
 
 
 def test_purge_deletes_truth_when_vectors_fail(conn, monkeypatch, tmp_path) -> None:
-    from libref.services.retention import purge_version
+    from libref.services.ops.retention import purge_version
 
     seed_library_version(conn)
     store = DocumentStore(conn)
@@ -212,7 +212,7 @@ def test_purge_deletes_truth_when_vectors_fail(conn, monkeypatch, tmp_path) -> N
 
 
 def test_version_drifted_never_embedded_is_current(conn, monkeypatch, tmp_path) -> None:
-    from libref.services.maintenance import version_drifted
+    from libref.services.ops.maintenance import version_drifted
     from libref.store.vec_store import write_version_meta
 
     seed_library_version(conn)

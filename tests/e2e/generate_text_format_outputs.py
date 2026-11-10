@@ -102,10 +102,10 @@ def _write(out_dir: Path, name: str, body: str) -> None:
 
 def main() -> int:
     from libref.db import apply_migrations, open_db
-    from libref.services.answer_materials import build_citations, build_messages
-    from libref.services.libraries import LibraryService
-    from libref.services.mining_read import MiningReadService
-    from libref.services.pages import PageService
+    from libref.services.code.mining_read import MiningReadService
+    from libref.services.docs.answer_materials import build_citations, build_messages
+    from libref.services.docs.pages import PageService
+    from libref.services.registry.libraries import LibraryService
     from libref.text.normalize import normalize_markdown
     from libref.text.snippet import fences_balanced, make_snippet, truncate_material
 

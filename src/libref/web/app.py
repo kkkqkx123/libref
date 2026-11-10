@@ -10,13 +10,13 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from libref.config import LibrefSettings, settings_fingerprint
 from libref.crawler.registry import RegistryError
 from libref.mcp_server.auth import verify_bearer
-from libref.services.ingest import IngestService
-from libref.services.jobs import JobManager
-from libref.services.libraries import LibraryService
-from libref.services.mining_read import MiningReadService
-from libref.services.pages import PageService
-from libref.services.review import ReviewService
-from libref.services.search import SearchService
+from libref.services.code.mining_read import MiningReadService
+from libref.services.docs.ingest import IngestService
+from libref.services.docs.pages import PageService
+from libref.services.docs.search import SearchService
+from libref.services.infra.jobs import JobManager
+from libref.services.ops.review import ReviewService
+from libref.services.registry.libraries import LibraryService
 from libref.web.api import (
     AnswerQuery,
     ApiInsightQuery,
@@ -50,7 +50,7 @@ def build_web_app(
     chat=None,
 ) -> FastAPI:
     """Assemble the web app; the caller manages the connection lifecycle."""
-    from libref.services.discovery import DiscoveryService
+    from libref.services.registry.discovery import DiscoveryService
 
     svc = SearchService(conn, settings, vec_store=vec_store, embed=embed, rerank=rerank)
     discovery = DiscoveryService(conn, settings)
@@ -162,7 +162,7 @@ def build_web_app(
         material_limit: int | None = None,
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
-        from libref.services.answer import answer_query_async
+        from libref.services.docs.answer import answer_query_async
 
         params = AnswerQuery(
             query=query,
@@ -385,7 +385,7 @@ def build_web_app(
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         from libref.crawler.http import build_async_client
-        from libref.services.resolver import resolve as _resolve
+        from libref.services.registry.resolver import resolve as _resolve
 
         params = ResolveQuery(
             ecosystem=ecosystem, name=name, version=version, target=target

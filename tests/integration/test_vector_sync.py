@@ -6,8 +6,8 @@ import httpx
 import pytest
 
 from libref.chunking import Chunk
-from libref.services.ingest import IngestService
-from libref.services.search import SearchService
+from libref.services.docs.ingest import IngestService
+from libref.services.docs.search import SearchService
 from libref.store.document_store import DocumentStore
 from libref.store.vec_store import QdrantVecStore, collection_for
 from libref.text.embedding import build_embed_text
@@ -230,7 +230,7 @@ def test_search_results_carry_row_id(conn, monkeypatch, tmp_path):
 def test_reconcile_repairs_orphans_and_missing(conn, monkeypatch, tmp_path):
     import asyncio
 
-    from libref.services.maintenance import (
+    from libref.services.ops.maintenance import (
         embeddable_doc_ids,
         reconcile_version,
         sqlite_embeddable_count,
@@ -291,7 +291,7 @@ def test_reconcile_repairs_orphans_and_missing(conn, monkeypatch, tmp_path):
 def test_model_only_drift_rebuilds_single_version(conn, monkeypatch, tmp_path):
     import asyncio
 
-    from libref.services.maintenance import reconcile_version
+    from libref.services.ops.maintenance import reconcile_version
 
     _seed_lv(conn)
     conn.execute("INSERT INTO versions(id, library_id, version) VALUES(2, 1, '2.0')")
@@ -325,7 +325,7 @@ def test_model_only_drift_rebuilds_single_version(conn, monkeypatch, tmp_path):
 
 
 def test_purge_clears_vectors_after_truth_commit(conn, monkeypatch, tmp_path):
-    from libref.services.retention import purge_version
+    from libref.services.ops.retention import purge_version
 
     _seed_lv(conn)
     store = DocumentStore(conn)
