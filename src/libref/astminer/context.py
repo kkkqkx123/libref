@@ -13,6 +13,7 @@ _JAVA_SOURCE_ROOTS = (
 )
 
 _JS_SUFFIXES = (".js", ".mjs", ".cjs")
+_RUST_STRIP_ROOTS = ("src/",)
 
 
 def _clean_path(rel_path: str) -> str | None:
@@ -59,6 +60,28 @@ def determine_module_path(rel_path: str, language: str) -> str | None:
             return None
         stem = stem.removesuffix("/index")
         return stem.replace("/", ".") or None
+    if language == "rust":
+        if not path.endswith(".rs"):
+            return None
+        stem = path[: -len(".rs")]
+        for root in _RUST_STRIP_ROOTS:
+            if stem.startswith(root):
+                stem = stem[len(root) :]
+                break
+        parts = stem.split("/")
+        if parts and parts[-1] in ("mod", "main", "lib"):
+            parts = parts[:-1]
+        if not parts:
+            return None
+        return ".".join(parts) or None
+    if language == "go":
+        if not path.endswith(".go"):
+            return None
+        return path[: -len(".go")].replace("/", ".") or None
+    if language == "csharp":
+        if not path.lower().endswith(".cs"):
+            return None
+        return path[: -len(".cs")].replace("/", ".") or None
     return None
 
 

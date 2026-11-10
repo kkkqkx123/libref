@@ -9,7 +9,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-_CLASS_LIKE = frozenset({"class", "interface", "enum", "record", "annotation"})
+_CLASS_LIKE = frozenset(
+    {
+        "class",
+        "interface",
+        "enum",
+        "record",
+        "annotation",
+        "struct",
+        "union",
+        "package",
+        "module",
+    }
+)
 
 
 @dataclass

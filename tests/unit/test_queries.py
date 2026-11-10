@@ -10,15 +10,29 @@ from libref.astminer import queries as ast_queries
 
 
 def test_all_queries_compile(monkeypatch, tmp_path):
-    for cfg in (ast_config.PYTHON_CONFIG, ast_config.JAVA_CONFIG):
+    for cfg in (
+        ast_config.PYTHON_CONFIG,
+        ast_config.JAVA_CONFIG,
+        ast_config.JAVASCRIPT_CONFIG,
+        ast_config.RUST_CONFIG,
+        ast_config.GO_CONFIG,
+        ast_config.CSHARP_CONFIG,
+    ):
         language = ast_config.load_language(cfg)
         for kind in ast_queries.KINDS:
             Query(language, ast_queries.get(cfg.name, kind))
 
 
 def test_check_config_compiles_queries(monkeypatch, tmp_path):
-    ast_config.check_config(ast_config.PYTHON_CONFIG)
-    ast_config.check_config(ast_config.JAVA_CONFIG)
+    for cfg in (
+        ast_config.PYTHON_CONFIG,
+        ast_config.JAVA_CONFIG,
+        ast_config.JAVASCRIPT_CONFIG,
+        ast_config.RUST_CONFIG,
+        ast_config.GO_CONFIG,
+        ast_config.CSHARP_CONFIG,
+    ):
+        ast_config.check_config(cfg)
 
 
 def test_python_decorated_and_async_shapes(monkeypatch, tmp_path):
@@ -66,6 +80,12 @@ def test_python_wildcard_and_relative_yield_no_alias(monkeypatch, tmp_path):
 
 def test_javascript_queries_compile(monkeypatch, tmp_path):
     ast_config.check_config(ast_config.JAVASCRIPT_CONFIG)
+
+
+def test_new_language_queries_compile(monkeypatch, tmp_path):
+    ast_config.check_config(ast_config.RUST_CONFIG)
+    ast_config.check_config(ast_config.GO_CONFIG)
+    ast_config.check_config(ast_config.CSHARP_CONFIG)
 
 
 def test_javascript_class_method_calls(monkeypatch, tmp_path):
@@ -148,3 +168,90 @@ def test_java_extends_implements_and_calls(monkeypatch, tmp_path):
     assert by_raw["obj.bar"].caller == "A.foo"
     assert by_raw["this.baz"].caller == "A.foo"
     assert "Foo" in by_raw
+
+
+def test_rust_impl_methods_and_use_aliases(monkeypatch, tmp_path):
+    cfg = ast_config.RUST_CONFIG
+    decls, aliases, raw = ast_engine.extract_file(
+        "src/main.rs",
+        cfg,
+        b"use std::collections::HashMap;\n"
+        b"use crate::store::{load, save as store_save};\n"
+        b"pub struct Cache { items: u32 }\n"
+        b"impl Cache {\n"
+        b"    pub fn new() -> Cache { Cache { items: 0 } }\n"
+        b"    pub fn get(&self) -> u32 { self.helper() }\n"
+        b"}\n"
+        b'fn main() { let c = Cache::new(); c.get(); load("f"); }\n',
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["Cache"].kind == "struct"
+    assert by_qual["Cache.new"].kind == "method"
+    assert by_qual["Cache.get"].kind == "method"
+    assert ("load", "store.load") in aliases
+    assert ("store_save", "store.save") in aliases
+    assert not [a for a in aliases if a[0] == "HashMap"]
+    by_raw = {c.raw_callee: c for c in raw}
+    assert by_raw["Cache.new"].caller == "main"
+    assert by_raw["load"].caller == "main"
+    assert by_raw["self.helper"].caller == "Cache.get"
+
+
+def test_go_receiver_and_grouped_imports(monkeypatch, tmp_path):
+    cfg = ast_config.GO_CONFIG
+    decls, aliases, raw = ast_engine.extract_file(
+        "store/cache.go",
+        cfg,
+        b"package store\n"
+        b"import (\n"
+        b'\t"fmt"\n'
+        b'\talias "example.com/x/y"\n'
+        b")\n"
+        b"type Cache struct { items int }\n"
+        b"func (c *Cache) Get() int { return c.items }\n"
+        b"func Load(path string) int {\n"
+        b"\tfmt.Println(path)\n"
+        b"\treturn alias.Fetch(path)\n"
+        b"}\n",
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["store.cache.Cache"].kind == "struct"
+    assert by_qual["store.cache.Cache.Get"].kind == "method"
+    assert by_qual["store.cache.Load"].params == ["path"]
+    assert ("alias", "example.com.x.y") in aliases
+    assert not [a for a in aliases if a[0] == "fmt"]
+    by_raw = {c.raw_callee: c for c in raw}
+    assert by_raw["alias.Fetch"].caller == "store.cache.Load"
+    assert by_raw["fmt.Println"].caller == "store.cache.Load"
+
+
+def test_csharp_namespace_using_and_calls(monkeypatch, tmp_path):
+    cfg = ast_config.CSHARP_CONFIG
+    decls, aliases, raw = ast_engine.extract_file(
+        "Store/Cache.cs",
+        cfg,
+        b"using System;\n"
+        b"using IO = System.IO;\n"
+        b"namespace Store {\n"
+        b"class Cache : Base {\n"
+        b"    public int Get(string key) { return this.Lookup(key); }\n"
+        b"    public void Run(string path) {\n"
+        b"        var cache = new Cache();\n"
+        b"        cache.Get(path);\n"
+        b"        IO.File.Delete(path);\n"
+        b"    }\n"
+        b"}\n"
+        b"}\n",
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["Store"].kind == "package"
+    assert by_qual["Store.Cache"].bases == ["Base"]
+    assert by_qual["Store.Cache.Get"].kind == "method"
+    assert by_qual["Store.Cache.Get"].params == ["key"]
+    assert ("IO", "System.IO") in aliases
+    assert ("System", "System") in aliases
+    by_raw = {c.raw_callee: c for c in raw}
+    assert by_raw["Lookup"].caller == "Store.Cache.Get"
+    assert by_raw["cache.Get"].caller == "Store.Cache.Run"
+    assert by_raw["IO.File.Delete"].caller == "Store.Cache.Run"
+    assert by_raw["Cache"].caller == "Store.Cache.Run"

@@ -13,7 +13,7 @@ from libref.astminer.models import (
 )
 from libref.astminer.rules import CALLABLE_DECL_KINDS, is_builtin_bare
 
-_SELF_HEADS = frozenset({"self", "cls", "this"})
+_SELF_HEADS = frozenset({"self", "cls", "this", "Self"})
 
 try:
     _PYTHON_STDLIB = set(sys.stdlib_module_names)
@@ -53,6 +53,8 @@ except AttributeError:  # pragma: no cover - fallback for older interpreters
     }
 
 _JAVA_STDLIB_PREFIXES = ("java.", "javax.", "jdk.", "sun.", "com.sun.")
+_RUST_STDLIB_PREFIXES = ("std.", "core.", "alloc.")
+_CSHARP_STDLIB_PREFIXES = ("System.",)
 _NODE_BUILTINS = frozenset(
     {
         "fs",
@@ -215,6 +217,11 @@ def resolve_one(
             return suffixed[0], "EXTRACTED"
         if _is_stdlib_target(resolved):
             return resolved, "AMBIGUOUS"
+        raw_hits = [q for q in declared if q == raw or q.endswith(f".{raw}")]
+        if len(raw_hits) == 1:
+            if raw_hits[0] in same_file:
+                return raw_hits[0], "EXTRACTED"
+            return raw_hits[0], "INFERRED"
         return resolved, "INFERRED"
     if (
         "." in raw
@@ -414,6 +421,9 @@ def _is_stdlib_target(resolved: str) -> bool:
     if head in _NODE_BUILTINS:
         return True
     for prefix in _JAVA_STDLIB_PREFIXES:
+        if resolved.startswith(prefix):
+            return True
+    for prefix in _RUST_STDLIB_PREFIXES + _CSHARP_STDLIB_PREFIXES:
         if resolved.startswith(prefix):
             return True
     return False

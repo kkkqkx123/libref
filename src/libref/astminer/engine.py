@@ -12,12 +12,15 @@ from libref.astminer import rules as _rules
 from libref.astminer.config import LanguageConfig, grammar_fingerprint, load_language
 from libref.astminer.context import determine_module_path
 from libref.astminer.models import ApiDeclRecord, RawCall
+from libref.astminer.rules import normalize_owner_text
 
 _parsers: dict[str, tuple[str, Parser]] = {}
 
 _compiled: dict[str, dict[str, Query]] = {}
 
-_CLASS_LIKE = frozenset({"class", "interface", "enum", "record", "annotation"})
+_CLASS_LIKE = frozenset(
+    {"class", "interface", "enum", "record", "annotation", "struct", "union"}
+)
 
 
 def get_parser(cfg: LanguageConfig) -> Parser:
@@ -226,12 +229,23 @@ def _build_decls(
     line_spans = list(line_nodes or [])
     groups = _merge_matches(entity_matches)
     cands: list[dict] = []
+    impl_anchors: list[tuple[int, int, str]] = []
     for node, captures in groups:
         roots = {
             name
             for name in captures
             if name.startswith("entity.") and name.count(".") == 1
         }
+        if "entity.impl" in roots:
+            owner_node = _rules.first_node(captures, ".type.name")
+            owner = (
+                normalize_owner_text(_rules.slice_text(owner_node, source))
+                if owner_node is not None
+                else ""
+            )
+            if owner:
+                impl_anchors.append((node.start_byte, node.end_byte, owner))
+            continue
         kinds = {
             kind
             for kind in (_rules.entity_kind({root}) for root in roots)
@@ -243,7 +257,21 @@ def _build_decls(
         name = _entity_name(captures, roots, source)
         if not name:
             continue
-        cands.append({"node": node, "kind": kind, "name": name, "captures": captures})
+        owner_node = _rules.first_node(captures, ".owner", ".receiver")
+        owner = (
+            normalize_owner_text(_rules.slice_text(owner_node, source))
+            if owner_node is not None
+            else ""
+        )
+        cands.append(
+            {
+                "node": node,
+                "kind": kind,
+                "name": name,
+                "captures": captures,
+                "owner": owner,
+            }
+        )
     cands.sort(key=lambda c: (c["node"].start_byte, -c["node"].end_byte))
     dep_spans: list[tuple[int, int, str]] = []
     for node, captures in _merge_matches(dep_matches):
@@ -258,6 +286,7 @@ def _build_decls(
                             )
     dep_spans.sort()
     decls: list[ApiDeclRecord] = []
+    decl_nodes: list = []
     stack: list[ApiDeclRecord] = []
     for cand in cands:
         node = cand["node"]
@@ -271,7 +300,9 @@ def _build_decls(
         kind = cand["kind"]
         if kind == "function" and stack and stack[-1].kind in _CLASS_LIKE:
             kind = "method"
-        if parent:
+        if kind == "package":
+            qual = cand["name"]
+        elif parent:
             qual = f"{parent}.{cand['name']}"
         elif module and (module == cand["name"] or module.endswith("." + cand["name"])):
             qual = module
@@ -305,9 +336,7 @@ def _build_decls(
         )
         return_type = _rules.shaped_return(return_node, source)
         bases = _decl_bases(captures, source)
-        for start, end, text in dep_spans:
-            if node.start_byte <= start and end <= node.end_byte and text not in bases:
-                bases.append(text)
+        decl_nodes.append(node)
         decls.append(
             ApiDeclRecord(
                 qualified_name=qual,
@@ -328,7 +357,52 @@ def _build_decls(
             )
         )
         stack.append(decls[-1])
+    _attach_bases_innermost(decls, decl_nodes, dep_spans)
+    _reparent_by_owner(decls, cands, impl_anchors, module)
     return decls
+
+
+def _attach_bases_innermost(decls, decl_nodes, dep_spans) -> None:
+    for start, end, text in dep_spans:
+        best: ApiDeclRecord | None = None
+        best_size: int | None = None
+        for decl, dnode in zip(decls, decl_nodes):
+            if not (dnode.start_byte <= start and end <= dnode.end_byte):
+                continue
+            size = dnode.end_byte - dnode.start_byte
+            if best is None or (best_size is not None and size < best_size):
+                best, best_size = decl, size
+        if best is not None and text not in best.bases:
+            best.bases.append(text)
+
+
+def _reparent_by_owner(
+    decls: list[ApiDeclRecord],
+    cands: list[dict],
+    impl_anchors: list[tuple[int, int, str]],
+    module: str | None,
+) -> None:
+    depth_by_qual: dict[str, int] = {}
+    for decl in decls:
+        depth_by_qual.setdefault(decl.qualified_name, decl.depth)
+    for decl, cand in zip(decls, cands):
+        if decl.kind not in ("function", "method"):
+            continue
+        owner = cand.get("owner") or ""
+        if not owner and impl_anchors:
+            for start, end, anchor_owner in impl_anchors:
+                if start <= decl.start_byte and decl.end_byte <= end:
+                    owner = anchor_owner
+                    break
+        if not owner:
+            continue
+        base = f"{module}.{owner}" if module else owner
+        name = decl.qualified_name.rpartition(".")[2] or decl.qualified_name
+        decl.parent = base
+        decl.qualified_name = f"{base}.{name}"
+        decl.depth = depth_by_qual.get(base, 0) + 1
+        if decl.kind == "function":
+            decl.kind = "method"
 
 
 def _build_aliases(
@@ -444,6 +518,8 @@ def _is_module_loader(node, source: bytes) -> bool:
 def _caller_for(node, decls: list[ApiDeclRecord]) -> str | None:
     best: ApiDeclRecord | None = None
     for decl in decls:
+        if decl.kind not in ("function", "method", "constructor"):
+            continue
         if not (decl.start_byte <= node.start_byte and node.end_byte <= decl.end_byte):
             continue
         if best is None or (

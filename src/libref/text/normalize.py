@@ -26,6 +26,9 @@ def wrap_source_content(raw: str | None, url: str) -> str:
     for suffix, lang in (
         (".py", "python"),
         (".java", "java"),
+        (".go", "go"),
+        (".rs", "rust"),
+        (".cs", "csharp"),
         (".js", "javascript"),
         (".ts", "typescript"),
         (".jsx", "jsx"),
@@ -49,7 +52,9 @@ def classify_content(content_type: str | None, url: str) -> str:
         return "html"
     if lowered_url.endswith((".txt", ".rst")):
         return "text"
-    if lowered_url.endswith((".py", ".java", ".js", ".ts", ".jsx", ".tsx")):
+    if lowered_url.endswith(
+        (".py", ".java", ".js", ".ts", ".jsx", ".tsx", ".go", ".rs", ".cs")
+    ):
         return "source"
     ctype = (content_type or "").lower().split(";")[0].strip()
     if ctype in ("text/markdown", "text/x-markdown"):

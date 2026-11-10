@@ -13,6 +13,10 @@ CALL_NODE_TYPES = frozenset(
         "object_creation_expression",
         "method_reference",
         "explicit_constructor_invocation",
+        "macro_invocation",
+        "invocation_expression",
+        "go_statement",
+        "defer_statement",
     }
 )
 
@@ -26,6 +30,9 @@ CALLABLE_DECL_KINDS = frozenset(
         "constructor",
         "record",
         "annotation",
+        "struct",
+        "union",
+        "type",
     }
 )
 
@@ -78,6 +85,9 @@ _ENTITY_KIND_BY_ROOT = {
     "entity.enum": "enum",
     "entity.enum_constant": "enum_constant",
     "entity.record": "record",
+    "entity.struct": "struct",
+    "entity.union": "union",
+    "entity.type": "type",
     "entity.annotation": "annotation",
     "entity.field": "field",
     "entity.variable": "variable",
@@ -207,6 +217,11 @@ def _is_splat(node: Any) -> bool:
 
 
 def summarize_arg(node: Any, source: bytes) -> str:
+    if node.type == "argument":
+        for child in node.children:
+            if child.is_named:
+                return summarize_arg(child, source)
+        return "?"
     if node.type == "keyword_argument":
         name_node = node.child_by_field_name("name")
         value_node = node.child_by_field_name("value")
@@ -416,6 +431,12 @@ def build_aliases(
         return _java_aliases(root, source)
     if language == "javascript":
         return _javascript_aliases(root, captures, source, importer_file)
+    if language == "rust":
+        return _rust_aliases(root, captures, source)
+    if language == "go":
+        return _go_aliases(root, captures, source)
+    if language == "csharp":
+        return _csharp_aliases(root, captures, source)
     return []
 
 
@@ -583,6 +604,156 @@ def _java_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:
         return []
     full = slice_text(path_node, source).strip()
     if not full or "*" in full:
+        return []
+    alias = full.split(".")[-1]
+    if not alias:
+        return []
+    return [(alias, full)]
+
+
+_RUST_STDLIB_HEADS = frozenset({"std", "core", "alloc"})
+
+
+def normalize_owner_text(text: str) -> str:
+    inner = (text or "").strip()
+    while len(inner) >= 2 and inner.startswith("(") and inner.endswith(")"):
+        inner = inner[1:-1].strip()
+    if not inner:
+        return ""
+    last = inner.split()[-1]
+    last = last.lstrip("*&?!~").strip()
+    for opener in ("<", "(", "["):
+        if opener in last:
+            last = last.split(opener, 1)[0].strip()
+    last = last.strip("()<>[]").strip()
+    if not last or " " in last:
+        return ""
+    return last.split(".")[-1].strip() or ""
+
+
+def _rust_aliases(
+    root: Any, captures: dict[str, list], source: bytes
+) -> list[tuple[str, str]]:
+    if root.type != "use_declaration":
+        return []
+    if first_node(captures, ".use.wildcard") is not None:
+        return []
+    alias_path = first_node(captures, ".use.alias.path")
+    if alias_path is not None:
+        alias_node = first_node(captures, ".use.alias.name")
+        alias = slice_text(alias_node, source).strip() if alias_node is not None else ""
+        full = generic_dotted(alias_path, source).strip()
+        if not alias or not full or full.split(".")[0] in _RUST_STDLIB_HEADS:
+            return []
+        return [(alias, full)]
+    list_path = first_node(captures, ".use.list.path")
+    items = first_node(captures, ".use.list.items")
+    if list_path is not None and items is not None:
+        base = generic_dotted(list_path, source).strip()
+        if not base or base.split(".")[0] in _RUST_STDLIB_HEADS:
+            return []
+        found: list[tuple[str, str]] = []
+        for child in items.children:
+            if child.type == "identifier":
+                name = slice_text(child, source).strip()
+                if name:
+                    found.append((name, f"{base}.{name}"))
+            elif child.type == "use_as_clause":
+                path_child = child.child_by_field_name("path")
+                alias_child = child.child_by_field_name("alias")
+                if path_child is None or alias_child is None:
+                    continue
+                original = generic_dotted(path_child, source).strip()
+                alias = slice_text(alias_child, source).strip()
+                if original and alias:
+                    found.append((alias, f"{base}.{original}"))
+        return found
+    path_node = first_node(captures, ".use.path")
+    if path_node is None:
+        return []
+    full = generic_dotted(path_node, source).strip()
+    if not full or full.split(".")[0] in _RUST_STDLIB_HEADS:
+        return []
+    alias = full.split(".")[-1]
+    if not alias:
+        return []
+    return [(alias, full)]
+
+
+def _go_aliases(
+    root: Any, captures: dict[str, list], source: bytes
+) -> list[tuple[str, str]]:
+    if root.type != "import_spec":
+        return []
+    path_node = first_node(captures, ".import.alias.path", ".import.path")
+    if path_node is None:
+        return []
+    raw_path = slice_text(path_node, source).strip().strip("\"'")
+    if not raw_path:
+        return []
+    dotted = raw_path.replace("/", ".")
+    head = raw_path.split("/")[0]
+    if "." not in head:
+        return []
+    name_node = first_node(captures, ".import.alias.name")
+    if name_node is not None:
+        name = slice_text(name_node, source).strip()
+        if (
+            not name
+            or name in (".", "_")
+            or name_node.type in ("dot", "blank_identifier")
+        ):
+            return []
+        return [(name, dotted)]
+    segments = [seg for seg in raw_path.split("/") if seg]
+    if not segments:
+        return []
+    local = segments[-1]
+    if (
+        len(segments) >= 2
+        and len(local) >= 2
+        and local[0] == "v"
+        and local[1:].isdigit()
+    ):
+        local = segments[-2]
+    if not local:
+        return []
+    return [(local, dotted)]
+
+
+def _csharp_aliases(
+    root: Any, captures: dict[str, list], source: bytes
+) -> list[tuple[str, str]]:
+    if root.type != "using_directive":
+        return []
+    alias_node = first_node(captures, ".using.alias.name")
+    if alias_node is not None:
+        alias = slice_text(alias_node, source).strip()
+        path_node = first_node(captures, ".using.alias.path")
+        if path_node is None:
+            for child in root.children:
+                if (
+                    child is not alias_node
+                    and child.is_named
+                    and child.type in ("identifier", "qualified_name")
+                ):
+                    path_node = child
+                    break
+        full = (
+            generic_dotted(path_node, source).strip() if path_node is not None else ""
+        )
+        if not alias or not full:
+            return []
+        return [(alias, full)]
+    target = None
+    for child in root.children:
+        if child.is_named and child.type in ("identifier", "qualified_name"):
+            target = child
+            break
+    if target is None:
+        return []
+    full = generic_dotted(target, source).strip()
+    if not full:
         return []
     alias = full.split(".")[-1]
     if not alias:

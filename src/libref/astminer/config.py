@@ -39,10 +39,34 @@ JAVASCRIPT_CONFIG = LanguageConfig(
     config_version=1,
 )
 
+RUST_CONFIG = LanguageConfig(
+    name="rust",
+    grammar="tree_sitter_rust",
+    file_suffixes=(".rs",),
+    config_version=1,
+)
+
+GO_CONFIG = LanguageConfig(
+    name="go",
+    grammar="tree_sitter_go",
+    file_suffixes=(".go",),
+    config_version=1,
+)
+
+CSHARP_CONFIG = LanguageConfig(
+    name="csharp",
+    grammar="tree_sitter_c_sharp",
+    file_suffixes=(".cs",),
+    config_version=1,
+)
+
 LANGUAGE_CONFIGS: dict[str, LanguageConfig] = {
     "python": PYTHON_CONFIG,
     "java": JAVA_CONFIG,
     "javascript": JAVASCRIPT_CONFIG,
+    "rust": RUST_CONFIG,
+    "go": GO_CONFIG,
+    "csharp": CSHARP_CONFIG,
 }
 
 

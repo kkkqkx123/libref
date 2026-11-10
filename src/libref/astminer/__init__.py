@@ -9,10 +9,13 @@ from libref.astminer.cache import (
     sweep_repo,
 )
 from libref.astminer.config import (
+    CSHARP_CONFIG,
+    GO_CONFIG,
     JAVA_CONFIG,
     JAVASCRIPT_CONFIG,
     LANGUAGE_CONFIGS,
     PYTHON_CONFIG,
+    RUST_CONFIG,
     LanguageConfig,
     all_suffixes,
     check_config,
@@ -31,10 +34,13 @@ from libref.astminer.resolution import resolve_calls
 from libref.astminer.source_chunk import SourceChunk, SourceSplit, build_source_chunks
 
 __all__ = [
+    "CSHARP_CONFIG",
+    "GO_CONFIG",
     "JAVASCRIPT_CONFIG",
     "JAVA_CONFIG",
     "LANGUAGE_CONFIGS",
     "PYTHON_CONFIG",
+    "RUST_CONFIG",
     "ApiDeclRecord",
     "CallInstanceRecord",
     "EntityGroup",
