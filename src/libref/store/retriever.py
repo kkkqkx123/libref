@@ -234,10 +234,11 @@ class HybridRetriever:
     def __init__(
         self, conn, settings=None, *, vec_store=None, embed=None, rerank=None
     ) -> None:
+        from libref.store.vec_store import paired_vector
+
         self._conn = conn
         self._settings = settings
-        self._vec = vec_store if embed is not None else None
-        self._embed = embed if vec_store is not None else None
+        self._vec, self._embed = paired_vector(vec_store, embed)
         self._rerank = rerank
 
     async def search_async(

@@ -50,26 +50,33 @@ async def sync_vectors_for_docs(
             if is_embeddable_metadata(d["metadata"])
         ]
         hard = int(settings.chunk_embed_max_tokens)
-        texts = []
-        for d in docs:
-            meta = d["metadata"] or {}
-            text = build_embed_text(meta.get("title"), meta.get("path"), d["content"])
-            clipped, was_clipped = ensure_hard_limit(text, ChunkPath.EMBEDDING, hard)
-            if was_clipped:
-                counts["chunk_truncated"] = counts.get("chunk_truncated", 0) + 1
-                logger.warning(
-                    "embedding text clipped to %d tokens for doc %d", hard, d["id"]
+        batch = max(1, int(settings.embed_batch))
+        for start in range(0, len(docs), batch):
+            group = docs[start : start + batch]
+            texts = []
+            for d in group:
+                meta = d["metadata"] or {}
+                text = build_embed_text(
+                    meta.get("title"), meta.get("path"), d["content"]
                 )
-            texts.append(clipped)
-        vecs = await embed(texts) if texts else []
-        if len(vecs) != len(docs):
-            raise RuntimeError("embedding count mismatch")
-        vec_store.upsert_batch(
-            [
-                (d["id"], d["library_id"], d["version_id"], vec)
-                for d, vec in zip(docs, vecs)
-            ]
-        )
+                clipped, was_clipped = ensure_hard_limit(
+                    text, ChunkPath.EMBEDDING, hard
+                )
+                if was_clipped:
+                    counts["chunk_truncated"] = counts.get("chunk_truncated", 0) + 1
+                    logger.warning(
+                        "embedding text clipped to %d tokens for doc %d", hard, d["id"]
+                    )
+                texts.append(clipped)
+            vecs = await embed(texts) if texts else []
+            if len(vecs) != len(group):
+                raise RuntimeError("embedding count mismatch")
+            vec_store.upsert_batch(
+                [
+                    (d["id"], d["library_id"], d["version_id"], vec)
+                    for d, vec in zip(group, vecs)
+                ]
+            )
     except Exception as exc:  # noqa: BLE001 — vector failures are recorded, not fatal
         counts["vector_failed"] = counts.get("vector_failed", 0) + len(inserted)
         logger.warning("vector upsert failed: %s", exc)
@@ -79,10 +86,11 @@ class MaintenanceService:
     """Full re-embedding of one library version into the derived vector index."""
 
     def __init__(self, conn, settings=None, *, vec_store=None, embed=None) -> None:
+        from libref.store.vec_store import paired_vector
+
         self._conn = conn
         self._settings = settings
-        self._vec = vec_store if embed is not None else None
-        self._embed = embed if vec_store is not None else None
+        self._vec, self._embed = paired_vector(vec_store, embed)
 
     async def reembed_library_async(
         self,

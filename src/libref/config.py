@@ -42,7 +42,7 @@ class LibrefSettings(BaseSettings):
     http_proxy: str | None = None
     no_proxy: str | None = None
     qdrant_url: str = "http://localhost:6333"
-    qdrant_collection: str = "libref_chunks"
+    vector_collection: str = "libref_chunks"
     qdrant_timeout: float = Field(default=5.0, gt=0)
     vector_backend: Literal["qdrant", "simvec"] = "simvec"
     simvec_dir: Path | None = None
@@ -211,7 +211,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
     "storage": frozenset(
         {
             "qdrant_url",
-            "qdrant_collection",
+            "vector_collection",
             "qdrant_timeout",
             "vector_backend",
             "simvec_dir",
@@ -311,7 +311,14 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
 RESERVED_SECTIONS = frozenset()
 
 PATH_FIELDS = frozenset(
-    {"db_path", "registry_overrides_file", "snapshot_dir", "repos_dir", "log_file"}
+    {
+        "db_path",
+        "registry_overrides_file",
+        "snapshot_dir",
+        "repos_dir",
+        "log_file",
+        "simvec_dir",
+    }
 )
 
 MASKED_VALUE = "***"

@@ -14,10 +14,9 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
-
-from qdrant_client import QdrantClient, models
 
 
 def collection_for(base: str, db_path: str | os.PathLike[str]) -> str:
@@ -74,6 +73,44 @@ def _write_vec_meta(conn: sqlite3.Connection, model: str, dim: int) -> None:
     conn.commit()
 
 
+def _needs_rebuild(
+    old_model: str | None,
+    old_dim: int | None,
+    cur_dim: int | None,
+    model: str,
+    dim: int,
+) -> bool:
+    """Whether stored metadata or live collection shape diverges from the desired model."""
+    return cur_dim != dim or old_dim != dim or old_model != model
+
+
+def paired_vector(
+    vec_store: Any | None, embed: Any | None
+) -> tuple[Any | None, Any | None]:
+    """Couple a vector backend with its embedding function; a half-wired pair disables both."""
+    if vec_store is not None and embed is not None:
+        return vec_store, embed
+    return None, None
+
+
+def _simvec_id(doc_id: int) -> str:
+    """Map a document row id to the string form the local engine stores."""
+    if isinstance(doc_id, bool) or not isinstance(doc_id, int) or doc_id <= 0:
+        raise ValueError(f"invalid document id for simvec point: {doc_id!r}")
+    return str(doc_id)
+
+
+def _doc_id_from_simvec(raw: Any) -> int:
+    """Map a local engine point id back to a document row id; malformed ids are rejected."""
+    try:
+        value = int(str(raw))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid simvec point id: {raw!r}") from exc
+    if value <= 0:
+        raise ValueError(f"invalid simvec point id: {raw!r}")
+    return value
+
+
 class QdrantVecStore(VectorStore):
     """Remote backend: single collection with payload-version filtering; distance is cosine."""
 
@@ -86,9 +123,12 @@ class QdrantVecStore(VectorStore):
         client: Any | None = None,
     ) -> None:
         self.collection = collection
-        self.client = (
-            client if client is not None else QdrantClient(url=url, timeout=timeout)
-        )
+        if client is not None:
+            self.client = client
+        else:
+            from qdrant_client import QdrantClient
+
+            self.client = QdrantClient(url=url, timeout=timeout)
 
     # ── Collection governance ──
 
@@ -100,10 +140,12 @@ class QdrantVecStore(VectorStore):
         collection shape is unrecognizable, delete and recreate it and update the
         records. When records match, this is an idempotent no-op.
         """
+        from qdrant_client import models
+
         old_model, old_dim = _read_vec_meta(conn)
         if self.client.collection_exists(self.collection):
             cur_dim = self._collection_dim()
-            if cur_dim != dim or old_dim != dim or old_model != model:
+            if _needs_rebuild(old_model, old_dim, cur_dim, model, dim):
                 self.client.delete_collection(self.collection)
         if not self.client.collection_exists(self.collection):
             self.client.create_collection(
@@ -116,6 +158,8 @@ class QdrantVecStore(VectorStore):
         _write_vec_meta(conn, model, dim)
 
     def _collection_dim(self) -> int | None:
+        from qdrant_client import models
+
         info = self.client.get_collection(self.collection)
         vectors = info.config.params.vectors
         if isinstance(vectors, models.VectorParams):
@@ -123,6 +167,8 @@ class QdrantVecStore(VectorStore):
         return None
 
     def _create_payload_indexes(self) -> None:
+        from qdrant_client import models
+
         # Build indexes before loading data; version_id is the filter key, and the
         # integer tenant optimization keeps equal values linked
         self.client.create_payload_index(
@@ -147,6 +193,8 @@ class QdrantVecStore(VectorStore):
         wait: bool = True,
     ) -> None:
         """Batch-write document, library and version ids with vectors, idempotent overwrite."""
+        from qdrant_client import models
+
         if not points:
             return
         self.client.upsert(
@@ -164,6 +212,8 @@ class QdrantVecStore(VectorStore):
 
     def delete_docs(self, doc_ids: list[int]) -> None:
         """Delete vector points for the given documents, cleaning up old points on single-page re-chunking."""
+        from qdrant_client import models
+
         if not doc_ids:
             return
         self.client.delete(
@@ -173,6 +223,8 @@ class QdrantVecStore(VectorStore):
 
     def delete_version(self, version_id: int) -> None:
         """Delete all vector points of a version, on re-crawl of that version."""
+        from qdrant_client import models
+
         self.client.delete(
             collection_name=self.collection,
             points_selector=models.FilterSelector(
@@ -204,7 +256,9 @@ class QdrantVecStore(VectorStore):
         ).count
 
     @staticmethod
-    def _version_filter(version_id: int) -> models.Filter:
+    def _version_filter(version_id: int):
+        from qdrant_client import models
+
         return models.Filter(
             must=[
                 models.FieldCondition(
@@ -231,14 +285,15 @@ def _simvec_bindings_dir() -> Path:
     )
 
 
-def _import_simvec_binding(lib: str | None = None):
+def _import_simvec_binding(lib: str | os.PathLike[str] | None = None):
     """Import the ctypes binding scoped to this loader; explicit path beats environment beats default discovery."""
     import importlib
 
-    if lib is not None and os.environ.get("SIMVEC_LIB") != lib:
-        os.environ["SIMVEC_LIB"] = lib
+    if lib is not None:
+        os.environ["SIMVEC_LIB"] = os.fspath(lib)
     bindings = str(_simvec_bindings_dir())
-    if bindings not in sys.path:
+    inserted = bindings not in sys.path
+    if inserted:
         sys.path.insert(0, bindings)
     try:
         return importlib.import_module("simvec")
@@ -249,12 +304,18 @@ def _import_simvec_binding(lib: str | None = None):
             "--manifest-path crates/simvec/Cargo.toml "
             "or point simvec_lib/SIMVEC_LIB at libsimvec explicitly"
         ) from exc
+    finally:
+        if inserted:
+            with contextlib.suppress(ValueError):
+                sys.path.remove(bindings)
 
 
 _ENGINES: dict[str, Any] = {}
+_ENGINES_LOCK = threading.Lock()
+_MEM_SIMVEC_ROOT: Path | None = None
 
 
-def simvec_available(lib: str | None = None) -> bool:
+def simvec_available(lib: str | os.PathLike[str] | None = None) -> bool:
     """Whether the native simvec binding imports; used for test skip decisions."""
     try:
         _import_simvec_binding(lib)
@@ -263,31 +324,39 @@ def simvec_available(lib: str | None = None) -> bool:
     return True
 
 
-def _open_simvec_engine(root: Path, lib: str | None = None):
+def _open_simvec_engine(root: Path, lib: str | os.PathLike[str] | None = None):
     key = os.path.abspath(os.fspath(root))
-    engine = _ENGINES.get(key)
-    if engine is None:
-        os.makedirs(key, exist_ok=True)
-        engine = _import_simvec_binding(lib).Engine(key)
-        _ENGINES[key] = engine
-    return engine
+    with _ENGINES_LOCK:
+        engine = _ENGINES.get(key)
+        if engine is None:
+            os.makedirs(key, exist_ok=True)
+            engine = _import_simvec_binding(lib).Engine(key)
+            _ENGINES[key] = engine
+        return engine
 
 
 def close_simvec_engines() -> None:
     """Release cached engines; used by tests and process teardown."""
-    while _ENGINES:
-        _, engine = _ENGINES.popitem()
+    while True:
+        with _ENGINES_LOCK:
+            item = _ENGINES.popitem() if _ENGINES else None
+        if item is None:
+            return
         with contextlib.suppress(Exception):
-            engine.close()
+            item[1].close()
 
 
 def simvec_root_for(db_path, simvec_dir=None) -> Path:
-    """Derive the engine root from the database file; explicit directory wins, memory databases get an ephemeral root."""
+    """Derive the engine root from the database file; explicit directory wins, memory databases share one cached root."""
+    global _MEM_SIMVEC_ROOT
     if simvec_dir is not None:
-        return Path(simvec_dir)
+        return Path(os.fspath(simvec_dir))
     raw = os.fspath(db_path)
     if raw == ":memory:":
-        return Path(tempfile.mkdtemp(prefix="libref-simvec-"))
+        with _ENGINES_LOCK:
+            if _MEM_SIMVEC_ROOT is None:
+                _MEM_SIMVEC_ROOT = Path(tempfile.mkdtemp(prefix="libref-simvec-"))
+            return _MEM_SIMVEC_ROOT
     return Path(os.path.abspath(raw) + ".simvec")
 
 
@@ -304,9 +373,13 @@ class SimvecVecStore(VectorStore):
     """Local backend: single collection with payload-version filtering; distance is cosine."""
 
     def __init__(
-        self, root: str | Path, collection: str, *, lib: str | None = None
+        self,
+        root: str | Path,
+        collection: str,
+        *,
+        lib: str | os.PathLike[str] | None = None,
     ) -> None:
-        self.root = Path(root)
+        self.root = Path(os.fspath(root))
         self.collection = collection
         self._engine = _open_simvec_engine(self.root, lib)
 
@@ -321,7 +394,7 @@ class SimvecVecStore(VectorStore):
                 cur_dim = cur.get("vector_size")
             except Exception:  # noqa: BLE001 — unreadable shape counts as mismatch, rebuilt below
                 cur_dim = None
-            if cur_dim != dim or old_dim != dim or old_model != model:
+            if _needs_rebuild(old_model, old_dim, cur_dim, model, dim):
                 self._engine.delete_collection(self.collection)
                 self._create_collection(dim)
         _write_vec_meta(conn, model, dim)
@@ -346,14 +419,14 @@ class SimvecVecStore(VectorStore):
         *,
         wait: bool = True,
     ) -> None:
-        """Batch-write document, library and version ids with vectors, idempotent overwrite."""
+        """Batch-write document, library and version ids with vectors, idempotent overwrite; local writes are visible on return."""
         if not points:
             return
         self._engine.upsert_batch(
             self.collection,
             [
                 {
-                    "id": str(doc_id),
+                    "id": _simvec_id(doc_id),
                     "vector": list(embedding),
                     "payload": {"library_id": library_id, "version_id": version_id},
                 }
@@ -365,7 +438,7 @@ class SimvecVecStore(VectorStore):
         """Delete vector points for the given documents, cleaning up old points on single-page re-chunking."""
         if not doc_ids:
             return
-        self._engine.delete_batch(self.collection, [str(i) for i in doc_ids])
+        self._engine.delete_batch(self.collection, [_simvec_id(i) for i in doc_ids])
 
     def delete_version(self, version_id: int) -> None:
         """Delete all vector points of a version, on re-crawl of that version."""
@@ -385,7 +458,7 @@ class SimvecVecStore(VectorStore):
             with_payload=False,
             with_vector=False,
         )
-        return [(int(h["id"]), float(h["score"])) for h in hits]
+        return [(_doc_id_from_simvec(h["id"]), float(h["score"])) for h in hits]
 
     def count(self, version_id: int) -> int:
         """Number of vector points in a version, for reconciliation against the documents table count."""

@@ -413,10 +413,11 @@ class IngestService:
         vec_store: VectorStore | None = None,
         embed: EmbedFn | None = None,
     ) -> None:
+        from libref.store.vec_store import paired_vector
+
         self._settings = settings
         self._conn = conn
-        self._vec = vec_store if embed is not None else None
-        self._embed = embed if vec_store is not None else None
+        self._vec, self._embed = paired_vector(vec_store, embed)
         self._budgets = _doc_budgets(settings)
         self._clean_fingerprint = _budget_fingerprint(self._budgets)
         self._clean_cache: dict[str, str] = {}

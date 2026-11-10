@@ -31,13 +31,13 @@ def build_vector(settings, gateway=None):
     if settings.vector_backend == "simvec":
         vec = SimvecVecStore(
             simvec_root_for(settings.db_path, settings.simvec_dir),
-            collection_for(settings.qdrant_collection, settings.db_path),
+            collection_for(settings.vector_collection, settings.db_path),
             lib=settings.simvec_lib,
         )
     else:
         vec = QdrantVecStore(
             settings.qdrant_url,
-            collection_for(settings.qdrant_collection, settings.db_path),
+            collection_for(settings.vector_collection, settings.db_path),
             timeout=settings.qdrant_timeout,
         )
     return vec, embed, gw
