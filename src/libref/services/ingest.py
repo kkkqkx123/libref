@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,6 +28,7 @@ from libref.crawler import (
 from libref.llm import EmbedFn
 from libref.services.jobs import Job, JobManager
 from libref.services.libraries import LibraryService
+from libref.services.version_lock import version_lock as _version_lock
 from libref.store.document_store import DocumentInput, DocumentStore, StoreResult
 from libref.store.vec_store import VectorStore
 from libref.text.normalize import (
@@ -125,124 +125,6 @@ def start_refresh_job(
             registry_confirmed=True,
         ),
     )
-
-
-def _version_key(ecosystem: str, library: str, version: str) -> str:
-    return f"{ecosystem}\0{library}\0{version}"
-
-
-def _ensure_version_locks(conn) -> None:
-    from libref.db.schema import GOVERNANCE_SQL
-
-    conn.executescript(GOVERNANCE_SQL)
-    conn.commit()
-
-
-_mem_locks: dict[str, asyncio.Lock] = {}
-_mem_guard = threading.Lock()
-
-
-def _mem_lock(key: str) -> asyncio.Lock:
-    with _mem_guard:
-        lock = _mem_locks.get(key)
-        if lock is None:
-            lock = asyncio.Lock()
-            _mem_locks[key] = lock
-        return lock
-
-
-class _VersionGuard:
-    def __init__(self, conn, key: str, stale_after: float = 600.0) -> None:
-        self._conn = conn
-        self._key = key
-        self._stale_after = stale_after
-        self._owner = f"{__import__('os').getpid()}-{__import__('time').time_ns()}"
-        self._mem = _mem_lock(key)
-        self._beat_task = None
-
-    async def __aenter__(self):
-        await self._mem.acquire()
-        try:
-            await self._claim()
-        except BaseException:
-            self._mem.release()
-            raise
-        self._beat_task = asyncio.get_running_loop().create_task(self._beat_loop())
-        return self
-
-    async def __aexit__(self, *exc):
-        try:
-            if self._beat_task is not None:
-                self._beat_task.cancel()
-        finally:
-            try:
-                self._conn.execute(
-                    "DELETE FROM version_locks WHERE version_key=? AND owner=?",
-                    (self._key, self._owner),
-                )
-                self._conn.commit()
-            except Exception:  # noqa: BLE001, S110 — best-effort lock cleanup; release follows regardless
-                pass
-            self._mem.release()
-        return False
-
-    async def _claim(self) -> None:
-        import time as _time
-
-        _ensure_version_locks(self._conn)
-        while True:
-            now = _time.time()
-            try:
-                self._conn.execute(
-                    "INSERT INTO version_locks(version_key, owner, heartbeat_at) VALUES(?,?,?)",
-                    (self._key, self._owner, now),
-                )
-                self._conn.commit()
-                return
-            except Exception:  # noqa: BLE001 — lock contention is expected; retry via the loop below
-                try:
-                    self._conn.rollback()
-                except Exception:  # noqa: BLE001, S110 — nothing left to roll back
-                    pass
-            row = self._conn.execute(
-                "SELECT owner, heartbeat_at FROM version_locks WHERE version_key=?",
-                (self._key,),
-            ).fetchone()
-            if row is None:
-                continue
-            owner, heartbeat = row[0], float(row[1] or 0)
-            if owner == self._owner:
-                return
-            if now - heartbeat > self._stale_after:
-                cur = self._conn.execute(
-                    "UPDATE version_locks SET owner=?, heartbeat_at=? WHERE version_key=? AND heartbeat_at=?",
-                    (self._owner, now, self._key, heartbeat),
-                )
-                self._conn.commit()
-                if cur.rowcount > 0:
-                    return
-            await asyncio.sleep(0.2)
-
-    async def _beat_loop(self) -> None:
-        import time as _time
-
-        try:
-            while True:
-                await asyncio.sleep(max(1.0, self._stale_after / 6.0))
-                try:
-                    self._conn.execute(
-                        "UPDATE version_locks SET heartbeat_at=? WHERE version_key=? AND owner=?",
-                        (_time.time(), self._key, self._owner),
-                    )
-                    self._conn.commit()
-                except Exception:  # noqa: BLE001, S112 — heartbeat failure retries on the next tick
-                    continue
-        except asyncio.CancelledError:
-            return
-
-
-def _version_lock(conn, ecosystem: str, library: str, version: str):
-    return _VersionGuard(conn, _version_key(ecosystem, library, version))
 
 
 def build_scrape_runner(settings, conn, *, vec_store=None, embed=None, mgr=None):

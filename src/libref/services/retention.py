@@ -113,7 +113,8 @@ def purge_version(
     snapshot_root: Path | None = None,
     vec_store: Any | None = None,
 ) -> dict[str, int]:
-    from libref.store.snapshots import SnapshotStore
+    """Resolve the version, hold the version lock, then purge."""
+    from libref.services.version_lock import version_lock_sync
 
     ensure_deletion_log(conn)
     if ecosystem is not None:
@@ -132,9 +133,44 @@ def purge_version(
         ).fetchall()
     if len(rows) != 1:
         raise ValueError("library version must resolve to a single version")
-    version_id = int(rows[0][0])
     eco = str(rows[0][1])
+    version_id = int(rows[0][0])
+    with version_lock_sync(conn, eco, library, version):
+        return _purge_inner(
+            conn,
+            library,
+            version,
+            eco,
+            version_id,
+            repos_dir=repos_dir,
+            snapshot_root=snapshot_root,
+            vec_store=vec_store,
+        )
+
+
+def _purge_inner(
+    conn: sqlite3.Connection,
+    library: str,
+    version: str,
+    eco: str,
+    version_id: int,
+    *,
+    repos_dir: Path | None = None,
+    snapshot_root: Path | None = None,
+    vec_store: Any | None = None,
+) -> dict[str, int]:
+    from libref.store.snapshots import SnapshotStore
+
     logger.info("purge start %s:%s %s", eco, library, version)
+    if vec_store is not None:
+        try:
+            vec_store.delete_version(version_id)
+        except Exception as exc:  # noqa: BLE001 — pre-clean failure retries after the truth commit
+            logger.warning(
+                "purge vector pre-clean failed for version %d: %s",
+                version_id,
+                exc,
+            )
     doc_rows = conn.execute(
         "SELECT id FROM documents WHERE version_id=?", (version_id,)
     ).fetchall()
@@ -182,7 +218,7 @@ def purge_version(
     if vec_store is not None:
         try:
             vec_store.delete_version(version_id)
-        except Exception as exc:  # noqa: BLE001 — truth deletion already committed; leftovers are cleared by reconciliation
+        except Exception as exc:  # noqa: BLE001 — truth deletion already committed; retry covers the crash window
             logger.warning(
                 "purge vector version failed for version %d: %s", version_id, exc
             )

@@ -866,6 +866,39 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fts_rebuild(args: argparse.Namespace) -> int:
+    from libref.services.maintenance import rebuild_fts
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        out = rebuild_fts(conn)
+    finally:
+        conn.close()
+    print(
+        f"documents: {out['documents']} sampled: {out['sampled']} "
+        f"missing: {out['missing']} in_sync: {out['in_sync']}"
+    )
+    return 0 if out["in_sync"] else 1
+
+
+def cmd_fts_check(args: argparse.Namespace) -> int:
+    from libref.services.maintenance import check_fts
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        out = check_fts(conn)
+    finally:
+        conn.close()
+    print(
+        f"documents: {out['documents']} triggers: {out['triggers']} "
+        f"sampled: {out['sampled']} missing: {out['missing']} "
+        f"in_sync: {out['in_sync']}"
+    )
+    return 0 if out["in_sync"] else 1
+
+
 def cmd_review(args: argparse.Namespace) -> int:
     conn = _connect(_load_settings(args))
     try:
@@ -1456,6 +1489,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_reconcile.add_argument("version")
     p_reconcile.add_argument("--ecosystem", default=None)
     p_reconcile.set_defaults(func=cmd_reconcile)
+
+    p_fts_rebuild = sub.add_parser(
+        "fts-rebuild",
+        help="Rebuild the full-text index from the source tables",
+        parents=[_config_parent],
+    )
+    p_fts_rebuild.set_defaults(func=cmd_fts_rebuild)
+
+    p_fts_check = sub.add_parser(
+        "fts-check",
+        help="Check full-text index row counts and triggers",
+        parents=[_config_parent],
+    )
+    p_fts_check.set_defaults(func=cmd_fts_check)
 
     p_review = sub.add_parser(
         "review", help="Review pending call instances", parents=[_config_parent]

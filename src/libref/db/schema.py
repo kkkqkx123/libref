@@ -58,6 +58,8 @@ CREATE TABLE documents(
   content TEXT,
   metadata JSON,
   sort_order INTEGER NOT NULL,
+  title TEXT GENERATED ALWAYS AS (json_extract(metadata, '$.title')) STORED,
+  path TEXT GENERATED ALWAYS AS (json_extract(metadata, '$.path')) STORED,
   UNIQUE(page_id, sort_order)
 );
 
@@ -66,6 +68,12 @@ CREATE INDEX idx_documents_page ON documents(page_id);
 CREATE INDEX idx_pages_version ON pages(version_id);
 CREATE INDEX idx_versions_library ON versions(library_id);
 
+-- External-content index over documents. Title and path are read-only
+-- generated columns derived from metadata JSON, so every index column
+-- exists in the content table and native maintenance works. Index writes
+-- must go through the triggers below or the maintenance rebuild; partial
+-- out-of-band writes leave terms out of agreement and later triggered
+-- deletes fail with a corruption error.
 CREATE VIRTUAL TABLE documents_fts USING fts5(
   content,
   title,
@@ -76,29 +84,24 @@ CREATE VIRTUAL TABLE documents_fts USING fts5(
   content_rowid='id'
 );
 
--- title and path are stored in documents.metadata JSON; triggers extract them in sync
 CREATE TRIGGER documents_fts_after_insert
 AFTER INSERT ON documents BEGIN
   INSERT INTO documents_fts(rowid, content, title, url, path)
-  VALUES(new.id, new.content, json_extract(new.metadata, '$.title'),
-         new.url, json_extract(new.metadata, '$.path'));
+  VALUES(new.id, new.content, new.title, new.url, new.path);
 END;
 
 CREATE TRIGGER documents_fts_after_delete
 AFTER DELETE ON documents BEGIN
   INSERT INTO documents_fts(documents_fts, rowid, content, title, url, path)
-  VALUES('delete', old.id, old.content, json_extract(old.metadata, '$.title'),
-         old.url, json_extract(old.metadata, '$.path'));
+  VALUES('delete', old.id, old.content, old.title, old.url, old.path);
 END;
 
 CREATE TRIGGER documents_fts_after_update
 AFTER UPDATE OF content, metadata, url, page_id ON documents BEGIN
   INSERT INTO documents_fts(documents_fts, rowid, content, title, url, path)
-  VALUES('delete', old.id, old.content, json_extract(old.metadata, '$.title'),
-         old.url, json_extract(old.metadata, '$.path'));
+  VALUES('delete', old.id, old.content, old.title, old.url, old.path);
   INSERT INTO documents_fts(rowid, content, title, url, path)
-  VALUES(new.id, new.content, json_extract(new.metadata, '$.title'),
-         new.url, json_extract(new.metadata, '$.path'));
+  VALUES(new.id, new.content, new.title, new.url, new.path);
 END;
 """
 

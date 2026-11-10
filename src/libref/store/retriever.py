@@ -229,6 +229,26 @@ def _cluster_sets(
     return out
 
 
+def _current_vids(conn, settings, vids: list[int]) -> tuple[list[int], bool]:
+    """Split version ids into vector-searchable ones; drifted ones are skipped."""
+    from libref.config import setting_or_default
+    from libref.store.vec_store import read_version_meta
+
+    model = setting_or_default(settings, "embedding_model")
+    dim = int(setting_or_default(settings, "embedding_dim"))
+    current: list[int] = []
+    skipped = False
+    for vid in vids:
+        old_model, old_dim = read_version_meta(conn, int(vid))
+        if old_model is None and old_dim is None:
+            current.append(int(vid))
+        elif (old_model, old_dim) != (model, dim):
+            skipped = True
+        else:
+            current.append(int(vid))
+    return current, skipped
+
+
 class HybridRetriever:
     """Orchestration point for two-path recall and fused reranking; vector and rerank failures only set the degraded flag."""
 
@@ -279,60 +299,63 @@ class HybridRetriever:
         vids = _version_ids(self._conn, library, version, ecosystem)
         max_versions = int(setting_or_default(self._settings, "retrieval_max_versions"))
         if self._vec is not None and self._embed is not None and vids:
-            try:
-                [query_vec] = await self._embed([query])
-            except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
-                degraded = True
-                query_vec = []
-            if query_vec is not None and len(query_vec):
-                if len(vids) == 1:
-                    try:
-                        vec_ids = [
-                            doc_id
-                            for doc_id, _ in self._vec.search(
-                                query_vec, k=need, version_id=vids[0]
-                            )
-                        ]
-                    except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
-                        degraded = True
-                        vec_ids = []
-                else:
-                    scoped = vids
-                    if len(scoped) > max_versions:
-                        scoped = scoped[:max_versions]
-                        degraded = True
-                    try:
-                        grouped = await asyncio.gather(
-                            *(
-                                asyncio.to_thread(
-                                    self._vec.search,
-                                    query_vec,
-                                    k=need,
-                                    version_id=vid,
+            vids, drift_skipped = _current_vids(self._conn, self._settings, vids)
+            degraded = degraded or drift_skipped
+            if vids:
+                try:
+                    [query_vec] = await self._embed([query])
+                except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
+                    degraded = True
+                    query_vec = []
+                if query_vec is not None and len(query_vec):
+                    if len(vids) == 1:
+                        try:
+                            vec_ids = [
+                                doc_id
+                                for doc_id, _ in self._vec.search(
+                                    query_vec, k=need, version_id=vids[0]
                                 )
-                                for vid in scoped
-                            )
-                        )
-                    except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
-                        degraded = True
-                        vec_ids = []
+                            ]
+                        except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
+                            degraded = True
+                            vec_ids = []
                     else:
-                        pooled: list[tuple[float, int]] = [
-                            (float(score), int(doc_id))
-                            for hits in grouped
-                            for doc_id, score in hits
-                        ]
-                        pooled.sort(key=lambda kv: (kv[0], kv[1]), reverse=True)
-                        seen_ids: set[int] = set()
-                        merged: list[int] = []
-                        for _, doc_id in pooled:
-                            if doc_id in seen_ids:
-                                continue
-                            seen_ids.add(doc_id)
-                            merged.append(doc_id)
-                            if len(merged) >= need:
-                                break
-                        vec_ids = merged
+                        scoped = vids
+                        if len(scoped) > max_versions:
+                            scoped = scoped[:max_versions]
+                            degraded = True
+                        try:
+                            grouped = await asyncio.gather(
+                                *(
+                                    asyncio.to_thread(
+                                        self._vec.search,
+                                        query_vec,
+                                        k=need,
+                                        version_id=vid,
+                                    )
+                                    for vid in scoped
+                                )
+                            )
+                        except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
+                            degraded = True
+                            vec_ids = []
+                        else:
+                            pooled: list[tuple[float, int]] = [
+                                (float(score), int(doc_id))
+                                for hits in grouped
+                                for doc_id, score in hits
+                            ]
+                            pooled.sort(key=lambda kv: (kv[0], kv[1]), reverse=True)
+                            seen_ids: set[int] = set()
+                            merged: list[int] = []
+                            for _, doc_id in pooled:
+                                if doc_id in seen_ids:
+                                    continue
+                                seen_ids.add(doc_id)
+                                merged.append(doc_id)
+                                if len(merged) >= need:
+                                    break
+                            vec_ids = merged
         fused = self._rrf(fts_ids, vec_ids)
         fused = _collapse_by_group(self._conn, fused)
         if not fused:

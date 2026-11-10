@@ -352,7 +352,7 @@ def test_purge_clears_vectors_after_truth_commit(conn):
     vec.points[1] = (1, 1, 1, [1.0, 0.0])
     out = purge_version(conn, "docs", "1.0", vec_store=vec)
     assert out["removed_docs"] == 1
-    assert vec.delete_version_calls == [1]
+    assert vec.delete_version_calls == [1, 1]
     assert vec.deleted == []
     assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 0
 

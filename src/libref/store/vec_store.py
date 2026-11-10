@@ -20,7 +20,7 @@ from typing import Any, Protocol, runtime_checkable
 
 
 def collection_for(base: str, db_path: str | os.PathLike[str]) -> str:
-    """Derive the collection name from the database file identity; different db files are naturally isolated, in-memory dbs keep the base name."""
+    """Derive the collection name from the database file identity; different db files are naturally isolated, in-memory dbs keep the base name for tests only."""
     raw = os.fspath(db_path)
     if raw == ":memory:":
         return base
@@ -55,18 +55,8 @@ class VectorStore(Protocol):
     def list_ids(self, version_id: int, *, batch: int = 512) -> list[int]: ...
 
 
-def _read_vec_meta(conn: sqlite3.Connection) -> tuple[str | None, int | None]:
-    rows = dict(
-        conn.execute(
-            "SELECT key, value FROM schema_meta WHERE key IN ('vec_model','vec_dim')"
-        )
-    )
-    model = rows.get("vec_model")
-    dim = int(rows["vec_dim"]) if "vec_dim" in rows else None
-    return model, dim
-
-
 def _write_vec_meta(conn: sqlite3.Connection, model: str, dim: int) -> None:
+    """Record the last writer model; per-version records stay authoritative."""
     conn.executemany(
         "INSERT INTO schema_meta(key, value) VALUES(?, ?)"
         " ON CONFLICT(key) DO UPDATE SET value=excluded.value",

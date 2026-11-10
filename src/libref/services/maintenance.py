@@ -82,7 +82,84 @@ def _version_drifted(conn, version_id: int, model: str, dim: int) -> bool:
     from libref.store.vec_store import read_version_meta
 
     old_model, old_dim = read_version_meta(conn, version_id)
+    if old_model is None and old_dim is None:
+        return False
     return (old_model, old_dim) != (model, dim)
+
+
+def version_drifted(conn, settings, version_id: int) -> bool:
+    """Whether a version needs re-embedding under current settings."""
+    return _version_drifted(
+        conn, version_id, settings.embedding_model, int(settings.embedding_dim)
+    )
+
+
+def rebuild_fts(conn) -> dict[str, int]:
+    """Rebuild the full-text index from the source tables, then verify."""
+    conn.execute("INSERT INTO documents_fts(documents_fts) VALUES('rebuild')")
+    conn.commit()
+    return check_fts(conn)
+
+
+def _fts_probe_token(title: str | None, content: str | None) -> str | None:
+    """One distinctive index term for a document, if its text yields any."""
+    import re
+
+    words = re.findall(r"[A-Za-z0-9_]{4,}", f"{title or ''} {content or ''}")
+    if words:
+        return f'"{max(words, key=len)}"'
+    from libref.text.query import safe_fts_query
+
+    shaped = safe_fts_query(f"{title or ''} {content or ''}")
+    if not shaped:
+        return None
+    return shaped.split(" OR ", 1)[0]
+
+
+def check_fts(conn, *, sample: int = 20) -> dict[str, int]:
+    """Check trigger presence plus spot MATCH lookups.
+
+    Non-MATCH reads are served from the content table, so only MATCH
+    queries observe the index; verify a head and tail sample instead.
+    Rebuild stays idempotent for full repair.
+    """
+    docs = int(conn.execute("SELECT count(*) FROM documents").fetchone()[0])
+    triggers = int(
+        conn.execute(
+            "SELECT count(*) FROM sqlite_master WHERE type='trigger'"
+            " AND name IN ('documents_fts_after_insert',"
+            " 'documents_fts_after_delete', 'documents_fts_after_update')"
+        ).fetchone()[0]
+    )
+    half = max(1, max(0, int(sample)) // 2)
+    rows = conn.execute(
+        "SELECT id, content, title, path FROM documents ORDER BY id LIMIT ?",
+        (half,),
+    ).fetchall()
+    rows += conn.execute(
+        "SELECT id, content, title, path FROM documents ORDER BY id DESC LIMIT ?",
+        (half,),
+    ).fetchall()
+    sampled = 0
+    missing = 0
+    for doc_id, content, title, path in rows:
+        token = _fts_probe_token(title, content or path)
+        if token is None:
+            continue
+        sampled += 1
+        hits = conn.execute(
+            "SELECT rowid FROM documents_fts WHERE documents_fts MATCH ? LIMIT -1",
+            (token,),
+        ).fetchall()
+        if int(doc_id) not in {int(r[0]) for r in hits}:
+            missing += 1
+    return {
+        "documents": docs,
+        "triggers": triggers,
+        "sampled": sampled,
+        "missing": missing,
+        "in_sync": int(triggers == 3 and missing == 0),
+    }
 
 
 def _record_version(conn, version_id: int, model: str, dim: int) -> None:
@@ -174,9 +251,9 @@ async def sync_vectors_for_docs(
     *,
     version_id: int | None = None,
 ) -> None:
-    """Sync the scrape delta, then verify the version by count and repair drift.
+    """Sync the scrape delta, then verify the version by set and repair drift.
 
-    Crash leftovers surface as count mismatches and are repaired here or at the
+    Crash leftovers surface as set mismatches and are repaired here or at the
     next run of the same version; vector failures are recorded, never fatal.
     """
     if vec_store is None or embed is None:
@@ -253,20 +330,30 @@ async def sync_vectors_for_docs(
 async def _verify_version(
     conn, settings, vec_store, embed, counts, version_id: int
 ) -> None:
-    """Lightweight count check after sync; mismatch falls through to set-difference repair."""
+    """Verify by count then id set; mismatch falls through to set-difference repair."""
     try:
-        want = sqlite_embeddable_count(conn, version_id)
-        have = int(vec_store.count(version_id))
+        want_count = sqlite_embeddable_count(conn, version_id)
+        have_count = int(vec_store.count(version_id))
     except Exception as exc:  # noqa: BLE001 — verification failure counts, repair is skipped
         counts["vector_failed"] = counts.get("vector_failed", 0) + 1
         logger.warning("vector verify failed: %s", exc)
         return
-    if want == have:
-        return
+    if want_count == have_count:
+        try:
+            want_ids = set(embeddable_doc_ids(conn, version_id))
+            have_ids = {int(i) for i in vec_store.list_ids(version_id)}
+        except Exception as exc:  # noqa: BLE001 — verification failure counts, repair is skipped
+            counts["vector_failed"] = counts.get("vector_failed", 0) + 1
+            logger.warning("vector verify failed: %s", exc)
+            return
+        if want_ids == have_ids:
+            return
     try:
         stats = await reconcile_version(conn, settings, vec_store, embed, version_id)
     except Exception as exc:  # noqa: BLE001 — vector failures are recorded, not fatal
-        counts["vector_failed"] = counts.get("vector_failed", 0) + abs(want - have)
+        counts["vector_failed"] = counts.get("vector_failed", 0) + abs(
+            want_count - have_count
+        )
         logger.warning("vector reconcile failed: %s", exc)
         return
     counts["vector_reconciled"] = (

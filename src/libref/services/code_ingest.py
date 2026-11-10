@@ -396,6 +396,43 @@ async def index_repo_async(
     vec_store=None,
     embed=None,
 ) -> dict[str, int]:
+    """Lock one version across doc and code writers, then run the ingest."""
+    from libref.services.version_lock import version_lock
+
+    async with version_lock(conn, ecosystem, library, version):
+        return await _index_repo_inner(
+            conn,
+            library,
+            version,
+            source,
+            update=update,
+            repos_dir=repos_dir,
+            ecosystem=ecosystem,
+            resolved_from=resolved_from,
+            registry_confirmed=registry_confirmed,
+            repos_quota_mb=repos_quota_mb,
+            settings=settings,
+            vec_store=vec_store,
+            embed=embed,
+        )
+
+
+async def _index_repo_inner(
+    conn,
+    library: str,
+    version: str,
+    source: str | None = None,
+    *,
+    update: bool = False,
+    repos_dir: Path,
+    ecosystem: str = "custom",
+    resolved_from: str | None = None,
+    registry_confirmed: bool = True,
+    repos_quota_mb: int | None = None,
+    settings=None,
+    vec_store=None,
+    embed=None,
+) -> dict[str, int]:
     from libref.astminer import cache as ast_cache
     from libref.astminer import config as ast_config
     from libref.astminer import resolution as ast_resolution
