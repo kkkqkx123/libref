@@ -52,6 +52,8 @@ class VectorStore(Protocol):
 
     def count(self, version_id: int) -> int: ...
 
+    def list_ids(self, version_id: int, *, batch: int = 512) -> list[int]: ...
+
 
 def _read_vec_meta(conn: sqlite3.Connection) -> tuple[str | None, int | None]:
     rows = dict(
@@ -73,15 +75,38 @@ def _write_vec_meta(conn: sqlite3.Connection, model: str, dim: int) -> None:
     conn.commit()
 
 
-def _needs_rebuild(
-    old_model: str | None,
-    old_dim: int | None,
-    cur_dim: int | None,
-    model: str,
-    dim: int,
-) -> bool:
-    """Whether stored metadata or live collection shape diverges from the desired model."""
-    return cur_dim != dim or old_dim != dim or old_model != model
+def _needs_recreate(cur_dim: int | None, dim: int) -> bool:
+    """Whether the live collection shape forces a rebuild; model-name drift alone never does."""
+    return cur_dim is None or cur_dim != dim
+
+
+def read_version_meta(
+    conn: sqlite3.Connection, version_id: int
+) -> tuple[str | None, int | None]:
+    """Per-version embedding record; absent means the version was never embedded under the current scheme."""
+    try:
+        row = conn.execute(
+            "SELECT model, dim FROM vec_version_meta WHERE version_id=?",
+            (version_id,),
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None, None
+    if row is None:
+        return None, None
+    return row[0], int(row[1])
+
+
+def write_version_meta(
+    conn: sqlite3.Connection, version_id: int, model: str, dim: int
+) -> None:
+    """Record a version's embedded model; committed with the caller's transaction scope."""
+    conn.execute(
+        "INSERT INTO vec_version_meta(version_id, model, dim) VALUES(?, ?, ?)"
+        " ON CONFLICT(version_id) DO UPDATE SET model=excluded.model,"
+        " dim=excluded.dim, updated_at=datetime('now')",
+        (version_id, model, dim),
+    )
+    conn.commit()
 
 
 def paired_vector(
@@ -136,16 +161,16 @@ class QdrantVecStore(VectorStore):
         """Create or verify the collection and register model metadata.
 
         When the collection does not exist, create it with the given dimension plus
-        filter indexes. If the model name, dimension or records mismatch, or the
-        collection shape is unrecognizable, delete and recreate it and update the
-        records. When records match, this is an idempotent no-op.
+        filter indexes. A dimension mismatch or an unreadable shape deletes and
+        recreates it; a model-name change alone never wipes other versions and is
+        repaired per version by the maintenance layer. When records match, this is
+        an idempotent no-op.
         """
         from qdrant_client import models
 
-        old_model, old_dim = _read_vec_meta(conn)
         if self.client.collection_exists(self.collection):
             cur_dim = self._collection_dim()
-            if _needs_rebuild(old_model, old_dim, cur_dim, model, dim):
+            if _needs_recreate(cur_dim, dim):
                 self.client.delete_collection(self.collection)
         if not self.client.collection_exists(self.collection):
             self.client.create_collection(
@@ -248,12 +273,29 @@ class QdrantVecStore(VectorStore):
         return [(p.id, p.score) for p in res.points]
 
     def count(self, version_id: int) -> int:
-        """Number of vector points in a version, for reconciliation against the documents table count."""
+        """Number of vector points in a version, for reconciliation against the embeddable subset."""
         return self.client.count(
             collection_name=self.collection,
             count_filter=self._version_filter(version_id),
             exact=True,
         ).count
+
+    def list_ids(self, version_id: int, *, batch: int = 512) -> list[int]:
+        """All vector point ids of a version, paged scroll for set-difference repair."""
+        found: list[int] = []
+        offset = None
+        while True:
+            records, offset = self.client.scroll(
+                collection_name=self.collection,
+                scroll_filter=self._version_filter(version_id),
+                limit=max(1, int(batch)),
+                offset=offset,
+                with_payload=False,
+                with_vectors=False,
+            )
+            found.extend(int(r.id) for r in records)
+            if offset is None:
+                return found
 
     @staticmethod
     def _version_filter(version_id: int):
@@ -388,13 +430,12 @@ class SimvecVecStore(VectorStore):
         if not self._engine.collection_exists(self.collection):
             self._create_collection(dim)
         else:
-            old_model, old_dim = _read_vec_meta(conn)
             try:
                 cur = self._engine.collection_config(self.collection)
                 cur_dim = cur.get("vector_size")
             except Exception:  # noqa: BLE001 — unreadable shape counts as mismatch, rebuilt below
                 cur_dim = None
-            if _needs_rebuild(old_model, old_dim, cur_dim, model, dim):
+            if _needs_recreate(cur_dim, dim):
                 self._engine.delete_collection(self.collection)
                 self._create_collection(dim)
         _write_vec_meta(conn, model, dim)
@@ -461,9 +502,28 @@ class SimvecVecStore(VectorStore):
         return [(_doc_id_from_simvec(h["id"]), float(h["score"])) for h in hits]
 
     def count(self, version_id: int) -> int:
-        """Number of vector points in a version, for reconciliation against the documents table count."""
+        """Number of vector points in a version, for reconciliation against the embeddable subset."""
         return int(
             self._engine.count_by_filter(
                 self.collection, _simvec_version_filter(version_id)
             )
         )
+
+    def list_ids(self, version_id: int, *, batch: int = 512) -> list[int]:
+        """All vector point ids of a version, paged scroll for set-difference repair."""
+        found: list[int] = []
+        offset = None
+        while True:
+            page = self._engine.scroll_by_filter(
+                self.collection,
+                _simvec_version_filter(version_id),
+                max(1, int(batch)),
+                offset,
+                with_payload=False,
+                with_vector=False,
+            )
+            for point in page.get("points", []):
+                found.append(_doc_id_from_simvec(point["id"]))
+            offset = page.get("next_offset")
+            if not offset:
+                return found

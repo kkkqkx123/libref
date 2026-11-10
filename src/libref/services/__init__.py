@@ -33,7 +33,13 @@ from libref.services.ingest import (
 )
 from libref.services.jobs import JobManager
 from libref.services.libraries import LibraryService, mining_version_ids
-from libref.services.maintenance import MaintenanceService
+from libref.services.maintenance import (
+    MaintenanceService,
+    embeddable_doc_ids,
+    reconcile_version,
+    sqlite_embeddable_count,
+    sync_vectors_for_docs,
+)
 from libref.services.mining_read import MiningReadService, is_subsequence
 from libref.services.mining_refresh import (
     MINE_PATTERNS_JOB_KIND,
@@ -83,6 +89,7 @@ __all__ = [
     "build_search_service",
     "call_uid",
     "check_quota",
+    "embeddable_doc_ids",
     "entity_uid",
     "index_repo",
     "index_repo_by_name",
@@ -97,12 +104,15 @@ __all__ = [
     "mining_version_ids",
     "prune_expired_logs",
     "purge_version",
+    "reconcile_version",
     "refresh_clusters",
     "refresh_feature_tree",
     "resolve_package",
     "resolve_repo",
     "run_scrape_job_sync",
     "scrape_job_params",
+    "sqlite_embeddable_count",
     "start_refresh_job",
     "start_scrape_job",
+    "sync_vectors_for_docs",
 ]

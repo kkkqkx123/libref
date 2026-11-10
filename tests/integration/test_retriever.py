@@ -71,6 +71,34 @@ def test_rrf_missing_road_contributes_zero(conn, tmp_path, monkeypatch) -> None:
     assert r._rrf([1, 2], [2, 3]) == [2, 1, 3]
 
 
+def test_multi_version_fanout_capped(conn, tmp_path, monkeypatch) -> None:
+    class _VersionVec:
+        def __init__(self) -> None:
+            self.seen: list[int] = []
+
+        def search(self, query_vec, *, k: int, version_id: int):
+            self.seen.append(version_id)
+            return []
+
+    conn.execute("INSERT INTO libraries(name) VALUES('docs')")
+    for i in range(1, 5):
+        conn.execute(
+            "INSERT INTO versions(id, library_id, version) VALUES(?, 1, ?)",
+            (i, f"{i}.0"),
+        )
+    conn.commit()
+    monkeypatch.chdir(tmp_path)
+    s = LibrefSettings(retrieval_max_versions=2)
+    vec = _VersionVec()
+    _, degraded = asyncio.run(
+        HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
+            "quetzalcap", limit=2
+        )
+    )
+    assert degraded is True
+    assert vec.seen == [1, 2]
+
+
 def test_hybrid_marks_sources_and_fused_score_sorted(
     conn, tmp_path, monkeypatch
 ) -> None:

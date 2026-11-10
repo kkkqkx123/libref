@@ -15,6 +15,7 @@ from libref.db.schema import (
     MINING_REVIEW_SCHEMA_SQL,
     PAGES_CONTENT_HASH_SQL,
     REPOS_ASTCACHE_SQL,
+    VEC_VERSION_META_SQL,
     VECTOR_META_SQL,
 )
 
@@ -36,6 +37,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(6, "mining-provenance-index", MINING_PROVENANCE_INDEX_SQL),
     Migration(7, "feature-tree-cluster", FEATURE_TREE_CLUSTER_SQL),
     Migration(8, "governance-tables", GOVERNANCE_SQL),
+    Migration(9, "vec-version-meta", VEC_VERSION_META_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

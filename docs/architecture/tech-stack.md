@@ -16,7 +16,7 @@
 | 分块 | 自研两阶段分块（结构感知切分 + 贪心合并 + 代码围栏平衡） | docs-mcp-server 的 SemanticMarkdownSplitter / GreedySplitter 模式，纯逻辑无依赖。 |
 | 序列挖掘 | **自研 PrefixSpan**（约 300 行，归一化整数索引输入），以 `ref/PrefixSpan-py` 为复刻蓝本（见 docs/ref/prefixspan.md） | PrefixSpan-py 为纯 Python、无重依赖的成熟极简实现，可直接复刻并定制（加权支持度、流式落库、closed 去冗余）；不引入 pyfim（2020 年停更、wheel 仅到 cp37 且无 abi3，非硬性依赖）。APP-Miner 仅借鉴其支持度阈值与 maximal 剪枝思路。 |
 | 频次统计 | 自研（借鉴 EpiCoder `extract_frequency_count.py` 层级聚合 + top-N 剪枝、"结构树/频次表"分离存储） | EpiCoder 该部分为纯静态代码，可直接改写复用；其特征抽取靠 LLM，必须替换为 tree-sitter 静态抽取。 |
-| Embedding | **主后端 SiliconFlow 免费 `BAAI/bge-m3`**（OpenAI 兼容 `/v1/embeddings`，1024 维；2026-11 用户决策，暂定策略），接口抽象预留多后端（本地 llama-server 等同协议端点可切换，`tools/hurl/` 已有示范） | 免本地权重分发，密钥经 `.env` 注入不入库；记录模型名+维度，变更时整体失效向量（借鉴 docs-mcp-server 的 metadata 校验机制）。 |
+| Embedding | **主后端 SiliconFlow 免费 `BAAI/bge-m3`**（OpenAI 兼容 `/v1/embeddings`，1024 维；2026-11 用户决策，暂定策略），接口抽象预留多后端（本地 llama-server 等同协议端点可切换，`tools/hurl/` 已有示范） | 免本地权重分发，密钥经 `.env` 注入不入库；集合维度与模型记在 `schema_meta`，维度变化才重建集合，模型名变化按版本懒重嵌（`vec_version_meta`，见 docs/plan/vec-sync-hardening.md）。 |
 | MCP 出口 | **官方 `mcp` Python SDK**（FastMCP），stdio + Streamable HTTP 传输，令牌鉴权 | init-req 指定 MCP 官方 servers 为协议参考；Python SDK 的 FastMCP 覆盖 tools/resources 两类能力，与 docs-mcp-server 工具面（search_docs / read_page / list_libraries…）一一对应。 |
 | Web 出口 | **FastAPI + uvicorn**，前端 **Vue 3 + Vite + Element Plus**（§7 决策点 1 已定） | docs-mcp-server 的三出口架构中 Web 层仅是服务层调用方；Python 侧 FastAPI 生态与 MCP SDK 的 HTTP transport 均基于 ASGI，可同进程部署。 |
 | 数据校验 | **pydantic v2**（贯穿：抽取结果 schema、MCP 工具参数、API 模型） | graphify 的 validate.py 与 MCP SDK 的参数校验均需要统一 schema 层。 |

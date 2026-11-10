@@ -225,6 +225,16 @@ ALTER TABLE call_instances ADD COLUMN start_byte INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE call_instances ADD COLUMN end_byte INTEGER NOT NULL DEFAULT 0;
 """
 
+# ── Per-version vector embedding records: model drift is repaired per version, collection rebuild only on dimension change ──
+VEC_VERSION_META_SQL = """
+CREATE TABLE vec_version_meta(
+  version_id INTEGER PRIMARY KEY REFERENCES versions(id) ON DELETE CASCADE,
+  model TEXT NOT NULL,
+  dim INTEGER NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
 # ── Operations governance tables: jobs, cache, audit trail, version mutex; all created idempotently ──
 GOVERNANCE_SQL = """
 CREATE TABLE IF NOT EXISTS jobs(

@@ -6,6 +6,7 @@ weighting lives in libref.mining.scoring.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from typing import Any
@@ -276,37 +277,62 @@ class HybridRetriever:
         )
         vec_ids: list[int] = []
         vids = _version_ids(self._conn, library, version, ecosystem)
+        max_versions = int(setting_or_default(self._settings, "retrieval_max_versions"))
         if self._vec is not None and self._embed is not None and vids:
             try:
                 [query_vec] = await self._embed([query])
-                if len(vids) == 1:
-                    vec_ids = [
-                        doc_id
-                        for doc_id, _ in self._vec.search(
-                            query_vec, k=need, version_id=vids[0]
-                        )
-                    ]
-                else:
-                    pooled: list[tuple[float, int]] = []
-                    for vid in vids:
-                        for doc_id, score in self._vec.search(
-                            query_vec, k=need, version_id=vid
-                        ):
-                            pooled.append((float(score), int(doc_id)))
-                    pooled.sort(key=lambda kv: (kv[0], kv[1]), reverse=True)
-                    seen_ids: set[int] = set()
-                    merged: list[int] = []
-                    for _, doc_id in pooled:
-                        if doc_id in seen_ids:
-                            continue
-                        seen_ids.add(doc_id)
-                        merged.append(doc_id)
-                        if len(merged) >= need:
-                            break
-                    vec_ids = merged
             except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
                 degraded = True
-                vec_ids = []
+                query_vec = []
+            if query_vec is not None and len(query_vec):
+                if len(vids) == 1:
+                    try:
+                        vec_ids = [
+                            doc_id
+                            for doc_id, _ in self._vec.search(
+                                query_vec, k=need, version_id=vids[0]
+                            )
+                        ]
+                    except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
+                        degraded = True
+                        vec_ids = []
+                else:
+                    scoped = vids
+                    if len(scoped) > max_versions:
+                        scoped = scoped[:max_versions]
+                        degraded = True
+                    try:
+                        grouped = await asyncio.gather(
+                            *(
+                                asyncio.to_thread(
+                                    self._vec.search,
+                                    query_vec,
+                                    k=need,
+                                    version_id=vid,
+                                )
+                                for vid in scoped
+                            )
+                        )
+                    except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
+                        degraded = True
+                        vec_ids = []
+                    else:
+                        pooled: list[tuple[float, int]] = [
+                            (float(score), int(doc_id))
+                            for hits in grouped
+                            for doc_id, score in hits
+                        ]
+                        pooled.sort(key=lambda kv: (kv[0], kv[1]), reverse=True)
+                        seen_ids: set[int] = set()
+                        merged: list[int] = []
+                        for _, doc_id in pooled:
+                            if doc_id in seen_ids:
+                                continue
+                            seen_ids.add(doc_id)
+                            merged.append(doc_id)
+                            if len(merged) >= need:
+                                break
+                        vec_ids = merged
         fused = self._rrf(fts_ids, vec_ids)
         fused = _collapse_by_group(self._conn, fused)
         if not fused:

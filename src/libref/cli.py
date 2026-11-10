@@ -835,6 +835,37 @@ def cmd_reembed(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reconcile(args: argparse.Namespace) -> int:
+    import asyncio as _asyncio
+
+    from libref.services.libraries import mining_version_ids
+    from libref.services.maintenance import reconcile_version
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        vec_store, embed = _build_vector(settings)
+        if vec_store is None or embed is None:
+            print("embedding is not configured (missing key)", file=sys.stderr)
+            return 1
+        vids = mining_version_ids(conn, args.library, args.version, args.ecosystem)
+        if len(vids) != 1:
+            print(
+                "invalid: library version must resolve to a single version",
+                file=sys.stderr,
+            )
+            return 1
+        out = _asyncio.run(reconcile_version(conn, settings, vec_store, embed, vids[0]))
+    finally:
+        conn.close()
+    print(
+        f"sqlite: {out['sqlite_embeddable']} vector_before: {out['vector_before']} "
+        f"missing: {out['missing']} orphans: {out['orphans']} "
+        f"upserted: {out['upserted']} rebuilt: {out['rebuilt']}"
+    )
+    return 0
+
+
 def cmd_review(args: argparse.Namespace) -> int:
     conn = _connect(_load_settings(args))
     try:
@@ -1415,6 +1446,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_reembed.add_argument("version")
     p_reembed.add_argument("--ecosystem", default=None)
     p_reembed.set_defaults(func=cmd_reembed)
+
+    p_reconcile = sub.add_parser(
+        "reconcile",
+        help="Repair a version's vectors from the source of truth by set difference",
+        parents=[_config_parent],
+    )
+    p_reconcile.add_argument("library")
+    p_reconcile.add_argument("version")
+    p_reconcile.add_argument("--ecosystem", default=None)
+    p_reconcile.set_defaults(func=cmd_reconcile)
 
     p_review = sub.add_parser(
         "review", help="Review pending call instances", parents=[_config_parent]

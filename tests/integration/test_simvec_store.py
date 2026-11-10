@@ -116,16 +116,12 @@ def test_delete_docs_and_version(store: SimvecVecStore, conn) -> None:
 @pytest.mark.integration
 @pytest.mark.requires_simvec
 @needs_lib
-def test_model_or_dim_change_invalidates(store: SimvecVecStore, conn) -> None:
+def test_dim_change_invalidates(store: SimvecVecStore, conn) -> None:
     store.ensure_collection(conn, "m1", 4)
     store.upsert_batch([(1, 1, 10, [1.0, 0.0, 0.0, 0.0])])
     assert store.count(10) == 1
 
-    store.ensure_collection(conn, "m2", 4)  # model change → invalidation rebuild
-    assert store.count(10) == 0
-    assert _meta(conn, "vec_model") == "m2"
-
-    store.ensure_collection(conn, "m2", 8)  # dim change → rebuild, new dim writable
+    store.ensure_collection(conn, "m1", 8)  # dim change → rebuild, new dim writable
     store.upsert_batch([(1, 1, 10, [1.0] * 8)])
     assert len(store.search([1.0] * 8, k=1, version_id=10)) == 1
     assert _meta(conn, "vec_dim") == "8"
@@ -134,8 +130,47 @@ def test_model_or_dim_change_invalidates(store: SimvecVecStore, conn) -> None:
 @pytest.mark.integration
 @pytest.mark.requires_simvec
 @needs_lib
+def test_model_only_change_keeps_collection(store: SimvecVecStore, conn) -> None:
+    """Model-name drift never wipes other versions; per-version repair owns it."""
+    store.ensure_collection(conn, "m1", 4)
+    store.upsert_batch(
+        [
+            (1, 1, 10, [1.0, 0.0, 0.0, 0.0]),
+            (2, 1, 20, [0.0, 1.0, 0.0, 0.0]),
+        ]
+    )
+    store.ensure_collection(conn, "m2", 4)
+    assert store.count(10) == 1
+    assert store.count(20) == 1
+    assert _meta(conn, "vec_model") == "m2"
+
+
+@pytest.mark.integration
+@pytest.mark.requires_simvec
+@needs_lib
+def test_list_ids_roundtrip(store: SimvecVecStore, conn) -> None:
+    store.ensure_collection(conn, "m", 4)
+    store.upsert_batch(
+        [
+            (1, 1, 10, [1.0, 0.0, 0.0, 0.0]),
+            (2, 1, 10, [0.0, 1.0, 0.0, 0.0]),
+            (3, 1, 20, [0.0, 0.0, 1.0, 0.0]),
+        ]
+    )
+    assert store.list_ids(10) == [1, 2]
+    assert store.list_ids(20) == [3]
+    assert store.list_ids(99) == []
+
+
+@pytest.mark.integration
+@pytest.mark.requires_simvec
+@needs_lib
 def test_reconcile_count_consistency(store: SimvecVecStore, conn) -> None:
-    """Reconciliation semantics: count(version) should equal the SQLite documents count."""
+    """Reconciliation baseline is the embeddable subset; bm25 chunks stay FTS-only."""
+    import json as _json
+
+    from libref.services.maintenance import sqlite_embeddable_count
+
     conn.execute("INSERT INTO libraries(name) VALUES('l')")
     conn.execute("INSERT INTO versions(library_id, version) VALUES(1, '1.0')")
     conn.execute("INSERT INTO pages(version_id, url) VALUES(1, 'https://e.com/1')")
@@ -144,14 +179,20 @@ def test_reconcile_count_consistency(store: SimvecVecStore, conn) -> None:
         " metadata, sort_order) VALUES(1, 1, 1, ?, 'doc', NULL, ?)",
         [(f"https://e.com/{i}", i) for i in range(5)],
     )
+    conn.execute(
+        "INSERT INTO documents(library_id, version_id, page_id, url, content,"
+        " metadata, sort_order) VALUES(1, 1, 1, 'https://e.com/bm25', 'doc', ?, 5)",
+        (_json.dumps({"chunk_path": "bm25"}),),
+    )
     conn.commit()
     store.ensure_collection(conn, "m", 4)
     store.upsert_batch([(i, 1, 1, [1.0, 0.0, 0.0, 0.0]) for i in range(1, 6)])
-    sql_count = conn.execute(
-        "SELECT count(*) FROM documents WHERE version_id=1"
-    ).fetchone()[0]
-    assert sql_count == 5
-    assert store.count(1) == sql_count
+    assert (
+        conn.execute("SELECT count(*) FROM documents WHERE version_id=1").fetchone()[0]
+        == 6
+    )
+    assert sqlite_embeddable_count(conn, 1) == 5
+    assert store.count(1) == sqlite_embeddable_count(conn, 1)
 
 
 @pytest.mark.integration

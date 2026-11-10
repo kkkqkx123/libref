@@ -759,7 +759,9 @@ class IngestService:
                     )
                 )
                 vectors_start = _time.monotonic()
-                await self._sync_vectors(store, counts, removed_all, inserted_all)
+                await self._sync_vectors(
+                    store, counts, removed_all, inserted_all, version_id=version_id
+                )
                 counts["vectors_ms"] = int((_time.monotonic() - vectors_start) * 1000)
                 _beat()
             import time as _time2
@@ -795,6 +797,8 @@ class IngestService:
         counts: dict[str, int],
         removed: list[int],
         inserted: list[int],
+        *,
+        version_id: int | None = None,
     ) -> None:
         from libref.services.maintenance import sync_vectors_for_docs
 
@@ -807,6 +811,7 @@ class IngestService:
             counts,
             removed,
             inserted,
+            version_id=version_id,
         )
 
     def _sweep_absent(

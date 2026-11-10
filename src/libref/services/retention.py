@@ -139,20 +139,6 @@ def purge_version(
         "SELECT id FROM documents WHERE version_id=?", (version_id,)
     ).fetchall()
     removed_docs = len(doc_rows)
-    removed_doc_ids = [int(r[0]) for r in doc_rows]
-    if vec_store is not None:
-        try:
-            vec_store.delete_docs(removed_doc_ids)
-        except Exception as exc:  # noqa: BLE001 — whole-version purge proceeds with source-of-truth deletion; warn only
-            logger.warning(
-                "purge vector docs failed for version %d: %s", version_id, exc
-            )
-        try:
-            vec_store.delete_version(version_id)
-        except Exception as exc:  # noqa: BLE001 — same as above
-            logger.warning(
-                "purge vector version failed for version %d: %s", version_id, exc
-            )
     conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM api_clusters WHERE version_id=?", (version_id,))
@@ -193,6 +179,13 @@ def purge_version(
             except Exception:  # noqa: BLE001 — repo dir removal failure must not abort the purge
                 repos_removed = 0
     conn.commit()
+    if vec_store is not None:
+        try:
+            vec_store.delete_version(version_id)
+        except Exception as exc:  # noqa: BLE001 — truth deletion already committed; leftovers are cleared by reconciliation
+            logger.warning(
+                "purge vector version failed for version %d: %s", version_id, exc
+            )
     logger.info(
         "purge done %s:%s %s removed_docs=%d snapshots=%d repos=%d",
         eco,

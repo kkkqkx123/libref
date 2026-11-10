@@ -74,6 +74,7 @@ class LibrefSettings(BaseSettings):
     candidate_multiplier: int = Field(default=3, ge=1)
     assemble_multiplier: int = Field(default=2, ge=1)
     assemble_min: int = Field(default=10, ge=1)
+    retrieval_max_versions: int = Field(default=8, ge=1)
     snippet_radius: int = Field(default=60, ge=0)
     snippet_cap: int = Field(default=400, ge=1)
     window_preview_cap: int = Field(default=300, ge=1)
@@ -261,6 +262,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "candidate_multiplier",
             "assemble_multiplier",
             "assemble_min",
+            "retrieval_max_versions",
             "snippet_radius",
             "snippet_cap",
             "window_preview_cap",

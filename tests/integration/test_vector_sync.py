@@ -53,15 +53,39 @@ class _FakeVec:
         self.ensured: list[tuple] = []
         self.deleted: list[int] = []
         self.upserted: list[tuple] = []
+        self.delete_version_calls: list[int] = []
+        self.points: dict[int, tuple] = {}
 
     def ensure_collection(self, conn, model: str, dim: int) -> None:
         self.ensured.append((model, dim))
 
     def delete_docs(self, doc_ids: list[int]) -> None:
         self.deleted.extend(doc_ids)
+        for doc_id in doc_ids:
+            self.points.pop(int(doc_id), None)
+
+    def delete_version(self, version_id: int) -> None:
+        self.delete_version_calls.append(int(version_id))
+        for pid in [pid for pid, pt in self.points.items() if pt[2] == int(version_id)]:
+            del self.points[pid]
 
     def upsert_batch(self, points, *, wait: bool = True) -> None:
         self.upserted.extend(points)
+        for doc_id, library_id, version_id, embedding in points:
+            self.points[int(doc_id)] = (
+                int(doc_id),
+                library_id,
+                version_id,
+                embedding,
+            )
+
+    def count(self, version_id: int) -> int:
+        return sum(1 for pt in self.points.values() if pt[2] == int(version_id))
+
+    def list_ids(self, version_id: int, *, batch: int = 512) -> list[int]:
+        return sorted(
+            pid for pid, pt in self.points.items() if pt[2] == int(version_id)
+        )
 
 
 async def _fake_embed(texts: list[str]) -> list[list[float]]:
@@ -200,6 +224,137 @@ def test_search_results_carry_row_id(conn):
     hits = SearchService(conn).search_docs("quetzalid")
     assert len(hits) == 1
     assert hits[0]["id"] == result.inserted_ids[0]
+
+
+def test_reconcile_repairs_orphans_and_missing(conn):
+    import asyncio
+
+    from libref.services.maintenance import (
+        embeddable_doc_ids,
+        reconcile_version,
+        sqlite_embeddable_count,
+    )
+    from libref.store.vec_store import write_version_meta
+
+    _seed_lv(conn)
+    store = DocumentStore(conn)
+    kept = store.store_page(
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/a.html",
+                path="G",
+                title="G",
+                content="quetzalrepair alpha",
+                sort_order=0,
+            )
+        ],
+        raw_content="a",
+    )
+    other = store.store_page(
+        1,
+        1,
+        "https://d.example/b.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/b.html",
+                path="G",
+                title="G",
+                content="quetzalrepair beta",
+                sort_order=0,
+                chunk_path="bm25",
+            )
+        ],
+        raw_content="b",
+    )
+    settings = _settings()
+    write_version_meta(conn, 1, settings.embedding_model, settings.embedding_dim)
+    vec = _FakeVec()
+    only_id = kept.inserted_ids[0]
+    vec.points[only_id] = (only_id, 1, 1, [1.0, 0.0])
+    vec.points[9999] = (9999, 1, 1, [1.0, 0.0])
+    assert sqlite_embeddable_count(conn, 1) == 1
+    assert embeddable_doc_ids(conn, 1) == [only_id]
+    stats = asyncio.run(reconcile_version(conn, settings, vec, _fake_embed, 1))
+    assert stats["missing"] == 0
+    assert stats["orphans"] == 1
+    assert stats["rebuilt"] == 0
+    assert vec.list_ids(1) == [only_id]
+    assert other.inserted_ids[0] not in vec.list_ids(1)
+
+
+def test_model_only_drift_rebuilds_single_version(conn):
+    import asyncio
+
+    from libref.services.maintenance import reconcile_version
+
+    _seed_lv(conn)
+    conn.execute("INSERT INTO versions(id, library_id, version) VALUES(2, 1, '2.0')")
+    conn.commit()
+    store = DocumentStore(conn)
+    for version_id, url in (
+        (1, "https://d.example/a.html"),
+        (2, "https://d.example/b.html"),
+    ):
+        store.store_page(
+            version_id,
+            1,
+            url,
+            "stored",
+            chunks=[Chunk(url=url, path="G", title="G", content="body", sort_order=0)],
+            raw_content=url,
+        )
+    settings = _settings()
+    vec = _FakeVec()
+    asyncio.run(reconcile_version(conn, settings, vec, _fake_embed, 1))
+    asyncio.run(reconcile_version(conn, settings, vec, _fake_embed, 2))
+    before_other = list(vec.list_ids(2))
+    assert before_other
+    settings = LibrefSettings(
+        request_timeout=5.0,
+        fetch_concurrency=2,
+        crawl_delay_default=0.0,
+        robots_cache_ttl_days=1.0,
+        embedding_model="other-model",
+    )
+    stats = asyncio.run(reconcile_version(conn, settings, vec, _fake_embed, 1))
+    assert stats["rebuilt"] == 1
+    assert vec.delete_version_calls[-1] == 1
+    assert vec.list_ids(2) == before_other
+
+
+def test_purge_clears_vectors_after_truth_commit(conn):
+    from libref.services.retention import purge_version
+
+    _seed_lv(conn)
+    store = DocumentStore(conn)
+    store.store_page(
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/a.html",
+                path="G",
+                title="G",
+                content="quetzalpurge body",
+                sort_order=0,
+            )
+        ],
+        raw_content="a",
+    )
+    vec = _FakeVec()
+    vec.points[1] = (1, 1, 1, [1.0, 0.0])
+    out = purge_version(conn, "docs", "1.0", vec_store=vec)
+    assert out["removed_docs"] == 1
+    assert vec.delete_version_calls == [1]
+    assert vec.deleted == []
+    assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 0
 
 
 def test_title_match_outranks_content_only(conn):

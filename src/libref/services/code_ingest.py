@@ -484,6 +484,7 @@ async def index_repo_async(
             counts,
             removed_ids,
             inserted_ids,
+            version_id=version_id,
         )
     return counts
 
