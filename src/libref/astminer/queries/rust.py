@@ -76,6 +76,10 @@ def entity_query() -> str:
 (impl_item
   type: (_) @entity.impl.type.name
   body: (declaration_list)? @entity.impl.body) @entity.impl
+
+(macro_definition
+  name: (identifier) @entity.macro.name @entity.macro.signature.name
+  (macro_rule) @entity.macro.body) @entity.macro
 """
 
 
@@ -105,6 +109,23 @@ def call_query() -> str:
 
 (macro_invocation
   macro: (identifier) @call.function.name) @call.macro
+
+(macro_invocation
+  macro: (scoped_identifier
+    path: (_) @call.method.object
+    name: (identifier) @call.method.function)) @call.method
+
+(call_expression
+  function: (generic_function
+    function: (identifier) @call.function.name)
+  arguments: (arguments)? @call.function.arguments) @call.function
+
+(call_expression
+  function: (generic_function
+    function: (field_expression
+      value: (_) @call.method.object
+      field: (field_identifier) @call.method.function))
+  arguments: (arguments)? @call.method.arguments) @call.method
 """
 
 

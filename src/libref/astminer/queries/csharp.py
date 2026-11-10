@@ -70,10 +70,10 @@ def entity_query() -> str:
   body: (declaration_list) @entity.package.body) @entity.package
 
 (file_scoped_namespace_declaration
-  name: (identifier) @entity.package.name @entity.package.signature.name) @entity.package
+  name: (identifier) @entity.package.name @entity.package.signature.name) @entity.package @entity.package.file_scoped
 
 (file_scoped_namespace_declaration
-  name: (qualified_name) @entity.package.name @entity.package.signature.name) @entity.package
+  name: (qualified_name) @entity.package.name @entity.package.signature.name) @entity.package @entity.package.file_scoped
 
 (delegate_declaration
   name: (identifier) @entity.function.name @entity.function.signature.name) @entity.function
@@ -152,6 +152,21 @@ def call_query() -> str:
 
 (object_creation_expression
   type: (qualified_name) @call.constructor.name) @call.constructor
+
+(invocation_expression
+  function: (generic_name) @call.function.name
+  arguments: (argument_list) @call.function.arguments) @call.function
+
+(invocation_expression
+  function: (member_access_expression
+    expression: (_) @call.method.object
+    name: (generic_name) @call.method.function)
+  arguments: (argument_list) @call.method.arguments) @call.method
+
+(invocation_expression
+  function: (member_access_expression
+    name: (generic_name) @call.method.function)
+  arguments: (argument_list) @call.method.arguments) @call.method
 """
 
 

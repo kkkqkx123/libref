@@ -44,6 +44,21 @@ def call_uid(
     return hashlib.sha1(blob).hexdigest()
 
 
+def _read_go_module_prefix(root) -> str:
+    from pathlib import Path
+
+    try:
+        text = (Path(root) / "go.mod").read_text(encoding="utf-8")
+    except OSError:
+        return ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("module"):
+            rest = stripped[len("module") :].strip().strip("\"'")
+            return rest.split()[0] if rest else ""
+    return ""
+
+
 def _collect_repo(
     conn,
     repo_name: str,
@@ -62,7 +77,9 @@ def _collect_repo(
     from libref.astminer import cache as ast_cache
     from libref.astminer import config as ast_config
     from libref.astminer import engine as ast_engine
+    from libref.astminer import rules as ast_rules
 
+    go_prefix = _read_go_module_prefix(root).replace("/", ".")
     all_decls: list = []
     file_aliases: dict[str, list[tuple[str, str]]] = {}
     all_raw: list = []
@@ -82,12 +99,22 @@ def _collect_repo(
             counts["cached"] += 1
             decls, aliases, raw_calls = ast_cache.decode_records(hit[1], rel)
             all_decls.extend(decls)
+            if go_prefix and cfg.name == "go":
+                aliases = [
+                    (name, ast_rules.normalize_go_import(target, go_prefix))
+                    for name, target in aliases
+                ]
             file_aliases[rel] = aliases
             all_raw.extend(raw_calls)
             continue
         counts["parsed"] += 1
         decls, aliases, raw_calls = ast_engine.extract_file(rel, cfg, data)
         all_decls.extend(decls)
+        if go_prefix and cfg.name == "go":
+            aliases = [
+                (name, ast_rules.normalize_go_import(target, go_prefix))
+                for name, target in aliases
+            ]
         file_aliases[rel] = list(aliases)
         all_raw.extend(raw_calls)
         ast_cache.store(

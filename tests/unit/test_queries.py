@@ -255,3 +255,101 @@ def test_csharp_namespace_using_and_calls(monkeypatch, tmp_path):
     assert by_raw["cache.Get"].caller == "Store.Cache.Run"
     assert by_raw["IO.File.Delete"].caller == "Store.Cache.Run"
     assert by_raw["Cache"].caller == "Store.Cache.Run"
+
+
+def test_rust_macro_definition_and_call(monkeypatch, tmp_path):
+    cfg = ast_config.RUST_CONFIG
+    decls, _aliases, raw = ast_engine.extract_file(
+        "m.rs",
+        cfg,
+        b"macro_rules! myvec { ($($x:expr),*) => { vec![$($x),*] }; }\n"
+        b"fn f() { myvec![1, 2]; crate::m::other!(3); }\n",
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["m.myvec"].kind == "macro"
+    by_raw = {c.raw_callee: c for c in raw}
+    assert by_raw["myvec"].caller == "m.f"
+    assert by_raw["m.other"].caller == "m.f"
+
+
+def test_rust_generic_calls_strip_type_arguments(monkeypatch, tmp_path):
+    cfg = ast_config.RUST_CONFIG
+    _decls, _aliases, raw = ast_engine.extract_file(
+        "m.rs",
+        cfg,
+        b"fn f() { let a = foo::<i32>(1); obj.bar::<u8>(2); }\n",
+    )
+    by_raw = {c.raw_callee: c for c in raw}
+    assert by_raw["foo"].caller == "m.f"
+    assert by_raw["obj.bar"].caller == "m.f"
+
+
+def test_rust_use_path_keywords_resolve_against_module(monkeypatch, tmp_path):
+    cfg = ast_config.RUST_CONFIG
+    _decls, aliases, _raw = ast_engine.extract_file(
+        "a/b.rs",
+        cfg,
+        b"use super::sibling::Thing;\n"
+        b"use self::inner::Item;\n"
+        b"use crate::top::Top;\n"
+        b"use plain::P;\n",
+    )
+    assert ("Thing", "a.sibling.Thing") in aliases
+    assert ("Item", "a.b.inner.Item") in aliases
+    assert ("Top", "top.Top") in aliases
+    assert ("P", "plain.P") in aliases
+
+
+def test_csharp_generic_calls_use_base_name(monkeypatch, tmp_path):
+    cfg = ast_config.CSHARP_CONFIG
+    _decls, _aliases, raw = ast_engine.extract_file(
+        "m.cs",
+        cfg,
+        b"class A { void M() {\n"
+        b"    this.G<int>(1); Helper.H<string>(x); G2<int, string>(y);\n"
+        b"} }\n",
+    )
+    by_raw = {c.raw_callee: c for c in raw}
+    assert by_raw["G"].caller == "m.A.M"
+    assert by_raw["Helper.H"].caller == "m.A.M"
+    assert by_raw["G2"].caller == "m.A.M"
+
+
+def test_csharp_nested_and_file_scoped_namespaces(monkeypatch, tmp_path):
+    cfg = ast_config.CSHARP_CONFIG
+    decls, _aliases, _raw = ast_engine.extract_file(
+        "m.cs",
+        cfg,
+        b"namespace A { namespace B { class C { void M() {} } } }\n",
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["A.B.C"].kind == "class"
+    assert by_qual["A.B.C.M"].kind == "method"
+    assert "B" in by_qual["A.B"].bases or by_qual["A.B"].kind == "package"
+
+    decls, _aliases, _raw = ast_engine.extract_file(
+        "m.cs",
+        cfg,
+        b"namespace A.B;\nclass C { void M() { this.M(); } }\n",
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["A.B.C.M"].kind == "method"
+    assert by_qual["A.B"].kind == "package"
+
+
+def test_go_import_prefix_normalization(monkeypatch, tmp_path):
+    from libref.astminer import rules as ast_rules
+
+    assert (
+        ast_rules.normalize_go_import("example.com.demo.pkg", "example.com.demo")
+        == "pkg"
+    )
+    assert (
+        ast_rules.normalize_go_import("github.com.x.y", "example.com.demo")
+        == "github.com.x.y"
+    )
+    assert (
+        ast_rules.normalize_go_import("example.com.demo", "example.com.demo")
+        == "example.com.demo"
+    )
+    assert ast_rules.normalize_go_import("fmt", "") == "fmt"

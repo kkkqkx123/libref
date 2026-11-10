@@ -270,6 +270,9 @@ def _build_decls(
                 "name": name,
                 "captures": captures,
                 "owner": owner,
+                "file_scoped": any(
+                    capture == "entity.package.file_scoped" for capture in captures
+                ),
             }
         )
     cands.sort(key=lambda c: (c["node"].start_byte, -c["node"].end_byte))
@@ -300,7 +303,7 @@ def _build_decls(
         kind = cand["kind"]
         if kind == "function" and stack and stack[-1].kind in _CLASS_LIKE:
             kind = "method"
-        if kind == "package":
+        if kind == "package" and parent is None:
             qual = cand["name"]
         elif parent:
             qual = f"{parent}.{cand['name']}"
@@ -358,6 +361,7 @@ def _build_decls(
         )
         stack.append(decls[-1])
     _attach_bases_innermost(decls, decl_nodes, dep_spans)
+    _claim_file_scoped(decls, cands)
     _reparent_by_owner(decls, cands, impl_anchors, module)
     return decls
 
@@ -374,6 +378,34 @@ def _attach_bases_innermost(decls, decl_nodes, dep_spans) -> None:
                 best, best_size = decl, size
         if best is not None and text not in best.bases:
             best.bases.append(text)
+
+
+def _claim_file_scoped(decls: list[ApiDeclRecord], cands: list[dict]) -> None:
+    owners = [
+        decl
+        for decl, cand in zip(decls, cands)
+        if cand.get("file_scoped") and decl.parent is None
+    ]
+    if len(owners) != 1:
+        return
+    owner = owners[0]
+    renamed: dict[str, str] = {}
+    for decl in decls:
+        if decl is owner or decl.parent is not None:
+            continue
+        old = decl.qualified_name
+        short = old.rpartition(".")[2] or old
+        decl.parent = owner.qualified_name
+        decl.qualified_name = f"{owner.qualified_name}.{short}"
+        decl.depth = owner.depth + 1
+        renamed[old] = decl.qualified_name
+    for decl in decls:
+        if decl.parent in renamed:
+            decl.parent = renamed[decl.parent]
+            old = decl.qualified_name
+            short = old.rpartition(".")[2] or old
+            decl.qualified_name = f"{decl.parent}.{short}"
+            renamed[old] = decl.qualified_name
 
 
 def _reparent_by_owner(

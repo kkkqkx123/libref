@@ -33,6 +33,7 @@ CALLABLE_DECL_KINDS = frozenset(
         "struct",
         "union",
         "type",
+        "macro",
     }
 )
 
@@ -88,6 +89,7 @@ _ENTITY_KIND_BY_ROOT = {
     "entity.struct": "struct",
     "entity.union": "union",
     "entity.type": "type",
+    "entity.macro": "macro",
     "entity.annotation": "annotation",
     "entity.field": "field",
     "entity.variable": "variable",
@@ -176,6 +178,13 @@ def generic_dotted(node: Any, source: bytes) -> str:
                     names.append(nested)
         if names:
             return ".".join(names)
+    if node.type == "generic_name":
+        for child in node.children:
+            if child.type == "identifier":
+                text = slice_text(child, source).strip()
+                if text:
+                    return text
+        return ""
     if node.type == "identifier":
         return slice_text(node, source).strip()
     return slice_text(node, source).replace(" ", "").strip()
@@ -432,7 +441,7 @@ def build_aliases(
     if language == "javascript":
         return _javascript_aliases(root, captures, source, importer_file)
     if language == "rust":
-        return _rust_aliases(root, captures, source)
+        return _rust_aliases(root, captures, source, current_module)
     if language == "go":
         return _go_aliases(root, captures, source)
     if language == "csharp":
@@ -631,8 +640,52 @@ def normalize_owner_text(text: str) -> str:
     return last.split(".")[-1].strip() or ""
 
 
+def _rust_path_segments(node: Any, source: bytes) -> list[str]:
+    if node.type == "scoped_identifier":
+        out: list[str] = []
+        for child in node.children:
+            if slice_text(child, source) == "::":
+                continue
+            out.extend(_rust_path_segments(child, source))
+        return out
+    text = slice_text(node, source).strip()
+    return [text] if text else []
+
+
+def resolve_rust_use_path(segments: list[str], current_module: str | None) -> str:
+    parts = [seg for seg in segments if seg]
+    if not parts:
+        return ""
+    head = parts[0]
+    base = current_module.split(".") if current_module else []
+    if head == "crate":
+        rest = parts[1:]
+    elif head in ("self", "Self"):
+        rest = base + parts[1:]
+    elif head == "super":
+        depth = 0
+        while depth < len(parts) and parts[depth] == "super":
+            depth += 1
+        rest = base[: max(0, len(base) - depth)] + parts[depth:]
+    else:
+        rest = parts
+    return ".".join([seg for seg in rest if seg])
+
+
+def normalize_go_import(dotted: str, module_prefix: str) -> str:
+    prefix = (module_prefix or "").strip().strip(".")
+    if not prefix or dotted == prefix:
+        return dotted
+    if dotted.startswith(prefix + "."):
+        return dotted[len(prefix) + 1 :]
+    return dotted
+
+
 def _rust_aliases(
-    root: Any, captures: dict[str, list], source: bytes
+    root: Any,
+    captures: dict[str, list],
+    source: bytes,
+    current_module: str | None = None,
 ) -> list[tuple[str, str]]:
     if root.type != "use_declaration":
         return []
@@ -642,14 +695,18 @@ def _rust_aliases(
     if alias_path is not None:
         alias_node = first_node(captures, ".use.alias.name")
         alias = slice_text(alias_node, source).strip() if alias_node is not None else ""
-        full = generic_dotted(alias_path, source).strip()
+        full = resolve_rust_use_path(
+            _rust_path_segments(alias_path, source), current_module
+        )
         if not alias or not full or full.split(".")[0] in _RUST_STDLIB_HEADS:
             return []
         return [(alias, full)]
     list_path = first_node(captures, ".use.list.path")
     items = first_node(captures, ".use.list.items")
     if list_path is not None and items is not None:
-        base = generic_dotted(list_path, source).strip()
+        base = resolve_rust_use_path(
+            _rust_path_segments(list_path, source), current_module
+        )
         if not base or base.split(".")[0] in _RUST_STDLIB_HEADS:
             return []
         found: list[tuple[str, str]] = []
@@ -663,7 +720,9 @@ def _rust_aliases(
                 alias_child = child.child_by_field_name("alias")
                 if path_child is None or alias_child is None:
                     continue
-                original = generic_dotted(path_child, source).strip()
+                original = resolve_rust_use_path(
+                    _rust_path_segments(path_child, source), current_module
+                )
                 alias = slice_text(alias_child, source).strip()
                 if original and alias:
                     found.append((alias, f"{base}.{original}"))
@@ -671,7 +730,7 @@ def _rust_aliases(
     path_node = first_node(captures, ".use.path")
     if path_node is None:
         return []
-    full = generic_dotted(path_node, source).strip()
+    full = resolve_rust_use_path(_rust_path_segments(path_node, source), current_module)
     if not full or full.split(".")[0] in _RUST_STDLIB_HEADS:
         return []
     alias = full.split(".")[-1]
