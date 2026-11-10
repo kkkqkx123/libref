@@ -27,7 +27,7 @@ def mining_version_ids(
         params.append(version)
     where = ("WHERE " + " AND ".join(filters)) if filters else ""
     rows = conn.execute(
-        f"SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id {where}",
+        f"SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id {where} ORDER BY v.id",
         params,
     ).fetchall()
     return [int(r[0]) for r in rows]

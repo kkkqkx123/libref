@@ -158,6 +158,88 @@ def main() -> int:
         f"scores={scores[:4]}",
     )
 
+    # Decoy version holding many matches: scoped reads stay version-local
+    # even with a small truncation.
+    from libref.store.retriever import fts_search
+
+    conn.execute("INSERT INTO versions(id, library_id, version) VALUES(2, 1, '2.0')")
+    conn.commit()
+    for page_no in range(3):
+        store.store_page(
+            2,
+            1,
+            f"https://d.example/decoy-{page_no}.html",
+            "stored",
+            chunks=[
+                Chunk(
+                    url=f"https://d.example/decoy-{page_no}.html",
+                    path=f"D{page_no}",
+                    title=f"Decoy {page_no}",
+                    content=f"quetzaldbq decoy filler {page_no}-{slot}",
+                    sort_order=slot,
+                    chunk_path="embedding",
+                    source_group_id=f"d{page_no}",
+                    chunk_id=f"d{page_no}-{slot}",
+                )
+                for slot in range(10)
+            ],
+            raw_content=f"decoy {page_no}",
+        )
+    scoped_hits = SearchService(conn).search_docs(
+        "quetzaldbq", library="docs", version="1.0", limit=2
+    )
+    _check(
+        "scoped search stays in version",
+        len(scoped_hits) == 1 and all(h["version"] == "1.0" for h in scoped_hits),
+        f"versions={[h['version'] for h in scoped_hits]}",
+    )
+    scoped_pairs = fts_search(
+        conn,
+        "quetzaldbq",
+        library="docs",
+        version="1.0",
+        weights=(1.0, 1.0, 1.0, 1.0),
+        budget=50,
+    )
+    scoped_vids = {
+        r[0]
+        for r in conn.execute(
+            "SELECT DISTINCT version_id FROM documents WHERE id IN "
+            f"({','.join('?' for _ in scoped_pairs)})",
+            [i for i, _ in scoped_pairs],
+        ).fetchall()
+    }
+    _check(
+        "scoped match ids stay in version",
+        scoped_vids == {1},
+        f"vids={sorted(scoped_vids)}",
+    )
+    traced: list[str] = []
+    conn.set_trace_callback(traced.append)
+    try:
+        fts_search(
+            conn,
+            "quetzaldbq",
+            library="docs",
+            version="1.0",
+            weights=(1.0, 1.0, 1.0, 1.0),
+            budget=5,
+        )
+    finally:
+        conn.set_trace_callback(None)
+    scoped_sql = next(s for s in traced if "documents_fts" in s and "MATCH" in s)
+    # The trace callback receives the statement with literals expanded,
+    # so the plan runs without bound parameters.
+    scoped_plan = _plan(conn, scoped_sql)
+    print(f"   scoped fts sql: {scoped_sql}")
+    for line in scoped_plan:
+        print(f"   plan: {line}")
+    _check(
+        "scoped fts avoids global sort",
+        all("ORDER BY" not in line for line in scoped_plan),
+        f"plan={scoped_plan}",
+    )
+
     # Mining seed: two scopes, one holding the full pattern.
     calls = [
         ("a.open", "f.py", "m.f", 1, 0, "EXTRACTED"),
@@ -283,17 +365,6 @@ def main() -> int:
                 "SELECT rs.entity_id FROM review_status rs"
                 " WHERE rs.entity_type='call_instance' AND rs.status='pending'"
                 " ORDER BY rs.updated_at, rs.entity_id LIMIT 1"
-            ),
-        ),
-        (
-            "fts plus library filter",
-            (
-                "SELECT d.id FROM documents_fts"
-                " JOIN documents d ON d.id=documents_fts.rowid"
-                " JOIN versions v ON v.id=d.version_id"
-                " JOIN libraries l ON l.id=d.library_id"
-                " WHERE documents_fts MATCH '\"quetzaldbq\"' AND l.name='docs'"
-                " ORDER BY bm25(documents_fts) LIMIT 10"
             ),
         ),
         (

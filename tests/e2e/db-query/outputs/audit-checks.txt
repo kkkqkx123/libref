@@ -5,13 +5,20 @@ migrations applied this run: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 [PASS] unchanged updates etag -- etag=e-new
 [PASS] precise hits found -- count=1
 [PASS] precise scores descending -- scores=[1e-06]
+[PASS] scoped search stays in version -- versions=['1.0']
+[PASS] scoped match ids stay in version -- vids=[1]
+   scoped fts sql: SELECT documents_fts.rowid, bm25(documents_fts, 1.0, 1.0, 1.0, 1.0) FROM documents_fts WHERE documents_fts MATCH '"quetzaldbq"' AND rowid IN (SELECT id FROM documents WHERE version_id IN (1))
+   plan: 2 | 0 | 146 | SCAN documents_fts VIRTUAL TABLE INDEX 0:=M4
+   plan: 6 | 0 | 0 | LIST SUBQUERY 1
+   plan: 8 | 6 | 52 | SEARCH documents USING COVERING INDEX idx_documents_version (version_id=?)
+[PASS] scoped fts avoids global sort -- plan=['2 | 0 | 146 | SCAN documents_fts VIRTUAL TABLE INDEX 0:=M4', '6 | 0 | 0 | LIST SUBQUERY 1', '8 | 6 | 52 | SEARCH documents USING COVERING INDEX idx_documents_version (version_id=?)']
 [PASS] usage counts cover null-scope fallback -- usage=[{'api': 'a.open', 'calls': 2, 'scopes': 2}, {'api': 'a.noise', 'calls': 1, 'scopes': 1}, {'api': 'a.write', 'calls': 1, 'scopes': 1}]
 [PASS] pending lowest confidence first -- first=AMBIGUOUS
 [PASS] evidence finds one group -- matched=[0, 2]
 [PASS] evidence inclusive keeps ambiguous -- matched=[0, 3]
 [PASS] patterns mined -- count=1
-[PASS] ghost source page swept -- swept=[3]
-[PASS] fts in sync -- {'documents': 2, 'triggers': 3, 'sampled': 4, 'missing': 0, 'in_sync': 1}
+[PASS] ghost source page swept -- swept=[33]
+[PASS] fts in sync -- {'documents': 32, 'triggers': 3, 'sampled': 20, 'missing': 0, 'in_sync': 1}
 [PASS] page read single lane -- chunks=1
 --- query plans ---
 ## section filter
@@ -20,13 +27,6 @@ migrations applied this run: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 ## pending scan
    sql: SELECT rs.entity_id FROM review_status rs WHERE rs.entity_type='call_instance' AND rs.status='pending' ORDER BY rs.updated_at, rs.entity_id LIMIT 1
    plan: 4 | 0 | 56 | SEARCH rs USING COVERING INDEX idx_review_pending (entity_type=? AND status=?)
-## fts plus library filter
-   sql: SELECT d.id FROM documents_fts JOIN documents d ON d.id=documents_fts.rowid JOIN versions v ON v.id=d.version_id JOIN libraries l ON l.id=d.library_id WHERE documents_fts MATCH '"quetzaldbq"' AND l.name='docs' ORDER BY bm25(documents_fts) LIMIT 10
-   plan: 9 | 0 | 156 | SCAN documents_fts VIRTUAL TABLE INDEX 0:M4
-   plan: 14 | 0 | 45 | SEARCH d USING INTEGER PRIMARY KEY (rowid=?)
-   plan: 17 | 0 | 45 | SEARCH v USING INTEGER PRIMARY KEY (rowid=?)
-   plan: 20 | 0 | 45 | SEARCH l USING INTEGER PRIMARY KEY (rowid=?)
-   plan: 36 | 0 | 0 | USE TEMP B-TREE FOR ORDER BY
 ## url-only page read
    sql: SELECT p.id FROM pages p WHERE p.url='https://d.example/a.html'
    plan: 2 | 0 | 54 | SEARCH p USING COVERING INDEX idx_pages_url (url=?)

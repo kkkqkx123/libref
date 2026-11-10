@@ -6,7 +6,6 @@ import json
 from typing import Any
 
 from libref.text.embedding import strip_markdown_for_embedding
-from libref.text.query import safe_fts_query
 from libref.text.snippet import make_snippet
 
 
@@ -34,11 +33,8 @@ class SearchService:
     ) -> list[dict[str, Any]]:
         """Exact full-text query: FTS single path only; the hybrid default goes through the async hybrid entry."""
         from libref.config import setting_or_default
+        from libref.store.retriever import alignment_key, fts_search
 
-        filters = []
-        safe = safe_fts_query(query)
-        if not safe:
-            return []
         weights = (
             float(setting_or_default(self._settings, "fts_w_content")),
             float(setting_or_default(self._settings, "fts_w_title")),
@@ -47,41 +43,41 @@ class SearchService:
         )
         radius = int(setting_or_default(self._settings, "snippet_radius"))
         cap = int(setting_or_default(self._settings, "snippet_cap"))
-        params: list[Any] = [safe]
-        if library is not None:
-            filters.append("l.name = ?")
-            params.append(library)
-        if ecosystem is not None:
-            filters.append("l.ecosystem = ?")
-            params.append(ecosystem)
-        if version is not None:
-            filters.append("v.version = ?")
-            params.append(version)
-        where = ("AND " + " AND ".join(filters) + " ") if filters else ""
-        # Join filters apply after the match, so over-fetch under filters to recover recall.
-        budget = limit if not filters else max(limit, min(limit * 5, 500))
-        params.append(budget)
-        sql = (
-            f"SELECT d.id, d.url, -bm25(documents_fts, {weights[0]}, {weights[1]}, {weights[2]}, {weights[3]}) AS score, d.content, "
+        scoped = library is not None or version is not None or ecosystem is not None
+        # Extra picks compensate rows folded away by group dedup below.
+        budget = limit if not scoped else max(limit, min(limit * 5, 500))
+        pairs = fts_search(
+            self._conn,
+            query,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            weights=weights,
+            budget=budget,
+        )
+        if not pairs:
+            return []
+        marks = ",".join("?" for _ in pairs)
+        rows = self._conn.execute(
+            "SELECT d.id, d.url, d.content, "
             "json_extract(d.metadata, '$.title') AS title, "
             "json_extract(d.metadata, '$.path') AS path, "
             "l.name AS library, v.version AS version, d.metadata, "
             "d.page_id, d.sort_order "
-            "FROM documents_fts "
-            "JOIN documents d ON d.id = documents_fts.rowid "
+            "FROM documents d "
             "JOIN versions v ON v.id = d.version_id "
             "JOIN libraries l ON l.id = d.library_id "
-            f"WHERE documents_fts MATCH ? {where}"
-            "ORDER BY score DESC LIMIT ?"
-        )
-        rows = self._conn.execute(sql, params).fetchall()
+            f"WHERE d.id IN ({marks})",
+            [doc_id for doc_id, _ in pairs],
+        ).fetchall()
+        by_id = {int(r[0]): r for r in rows}
+        scores = {doc_id: -score for doc_id, score in pairs}
+        ordered = [by_id[i] for i, _ in pairs if i in by_id]
         out = []
-        from libref.store.retriever import alignment_key
-
         seen: set[str] = set()
-        for r in rows:
+        for r in ordered:
             try:
-                meta = json.loads(r[8]) if r[8] else {}
+                meta = json.loads(r[7]) if r[7] else {}
             except ValueError:
                 meta = {}
             key = alignment_key(meta, r[1], int(r[0]))
@@ -92,21 +88,21 @@ class SearchService:
                 {
                     "id": r[0],
                     "url": r[1],
-                    "score": r[2],
+                    "score": scores[int(r[0])],
                     "snippet": make_snippet(
-                        strip_markdown_for_embedding(r[3]),
+                        strip_markdown_for_embedding(r[2]),
                         query,
                         radius=radius,
                         cap=cap,
                     ),
-                    "title": r[4],
-                    "path": r[5],
-                    "library": r[6],
-                    "version": r[7],
+                    "title": r[3],
+                    "path": r[4],
+                    "library": r[5],
+                    "version": r[6],
                     "source_group_id": meta.get("source_group_id", ""),
                     "chunk_id": meta.get("chunk_id", ""),
-                    "page_id": r[9],
-                    "sort_order": r[10],
+                    "page_id": r[8],
+                    "sort_order": r[9],
                     "span_kind": meta.get("span_kind", "document_range"),
                     "merged_from": list(meta.get("merged_from", []) or []),
                     "overlap_from": meta.get("overlap_from"),

@@ -7,6 +7,7 @@ weighting lives in libref.mining.scoring.
 from __future__ import annotations
 
 import asyncio
+import heapq
 import json
 import sqlite3
 from typing import Any
@@ -49,6 +50,57 @@ def _version_ids(
     return [int(r[0]) for r in rows]
 
 
+def _bm25_expr(weights: tuple[float, float, float, float]) -> str:
+    return (
+        f"bm25(documents_fts, {weights[0]}, {weights[1]}, {weights[2]}, {weights[3]})"
+    )
+
+
+def fts_search(
+    conn: sqlite3.Connection,
+    query: str,
+    *,
+    library: str | None = None,
+    version: str | None = None,
+    ecosystem: str | None = None,
+    weights: tuple[float, float, float, float],
+    budget: int,
+) -> list[tuple[int, float]]:
+    """Single shared full-text read path, returning document ids with raw scores.
+
+    Scores are raw match values in ascending order, best first. Without filters
+    the database sorts and truncates. With filters the scope resolves to version
+    ids first and only scoped candidates are ranked, so large unrelated versions
+    never enter the sort. An empty scope yields nothing.
+    """
+    safe = safe_fts_query(query)
+    if not safe or budget <= 0:
+        return []
+    scoped = library is not None or version is not None or ecosystem is not None
+    if not scoped:
+        rows = conn.execute(
+            f"SELECT documents_fts.rowid, {_bm25_expr(weights)} FROM documents_fts "
+            "WHERE documents_fts MATCH ? "
+            f"ORDER BY {_bm25_expr(weights)} LIMIT ?",
+            [safe, budget],
+        ).fetchall()
+        return [(int(r[0]), float(r[1])) for r in rows]
+    vids = _version_ids(conn, library, version, ecosystem)
+    if not vids:
+        return []
+    marks = ",".join("?" for _ in vids)
+    rows = conn.execute(
+        f"SELECT documents_fts.rowid, {_bm25_expr(weights)} FROM documents_fts "
+        "WHERE documents_fts MATCH ? "
+        f"AND rowid IN (SELECT id FROM documents WHERE version_id IN ({marks}))",
+        [safe, *vids],
+    ).fetchall()
+    picks = heapq.nsmallest(
+        budget, ((float(s), int(i)) for i, s in rows), key=lambda kv: (kv[0], kv[1])
+    )
+    return [(doc_id, score) for score, doc_id in picks]
+
+
 def _fts_candidates(
     conn: sqlite3.Connection,
     query: str,
@@ -59,35 +111,18 @@ def _fts_candidates(
     *,
     weights: tuple[float, float, float, float],
 ) -> list[int]:
-    safe = safe_fts_query(query)
-    if not safe:
-        return []
-    filters = []
-    params: list[Any] = [safe]
-    if library is not None:
-        filters.append("l.name = ?")
-        params.append(library)
-    if ecosystem is not None:
-        filters.append("l.ecosystem = ?")
-        params.append(ecosystem)
-    if version is not None:
-        filters.append("v.version = ?")
-        params.append(version)
-    where = ("AND " + " AND ".join(filters) + " ") if filters else ""
-    # Join filters apply after the match, so a selective filter can starve the
-    # limit even when more matches exist. Over-fetch under filters to recover recall.
-    budget = limit if not filters else max(limit, min(limit * 5, 500))
-    params.append(budget)
-    rows = conn.execute(
-        "SELECT d.id FROM documents_fts "
-        "JOIN documents d ON d.id = documents_fts.rowid "
-        "JOIN versions v ON v.id = d.version_id "
-        "JOIN libraries l ON l.id = d.library_id "
-        f"WHERE documents_fts MATCH ? {where}"
-        f"ORDER BY bm25(documents_fts, {weights[0]}, {weights[1]}, {weights[2]}, {weights[3]}) LIMIT ?",
-        params,
-    ).fetchall()
-    return [int(r[0]) for r in rows]
+    return [
+        doc_id
+        for doc_id, _ in fts_search(
+            conn,
+            query,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            weights=weights,
+            budget=limit,
+        )
+    ]
 
 
 def _fetch_details(
