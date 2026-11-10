@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from libref.services.libraries import mining_version_ids
+from libref.text.snippet import gap_tag, unit_tag, xml_escape_attr
 
 
 def is_subsequence(pattern: list[str], names: list[str]) -> bool:
@@ -18,6 +19,63 @@ def is_subsequence(pattern: list[str], names: list[str]) -> bool:
             return False
         pos += 1
     return True
+
+
+def _subsequence_positions(pattern: list[str], names: list[str]) -> list[int]:
+    """Locate the first ordered occurrence of pattern inside names."""
+    pos: list[int] = []
+    cursor = 0
+    for want in pattern:
+        while cursor < len(names) and names[cursor] != want:
+            cursor += 1
+        if cursor >= len(names):
+            return []
+        pos.append(cursor)
+        cursor += 1
+    return pos
+
+
+def _render_evidence(
+    group: dict[str, Any], calls: list[dict[str, Any]], matched: list[int]
+) -> str:
+    """Render matched calls with neighbours and explicit gaps, body verbatim."""
+    keep: set[int] = set(matched)
+    if matched:
+        if matched[0] - 1 >= 0:
+            keep.add(matched[0] - 1)
+        if matched[-1] + 1 < len(calls):
+            keep.add(matched[-1] + 1)
+    ordered = sorted(keep)
+    parts: list[str] = []
+    prev: int | None = None
+    for idx in ordered:
+        if prev is not None and idx - prev > 1:
+            skipped = calls[prev + 1 : idx]
+            lines = [c for c in skipped if c.get("line_start") is not None]
+            if lines:
+                span = f"{lines[0].get('line_start')}-{lines[-1].get('line_end')}"
+            else:
+                span = f"{prev + 1}-{idx - 1}"
+            parts.append(gap_tag(len(skipped), span))
+        call = calls[idx]
+        args = call.get("args") or []
+        body = ", ".join(str(part) for part in args)
+        attrs = {
+            "callee": str(call.get("callee") or ""),
+            "lines": f"{call.get('line_start')}-{call.get('line_end')}",
+            "confidence": str(call.get("confidence") or ""),
+            "hit": "true" if idx in set(matched) else "false",
+        }
+        parts.append(f'<call callee="{xml_escape_attr(attrs["callee"])}" lines="{xml_escape_attr(attrs["lines"])}" confidence="{xml_escape_attr(attrs["confidence"])}" hit="{attrs["hit"]}">{body}</call>')
+        prev = idx
+    inner = "\n".join(parts)
+    head = {
+        "file": str(group.get("caller_file") or ""),
+        "caller": str(group.get("caller") or ""),
+        "library": str(group.get("library") or ""),
+        "version": str(group.get("version") or ""),
+    }
+    return unit_tag(head, inner)
 
 
 class MiningReadService:
@@ -226,11 +284,18 @@ class MiningReadService:
             )
         out = []
         for key in order:
-            names = [c["callee"] for c in groups[key]["calls"]]
-            if is_subsequence(pattern, names):
-                out.append(groups[key])
-                if len(out) >= limit:
-                    break
+            calls = groups[key]["calls"]
+            names = [c["callee"] for c in calls]
+            matched = _subsequence_positions(pattern, names)
+            if not matched:
+                continue
+            groups[key]["matched"] = matched
+            groups[key]["rendered"] = _render_evidence(
+                groups[key], calls, matched
+            )
+            out.append(groups[key])
+            if len(out) >= limit:
+                break
         return out
 
     def feature_tree(

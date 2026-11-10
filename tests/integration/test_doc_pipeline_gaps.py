@@ -124,7 +124,7 @@ def test_refresh_alias_and_window(conn) -> None:
     assert window is not None and window["docs"]
     section = PageService(conn).read_section(
         "https://d.example/a.html",
-        window["docs"][0]["metadata"].get("source_group_id", ""),
+        window["docs"][0].get("source_group_id", ""),
     )
     assert section is None or section["chunks"] >= 1
 

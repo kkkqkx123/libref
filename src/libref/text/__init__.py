@@ -19,7 +19,15 @@ from libref.text.normalize import (
     wrap_source_content,
 )
 from libref.text.query import safe_fts_query
-from libref.text.snippet import make_snippet, truncate_material
+from libref.text.snippet import (
+    gap_tag,
+    make_snippet,
+    omitted_tag,
+    reference_tag,
+    truncate_material,
+    unit_tag,
+    xml_escape_attr,
+)
 
 __all__ = [
     "CJK_RUN_RE",
@@ -27,13 +35,18 @@ __all__ = [
     "classify_content",
     "clean_text_for_bm25",
     "expand_cjk_run",
+    "gap_tag",
     "ident_snake_form",
     "is_embeddable_metadata",
     "make_snippet",
     "normalize_markdown",
+    "omitted_tag",
+    "reference_tag",
     "safe_fts_query",
     "snake_variant",
     "strip_markdown_for_embedding",
     "truncate_material",
+    "unit_tag",
     "wrap_source_content",
+    "xml_escape_attr",
 ]

@@ -71,6 +71,8 @@ def test_search_docs_bm25_hits_and_snippet(conn):
     assert len(results) == 1
     assert results[0]["url"] == "https://d.example/a.html"
     assert "libref" in results[0]["snippet"]
+    assert "<hit>libref</hit>" in results[0]["snippet"]
+    assert ">>>" not in results[0]["snippet"]
 
 
 def test_search_docs_library_version_filter(conn):
@@ -113,8 +115,12 @@ def test_read_page_reassembles(conn):
 
     page = PageService(conn).read_page("https://d.example/p.html")
     assert page is not None
-    assert page["content"] == "part one\n\npart two"
+    assert "part one" in page["content"]
+    assert "part two" in page["content"]
+    assert "<unit" in page["content"] and "</unit>" in page["content"]
     assert page["chunks"] == 2
+    assert all("content" not in item for item in page["chunk_details"])
+    assert page["chunk_details"][0]["length"] == len("part one")
 
 
 def test_list_libraries_and_versions(conn):

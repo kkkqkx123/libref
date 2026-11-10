@@ -19,7 +19,7 @@ from libref.mining.scoring import (
 )
 from libref.text.embedding import strip_markdown_for_embedding
 from libref.text.query import safe_fts_query
-from libref.text.snippet import make_snippet
+from libref.text.snippet import make_snippet, truncate_material
 
 
 def _version_ids(
@@ -606,9 +606,9 @@ class HybridRetriever:
                         {
                             "id": w["id"],
                             "sort_order": w["sort_order"],
-                            "content": strip_markdown_for_embedding(w["content"])[
-                                :preview_cap
-                            ],
+                            "chunk_id": str((w.get("metadata") or {}).get("chunk_id", "") or ""),
+                            "source_group_id": str((w.get("metadata") or {}).get("source_group_id", "") or ""),
+                            "content": truncate_material(w["content"], preview_cap),
                         }
                         for w in window
                     ]

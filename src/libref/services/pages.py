@@ -1,9 +1,63 @@
-"""Page reads: reassemble stored document blocks into full pages and windows."""
+"""Page reads: reassemble stored document blocks into boundary-marked pages."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
+
+from libref.text.snippet import unit_tag, xml_escape_attr
+
+
+def _chunk_unit(
+    content: str | None,
+    meta: dict[str, Any],
+    sort_order: int,
+) -> str:
+    body = content or ""
+    attrs = {
+        "chunk": str(meta.get("chunk_id", "") or ""),
+        "group": str(meta.get("source_group_id", "") or ""),
+        "order": str(sort_order),
+        "index": str(int(meta.get("chunk_index", 0) or 0)),
+        "total": str(max(1, int(meta.get("total_chunks", 1) or 1))),
+    }
+    return unit_tag(attrs, body)
+
+
+def _chunk_locator(content: str | None, meta: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source_group_id": str(meta.get("source_group_id", "") or ""),
+        "chunk_id": str(meta.get("chunk_id", "") or ""),
+        "span_kind": str(meta.get("span_kind", "document_range") or "document_range"),
+        "merged_from": list(meta.get("merged_from", []) or []),
+        "overlap_from": meta.get("overlap_from"),
+        "overlap_text": str(meta.get("overlap_text", "") or ""),
+        "chunk_index": int(meta.get("chunk_index", 0) or 0),
+        "total_chunks": max(1, int(meta.get("total_chunks", 1) or 1)),
+        "length": len(content or ""),
+    }
+
+
+def _doc_envelope(
+    url: str,
+    title: object,
+    path: object,
+    units: list[str],
+    extra: str = "",
+) -> str:
+    head = (
+        f'<doc url="{xml_escape_attr(url)}" '
+        f'title="{xml_escape_attr(title)}" '
+        f'path="{xml_escape_attr(path)}"{extra}>'
+    )
+    return head + "\n" + "\n".join(units) + "\n</doc>"
+
+
+def _parse_meta(raw: object) -> dict[str, Any]:
+    try:
+        return json.loads(raw) if raw else {}  # type: ignore[arg-type]
+    except ValueError:
+        return {}
 
 
 class PageService:
@@ -45,37 +99,24 @@ class PageService:
         ).fetchall()
         if not rows:
             return None
-        contents = [r[1] for r in rows if r[1] is not None]
-        meta = {}
-        if rows[0][2]:
-            meta = json.loads(rows[0][2])
-        details = []
-        for content, raw, _order in ((r[1], r[2], None) for r in rows):
-            try:
-                parsed = json.loads(raw) if raw else {}
-            except ValueError:
-                parsed = {}
-            details.append(
-                {
-                    "content": content,
-                    "source_group_id": parsed.get("source_group_id", ""),
-                    "chunk_id": parsed.get("chunk_id", ""),
-                    "span_kind": parsed.get("span_kind", "document_range"),
-                    "merged_from": list(parsed.get("merged_from", []) or []),
-                    "overlap_from": parsed.get("overlap_from"),
-                    "overlap_text": str(parsed.get("overlap_text", "") or ""),
-                    "chunk_index": int(parsed.get("chunk_index", 0) or 0),
-                    "total_chunks": max(1, int(parsed.get("total_chunks", 1) or 1)),
-                }
-            )
+        meta = _parse_meta(rows[0][2])
+        units: list[str] = []
+        details: list[dict[str, Any]] = []
+        for content, raw, order in ((r[1], r[2], r[3]) for r in rows):
+            if content is None:
+                continue
+            parsed = _parse_meta(raw)
+            units.append(_chunk_unit(content, parsed, int(order or 0)))
+            details.append(_chunk_locator(content, parsed))
+        content = _doc_envelope(url, meta.get("title"), meta.get("path"), units)
         return {
             "url": url,
             "library": rows[0][4],
             "version": rows[0][5],
             "title": meta.get("title"),
             "path": meta.get("path"),
-            "content": "\n\n".join(contents),
-            "chunks": len(contents),
+            "content": content,
+            "chunks": len(units),
             "chunk_details": details,
         }
 
@@ -116,8 +157,37 @@ class PageService:
             return None
         from libref.store.document_store import DocumentStore
 
-        docs = DocumentStore(self._conn).get_window(int(row[0]), sort_order, radius)
-        return {"url": url, "center": sort_order, "radius": radius, "docs": docs}
+        rows = DocumentStore(self._conn).get_window(
+            int(row[0]), sort_order, radius, chunk_path="embedding"
+        )
+        units: list[str] = []
+        docs: list[dict[str, Any]] = []
+        for entry in rows:
+            raw_meta = entry.get("metadata") or {}
+            units.append(
+                _chunk_unit(
+                    entry.get("content"), raw_meta, int(entry.get("sort_order") or 0)
+                )
+            )
+            locator = _chunk_locator(entry.get("content"), raw_meta)
+            locator.update(
+                {
+                    "id": int(entry.get("id") or 0),
+                    "url": str(entry.get("url") or ""),
+                    "sort_order": int(entry.get("sort_order") or 0),
+                }
+            )
+            docs.append(locator)
+        content = _doc_envelope(
+            url, page.get("title"), page.get("path"), units, ' mode="window"'
+        )
+        return {
+            "url": url,
+            "center": sort_order,
+            "radius": radius,
+            "content": content,
+            "docs": docs,
+        }
 
     def read_section(
         self,
@@ -149,30 +219,24 @@ class PageService:
         ).fetchall()
         if not rows:
             return None
-        details = []
-        for content, raw, _order in rows:
-            try:
-                parsed = json.loads(raw) if raw else {}
-            except ValueError:
-                parsed = {}
-            details.append(
-                {
-                    "content": content,
-                    "source_group_id": parsed.get("source_group_id", ""),
-                    "chunk_id": parsed.get("chunk_id", ""),
-                    "span_kind": parsed.get("span_kind", "document_range"),
-                    "merged_from": list(parsed.get("merged_from", []) or []),
-                    "overlap_from": parsed.get("overlap_from"),
-                    "overlap_text": str(parsed.get("overlap_text", "") or ""),
-                    "chunk_index": int(parsed.get("chunk_index", 0) or 0),
-                    "total_chunks": max(1, int(parsed.get("total_chunks", 1) or 1)),
-                }
-            )
+        units: list[str] = []
+        details: list[dict[str, Any]] = []
+        for content, raw, order in rows:
+            parsed = _parse_meta(raw)
+            units.append(_chunk_unit(content, parsed, int(order or 0)))
+            details.append(_chunk_locator(content, parsed))
+        content = _doc_envelope(
+            url,
+            None,
+            None,
+            units,
+            f' group="{xml_escape_attr(source_group_id)}"',
+        )
         return {
             "url": url,
             "source_group_id": source_group_id,
-            "content": "\n\n".join(r[0] for r in rows if r[0]),
-            "chunks": len(rows),
+            "content": content,
+            "chunks": len(units),
             "chunk_details": details,
         }
 

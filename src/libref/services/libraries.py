@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from libref.text.normalize import normalize_markdown
+
 
 def mining_version_ids(
     conn,
@@ -43,18 +45,21 @@ class LibraryService:
             "(SELECT count(*) FROM versions v WHERE v.library_id = l.id) AS versions "
             "FROM libraries l ORDER BY l.ecosystem, l.name"
         ).fetchall()
-        return [
-            {
-                "id": r[0],
-                "ecosystem": r[1],
-                "name": r[2],
-                "description": r[3],
-                "docs_url": r[4],
-                "resolved_from": r[5],
-                "versions": r[6],
-            }
-            for r in rows
-        ]
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            raw = r[3] if len(r) > 3 else None
+            out.append(
+                {
+                    "id": r[0],
+                    "ecosystem": r[1],
+                    "name": r[2],
+                    "description": normalize_markdown(raw) if raw else raw,
+                    "docs_url": r[4],
+                    "resolved_from": r[5],
+                    "versions": r[6],
+                }
+            )
+        return out
 
     def list_versions(
         self, library: str, ecosystem: str | None = None
