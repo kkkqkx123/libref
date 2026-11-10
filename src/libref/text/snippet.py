@@ -11,21 +11,7 @@ _FENCE_RE = re.compile(r"^(```|~~~)")
 def xml_escape_attr(value: object) -> str:
     """Escape a value for use inside a double-quoted XML attribute."""
     text = "" if value is None else str(value)
-    out: list[str] = []
-    for ch in text:
-        if ch == "&":
-            out.append("&amp;")
-        elif ch == "<":
-            out.append("&lt;")
-        elif ch == ">":
-            out.append("&gt;")
-        elif ch == '"':
-            out.append("&quot;")
-        elif ch == "'":
-            out.append("&apos;")
-        else:
-            out.append(ch)
-    return "".join(out)
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;")
 
 
 def gap_tag(lines: int | None = None, span: str | None = None) -> str:
@@ -36,13 +22,11 @@ def gap_tag(lines: int | None = None, span: str | None = None) -> str:
     if lines is not None:
         parts += f' lines="{int(lines)}"'
     if span:
-        parts += f' range="{xml_escape_attr(span)}"'
+        parts += f' span="{xml_escape_attr(span)}"'
     return f"<gap{parts}/>"
 
 
-def reference_tag(
-    path: str, lines: str, reason: str, tokens: int | None = None
-) -> str:
+def reference_tag(path: str, lines: str, reason: str, tokens: int | None = None) -> str:
     """Self-closing pointer replacing a body dropped for budget or freshness."""
     base = (
         f'<reference path="{xml_escape_attr(path)}" '
@@ -50,14 +34,14 @@ def reference_tag(
         f'reason="{xml_escape_attr(reason)}"'
     )
     if tokens:
-        base += f' tokens="~{int(tokens)}"'
+        base += f' tokens="{int(tokens)}"'
     return base + "/>"
 
 
 def omitted_tag(units: int, tokens: int | None = None) -> str:
     """Tail marker naming how many whole units were dropped for budget."""
     if tokens:
-        return f'<omitted units="{int(units)}" tokens="~{int(tokens)}"/>'
+        return f'<omitted units="{int(units)}" tokens="{int(tokens)}"/>'
     return f'<omitted units="{int(units)}"/>'
 
 
@@ -67,6 +51,14 @@ def unit_tag(attrs: Mapping[str, object], body: str) -> str:
         f' {key}="{xml_escape_attr(value)}"' for key, value in attrs.items()
     )
     return f"<unit{rendered}>\n{body}\n</unit>"
+
+
+def call_tag(attrs: Mapping[str, object], body: str) -> str:
+    """Wrap a verbatim call body with a hit-marked call tag."""
+    rendered = "".join(
+        f' {key}="{xml_escape_attr(value)}"' for key, value in attrs.items()
+    )
+    return f"<call{rendered}>{body}</call>"
 
 
 def fences_balanced(text: str) -> bool:

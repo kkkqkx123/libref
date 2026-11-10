@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from libref.text.snippet import unit_tag, xml_escape_attr
@@ -43,12 +44,16 @@ def _doc_envelope(
     title: object,
     path: object,
     units: list[str],
-    extra: str = "",
+    extra_attrs: Mapping[str, object] | None = None,
 ) -> str:
+    rendered = "".join(
+        f' {key}="{xml_escape_attr(value)}"'
+        for key, value in (extra_attrs or {}).items()
+    )
     head = (
         f'<doc url="{xml_escape_attr(url)}" '
         f'title="{xml_escape_attr(title)}" '
-        f'path="{xml_escape_attr(path)}"{extra}>'
+        f'path="{xml_escape_attr(path)}"{rendered}>'
     )
     return head + "\n" + "\n".join(units) + "\n</doc>"
 
@@ -179,7 +184,7 @@ class PageService:
             )
             docs.append(locator)
         content = _doc_envelope(
-            url, page.get("title"), page.get("path"), units, ' mode="window"'
+            url, page.get("title"), page.get("path"), units, {"mode": "window"}
         )
         return {
             "url": url,
@@ -230,7 +235,7 @@ class PageService:
             None,
             None,
             units,
-            f' group="{xml_escape_attr(source_group_id)}"',
+            {"group": source_group_id},
         )
         return {
             "url": url,

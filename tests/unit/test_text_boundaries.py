@@ -10,7 +10,7 @@ pytestmark = pytest.mark.unit
 def test_xml_attr_escapes_only_mandatory_chars():
     from libref.text.snippet import xml_escape_attr
 
-    assert xml_escape_attr('a&b<"c\'>') == "a&amp;b&lt;&quot;c&apos;&gt;"
+    assert xml_escape_attr("a&b<\"c'>") == "a&amp;b&lt;&quot;c'>"
     assert xml_escape_attr(None) == ""
     assert xml_escape_attr("plain") == "plain"
 
@@ -63,6 +63,55 @@ def test_material_block_is_self_locating_unit():
     assert 'n="1"' in user
     assert 'doc="7"' in user
     assert "body text" in user
+
+
+def test_gap_uses_span_attr():
+    from libref.text.snippet import gap_tag
+
+    assert gap_tag() == "<gap/>"
+    out = gap_tag(2, "3-5")
+    assert 'lines="2"' in out
+    assert 'span="3-5"' in out
+    assert "range=" not in out
+
+
+def test_tokens_rendered_plain():
+    from libref.text.snippet import omitted_tag, reference_tag
+
+    assert reference_tag("p", "1-2", "budget", 12).endswith('tokens="12"/>')
+    assert omitted_tag(3, 9).endswith('tokens="9"/>')
+    assert "~" not in omitted_tag(3, 9)
+
+
+def test_call_tag_escapes_attrs():
+    from libref.text.snippet import call_tag
+
+    out = call_tag(
+        {"callee": 'a&b<"c', "lines": "1-2", "confidence": "X", "hit": "true"},
+        "x, y",
+    )
+    assert out.startswith("<call ")
+    assert 'callee="a&amp;b&lt;&quot;c"' in out
+    assert out.endswith(">x, y</call>")
+
+
+def test_pom_body_stays_verbatim_inside_unit():
+    from libref.text.snippet import unit_tag
+
+    pom = (
+        "<project>\n"
+        "  <groupId>org.example</groupId>\n"
+        "  <dependencies>\n"
+        "    <dependency><artifactId>demo</artifactId></dependency>\n"
+        "  </dependencies>\n"
+        "</project>"
+    )
+    out = unit_tag({"chunk": "c0", "group": "g0", "order": "0"}, pom)
+    assert pom in out
+    assert out.startswith("<unit ")
+    assert out.endswith("</unit>")
+    assert out.count("<unit ") == 1
+    assert "&lt;project" not in out
 
 
 def test_pattern_evidence_marks_gaps_and_hits():

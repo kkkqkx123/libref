@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from libref.services.libraries import mining_version_ids
-from libref.text.snippet import gap_tag, unit_tag, xml_escape_attr
+from libref.text.snippet import call_tag, gap_tag, unit_tag
 
 
 def is_subsequence(pattern: list[str], names: list[str]) -> bool:
@@ -66,9 +66,7 @@ def _render_evidence(
             "confidence": str(call.get("confidence") or ""),
             "hit": "true" if idx in set(matched) else "false",
         }
-        parts.append(
-            f'<call callee="{xml_escape_attr(attrs["callee"])}" lines="{xml_escape_attr(attrs["lines"])}" confidence="{xml_escape_attr(attrs["confidence"])}" hit="{attrs["hit"]}">{body}</call>'
-        )
+        parts.append(call_tag(attrs, body))
         prev = idx
     inner = "\n".join(parts)
     head = {

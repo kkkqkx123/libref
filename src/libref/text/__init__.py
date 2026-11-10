@@ -20,6 +20,7 @@ from libref.text.normalize import (
 )
 from libref.text.query import safe_fts_query
 from libref.text.snippet import (
+    call_tag,
     gap_tag,
     make_snippet,
     omitted_tag,
@@ -32,6 +33,7 @@ from libref.text.snippet import (
 __all__ = [
     "CJK_RUN_RE",
     "build_embed_text",
+    "call_tag",
     "classify_content",
     "clean_text_for_bm25",
     "expand_cjk_run",
