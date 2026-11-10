@@ -301,3 +301,24 @@ CREATE TABLE api_clusters(
 );
 CREATE INDEX idx_api_clusters_version ON api_clusters(version_id, cluster_id);
 """
+
+# ── Pattern-level semantic labels: rebuildable model output, never mixed with static facts ──
+PATTERN_LABEL_SQL = """
+CREATE TABLE pattern_labels(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  pattern_hash TEXT NOT NULL,
+  pattern JSON NOT NULL,
+  model TEXT NOT NULL,
+  prompt_version TEXT NOT NULL DEFAULT 'v1',
+  name TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  category_path JSON NOT NULL DEFAULT '[]',
+  workflow TEXT NOT NULL DEFAULT '',
+  related_apis JSON NOT NULL DEFAULT '[]',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(version_id, pattern_hash, model, prompt_version)
+);
+CREATE INDEX idx_pattern_labels_version ON pattern_labels(version_id);
+"""

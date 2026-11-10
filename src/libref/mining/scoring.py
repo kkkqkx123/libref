@@ -65,3 +65,20 @@ def cluster_hit(content: str, members: set[str]) -> bool:
     """Check whether a block covers at least two members of one cluster."""
     full, toks = content_idents(content)
     return sum(1 for n in members if name_hit(n, full, toks)) >= 2
+
+
+def pattern_contains_all(names: list[str], wanted: list[str]) -> bool:
+    """Whether a mined pattern covers every requested API."""
+    if not wanted:
+        return True
+    have = set(names)
+    return all(w in have for w in wanted)
+
+
+def capped_alpha(base_alpha: float, reusability: float, floor: float = 0.02) -> float:
+    """Health-gated weighting cap: weak reuse shrinks the mining bonus."""
+    if base_alpha <= 0:
+        return 0.0
+    if reusability <= 0:
+        return min(base_alpha, floor)
+    return base_alpha

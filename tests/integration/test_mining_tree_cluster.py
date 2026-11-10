@@ -67,8 +67,12 @@ def test_mine_persists_tree_and_clusters(conn, tmp_path):
         "numpy.array" in g["members"] and "numpy.zeros" in g["members"]
         for g in clusters
     )
-    evidence = svc.pattern_evidence(["numpy.array", "numpy.zeros"], "demo", "0.1")
-    assert len(evidence) >= 2
+    raw = svc.pattern_evidence(
+        ["numpy.array", "numpy.zeros"], "demo", "0.1", dedup=False, per_file_limit=10
+    )
+    assert len(raw) >= 2
+    diversified = svc.pattern_evidence(["numpy.array", "numpy.zeros"], "demo", "0.1")
+    assert len(diversified) >= 1
 
 
 def test_mine_clears_derived_when_calls_gone(conn):

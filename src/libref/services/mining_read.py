@@ -66,7 +66,9 @@ def _render_evidence(
             "confidence": str(call.get("confidence") or ""),
             "hit": "true" if idx in set(matched) else "false",
         }
-        parts.append(f'<call callee="{xml_escape_attr(attrs["callee"])}" lines="{xml_escape_attr(attrs["lines"])}" confidence="{xml_escape_attr(attrs["confidence"])}" hit="{attrs["hit"]}">{body}</call>')
+        parts.append(
+            f'<call callee="{xml_escape_attr(attrs["callee"])}" lines="{xml_escape_attr(attrs["lines"])}" confidence="{xml_escape_attr(attrs["confidence"])}" hit="{attrs["hit"]}">{body}</call>'
+        )
         prev = idx
     inner = "\n".join(parts)
     head = {
@@ -200,6 +202,8 @@ class MiningReadService:
         containing: list[str] | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
+        from libref.mining.scoring import pattern_contains_all
+
         vids = mining_version_ids(self._conn, library, version, ecosystem)
         if not vids:
             return []
@@ -207,8 +211,8 @@ class MiningReadService:
         rows = self._conn.execute(
             "SELECT pattern, support FROM seq_patterns"
             f" WHERE version_id IN ({placeholders})"
-            " ORDER BY support DESC LIMIT ?",
-            (*vids, limit),
+            " ORDER BY support DESC, pattern",
+            tuple(vids),
         ).fetchall()
         out = []
         for raw, support in rows:
@@ -216,10 +220,74 @@ class MiningReadService:
                 names = json.loads(raw)
             except ValueError:
                 continue
-            if containing and not all(n in names for n in containing):
+            if containing and not pattern_contains_all(names, containing):
                 continue
             out.append({"pattern": names, "support": support})
+            if len(out) >= limit:
+                break
         return out
+
+    def related_common(
+        self,
+        apis: list[str],
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 10,
+        include_ambiguous: bool = False,
+    ) -> list[dict[str, Any]]:
+        if not apis:
+            return []
+        wanted = sorted({a for a in apis if a})
+        if not wanted:
+            return []
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        base_filter = "(rs.status IS NULL OR rs.status != 'conflict')"
+        if include_ambiguous:
+            conf = f"AND {base_filter}"
+        else:
+            conf = f"AND {base_filter} AND (call_instances.confidence != 'AMBIGUOUS' OR rs.status='approved')"
+        rows = self._conn.execute(
+            "SELECT caller_file, COALESCE(caller, ''), callee_name"
+            " FROM call_instances LEFT JOIN review_status rs"
+            " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
+            f" WHERE version_id IN ({placeholders}) {conf}",
+            tuple(vids),
+        ).fetchall()
+        scopes: dict[tuple[str, str], set[str]] = {}
+        for path, caller, callee in rows:
+            scopes.setdefault((str(path), str(caller)), set()).add(str(callee))
+        wanted_set = set(wanted)
+        hit_keys = {k for k, have in scopes.items() if wanted_set <= have}
+        if not hit_keys:
+            return []
+        counter: dict[str, dict[str, int]] = {}
+        for key in hit_keys:
+            for name in scopes[key]:
+                if name in wanted_set:
+                    continue
+                slot = counter.setdefault(name, {"scopes": 0, "calls": 0})
+                slot["scopes"] += 1
+        rows = self._conn.execute(
+            "SELECT callee_name, count(*) FROM call_instances"
+            " LEFT JOIN review_status rs ON rs.entity_type='call_instance'"
+            " AND rs.entity_id=call_instances.id"
+            f" WHERE version_id IN ({placeholders}) {conf}"
+            " GROUP BY callee_name",
+            tuple(vids),
+        ).fetchall()
+        totals = {str(r[0]): int(r[1]) for r in rows}
+        ranked = sorted(
+            counter.items(),
+            key=lambda kv: (-kv[1]["scopes"], -totals.get(kv[0], 0), kv[0]),
+        )
+        return [
+            {"api": name, "scopes": info["scopes"], "calls": totals.get(name, 0)}
+            for name, info in ranked[:limit]
+        ]
 
     def pattern_evidence(
         self,
@@ -229,6 +297,9 @@ class MiningReadService:
         ecosystem: str | None = None,
         limit: int = 5,
         include_ambiguous: bool = False,
+        per_file_limit: int | None = None,
+        dedup: bool | None = None,
+        with_snippet: bool = True,
     ) -> list[dict[str, Any]]:
         if not pattern:
             return []
@@ -290,10 +361,102 @@ class MiningReadService:
             if not matched:
                 continue
             groups[key]["matched"] = matched
-            groups[key]["rendered"] = _render_evidence(
-                groups[key], calls, matched
-            )
+            groups[key]["rendered"] = _render_evidence(groups[key], calls, matched)
             out.append(groups[key])
+        from libref.config import setting_or_default
+        from libref.mining.idiom import deduplicate_evidence, synthesize_snippet
+
+        file_cap = per_file_limit
+        if file_cap is None:
+            try:
+                file_cap = int(setting_or_default(None, "evidence_per_file_limit"))
+            except Exception:  # noqa: BLE001 -- defaults keep evidence readable without settings
+                file_cap = 1
+        do_dedup = dedup
+        if do_dedup is None:
+            try:
+                do_dedup = bool(setting_or_default(None, "evidence_dedup"))
+            except Exception:  # noqa: BLE001 -- defaults keep evidence readable without settings
+                do_dedup = True
+        out = deduplicate_evidence(
+            out, per_file_limit=max(1, int(file_cap)), cross_file_dedup=bool(do_dedup)
+        )
+        out = out[: max(1, int(limit))]
+        if with_snippet:
+            for group in out:
+                group["snippet"] = synthesize_snippet(
+                    pattern, group.get("calls") or [], group.get("matched") or []
+                )
+        return out
+
+    def mining_health(
+        self,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+    ) -> dict[str, Any]:
+        from libref.mining.idiom import reuse_diversity
+
+        patterns = self.list_patterns(
+            library=library, version=version, ecosystem=ecosystem, limit=100000
+        )
+        clusters = self.api_clusters(
+            library=library, version=version, ecosystem=ecosystem, limit=100000
+        )
+        return reuse_diversity(patterns, clusters)
+
+    def list_labels(
+        self,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        containing: list[str] | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        try:
+            rows = self._conn.execute(
+                "SELECT pattern, pattern_hash, model, prompt_version, name,"
+                " summary, category_path, workflow, related_apis"
+                " FROM pattern_labels"
+                f" WHERE version_id IN ({placeholders})"
+                " ORDER BY pattern_hash, model, prompt_version",
+                tuple(vids),
+            ).fetchall()
+        except Exception:  # noqa: BLE001 -- labels are optional before migration
+            return []
+        out = []
+        for raw, phash, model, pver, name, summary, cat, workflow, related in rows:
+            try:
+                names = json.loads(raw) if raw else []
+            except ValueError:
+                continue
+            if containing and not all(n in names for n in containing):
+                continue
+            try:
+                cat_path = json.loads(cat) if cat else []
+            except ValueError:
+                cat_path = []
+            try:
+                rel = json.loads(related) if related else []
+            except ValueError:
+                rel = []
+            out.append(
+                {
+                    "pattern": names,
+                    "pattern_hash": phash,
+                    "model": model,
+                    "prompt_version": pver,
+                    "name": name,
+                    "summary": summary,
+                    "category_path": cat_path,
+                    "workflow": workflow,
+                    "related_apis": rel,
+                }
+            )
             if len(out) >= limit:
                 break
         return out
@@ -381,6 +544,7 @@ class MiningReadService:
         self,
         view: str,
         api: str | None = None,
+        apis: list[str] | None = None,
         *,
         library: str | None = None,
         version: str | None = None,
@@ -388,6 +552,17 @@ class MiningReadService:
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Unified API view: frequency ranking, co-occurring APIs, argument shapes."""
+        if view == "common":
+            wanted = apis if apis is not None else ([api] if api else [])
+            if not wanted:
+                raise ValueError("common view requires api or apis")
+            return self.related_common(
+                wanted,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit if limit is not None else 10,
+            )
         if view == "usage":
             return self.api_usage_counts(
                 library=library,
@@ -428,8 +603,46 @@ class MiningReadService:
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int | None = None,
+        per_file_limit: int | None = None,
+        dedup: bool | None = None,
     ) -> list[dict[str, Any]]:
         """Unified pattern view: patterns, evidence, feature tree, clusters."""
+        if view == "health":
+            return [
+                self.mining_health(
+                    library=library, version=version, ecosystem=ecosystem
+                )
+            ]
+        if view == "labels":
+            return self.list_labels(
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                containing=containing,
+                limit=limit if limit is not None else 50,
+            )
+        if view == "snippets":
+            if not pattern:
+                raise ValueError("snippets view requires a non-empty pattern")
+            groups = self.pattern_evidence(
+                pattern,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit if limit is not None else 5,
+                per_file_limit=per_file_limit,
+                dedup=dedup,
+                with_snippet=True,
+            )
+            return [
+                {
+                    "caller_file": g.get("caller_file"),
+                    "caller": g.get("caller"),
+                    "snippet": g.get("snippet"),
+                    "rendered": g.get("rendered"),
+                }
+                for g in groups
+            ]
         if view == "patterns":
             return self.list_patterns(
                 library=library,
@@ -447,6 +660,9 @@ class MiningReadService:
                 version=version,
                 ecosystem=ecosystem,
                 limit=limit if limit is not None else 5,
+                per_file_limit=per_file_limit,
+                dedup=dedup,
+                with_snippet=True,
             )
         if view == "tree":
             return self.feature_tree(

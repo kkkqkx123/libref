@@ -11,7 +11,9 @@ import json
 import sqlite3
 from typing import Any
 
+from libref.mining.idiom import reuse_diversity
 from libref.mining.scoring import (
+    capped_alpha,
     cluster_hit,
     cluster_hit_exact,
     support_for_content,
@@ -471,12 +473,17 @@ class HybridRetriever:
             self._conn, fused, query, snippet_radius=radius, snippet_cap=cap
         )
         fts_set, vec_set = set(fts_ids), set(vec_ids)
-        alpha = float(setting_or_default(self._settings, "freq_alpha"))
+        raw_alpha = float(setting_or_default(self._settings, "freq_alpha"))
         cluster_alpha = float(setting_or_default(self._settings, "cluster_alpha"))
         rrf = self._rrf_scores(fts_ids, vec_ids)
         vids = sorted({details[d]["version_id"] for d in fused if d in details})
         patterns = _pattern_supports(self._conn, vids)
         clusters = _cluster_sets(self._conn, vids)
+        health_rows = [{"support": s} for plist in patterns.values() for _, s in plist]
+        health = reuse_diversity(
+            health_rows, [{"members": m} for cl in clusters.values() for m in cl]
+        )
+        alpha = capped_alpha(raw_alpha, float(health.get("reusability", 0.0)))
         scored: list[tuple[float, int]] = []
         for doc in fused:
             info = details.get(doc)
@@ -606,8 +613,13 @@ class HybridRetriever:
                         {
                             "id": w["id"],
                             "sort_order": w["sort_order"],
-                            "chunk_id": str((w.get("metadata") or {}).get("chunk_id", "") or ""),
-                            "source_group_id": str((w.get("metadata") or {}).get("source_group_id", "") or ""),
+                            "chunk_id": str(
+                                (w.get("metadata") or {}).get("chunk_id", "") or ""
+                            ),
+                            "source_group_id": str(
+                                (w.get("metadata") or {}).get("source_group_id", "")
+                                or ""
+                            ),
                             "content": truncate_material(w["content"], preview_cap),
                         }
                         for w in window

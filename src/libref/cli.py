@@ -673,15 +673,70 @@ def cmd_catalog(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_induce_labels(args: argparse.Namespace) -> int:
+    import asyncio
+    import json as _json
+
+    from libref.services.mining_refresh import (
+        INDUCE_LABELS_JOB_KIND,
+        build_induce_runner,
+        induce_job_params,
+        induce_labels,
+    )
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        if args.run_async:
+            mgr = JobManager(conn)
+            mgr.recover()
+            job_id = mgr.submit(
+                INDUCE_LABELS_JOB_KIND,
+                induce_job_params(
+                    args.library,
+                    args.version,
+                    ecosystem=getattr(args, "ecosystem", None),
+                    topn=args.topn,
+                ),
+            )
+
+            async def _drive():
+                mgr.start_worker(build_induce_runner(settings, conn))
+                try:
+                    return await mgr.wait_for(job_id)
+                finally:
+                    mgr.stop_worker()
+
+            job = asyncio.run(_drive())
+            _print_job(job)
+            return 0 if job.status == "done" else 1
+        out = asyncio.run(
+            induce_labels(
+                conn,
+                settings,
+                args.library,
+                args.version,
+                ecosystem=getattr(args, "ecosystem", None),
+                topn=args.topn,
+            )
+        )
+    finally:
+        conn.close()
+    print(_json.dumps(out, ensure_ascii=False))
+    return 0
+
+
 def cmd_api_insight(args: argparse.Namespace) -> int:
     import json
 
     conn = _connect(_load_settings(args))
     try:
         try:
+            apis = args.apis.split(",") if getattr(args, "apis", None) else None
             rows = MiningReadService(conn).api_insight(
                 args.view,
                 getattr(args, "api", None),
+                apis=apis,
                 library=args.library,
                 version=args.version,
                 ecosystem=getattr(args, "ecosystem", None),
@@ -716,6 +771,8 @@ def cmd_pattern_insight(args: argparse.Namespace) -> int:
                 version=args.version,
                 ecosystem=getattr(args, "ecosystem", None),
                 limit=args.limit,
+                per_file_limit=getattr(args, "per_file_limit", None),
+                dedup=None if getattr(args, "no_dedup", False) is False else False,
             )
         except ValueError as exc:
             print(f"invalid: {exc}", file=sys.stderr)
@@ -1488,11 +1545,26 @@ def build_parser() -> argparse.ArgumentParser:
     p_catalog.add_argument("--ecosystem", default=None)
     p_catalog.set_defaults(func=cmd_catalog)
 
+    p_induce = sub.add_parser(
+        "induce-labels",
+        help="Induce pattern labels with chat",
+        parents=[_config_parent],
+    )
+    p_induce.add_argument("library")
+    p_induce.add_argument("version")
+    p_induce.add_argument("--ecosystem", default=None)
+    p_induce.add_argument("--topn", type=int, default=None)
+    p_induce.add_argument(
+        "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
+    )
+    p_induce.set_defaults(func=cmd_induce_labels)
+
     p_api = sub.add_parser(
         "api-insight", help="API usage views", parents=[_config_parent]
     )
-    p_api.add_argument("view", choices=["usage", "related", "args"])
+    p_api.add_argument("view", choices=["usage", "related", "args", "common"])
     p_api.add_argument("--api", default=None)
+    p_api.add_argument("--apis", default=None)
     p_api.add_argument("--library", default=None)
     p_api.add_argument("--version", default=None)
     p_api.add_argument("--ecosystem", default=None)
@@ -1502,7 +1574,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_pattern = sub.add_parser(
         "pattern-insight", help="Sequence and structure views", parents=[_config_parent]
     )
-    p_pattern.add_argument("view", choices=["patterns", "evidence", "tree", "clusters"])
+    p_pattern.add_argument(
+        "view",
+        choices=[
+            "patterns",
+            "evidence",
+            "tree",
+            "clusters",
+            "health",
+            "labels",
+            "snippets",
+        ],
+    )
     p_pattern.add_argument(
         "--pattern",
         default=None,
@@ -1518,6 +1601,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_pattern.add_argument("--version", default=None)
     p_pattern.add_argument("--ecosystem", default=None)
     p_pattern.add_argument("--limit", type=int, default=None)
+    p_pattern.add_argument("--per-file-limit", type=int, default=None)
+    p_pattern.add_argument("--no-dedup", action="store_true")
     p_pattern.set_defaults(func=cmd_pattern_insight)
 
     p_resolve = sub.add_parser(

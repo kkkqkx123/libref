@@ -122,8 +122,14 @@ def test_retrieval_queries_over_mined_data(conn, tmp_path):
     patterns = svc.list_patterns("demo", "0.1", containing=["numpy.array"])
     assert ["numpy.array", "numpy.zeros"] in [p["pattern"] for p in patterns]
 
-    evidence = svc.pattern_evidence(["numpy.array", "numpy.zeros"], "demo", "0.1")
-    assert len(evidence) >= 2
+    raw = svc.pattern_evidence(
+        ["numpy.array", "numpy.zeros"], "demo", "0.1", dedup=False, per_file_limit=10
+    )
+    assert len(raw) >= 2
+    diversified = svc.pattern_evidence(["numpy.array", "numpy.zeros"], "demo", "0.1")
+    assert len(diversified) >= 1
+    assert len(diversified) <= len(raw)
+    evidence = diversified
     first = evidence[0]
     assert first["caller_file"] and first["caller"]
     assert [c["callee"] for c in first["calls"]][:2] == ["numpy.array", "numpy.zeros"]

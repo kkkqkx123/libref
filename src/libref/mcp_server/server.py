@@ -155,7 +155,12 @@ def build_mcp_server(
             return _invalid("url is empty")
         if mode not in ("page", "window", "section"):
             return _invalid(f"unsupported read mode: {mode}")
-        if not isinstance(radius, int) or isinstance(radius, bool) or radius < 0 or radius > 20:
+        if (
+            not isinstance(radius, int)
+            or isinstance(radius, bool)
+            or radius < 0
+            or radius > 20
+        ):
             return _invalid("radius must be between 0 and 20")
         if mode == "window" and sort_order is None:
             return _invalid("window mode requires sort_order")
@@ -194,18 +199,21 @@ def build_mcp_server(
 
     @mcp.tool()
     def api_insight(
-        view: Literal["usage", "related", "args"],
+        view: Literal["usage", "related", "args", "common"],
         api: str | None = None,
+        apis: list[str] | None = None,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int | None = None,
     ) -> dict[str, Any]:
         """API-centric usage: frequency ranking, co-occurring APIs, argument shapes."""
-        if view not in ("usage", "related", "args"):
+        if view not in ("usage", "related", "args", "common"):
             return _invalid(f"unsupported api view: {view}")
         if view in ("related", "args") and not api:
             return _invalid(f"{view} view requires api")
+        if view == "common" and not api and not apis:
+            return _invalid("common view requires api or apis")
         bad = _check_limit(limit, low=1, high=500)
         if bad is not None:
             return _invalid(bad)
@@ -214,6 +222,7 @@ def build_mcp_server(
                 mining.api_insight(
                     view,
                     api,
+                    apis=apis,
                     library=library,
                     version=version,
                     ecosystem=ecosystem,
@@ -227,7 +236,9 @@ def build_mcp_server(
 
     @mcp.tool()
     def pattern_insight(
-        view: Literal["patterns", "evidence", "tree", "clusters"],
+        view: Literal[
+            "patterns", "evidence", "tree", "clusters", "health", "labels", "snippets"
+        ],
         pattern: list[str] | None = None,
         containing: list[str] | None = None,
         prefix: str | None = None,
@@ -237,7 +248,15 @@ def build_mcp_server(
         limit: int | None = None,
     ) -> dict[str, Any]:
         """Sequence and structure insight: patterns, evidence, feature tree, clusters."""
-        if view not in ("patterns", "evidence", "tree", "clusters"):
+        if view not in (
+            "patterns",
+            "evidence",
+            "tree",
+            "clusters",
+            "health",
+            "labels",
+            "snippets",
+        ):
             return _invalid(f"unsupported pattern view: {view}")
         if view == "evidence" and not pattern:
             return _invalid("evidence view requires a non-empty pattern")
@@ -256,6 +275,22 @@ def build_mcp_server(
                     ecosystem=ecosystem,
                     limit=limit,
                 )
+            )
+        except ValueError as exc:
+            return _invalid(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _failed(str(exc))
+
+    @mcp.tool()
+    def mining_health(
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+    ) -> dict[str, Any]:
+        """Reuse and diversity health signals computed from derived tables."""
+        try:
+            return mining.mining_health(
+                library=library, version=version, ecosystem=ecosystem
             )
         except ValueError as exc:
             return _invalid(str(exc))

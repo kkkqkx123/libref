@@ -34,8 +34,32 @@ def material_block(
     return unit_tag(attrs, body)
 
 
+def build_label_blocks(labels: list[dict[str, Any]], limit: int) -> str:
+    """Render pattern labels as extra grounded materials."""
+    if not labels:
+        return ""
+    units: list[str] = []
+    for index, label in enumerate(labels[: max(1, int(limit))]):
+        pattern = label.get("pattern") or []
+        body = str(label.get("summary") or "")
+        workflow = str(label.get("workflow") or "")
+        if workflow:
+            body = f"{body} Workflow: {workflow}" if body else workflow
+        attrs = {
+            "n": f"label-{index + 1}",
+            "name": str(label.get("name") or ""),
+            "pattern": ", ".join(str(p) for p in pattern),
+        }
+        units.append(unit_tag(attrs, truncate_material(body, limit)))
+    return "\n".join(units)
+
+
 def build_messages(
-    query: str, results: list[dict[str, Any]], full_by_id: dict[int, str], limit: int
+    query: str,
+    results: list[dict[str, Any]],
+    full_by_id: dict[int, str],
+    limit: int,
+    labels: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     """Build chat messages with boundary-marked materials appended to the query."""
     units = "\n".join(
@@ -44,6 +68,9 @@ def build_messages(
     )
     if len(results) > 0 and not units.strip():
         units = omitted_tag(len(results))
+    label_block = build_label_blocks(labels or [], limit)
+    if label_block:
+        units = f"{units}\n{label_block}" if units.strip() else label_block
     materials = f'<materials count="{len(results)}">\n{units}\n</materials>'
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -69,4 +96,3 @@ def build_citations(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return cites
-

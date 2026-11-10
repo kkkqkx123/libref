@@ -84,6 +84,12 @@ class LibrefSettings(BaseSettings):
     fts_w_path: float = Field(default=3.0, ge=0)
     cluster_threshold: float = Field(default=0.15, ge=0)
     cluster_min_size: int = Field(default=2, ge=1)
+    evidence_per_file_limit: int = Field(default=1, ge=1)
+    evidence_dedup: bool = True
+    induction_enabled: bool = False
+    induction_topn: int = Field(default=20, ge=1)
+    induction_batch: int = Field(default=8, ge=1)
+    induction_prompt_version: str = "v1"
     # Registry resolution config: cache TTL, offline toggle, private allow, mirror presets, ecosystem base mapping, external overrides file.
     # Secret-based auth is out of scope; mirror addresses are usable only after being explicitly enabled here.
     # When adding an ecosystem, add entries to the default base and each preset plus a new registry_<eco>.py provider.
@@ -265,6 +271,12 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "cluster_alpha",
             "cluster_threshold",
             "cluster_min_size",
+            "evidence_per_file_limit",
+            "evidence_dedup",
+            "induction_enabled",
+            "induction_topn",
+            "induction_batch",
+            "induction_prompt_version",
             "retriever_window_radius",
             "retriever_expand_window",
             "candidate_multiplier",

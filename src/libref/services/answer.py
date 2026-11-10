@@ -7,7 +7,10 @@ from typing import Any
 
 from libref.llm.chat import ChatFn, build_chat_fn
 from libref.llm.errors import LlmConfigError
-from libref.services.answer_materials import build_citations, build_messages
+from libref.services.answer_materials import (
+    build_citations,
+    build_messages,
+)
 
 
 async def answer_query_async(
@@ -58,7 +61,16 @@ async def answer_query_async(
     except Exception:  # noqa: BLE001 — missing full content degrades gracefully to empty materials
         full_by_id = {}
     cap = settings.material_limit if material_limit is None else material_limit
-    messages = build_messages(query, results, full_by_id, cap)
+    labels: list[dict[str, Any]] = []
+    try:
+        from libref.services.mining_read import MiningReadService
+
+        labels = MiningReadService(conn).list_labels(
+            library=library, version=version, ecosystem=ecosystem, limit=3
+        )
+    except Exception:  # noqa: BLE001 — labels are display-only enrichment
+        labels = []
+    messages = build_messages(query, results, full_by_id, cap, labels=labels)
     answer = await answer_chat(messages)
     return {
         "answer": answer,

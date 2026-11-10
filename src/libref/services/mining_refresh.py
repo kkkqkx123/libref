@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 MINE_PATTERNS_JOB_KIND = "mine_patterns"
+INDUCE_LABELS_JOB_KIND = "induce_labels"
 
 DEFAULT_MINSUP = 2
 DEFAULT_MAXLEN = 10
@@ -28,10 +29,12 @@ def _cluster_defaults(
 
 
 def _clear_derived(conn, version_id: int) -> None:
-    """Clear all derived mining outputs within a version, keeping the three tables consistent when the call or sequence list is empty."""
+    """Clear all derived mining outputs within a version, keeping the tables consistent when the call or sequence list is empty."""
     conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
     conn.execute("DELETE FROM api_clusters WHERE version_id=?", (version_id,))
+    if _label_table_ready(conn):
+        conn.execute("DELETE FROM pattern_labels WHERE version_id=?", (version_id,))
 
 
 def _review_map(conn, version_id: int) -> dict[int, str]:
@@ -378,6 +381,184 @@ def build_mine_runner(settings, conn):
                     _cluster_fields["cluster_min_size"].default,
                 )
             ),
+        )
+
+    return runner
+
+
+def _label_table_ready(conn) -> bool:
+    row = conn.execute(
+        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='pattern_labels'"
+    ).fetchone()
+    return bool(row and row[0])
+
+
+def induce_job_params(
+    library: str,
+    version: str,
+    *,
+    ecosystem: str | None = None,
+    topn: int | None = None,
+    include_ambiguous: bool = False,
+) -> dict[str, Any]:
+    """Build induction job params with replayable scope."""
+    return {
+        "library": library,
+        "version": version,
+        "ecosystem": ecosystem,
+        "topn": topn,
+        "include_ambiguous": include_ambiguous,
+    }
+
+
+async def induce_labels(
+    conn,
+    settings,
+    library: str,
+    version: str,
+    *,
+    ecosystem: str | None = None,
+    topn: int | None = None,
+    include_ambiguous: bool = False,
+    chat=None,
+) -> dict[str, Any]:
+    """Induce names for top patterns with a chat function; disabled without a key."""
+    import json as _json
+
+    from libref.config import setting_or_default
+    from libref.llm.errors import LlmConfigError
+    from libref.mining.induction import (
+        InductionInput,
+        build_label_prompt,
+        parse_label_payload,
+        pattern_hash,
+    )
+    from libref.services.libraries import LibraryService
+    from libref.services.mining_read import MiningReadService
+
+    if not bool(setting_or_default(settings, "induction_enabled")):
+        return {"disabled": True, "labeled": 0, "failed": 0, "skipped": 0}
+    resolve_chat = chat
+    if resolve_chat is None:
+        try:
+            from libref.services.factory import build_gateway
+
+            resolve_chat = build_gateway(settings).chat_fn()
+        except Exception:  # noqa: BLE001 -- missing key disables induction
+            resolve_chat = None
+    if resolve_chat is None:
+        raise LlmConfigError("chat is not enabled: enable chat and set an api key")
+    if not _label_table_ready(conn):
+        return {"disabled": True, "reason": "missing table", "labeled": 0}
+    catalog = LibraryService(conn)
+    if ecosystem is not None:
+        library_id, version_id = catalog.ensure_library_version(
+            library, version, ecosystem
+        )
+    else:
+        library_id, version_id = catalog.ensure_library_version(library, version)
+    want_topn = (
+        int(topn)
+        if topn is not None
+        else int(setting_or_default(settings, "induction_topn"))
+    )
+    prompt_version = str(setting_or_default(settings, "induction_prompt_version"))
+    model = str(setting_or_default(settings, "chat_model"))
+    reader = MiningReadService(conn)
+    patterns = reader.list_patterns(
+        library, version, ecosystem, limit=max(1, want_topn)
+    )
+    labeled = 0
+    failed = 0
+    skipped = 0
+    for entry in patterns:
+        names = list(entry.get("pattern") or [])
+        if not names:
+            continue
+        phash = pattern_hash(names)
+        exists = conn.execute(
+            "SELECT count(*) FROM pattern_labels WHERE version_id=? AND pattern_hash=? AND model=? AND prompt_version=?",
+            (version_id, phash, model, prompt_version),
+        ).fetchone()
+        if exists and int(exists[0]) > 0:
+            skipped += 1
+            continue
+        shapes = []
+        try:
+            shapes = reader.arg_shapes(names[0], library, version, ecosystem, limit=3)
+        except Exception:  # noqa: BLE001 -- shapes are advisory for prompts
+            shapes = []
+        siblings: list[str] = []
+        try:
+            for rel in reader.related_apis(
+                names[0], library, version, ecosystem, limit=6
+            ):
+                siblings.append(str(rel.get("api") or ""))
+        except Exception:  # noqa: BLE001 -- siblings are advisory for prompts
+            siblings = []
+        allowed = set(names) | {s for s in siblings if s}
+        item = InductionInput(
+            pattern=names,
+            support=int(entry.get("support", 1) or 1),
+            arg_shapes=[
+                {"args": s.get("args"), "count": s.get("count", 0)} for s in shapes
+            ],
+            representative=names[0],
+            siblings=[s for s in siblings if s],
+        )
+        try:
+            import asyncio as _asyncio
+
+            messages = build_label_prompt(item)
+            produced = resolve_chat(messages)
+            if _asyncio.iscoroutine(produced):
+                produced = await produced
+            label = parse_label_payload(str(produced), allowed)
+        except Exception:  # noqa: BLE001 -- one bad reply must not block the batch
+            failed += 1
+            continue
+        conn.execute(
+            "INSERT INTO pattern_labels(library_id, version_id, pattern_hash, pattern, model,"
+            " prompt_version, name, summary, category_path, workflow, related_apis)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(version_id, pattern_hash, model, prompt_version) DO UPDATE SET"
+            " pattern=excluded.pattern, name=excluded.name, summary=excluded.summary,"
+            " category_path=excluded.category_path, workflow=excluded.workflow,"
+            " related_apis=excluded.related_apis, updated_at=datetime('now')",
+            (
+                library_id,
+                version_id,
+                phash,
+                _json.dumps(names, ensure_ascii=False),
+                model,
+                prompt_version,
+                label.name,
+                label.summary,
+                _json.dumps(label.category_path, ensure_ascii=False),
+                label.workflow,
+                _json.dumps(label.related_apis, ensure_ascii=False),
+            ),
+        )
+        labeled += 1
+    conn.commit()
+    return {"disabled": False, "labeled": labeled, "failed": failed, "skipped": skipped}
+
+
+def build_induce_runner(settings, conn):
+    """Build the induction job consumer."""
+
+    async def runner(job):
+        if job.kind != INDUCE_LABELS_JOB_KIND:
+            raise ValueError(f"unsupported job kind: {job.kind}")
+        p = job.params
+        return await induce_labels(
+            conn,
+            settings,
+            p["library"],
+            p["version"],
+            ecosystem=p.get("ecosystem"),
+            topn=p.get("topn"),
+            include_ambiguous=bool(p.get("include_ambiguous", False)),
         )
 
     return runner
