@@ -228,7 +228,7 @@ def _plan_targets(
     """Scrape target planning: scope filter plus start-page fallback plus pagination truncation; pure decisions, no DB access."""
     policy = build_scope(start_url, scope)
     candidates = seed.urls + [u for u in seed.cross_site if u not in seed.urls]
-    accepted, rejected = policy.filter(candidates)
+    accepted, rejected, stats = policy.filter_with_stats(candidates)
     if not accepted and policy.accept(start_url):
         accepted = [start_url]
     query = (scope or {}).get("crawl_query")
@@ -239,7 +239,7 @@ def _plan_targets(
         accepted = accepted[:max_pages]
         ingest_truncated = True
     truncated = bool(seed.truncated or ingest_truncated)
-    return accepted, rejected, truncated
+    return accepted, rejected, truncated, stats
 
 
 def _record_outcome(
@@ -550,6 +550,7 @@ class IngestService:
                 "chunk_reused",
                 "seed_discovered",
                 "scope_rejected",
+                "scope_content_type_rejected",
                 "seed_truncated",
                 "snapshot_written",
                 "snapshot_quota_skipped",
@@ -594,11 +595,14 @@ class IngestService:
                     force=force_seed,
                 )
                 counts["discover_ms"] = int((_time.monotonic() - discover_start) * 1000)
-                accepted, rejected, truncated = _plan_targets(
+                accepted, rejected, truncated, plan_stats = _plan_targets(
                     seed, start_url, scope, max_pages
                 )
                 counts["skipped"] += len(rejected)
                 counts["scope_rejected"] += len(rejected)
+                counts["scope_content_type_rejected"] += int(
+                    plan_stats.content_type_rejected
+                )
                 counts["seed_discovered"] += len(seed.urls)
                 if seed.source == "none" and seed.failed:
                     counts["failed"] += 1
@@ -890,11 +894,15 @@ class IngestService:
         if not await robots.can_fetch(url):
             return StoreResult("skipped"), 0, False, stage_ms, _FetchDetail()
         delay = await robots.crawl_delay(url)
+        cache_mode = (
+            "bypass" if (scope or {}).get("bypass_cache", False) else "enabled"
+        )
         result = await fetcher.fetch(
             url,
             etag=page.etag if page else None,
             last_modified=page.last_modified if page else None,
             crawl_delay=delay,
+            cache_mode=cache_mode,  # type: ignore[arg-type]
         )
         if result.status == "unchanged":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)

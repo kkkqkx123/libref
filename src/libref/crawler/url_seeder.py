@@ -23,6 +23,7 @@ _LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
 
 _SITEMAP_NAMES = ("sitemap.xml", "sitemap_index.xml", "sitemap-index.xml")
 _SITEMAP_GZ_NAMES = ("sitemap.xml.gz", "sitemap_index.xml.gz", "sitemap-index.xml.gz")
+_FEED_NAMES = ("feed.xml", "atom.xml", "rss.xml", "feed")
 _LLMS_VARIANTS = ("llms.txt", "llms-full.txt")
 _MAX_SITEMAP_DEPTH = 3
 _MAX_SITEMAP_URLS = 20000
@@ -114,7 +115,7 @@ class UrlSeeder:
         score_threshold: float | None = None,
         force: bool = False,
     ) -> SeedResult:
-        """Discover doc URLs from the start URL; fall back to directory-level llms.txt, else walk the sitemap queue."""
+        """Discover doc URLs from the start URL; llms.txt first, then the sitemap queue, then feed fallback."""
         if not force and self._cache_ttl > 0:
             hit = _SEED_CACHE.get(start_url)
             if hit is not None and time.time() - hit[0] < self._cache_ttl:
@@ -131,11 +132,25 @@ class UrlSeeder:
             transient = False
         else:
             sitemap = await self._collect_sitemap(start_url)
-            result = sitemap
-            attempted = list(dict.fromkeys(llms.attempted + sitemap.attempted))
-            errors = {**llms.errors, **sitemap.errors}
-            truncated = llms.truncated or sitemap.truncated
-            transient = llms.failed or sitemap.failed
+            if sitemap.urls:
+                result = sitemap
+                attempted = list(dict.fromkeys(llms.attempted + sitemap.attempted))
+                errors = {**llms.errors, **sitemap.errors}
+                truncated = llms.truncated or sitemap.truncated
+                transient = llms.failed or sitemap.failed
+            else:
+                feed = await self._collect_feed(start_url)
+                result = feed if feed.urls else sitemap
+                attempted = list(
+                    dict.fromkeys(
+                        llms.attempted + sitemap.attempted + feed.attempted
+                    )
+                )
+                errors = {**llms.errors, **sitemap.errors, **feed.errors}
+                truncated = (
+                    llms.truncated or sitemap.truncated or feed.truncated
+                )
+                transient = llms.failed or sitemap.failed or feed.failed
 
         seen: set[str] = set()
         urls: list[str] = []
@@ -421,9 +436,40 @@ class UrlSeeder:
             return None, f"HTTP {resp.status_code}", False
         return resp.content, None, False
 
-    async def _fetch_body(self, url: str) -> bytes | None:
-        body, _, _ = await self._get_bytes(url)
-        return body
+    async def _collect_feed(self, start_url: str) -> SeedResult:
+        """Feed fallback: try conventional feed paths; successful hits source as feed."""
+        attempted: list[str] = []
+        errors: dict[str, str] = {}
+        transient_seen = False
+        for candidate in _feed_candidates(start_url):
+            attempted.append(candidate)
+            body, note, transient = await self._get_bytes(candidate)
+            if body is None:
+                errors[candidate] = note or "fetch failed"
+                transient_seen = transient_seen or transient
+                continue
+            try:
+                payload = _maybe_gunzip(body)
+            except OSError:
+                payload = body
+            text = payload.decode("utf-8", errors="replace")
+            urls = _parse_feed_urls(text, candidate)
+            if urls:
+                capped, capped_truncated = _cap_urls(urls)
+                return SeedResult(
+                    urls=capped,
+                    source="feed",
+                    attempted=attempted,
+                    errors=errors,
+                    truncated=capped_truncated,
+                )
+            errors[candidate] = "no urls"
+        return SeedResult(
+            attempted=attempted,
+            errors=errors,
+            truncated=False,
+            failed=transient_seen,
+        )
 
     async def _head_ok(self, url: str) -> bool:
         try:
@@ -533,3 +579,53 @@ def _sitemap_directories(start_url: str) -> list[str]:
             if current not in dirs and current != start_dir:
                 dirs.append(current)
     return dirs
+
+
+_FEED_LINK_HREF_RE = re.compile(
+    r"<link[^>]+href\s*=\s*[\"']([^\"'<>\s]+)[\"']", re.IGNORECASE
+)
+_FEED_LINK_TEXT_RE = re.compile(r"<link>([^<>]+)</link>", re.IGNORECASE)
+_FEED_GUID_RE = re.compile(r"<guid[^>]*>([^<>]+)</guid>", re.IGNORECASE)
+_FEED_ENCLOSURE_RE = re.compile(
+    r"<enclosure[^>]+url\s*=\s*[\"']([^\"'<>\s]+)[\"']", re.IGNORECASE
+)
+
+
+def _feed_candidates(start_url: str) -> list[str]:
+    """Conventional feed paths under each sitemap directory; order-preserving dedup."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for directory in _sitemap_directories(start_url):
+        base = directory.rstrip("/")
+        for name in _FEED_NAMES:
+            candidate = f"{base}/{name}"
+            if candidate not in seen:
+                seen.add(candidate)
+                out.append(candidate)
+    return out
+
+
+def _parse_feed_urls(text: str, base_url: str) -> list[str]:
+    """Tolerant feed link extraction: Atom href, RSS link text, guid, enclosure."""
+    found: list[str] = []
+    for pattern in (
+        _FEED_LINK_HREF_RE,
+        _FEED_LINK_TEXT_RE,
+        _FEED_GUID_RE,
+        _FEED_ENCLOSURE_RE,
+    ):
+        for match in pattern.findall(text or ""):
+            token = _clean_link_token(str(match))
+            if not token or token.startswith(("#", "mailto:", "data:")):
+                continue
+            if token.startswith(("http://", "https://")):
+                found.append(token)
+            elif token.startswith("/") or _looks_like_doc_path(token):
+                found.append(urljoin(base_url, token))
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for url in found:
+        if url not in seen:
+            seen.add(url)
+            ordered.append(url)
+    return ordered

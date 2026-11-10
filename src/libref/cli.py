@@ -142,6 +142,7 @@ def _scope_from_args(args: argparse.Namespace) -> dict:
         "follow_links": bool(getattr(args, "follow_links", False)),
         "crawl_query": getattr(args, "crawl_query", None),
         "score_threshold": getattr(args, "score_threshold", None),
+        "bypass_cache": bool(getattr(args, "bypass_cache", False)),
     }
 
 
@@ -1238,6 +1239,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Rank crawl targets by URL relevance to this query",
     )
     p_ingest.add_argument("--score-threshold", type=float, default=None)
+    p_ingest.add_argument(
+        "--bypass-cache",
+        action="store_true",
+        help="Skip conditional headers and refetch without cache revalidation",
+    )
     p_ingest.set_defaults(func=cmd_ingest)
 
     p_refresh = sub.add_parser(
@@ -1251,12 +1257,55 @@ def build_parser() -> argparse.ArgumentParser:
     p_refresh.add_argument("--ecosystem", default=None)
     p_refresh.add_argument("--max-pages", type=int, default=None)
     p_refresh.add_argument("--prefilter", action="store_true")
+    p_refresh.add_argument(
+        "--allow-cross-site", action="store_true", help="Allow crawling across sites"
+    )
+    p_refresh.add_argument(
+        "--allow-subdomains",
+        action="store_true",
+        help="Allow same-domain subdomains",
+    )
+    p_refresh.add_argument(
+        "--path-prefix",
+        action="append",
+        default=None,
+        help="Accept only paths under this prefix; repeatable",
+    )
+    p_refresh.add_argument(
+        "--path-suffix",
+        action="append",
+        default=None,
+        help="Accept only paths with this suffix; repeatable",
+    )
+    p_refresh.add_argument(
+        "--include-pattern",
+        action="append",
+        default=None,
+        help="Regex allowlist; repeatable",
+    )
+    p_refresh.add_argument(
+        "--exclude-pattern",
+        action="append",
+        default=None,
+        help="Regex denylist; repeatable",
+    )
+    p_refresh.add_argument(
+        "--max-depth",
+        type=int,
+        default=None,
+        help="Maximum depth relative to the start URL",
+    )
     p_refresh.add_argument("--render-js", action="store_true")
     p_refresh.add_argument("--render-wait-for", default=None)
     p_refresh.add_argument("--render-timeout-ms", type=int, default=None)
     p_refresh.add_argument("--follow-links", action="store_true")
     p_refresh.add_argument("--crawl-query", default=None)
     p_refresh.add_argument("--score-threshold", type=float, default=None)
+    p_refresh.add_argument(
+        "--bypass-cache",
+        action="store_true",
+        help="Skip conditional headers and refetch without cache revalidation",
+    )
     p_refresh.add_argument(
         "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
     )
