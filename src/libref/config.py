@@ -10,7 +10,7 @@ import json
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -44,6 +44,9 @@ class LibrefSettings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     qdrant_collection: str = "libref_chunks"
     qdrant_timeout: float = Field(default=5.0, gt=0)
+    vector_backend: Literal["qdrant", "simvec"] = "simvec"
+    simvec_dir: Path | None = None
+    simvec_lib: str | None = None
     chunk_embed_max_tokens: int = Field(default=512, ge=1)
     chunk_embed_overlap_tokens: int = Field(default=50, ge=0)
     chunk_embed_min_tokens: int = Field(default=150, ge=0)
@@ -205,7 +208,16 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "ingest_clean_cache_cap",
         }
     ),
-    "storage": frozenset({"qdrant_url", "qdrant_collection", "qdrant_timeout"}),
+    "storage": frozenset(
+        {
+            "qdrant_url",
+            "qdrant_collection",
+            "qdrant_timeout",
+            "vector_backend",
+            "simvec_dir",
+            "simvec_lib",
+        }
+    ),
     "chunking": frozenset(
         {
             "chunk_embed_max_tokens",

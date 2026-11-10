@@ -38,6 +38,7 @@ markers = [
     "integration: needs sqlite, subprocess or external service",
     "e2e: needs real network (repos/registries), default skipped unless LIBREF_RUN_E2E=1",
     "requires_qdrant: needs localhost Qdrant service",
+    "requires_simvec: needs built libsimvec from crates/simvec",
     "requires_binary: needs built libref entrypoint",
 ]
 

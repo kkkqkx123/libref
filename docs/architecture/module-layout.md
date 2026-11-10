@@ -26,7 +26,7 @@ libref/
 │   │   │                       #      documents_fts + 扩展表
 │   │   │                       #      api_entities/call_instances/seq_patterns/review_status/schema_meta
 │   │   ├── migrations.py       # [P0] 版本化迁移（对齐 docs-mcp-server 迁移语义）
-│   │   └── conn.py             # [P0] 连接管理（PRAGMA）；向量通道在 store/vec_store（Qdrant）
+│   │   └── conn.py             # [P0] 连接管理（PRAGMA）；向量通道在 store/vec_store
 │   │
 │   ├── crawler/                # ── 分支 A：文档抓取（借鉴 crawl4ai 算法，自研实现）──
 │   │   ├── __init__.py
@@ -71,8 +71,8 @@ libref/
 │   ├── store/                  # ── 知识库与检索 ──
 │   │   ├── __init__.py
 │   │   ├── document_store.py   # [P1/P3] pages/documents 读写、增量结局六态
-│   │   ├── vec_store.py        # [P0] QdrantVecStore：向量写入/KNN/集合治理（真源 SQLite 的可重建派生索引）
-│   │   └── retriever.py        # [P3] FTS5 BM25 + Qdrant KNN → RRF → 频次重排 → 段落重组
+│   │   ├── vec_store.py        # [P0] 向量双后端（默认本地 simvec，Qdrant 保留）：写入/KNN/集合治理（真源 SQLite 的可重建派生索引）
+│   │   └── retriever.py        # [P3] FTS5 BM25 + 向量 KNN → RRF → 频次重排 → 段落重组
 │   │
 │   ├── services/               # ── 业务工具层（三出口唯一调用面）──
 │   │   ├── __init__.py
@@ -100,7 +100,8 @@ libref/
     ├── test_migrations.py      # [P0] 迁移可重放/失败回滚
     ├── test_fts_sync.py        # [P0] FTS 触发器增/改/删同步
     ├── test_config.py          # [P0] 配置默认值/环境覆盖
-    ├── test_vec_store.py       # [P0] QdrantVecStore 集成测试（服务不可达自动 skip）
+    ├── test_vec_store.py       # [P0] Qdrant 后端集成测试（服务不可达自动 skip）
+    ├── test_simvec_store.py    # 本地 simvec 后端集成测试（构建物缺席自动 skip）
     ├── test_chunking.py        # [P1]
     ├── test_url_seeder.py      # [P1]（本地 fixtures，不联网）
     ├── test_astminer.py        # [P2]（tree-sitter 抽取 vs stdlib ast 抽样 diff）
@@ -114,7 +115,7 @@ crawler ─┐
 chunking ├→ db ←─ store ←─ services ←─ {cli, mcp_server, web}
 astminer ┘   ↑       ↑
 mining ──────┘       llm（传输叶，只依赖 httpx；store 经函数注入消费，services 经构造器装配）
-              └→ Qdrant（store/vec_store 唯一触达点）
+              └→ 向量后端（store/vec_store 唯一触达点：Qdrant 服务或本地 simvec 引擎）
 ```
 
 1. **单向依赖**：`db` 是唯一被共享的 SQL 底层；`services/` 是唯一编排层；三个出口模块（`cli/mcp_server/web`）**禁止**绕过 services 直接调 store/crawler/mining。
@@ -122,13 +123,13 @@ mining ──────┘       llm（传输叶，只依赖 httpx；store 经
 3. **mining 纯内存算法**：不 import db/store，输入为纯 Python 数据（`list[list[int]]`），落库由 services 编排——保持算法可单测、可离线批跑。
 4. **astminer 与 crawler 互不依赖**：两条分支仅通过 db 汇合；SourceCode 类网页由 crawler 按 MIME 转投 astminer 的调用点经 services 编排。
 5. **跨包边界的 schema 均为 pydantic 模型**：抽取记录、调用实例、MCP 参数、REST 响应共用 `db/schema` 的定义派生，杜绝字段漂移。
-6. **Qdrant 仅 store 层可达**：`store/vec_store.py` 是唯一持有 `qdrant_client` 的模块；SQLite 为唯一真源，Qdrant 向量为可重建派生索引（失效后按 SQLite 重灌，不双写事务，见 docs/plan/qdrant-migration.md）。
+6. **向量后端仅 store 层可达**：`store/vec_store.py` 是唯一持有 `qdrant_client` 与 simvec 引擎句柄的模块；SQLite 为唯一真源，向量为可重建派生索引（失效后按 SQLite 重灌，不双写事务，见 docs/plan/qdrant-migration.md 与 docs/plan/simvec-integration.md）。
 
 ## 3. 各阶段最小可运行单元（与 tech-stack.md §8 对齐）
 
 | 阶段 | 新增模块 | 最小验证 |
 |---|---|---|
-| P0 | `db/`、`config.py`、`store/vec_store` | 建库迁移可重放；FTS 触发器同步正确；Qdrant 集合治理/版本过滤检索（真连集成测试） |
+| P0 | `db/`、`config.py`、`store/vec_store` | 建库迁移可重放；FTS 触发器同步正确；向量集合治理/版本过滤检索（双后端集成测试） |
 | P1 | `crawler/`、`chunking/`、`store/document_store`、`services/{search,ingest,jobs}`、`mcp_server/server`、`cli.py` | sitemap→抓取→分块→FTS→MCP `search_docs` stdio 全链路 |
 | P2 | `astminer/`、`mining/` | 仓库→调用实例→频次→closed 序列模式落 `seq_patterns` |
 | P3 | `store/{embeddings,retriever}`、`web/`、`mcp_server/auth`、`services/review` | RRF+频次重排检索；Web 审核工作流 |

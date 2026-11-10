@@ -35,6 +35,9 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# 依赖锁文件（各机器镜像源不同，不再跟踪，由各环境自行生成）
+uv.lock
+
 # 数据库文件
 data/
 

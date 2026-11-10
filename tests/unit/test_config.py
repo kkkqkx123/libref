@@ -37,6 +37,9 @@ def test_defaults(tmp_path, monkeypatch) -> None:
     assert s.http_proxy is None
     assert s.no_proxy is None
     assert s.registry_overrides_file is None
+    assert s.vector_backend == "simvec"
+    assert s.simvec_dir is None
+    assert s.simvec_lib is None
 
 
 def test_dotenv_file(tmp_path, monkeypatch) -> None:

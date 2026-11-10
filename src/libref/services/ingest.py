@@ -30,7 +30,7 @@ from libref.llm import EmbedFn
 from libref.services.jobs import Job, JobManager
 from libref.services.libraries import LibraryService
 from libref.store.document_store import DocumentInput, DocumentStore, StoreResult
-from libref.store.vec_store import QdrantVecStore
+from libref.store.vec_store import VectorStore
 from libref.text.normalize import (
     classify_content,
     normalize_markdown,
@@ -410,7 +410,7 @@ class IngestService:
         settings,
         conn,
         *,
-        vec_store: QdrantVecStore | None = None,
+        vec_store: VectorStore | None = None,
         embed: EmbedFn | None = None,
     ) -> None:
         self._settings = settings

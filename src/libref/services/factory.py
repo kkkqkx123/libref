@@ -1,7 +1,7 @@
 """Composition root: single place that wires gateway, vectors, and services.
 
 Exits (cli, mcp_server, web) only call this factory instead of
-constructing QdrantVecStore and LlmGateway inline.
+constructing vector stores and LlmGateway inline.
 """
 
 from __future__ import annotations
@@ -17,17 +17,29 @@ def build_gateway(settings):
 def build_vector(settings, gateway=None):
     """Build vector store and embed function, returning (None, None) when disabled."""
     from libref.llm import LlmGateway
-    from libref.store.vec_store import QdrantVecStore, collection_for
+    from libref.store.vec_store import (
+        QdrantVecStore,
+        SimvecVecStore,
+        collection_for,
+        simvec_root_for,
+    )
 
     gw = gateway if gateway is not None else LlmGateway(settings)
     embed = gw.embed_fn()
     if embed is None:
         return None, None, gw
-    vec = QdrantVecStore(
-        settings.qdrant_url,
-        collection_for(settings.qdrant_collection, settings.db_path),
-        timeout=settings.qdrant_timeout,
-    )
+    if settings.vector_backend == "simvec":
+        vec = SimvecVecStore(
+            simvec_root_for(settings.db_path, settings.simvec_dir),
+            collection_for(settings.qdrant_collection, settings.db_path),
+            lib=settings.simvec_lib,
+        )
+    else:
+        vec = QdrantVecStore(
+            settings.qdrant_url,
+            collection_for(settings.qdrant_collection, settings.db_path),
+            timeout=settings.qdrant_timeout,
+        )
     return vec, embed, gw
 
 
