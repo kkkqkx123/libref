@@ -22,8 +22,10 @@ from libref.crawler.registry.overrides import ensure_overrides_file, get_overrid
 
 def infer_ecosystem(explicit: str | None, name: str) -> str:
     """Ecosystem determination: explicit wins; bare names are not guessed; only scope and coordinate shape are inferable."""
+    from libref.crawler.registry import canonical_ecosystem
+
     if explicit is not None:
-        eco = explicit.strip().lower()
+        eco = canonical_ecosystem(explicit)
         if eco not in ("pypi", "npm", "maven"):
             raise ValueError(f"unsupported ecosystem: {explicit}")
         if eco == "pypi" and name.strip().startswith("@"):
@@ -297,7 +299,11 @@ def _explicit_docs_resolution(
     clean = sanitize_http_url(explicit_url, allow_private=allow_private)
     if clean is None:
         raise ValueError(f"invalid documentation address: {explicit_url}")
-    eco = ecosystem.strip().lower() if ecosystem else "custom"
+    from libref.crawler.registry import canonical_ecosystem
+
+    eco = canonical_ecosystem(ecosystem) if ecosystem else "custom"
+    if eco is None:
+        eco = ecosystem.strip().lower() if ecosystem else "custom"
     label = name.strip()
     if eco in ("pypi", "npm", "maven"):
         label = normalize_name(eco, name)
@@ -337,7 +343,11 @@ def _explicit_repo_resolution(
         text = cleaned
     if requested_version is None:
         raise ValueError("explicit repo source requires a version")
-    eco = ecosystem.strip().lower() if ecosystem else "custom"
+    from libref.crawler.registry import canonical_ecosystem as _canonical
+
+    eco = _canonical(ecosystem) if ecosystem else "custom"
+    if eco is None:
+        eco = ecosystem.strip().lower() if ecosystem else "custom"
     label = name.strip()
     if eco in ("pypi", "npm", "maven"):
         label = normalize_name(eco, name)

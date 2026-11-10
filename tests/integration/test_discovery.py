@@ -204,3 +204,49 @@ def test_disabled_and_invalid_inputs(conn, monkeypatch, tmp_path) -> None:
         run(svc.search_async("demo", "cargo", 10, counting_client([])))
     with pytest.raises(ValueError, match="between 1 and 100"):
         run(svc.search_async("demo", None, 0, counting_client([])))
+
+
+def test_ecosystem_aliases_share_canonical_cache(conn, monkeypatch, tmp_path) -> None:
+    svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
+    calls: list = []
+    via_alias = run(svc.search_async("demo", "py", 10, counting_client(calls)))
+    assert calls
+    assert via_alias[0]["ecosystem"] == "pypi"
+    calls.clear()
+    via_canonical = run(svc.search_async("demo", "pypi", 10, counting_client(calls)))
+    assert calls == []
+    assert via_canonical == via_alias
+
+
+def test_js_alias_matches_npm(conn, monkeypatch, tmp_path) -> None:
+    svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
+    items = run(svc.search_async("demo", "js", 10, counting_client([])))
+    assert items[0]["ecosystem"] == "npm"
+    assert items[0]["name"] == "demo"
+
+
+def test_pypi_fuzzy_search_lists_multiple_candidates(
+    conn, monkeypatch, tmp_path
+) -> None:
+    import httpx
+
+    html = (
+        '<a class="package-snippet" href="/project/demo/">'
+        '<span class="package-snippet__name">demo</span></a>'
+        '<a class="package-snippet" href="/project/demo-helper/">'
+        '<span class="package-snippet__name">demo-helper</span></a>'
+    )
+
+    def fuzzy_handler(request: httpx.Request) -> httpx.Response:
+        host, path = request.url.host, request.url.path
+        if host == "pypi.org" and path == "/search":
+            return httpx.Response(200, text=html)
+        return handler(request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(fuzzy_handler))
+    svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
+    items = run(svc.search_async("demo", "pypi", 10, client))
+    assert [c["name"] for c in items] == ["demo", "demo-helper"]
+    assert items[0]["exact"] is True
+    assert items[0]["docs_url"] == "https://demo.readthedocs.io/"
+    assert items[1]["source"] == "search:pypi"

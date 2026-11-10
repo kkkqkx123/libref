@@ -162,3 +162,52 @@ def test_rank_popularity_breaks_cross_source_tie(monkeypatch, tmp_path) -> None:
     )
     ranked = rank_candidates([npm, maven], "zzz")
     assert [c.name for c in ranked] == ["m-one", "n-one"]
+
+
+def test_canonical_ecosystem_aliases() -> None:
+    from libref.crawler.registry import canonical_ecosystem
+
+    assert canonical_ecosystem("py") == "pypi"
+    assert canonical_ecosystem("js") == "npm"
+    assert canonical_ecosystem("java") == "maven"
+    assert canonical_ecosystem("pypi") == "pypi"
+    assert canonical_ecosystem(None) is None
+    assert canonical_ecosystem("cargo") is None
+
+
+def test_pypi_search_parses_project_anchors() -> None:
+    from libref.crawler.registry.pypi import parse_pypi_search_html, pypi_search_url
+
+    assert "q=" in pypi_search_url("requests")
+    html = (
+        '<a class="package-snippet" href="/project/requests/">'
+        '<span class="package-snippet__name">requests</span>'
+        '<span class="package-snippet__version">2.32.0</span>'
+        '<p class="package-snippet__description">HTTP library</p></a>'
+        '<a href="/project/requests-toolbelt/">toolbelt</a>'
+        '<a href="/project/requests/">duplicate</a>'
+    )
+    items = parse_pypi_search_html(html)
+    assert [i["name"] for i in items] == ["requests", "requests-toolbelt"]
+    assert items[0]["version"] == "2.32.0"
+    assert items[0]["description"] == "HTTP library"
+    assert parse_pypi_search_html("") == []
+    assert parse_pypi_search_html("<not html") == []
+
+
+def test_npm_search_follows_explicit_mirror(monkeypatch, tmp_path) -> None:
+    from libref.crawler.registry.npm import npm_search_url_for
+    from tests.conftest import make_discovery_settings
+
+    default = make_discovery_settings(monkeypatch, tmp_path)
+    assert npm_search_url_for(default, "react", 5).startswith(
+        "https://registry.npmjs.org/-/v1/search?"
+    )
+    cn = make_discovery_settings(
+        monkeypatch,
+        tmp_path,
+        registry_mirror="cn",
+    )
+    assert npm_search_url_for(cn, "react", 5).startswith(
+        "https://registry.npmmirror.com/-/v1/search?"
+    )

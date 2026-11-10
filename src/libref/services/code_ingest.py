@@ -399,7 +399,10 @@ def lookup_index_source_cached(
 ) -> tuple[str, str] | None:
     from pathlib import Path
 
-    repo_name = f"{ecosystem}/{library}/{version}"
+    from libref.crawler.registry import canonical_ecosystem
+
+    eco = canonical_ecosystem(ecosystem) or ecosystem
+    repo_name = f"{eco}/{library}/{version}"
     row = conn.execute(
         "SELECT url, local_path FROM repos WHERE name=?", (repo_name,)
     ).fetchone()
@@ -411,17 +414,17 @@ def lookup_index_source_cached(
             return str(url), "repos"
     lib_row = conn.execute(
         "SELECT repo_url FROM libraries WHERE ecosystem=? AND name=?",
-        (ecosystem, library),
+        (eco, library),
     ).fetchone()
     if lib_row is not None and lib_row[0]:
         return str(lib_row[0]), "libraries"
-    if ecosystem in ("pypi", "npm", "maven"):
+    if eco in ("pypi", "npm", "maven"):
         try:
             from libref.crawler.registry import normalize_name
             from libref.services.resolver import read_cache
 
-            norm = normalize_name(ecosystem, library)
-            cached = read_cache(conn, ecosystem, norm)
+            norm = normalize_name(eco, library)
+            cached = read_cache(conn, eco, norm)
         except ValueError:
             cached = None
         if cached is not None and cached.get("repo_url"):

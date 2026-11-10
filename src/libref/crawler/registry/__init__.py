@@ -20,6 +20,28 @@ from pydantic import BaseModel, Field
 
 SUPPORTED_ECOSYSTEMS = ("pypi", "npm", "maven")
 
+ECOSYSTEM_ALIASES = {
+    "py": "pypi",
+    "python": "pypi",
+    "pip": "pypi",
+    "js": "npm",
+    "javascript": "npm",
+    "node": "npm",
+    "nodejs": "npm",
+    "java": "maven",
+}
+
+
+def canonical_ecosystem(ecosystem: str | None) -> str | None:
+    """Common language names map to registry ecosystems; canonical names pass through."""
+    if ecosystem is None:
+        return None
+    text = ecosystem.strip().lower()
+    if text in SUPPORTED_ECOSYSTEMS:
+        return text
+    return ECOSYSTEM_ALIASES.get(text)
+
+
 DEFAULT_REGISTRY_BASES = {
     "pypi": "https://pypi.org/pypi",
     "npm": "https://registry.npmjs.org",
@@ -99,15 +121,16 @@ class Resolution(BaseModel):
 
 def normalize_name(ecosystem: str, name: str) -> str:
     """Dispatch name normalization per ecosystem; implementations live in provider modules."""
-    if ecosystem == "pypi":
+    eco = canonical_ecosystem(ecosystem) or ecosystem.strip().lower()
+    if eco == "pypi":
         from libref.crawler.registry.pypi import normalize_pypi_name
 
         return normalize_pypi_name(name)
-    if ecosystem == "npm":
+    if eco == "npm":
         from libref.crawler.registry.npm import normalize_npm_name
 
         return normalize_npm_name(name)
-    if ecosystem == "maven":
+    if eco == "maven":
         from libref.crawler.registry.maven import normalize_maven_name
 
         return normalize_maven_name(name)
@@ -116,13 +139,14 @@ def normalize_name(ecosystem: str, name: str) -> str:
 
 def registry_base_for(ecosystem: str, settings) -> str:
     """Resolve the ecosystem base URL: an explicit mapping wins per-key, else fall back to the preset entry for that ecosystem."""
-    if ecosystem not in SUPPORTED_ECOSYSTEMS:
+    eco = canonical_ecosystem(ecosystem) or ecosystem.strip().lower()
+    if eco not in SUPPORTED_ECOSYSTEMS:
         raise ValueError(f"unsupported ecosystem: {ecosystem}")
     fields_set: set[str] = getattr(settings, "model_fields_set", set()) or set()
     if "registry_bases" in fields_set:
         bases = dict(getattr(settings, "registry_bases", None) or {})
-        if ecosystem in bases and str(bases[ecosystem]).strip():
-            return str(bases[ecosystem]).rstrip("/")
+        if eco in bases and str(bases[eco]).strip():
+            return str(bases[eco]).rstrip("/")
     mirror = (
         str(getattr(settings, "registry_mirror", "default") or "default")
         .strip()
@@ -135,9 +159,9 @@ def registry_base_for(ecosystem: str, settings) -> str:
         raise ValueError(
             f"unknown registry mirror: {mirror!r} (available: {available})"
         ) from None
-    if ecosystem in preset:
-        return str(preset[ecosystem]).rstrip("/")
-    return str(DEFAULT_REGISTRY_BASES[ecosystem]).rstrip("/")
+    if eco in preset:
+        return str(preset[eco]).rstrip("/")
+    return str(DEFAULT_REGISTRY_BASES[eco]).rstrip("/")
 
 
 def _is_private_host(host: str) -> bool:
@@ -280,16 +304,17 @@ async def _get_text(
 async def fetch_snapshot(
     ecosystem: str, raw_name: str, client: httpx.AsyncClient, settings
 ) -> RegistrySnapshot:
-    if ecosystem not in SUPPORTED_ECOSYSTEMS:
+    eco = canonical_ecosystem(ecosystem) or ecosystem.strip().lower()
+    if eco not in SUPPORTED_ECOSYSTEMS:
         raise ValueError(f"unsupported ecosystem: {ecosystem}")
-    name = normalize_name(ecosystem, raw_name)
+    name = normalize_name(eco, raw_name)
     if not name:
         raise ValueError("empty package name")
     allow_private = bool(settings.registry_allow_private)
-    if ecosystem == "pypi":
+    if eco == "pypi":
         from libref.crawler.registry.pypi import parse_pypi_payload, pypi_snapshot_url
 
-        base = registry_base_for(ecosystem, settings)
+        base = registry_base_for(eco, settings)
         resp = await _get_json(client, pypi_snapshot_url(base, name))
         if resp.status_code == 404:
             raise RegistryError("not_found", f"package not found: pypi:{name}")
@@ -298,10 +323,10 @@ async def fetch_snapshot(
         stable, versions, homepage, candidates, repo_url = parse_pypi_payload(
             resp.json(), allow_private=allow_private
         )
-    elif ecosystem == "npm":
+    elif eco == "npm":
         from libref.crawler.registry.npm import npm_snapshot_url, parse_npm_payload
 
-        base = registry_base_for(ecosystem, settings)
+        base = registry_base_for(eco, settings)
         resp = await _get_json(client, npm_snapshot_url(base, name))
         if resp.status_code == 404:
             raise RegistryError("not_found", f"package not found: npm:{name}")
@@ -319,7 +344,7 @@ async def fetch_snapshot(
             split_maven_name,
         )
 
-        base = registry_base_for(ecosystem, settings)
+        base = registry_base_for(eco, settings)
         group, artifact = split_maven_name(name)
         meta_resp = await _get_text(client, maven_metadata_url(base, group, artifact))
         if meta_resp.status_code == 404:
@@ -344,7 +369,7 @@ async def fetch_snapshot(
             if javadoc_url not in candidates:
                 candidates.append(javadoc_url)
     return RegistrySnapshot(
-        ecosystem=ecosystem,
+        ecosystem=eco,
         name=name,
         stable=stable,
         versions=versions,

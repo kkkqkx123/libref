@@ -37,18 +37,21 @@ class DiscoveryCandidate(BaseModel):
 
 def _normalize_query(ecosystem: str, query: str) -> str:
     text = query.strip()
-    if ecosystem == "maven":
+    from libref.crawler.registry import canonical_ecosystem
+
+    eco = canonical_ecosystem(ecosystem) or ecosystem.strip().lower()
+    if eco == "maven":
         from libref.crawler.registry.maven import normalize_maven_name
 
         try:
             return normalize_maven_name(text)
         except ValueError:
             return text
-    if ecosystem == "pypi":
+    if eco == "pypi":
         from libref.crawler.registry.pypi import normalize_pypi_name
 
         return normalize_pypi_name(text)
-    if ecosystem == "npm":
+    if eco == "npm":
         from libref.crawler.registry.npm import normalize_npm_name
 
         return normalize_npm_name(text)
@@ -103,10 +106,12 @@ class DiscoveryService:
     ) -> list[dict]:
         from libref.config import setting_or_default
         from libref.crawler.http import build_async_client
+        from libref.crawler.registry import canonical_ecosystem
 
         if not query.strip():
             raise ValueError("empty discovery query")
-        if ecosystem is not None and ecosystem not in SUPPORTED_ECOSYSTEMS:
+        eco = canonical_ecosystem(ecosystem) if ecosystem is not None else None
+        if ecosystem is not None and eco not in SUPPORTED_ECOSYSTEMS:
             raise ValueError(f"unsupported ecosystem: {ecosystem}")
         if not bool(setting_or_default(self._settings, "discovery_enabled")):
             raise ValueError("library discovery is disabled")
@@ -119,8 +124,8 @@ class DiscoveryService:
             raise ValueError("limit must be between 1 and 100")
         if client is None:
             async with build_async_client(self._settings) as owned:
-                return await self._search_with(owned, query, ecosystem, topn)
-        return await self._search_with(client, query, ecosystem, topn)
+                return await self._search_with(owned, query, eco, topn)
+        return await self._search_with(client, query, eco, topn)
 
     async def _search_with(
         self, client, query: str, ecosystem: str | None, topn: int
@@ -173,50 +178,121 @@ class DiscoveryService:
     async def _search_one(
         self, client, ecosystem: str, query: str
     ) -> list[DiscoveryCandidate]:
-        if ecosystem == "pypi":
+        from libref.crawler.registry import canonical_ecosystem
+
+        eco = canonical_ecosystem(ecosystem) or ecosystem
+        if eco == "pypi":
             return await self._search_pypi(client, query)
-        if ecosystem == "npm":
+        if eco == "npm":
             return await self._search_npm(client, query)
-        if ecosystem == "maven":
+        if eco == "maven":
             return await self._search_maven(client, query)
         raise ValueError(f"unsupported ecosystem: {ecosystem}")
 
     async def _search_pypi(self, client, query: str) -> list[DiscoveryCandidate]:
+        from libref.crawler.http import resilient_get
         from libref.crawler.registry import fetch_snapshot
+        from libref.crawler.registry.pypi import (
+            parse_pypi_search_html,
+            pypi_search_url,
+        )
 
+        async def _exact_snapshot(name: str):
+            try:
+                return await fetch_snapshot("pypi", name, client, self._settings)
+            except RegistryError as exc:
+                if exc.kind == "not_found":
+                    return None
+                raise
+
+        items: list[dict[str, str]] = []
         try:
-            snap = await fetch_snapshot("pypi", query.strip(), client, self._settings)
-        except RegistryError as exc:
-            if exc.kind == "not_found":
-                return []
-            raise
-        docs = list(snap.doc_candidates)
-        return [
-            DiscoveryCandidate(
-                ecosystem="pypi",
-                name=snap.name,
-                version=snap.stable or "",
-                description="",
-                docs_url=docs[0] if docs else None,
-                candidates=docs,
-                homepage=snap.homepage,
-                repo_url=snap.repo_url,
-                popularity=0.0,
-                updated="",
-                exact=True,
-                source="registry",
+            resp = await resilient_get(
+                client,
+                pypi_search_url(query),
+                headers={"Accept": "text/html, */*"},
             )
-        ]
+        except httpx.HTTPError as exc:
+            raise RegistryError(
+                "retryable", f"pypi search unreachable: {exc}"
+            ) from None
+        if resp.status_code == 200:
+            items = parse_pypi_search_html(resp.text, limit=20)
+        search_degraded = resp.status_code == 429 or resp.status_code >= 500
+        if not items:
+            snap = await _exact_snapshot(query.strip())
+            if snap is None:
+                if search_degraded:
+                    raise RegistryError(
+                        "retryable", f"pypi search HTTP {resp.status_code}"
+                    )
+                return []
+            docs = list(snap.doc_candidates)
+            return [
+                DiscoveryCandidate(
+                    ecosystem="pypi",
+                    name=snap.name,
+                    version=snap.stable or "",
+                    description="",
+                    docs_url=docs[0] if docs else None,
+                    candidates=docs,
+                    homepage=snap.homepage,
+                    repo_url=snap.repo_url,
+                    popularity=0.0,
+                    updated="",
+                    exact=True,
+                    source="registry",
+                )
+            ]
+        norm = _normalize_query("pypi", query)
+        out: list[DiscoveryCandidate] = []
+        for position, item in enumerate(items):
+            if item["name"].lower() == norm:
+                snap = await _exact_snapshot(item["name"])
+                if snap is not None:
+                    docs = list(snap.doc_candidates)
+                    out.append(
+                        DiscoveryCandidate(
+                            ecosystem="pypi",
+                            name=snap.name,
+                            version=snap.stable or item["version"],
+                            description=item["description"],
+                            docs_url=docs[0] if docs else None,
+                            candidates=docs,
+                            homepage=snap.homepage,
+                            repo_url=snap.repo_url,
+                            popularity=0.0,
+                            updated="",
+                            exact=True,
+                            rank=position,
+                            source="registry",
+                        )
+                    )
+                    continue
+            out.append(
+                DiscoveryCandidate(
+                    ecosystem="pypi",
+                    name=item["name"],
+                    version=item["version"],
+                    description=item["description"],
+                    popularity=0.0,
+                    updated="",
+                    exact=item["name"].lower() == norm,
+                    rank=position,
+                    source="search:pypi",
+                )
+            )
+        return out
 
     async def _search_npm(self, client, query: str) -> list[DiscoveryCandidate]:
         from libref.crawler.http import resilient_get
         from libref.crawler.registry import fetch_snapshot, is_repo_host_url
-        from libref.crawler.registry.npm import npm_search_url, parse_npm_search
+        from libref.crawler.registry.npm import npm_search_url_for, parse_npm_search
 
         try:
             resp = await resilient_get(
                 client,
-                npm_search_url(query, 20),
+                npm_search_url_for(self._settings, query, 20),
                 headers={"Accept": "application/json"},
             )
         except httpx.HTTPError as exc:
@@ -345,7 +421,7 @@ class DiscoveryService:
         try:
             resp = await resilient_get(
                 client,
-                github_search_url(query, 10),
+                github_search_url(f"{query.strip()} in:name", 10),
                 headers=github_search_headers(token),
             )
         except httpx.HTTPError as exc:

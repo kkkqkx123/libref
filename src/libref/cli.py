@@ -396,15 +396,20 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
             if args.version is None:
                 print("explicit mode requires library version source", file=sys.stderr)
                 return 2
-            if args.ecosystem is not None and args.ecosystem.strip().lower() in (
-                "pypi",
-                "npm",
-                "maven",
-            ):
-                from libref.crawler.registry import normalize_name
+            from libref.crawler.registry import (
+                SUPPORTED_ECOSYSTEMS,
+                canonical_ecosystem,
+                normalize_name,
+            )
 
-                library = normalize_name(args.ecosystem.strip().lower(), args.library)
-                ecosystem = args.ecosystem.strip().lower()
+            eco_name = (
+                canonical_ecosystem(args.ecosystem)
+                if args.ecosystem is not None
+                else None
+            )
+            if eco_name in SUPPORTED_ECOSYSTEMS:
+                library = normalize_name(eco_name, args.library)
+                ecosystem = eco_name
             else:
                 library, ecosystem = args.library.strip(), (args.ecosystem or "custom")
             version, source = args.version, args.source
@@ -1444,7 +1449,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_discover = sub.add_parser(
         "discover",
-        help="Fuzzy library discovery across registries",
+        help="Fuzzy discovery across registries (pypi/npm/maven; py/js/java aliases accepted)",
         parents=[_config_parent],
     )
     p_discover.add_argument("query")

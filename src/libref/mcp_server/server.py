@@ -127,7 +127,7 @@ def build_mcp_server(
         ecosystem: str | None = None,
         limit: int = 10,
     ) -> dict[str, Any]:
-        """Fuzzy library discovery across registries; reads and refreshes the discovery cache."""
+        """Fuzzy discovery across registries (pypi/npm/maven; py/js/java aliases accepted)."""
         if not query.strip():
             return _invalid("query is empty")
         bad = _check_limit(limit, low=1, high=100)

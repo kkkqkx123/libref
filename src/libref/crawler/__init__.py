@@ -21,9 +21,12 @@ from libref.crawler.extract import (
 )
 from libref.crawler.fetcher import FetchOutcome, HttpFetcher
 from libref.crawler.registry import (
+    ECOSYSTEM_ALIASES,
+    SUPPORTED_ECOSYSTEMS,
     RegistryError,
     RegistrySnapshot,
     Resolution,
+    canonical_ecosystem,
     fetch_snapshot,
     normalize_name,
     sanitize_http_url,
@@ -41,6 +44,8 @@ from libref.crawler.scope import (
 from libref.crawler.url_seeder import SeedResult, UrlSeeder
 
 __all__ = [
+    "ECOSYSTEM_ALIASES",
+    "SUPPORTED_ECOSYSTEMS",
     "FetchOutcome",
     "FilterStats",
     "HttpFetcher",
@@ -53,6 +58,7 @@ __all__ = [
     "SeedResult",
     "UrlSeeder",
     "build_scope",
+    "canonical_ecosystem",
     "close_browser",
     "content_type_allowed",
     "convert_links_to_citations",

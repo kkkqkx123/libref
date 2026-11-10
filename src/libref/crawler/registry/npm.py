@@ -50,6 +50,21 @@ def npm_search_url(query: str, size: int) -> str:
     )
 
 
+def npm_search_url_for(settings, query: str, size: int) -> str:
+    """Search address derived from the artifact base so explicit mirrors apply; falls back to central."""
+    from libref.crawler.registry import registry_base_for
+
+    try:
+        base = registry_base_for("npm", settings)
+    except Exception:  # noqa: BLE001 — misconfigured mirror falls back to central search
+        return npm_search_url(query, size)
+    if not base or not base.startswith(("http://", "https://")):
+        return npm_search_url(query, size)
+    from urllib.parse import urlencode
+
+    return f"{base.rstrip('/')}/-/v1/search?{urlencode({'text': query.strip(), 'size': max(1, size)})}"
+
+
 def parse_npm_search(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Flatten search objects into ranking inputs; native order carries relevance."""
     out: list[dict[str, Any]] = []

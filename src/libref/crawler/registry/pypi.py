@@ -80,3 +80,55 @@ def parse_pypi_payload(
 
 def pypi_snapshot_url(base: str, name: str) -> str:
     return f"{base.rstrip('/')}/{name}/json"
+
+
+PYPI_SEARCH_URL = "https://pypi.org/search"
+
+
+def pypi_search_url(query: str) -> str:
+    from urllib.parse import urlencode
+
+    return f"{PYPI_SEARCH_URL}?{urlencode({'q': query.strip()})}"
+
+
+def parse_pypi_search_html(html: str, *, limit: int = 20) -> list[dict[str, str]]:
+    """Extract project names from the search result page; tolerant to snippet markup changes."""
+    from selectolax.lexbor import LexborHTMLParser as HTMLParser
+
+    if not html or not isinstance(html, str):
+        return []
+    try:
+        tree = HTMLParser(html)
+    except Exception:  # noqa: BLE001 — malformed markup yields no candidates
+        return []
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    try:
+        anchors = list(tree.css('a[href^="/project/"]'))
+    except Exception:  # noqa: BLE001 — selector failure yields no candidates
+        return []
+    for node in anchors:
+        try:
+            href = str((node.attributes or {}).get("href", "") or "")
+        except Exception:  # noqa: BLE001, S112 — unreadable node is skipped
+            continue
+        parts = href.strip().split("/")
+        name = parts[2].strip() if len(parts) >= 3 else ""
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        version = ""
+        description = ""
+        try:
+            version_node = node.css_first(".package-snippet__version")
+            if version_node is not None:
+                version = (version_node.text(strip=True) or "").strip()
+            desc_node = node.css_first(".package-snippet__description")
+            if desc_node is not None:
+                description = (desc_node.text(strip=True) or "").strip()[:300]
+        except Exception:  # noqa: BLE001, S110 — snippet details are best-effort
+            pass
+        out.append({"name": name, "version": version, "description": description})
+        if len(out) >= max(1, limit):
+            break
+    return out
