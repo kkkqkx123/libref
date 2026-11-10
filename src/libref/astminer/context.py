@@ -76,3 +76,24 @@ def resolve_python_relative(current_module: str | None, relative: str) -> str | 
     if rest:
         parts.append(rest)
     return ".".join(parts) or None
+
+
+def normalize_js_specifier(specifier: str, importer_file: str | None) -> str:
+    raw = specifier.strip().strip("\"'")
+    if not raw or importer_file is None:
+        return raw
+    if not raw.startswith("."):
+        return raw
+    import posixpath
+
+    base = importer_file.replace("\\", "/")
+    directory = posixpath.dirname(base)
+    joined = posixpath.normpath(posixpath.join(directory, raw))
+    joined = joined.removeprefix("./")
+    while joined.startswith("../"):
+        joined = joined[3:]
+    candidate = joined if joined.endswith(_JS_SUFFIXES) else joined + ".js"
+    module = determine_module_path(candidate, "javascript")
+    if module:
+        return module
+    return joined.replace("/", ".").strip(".") or raw

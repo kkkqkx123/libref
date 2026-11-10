@@ -135,7 +135,7 @@ def extract_file(
     alias_module = module
     if module is not None and path.replace("\\", "/").endswith("__init__.py"):
         alias_module = f"{module}.__init__"
-    aliases = _build_aliases(cfg, source, dep_matches, alias_module)
+    aliases = _build_aliases(cfg, source, dep_matches, alias_module, path)
     import_map = dict(aliases)
     for var, target in _rules.collect_simple_var_aliases(tree.root_node, source):
         if not var or not target or var in import_map:
@@ -332,12 +332,12 @@ def _build_decls(
 
 
 def _build_aliases(
-    cfg, source, dep_matches, module: str | None = None
+    cfg, source, dep_matches, module: str | None = None, importer_file: str | None = None
 ) -> list[tuple[str, str]]:
     aliases: list[tuple[str, str]] = []
     for node, captures in _merge_matches(dep_matches):
         for alias, full in _rules.build_aliases(
-            cfg.name, node, captures, source, module
+            cfg.name, node, captures, source, module, importer_file
         ):
             if alias and full:
                 aliases.append((alias, full))

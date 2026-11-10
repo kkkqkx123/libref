@@ -307,7 +307,10 @@ def _persist_calls(
                 commit_sha or call.commit_sha,
             ),
         )
-        if call.confidence == "AMBIGUOUS":
+        needs_review = call.confidence == "AMBIGUOUS" or (
+            call.confidence == "INFERRED" and ent_id is None
+        )
+        if needs_review:
             row = conn.execute(
                 "SELECT id FROM call_instances WHERE call_uid=?", (uid,)
             ).fetchone()

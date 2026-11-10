@@ -29,6 +29,20 @@ CALLABLE_DECL_KINDS = frozenset(
     }
 )
 
+BUILTIN_BARE_CALLS = frozenset(
+    {
+        "str", "int", "float", "bool", "list", "dict", "set", "tuple",
+        "len", "range", "print", "open", "isinstance", "type", "super",
+        "String", "Number", "Boolean", "Object", "Array", "Promise",
+        "Map", "Set", "JSON", "Math", "console",
+    }
+)
+
+
+def is_builtin_bare(raw: str, alias_map: dict[str, str]) -> bool:
+    head = raw.partition(".")[0]
+    return bool(head) and head in BUILTIN_BARE_CALLS and head not in alias_map
+
 _ENTITY_KIND_BY_ROOT = {
     "entity.class": "class",
     "entity.function": "function",
@@ -371,13 +385,14 @@ def build_aliases(
     captures: dict[str, list],
     source: bytes,
     current_module: str | None = None,
+    importer_file: str | None = None,
 ) -> list[tuple[str, str]]:
     if language == "python":
         return _python_aliases(root, captures, source, current_module)
     if language == "java":
         return _java_aliases(root, source)
     if language == "javascript":
-        return _javascript_aliases(root, captures, source)
+        return _javascript_aliases(root, captures, source, importer_file)
     return []
 
 
@@ -451,11 +466,19 @@ def _module_path(node: Any, source: bytes) -> str:
 
 
 def _javascript_aliases(
-    root: Any, captures: dict[str, list], source: bytes
+    root: Any,
+    captures: dict[str, list],
+    source: bytes,
+    importer_file: str | None = None,
 ) -> list[tuple[str, str]]:
+    def _normalized(raw_mod: str) -> str:
+        from libref.astminer.context import normalize_js_specifier
+
+        return normalize_js_specifier(raw_mod, importer_file)
+
     module = first_node(captures, ".import.module")
     if root.type == "import_statement" and module is not None:
-        mod = _module_path(module, source)
+        mod = _normalized(_module_path(module, source))
         found: list[tuple[str, str]] = []
         default = first_node(captures, ".default.name")
         if default is not None:
@@ -494,7 +517,7 @@ def _javascript_aliases(
         module = first_node(captures, ".require.module")
         if module is None:
             return []
-        mod = _module_path(module, source)
+        mod = _normalized(_module_path(module, source))
         if not mod:
             return []
         name_node = first_node(captures, ".require.name")

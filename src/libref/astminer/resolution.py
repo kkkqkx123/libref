@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from libref.astminer.models import ApiDeclRecord, CallInstanceRecord, RawCall
-from libref.astminer.rules import CALLABLE_DECL_KINDS
+from libref.astminer.rules import CALLABLE_DECL_KINDS, is_builtin_bare
 
 _SELF_HEADS = frozenset({"self", "cls", "this"})
 
@@ -77,6 +77,8 @@ def resolve_one(
     if not raw:
         return raw, "AMBIGUOUS"
     head, _, _rest = raw.partition(".")
+    if is_builtin_bare(raw, alias_map) and raw not in same_file:
+        return raw, "AMBIGUOUS"
     if head in _SELF_HEADS and caller:
         base = caller.rpartition(".")[0] if "." in caller else caller
         resolved = (base + raw[len(head) :]) if base else raw
