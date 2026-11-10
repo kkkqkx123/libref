@@ -120,6 +120,10 @@ class LibrefSettings(BaseSettings):
     web_port: int = Field(default=8001, ge=1, le=65535)
     # Docs-path extras: browser fallback default toggle, retrieval window expansion.
     render_js_default: bool = False
+    render_wait_for: str | None = None
+    render_timeout_ms: int = Field(default=15000, gt=0)
+    seeder_cache_ttl_hours: float = Field(default=0.0, ge=0)
+    follow_links_default: bool = False
     retriever_window_radius: int = Field(default=1, ge=0)
     retriever_expand_window: bool = False
     # Scrape audit and local governance: snapshot toggle/dir quota, repos dir quota, deletion-log retention.
@@ -206,6 +210,10 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "http_proxy",
             "no_proxy",
             "render_js_default",
+            "render_wait_for",
+            "render_timeout_ms",
+            "seeder_cache_ttl_hours",
+            "follow_links_default",
             "ingest_clean_cache_cap",
         }
     ),

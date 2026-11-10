@@ -34,6 +34,16 @@ def conn(tmp_path) -> sqlite3.Connection:
     c.close()
 
 
+@pytest.fixture(autouse=True)
+def _clear_seed_cache():
+    """Isolate the process-local seeder cache between tests sharing mock hosts."""
+    from libref.crawler.url_seeder import _SEED_CACHE
+
+    _SEED_CACHE.clear()
+    yield
+    _SEED_CACHE.clear()
+
+
 def seed_library_version(
     conn: sqlite3.Connection, library: str = "docs", version: str = "1.0"
 ) -> tuple[int, int]:

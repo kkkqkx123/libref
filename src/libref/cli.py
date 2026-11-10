@@ -137,6 +137,11 @@ def _scope_from_args(args: argparse.Namespace) -> dict:
         "exclude_patterns": list(getattr(args, "exclude_pattern", None) or []),
         "max_depth": getattr(args, "max_depth", None),
         "render_js": bool(getattr(args, "render_js", False)),
+        "render_wait_for": getattr(args, "render_wait_for", None),
+        "render_timeout_ms": getattr(args, "render_timeout_ms", None),
+        "follow_links": bool(getattr(args, "follow_links", False)),
+        "crawl_query": getattr(args, "crawl_query", None),
+        "score_threshold": getattr(args, "score_threshold", None),
     }
 
 
@@ -1216,6 +1221,23 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fall back to the browser for pages that look JS-rendered",
     )
+    p_ingest.add_argument(
+        "--render-wait-for",
+        default=None,
+        help="CSS selector the browser waits for before returning HTML",
+    )
+    p_ingest.add_argument("--render-timeout-ms", type=int, default=None)
+    p_ingest.add_argument(
+        "--follow-links",
+        action="store_true",
+        help="Follow in-page links breadth-first within scope budget",
+    )
+    p_ingest.add_argument(
+        "--crawl-query",
+        default=None,
+        help="Rank crawl targets by URL relevance to this query",
+    )
+    p_ingest.add_argument("--score-threshold", type=float, default=None)
     p_ingest.set_defaults(func=cmd_ingest)
 
     p_refresh = sub.add_parser(
@@ -1230,6 +1252,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_refresh.add_argument("--max-pages", type=int, default=None)
     p_refresh.add_argument("--prefilter", action="store_true")
     p_refresh.add_argument("--render-js", action="store_true")
+    p_refresh.add_argument("--render-wait-for", default=None)
+    p_refresh.add_argument("--render-timeout-ms", type=int, default=None)
+    p_refresh.add_argument("--follow-links", action="store_true")
+    p_refresh.add_argument("--crawl-query", default=None)
+    p_refresh.add_argument("--score-threshold", type=float, default=None)
     p_refresh.add_argument(
         "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
     )

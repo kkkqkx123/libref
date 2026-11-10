@@ -6,6 +6,100 @@ import re
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
+# Default binary suffixes rejected before any request is spent; override via
+# excluded_suffixes / allowed_suffixes options. Mirrors the blueprint
+# ContentTypeFilter idea of refusing non-document payloads at decision time.
+_DEFAULT_EXCLUDED_SUFFIXES = (
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".ico",
+    ".webp",
+    ".bmp",
+    ".mp4",
+    ".mp3",
+    ".wav",
+    ".ogg",
+    ".webm",
+    ".avi",
+    ".mov",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".otf",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".tgz",
+    ".rar",
+    ".7z",
+    ".exe",
+    ".dmg",
+    ".pkg",
+    ".deb",
+    ".rpm",
+    ".pdf",
+)
+
+
+@dataclass
+class FilterStats:
+    """Per-run scope counters; observability only, never affects decisions."""
+
+    accepted: int = 0
+    rejected: int = 0
+    content_type_rejected: int = 0
+
+
+def content_type_allowed(url: str, content_type: str | None) -> bool:
+    """Suffix-first, MIME-second document check shared by scope filtering and HEAD prescreening."""
+    lowered = (url or "").lower().split("?")[0]
+    if lowered.endswith(_DEFAULT_EXCLUDED_SUFFIXES):
+        return False
+    if not content_type:
+        return True
+    ctype = content_type.lower().split(";")[0].strip()
+    if ctype.startswith(("image/", "audio/", "video/", "font/")):
+        return False
+    return ctype not in (
+        "application/zip",
+        "application/gzip",
+        "application/x-tar",
+        "application/pdf",
+        "application/octet-stream",
+    )
+
+
+def score_url(url: str, query: str) -> float:
+    """URL-only relevance in 0..1: query token overlap over host and path, penalized by depth."""
+    tokens = [t for t in query.lower().split() if t]
+    if not tokens:
+        return 0.0
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return 0.0
+    host = parts.netloc.lower().replace("www.", "")
+    segments = [s.lower() for s in parts.path.split("/") if s]
+    haystack = " ".join([host, *segments, parts.query.lower()])
+    hits = sum(1 for t in tokens if t in haystack)
+    if hits == 0:
+        return 0.0
+    depth_penalty = 1.0 / (1.0 + 0.1 * max(0, len(segments) - 2))
+    return min(1.0, (hits / len(tokens)) * depth_penalty)
+
+
+def sort_by_relevance(urls: list[str], query: str | None) -> list[str]:
+    """Stable relevance ordering; empty query keeps discovery order."""
+    if not query or not query.strip():
+        return list(urls)
+    scored = [(score_url(u, query), i, u) for i, u in enumerate(urls)]
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [u for _, _, u in scored]
+
 
 @dataclass
 class ScopePolicy:
@@ -23,6 +117,8 @@ class ScopePolicy:
     include_patterns: tuple[str, ...] = ()
     exclude_patterns: tuple[str, ...] = ()
     max_depth: int | None = None
+    excluded_suffixes: tuple[str, ...] = ()
+    allowed_suffixes: tuple[str, ...] = ()
     _include_res: tuple[re.Pattern[str], ...] = field(default=(), repr=False)
     _exclude_res: tuple[re.Pattern[str], ...] = field(default=(), repr=False)
 
@@ -37,6 +133,8 @@ class ScopePolicy:
         include_patterns: tuple[str, ...] | list[str] = (),
         exclude_patterns: tuple[str, ...] | list[str] = (),
         max_depth: int | None = None,
+        excluded_suffixes: tuple[str, ...] | list[str] | None = None,
+        allowed_suffixes: tuple[str, ...] | list[str] = (),
     ) -> None:
         object.__setattr__(self, "start_url", start_url)
         object.__setattr__(self, "allow_cross_site", bool(allow_cross_site))
@@ -46,6 +144,26 @@ class ScopePolicy:
         object.__setattr__(self, "include_patterns", tuple(include_patterns or ()))
         object.__setattr__(self, "exclude_patterns", tuple(exclude_patterns or ()))
         object.__setattr__(self, "max_depth", max_depth)
+        object.__setattr__(
+            self,
+            "excluded_suffixes",
+            tuple(
+                s.lower() if s.startswith(".") else f".{s.lower()}"
+                for s in (
+                    excluded_suffixes
+                    if excluded_suffixes is not None
+                    else _DEFAULT_EXCLUDED_SUFFIXES
+                )
+            ),
+        )
+        object.__setattr__(
+            self,
+            "allowed_suffixes",
+            tuple(
+                s.lower() if s.startswith(".") else f".{s.lower()}"
+                for s in (allowed_suffixes or ())
+            ),
+        )
         object.__setattr__(
             self,
             "_include_res",
@@ -72,6 +190,14 @@ class ScopePolicy:
         ):
             return False
         path = parts.path or "/"
+        lowered_path = path.lower().split("?")[0]
+        if self.allowed_suffixes:
+            if not any(lowered_path.endswith(s) for s in self.allowed_suffixes):
+                return False
+        elif self.excluded_suffixes and any(
+            lowered_path.endswith(s) for s in self.excluded_suffixes
+        ):
+            return False
         if self.path_prefixes and not any(
             path.startswith(p) for p in self.path_prefixes
         ):
@@ -94,6 +220,29 @@ class ScopePolicy:
             (accepted if self.accept(url) else rejected).append(url)
         return accepted, rejected
 
+    def filter_with_stats(
+        self, urls: list[str]
+    ) -> tuple[list[str], list[str], FilterStats]:
+        stats = FilterStats()
+        accepted: list[str] = []
+        rejected: list[str] = []
+        for url in urls:
+            if self.accept(url):
+                stats.accepted += 1
+                accepted.append(url)
+            else:
+                stats.rejected += 1
+                try:
+                    lowered = urlsplit(url).path.lower()
+                except ValueError:
+                    lowered = ""
+                if any(
+                    lowered.split("?")[0].endswith(s) for s in self.excluded_suffixes
+                ):
+                    stats.content_type_rejected += 1
+                rejected.append(url)
+        return accepted, rejected, stats
+
 
 def build_scope(start_url: str, opts: dict | None) -> ScopePolicy:
     """Build the policy from a task options dict; empty options yield the default same-site policy."""
@@ -107,6 +256,8 @@ def build_scope(start_url: str, opts: dict | None) -> ScopePolicy:
         include_patterns=tuple(opts.get("include_patterns", ()) or ()),
         exclude_patterns=tuple(opts.get("exclude_patterns", ()) or ()),
         max_depth=opts.get("max_depth"),
+        excluded_suffixes=opts.get("excluded_suffixes", None),
+        allowed_suffixes=tuple(opts.get("allowed_suffixes", ()) or ()),
     )
 
 

@@ -10,12 +10,14 @@ from __future__ import annotations
 
 import gzip
 import re
+import time
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlsplit
 
 import httpx
 
 from libref.crawler.robots import RobotsChecker
+from libref.crawler.scope import content_type_allowed, score_url, sort_by_relevance
 
 _LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
 
@@ -24,6 +26,41 @@ _SITEMAP_GZ_NAMES = ("sitemap.xml.gz", "sitemap_index.xml.gz", "sitemap-index.xm
 _LLMS_VARIANTS = ("llms.txt", "llms-full.txt")
 _MAX_SITEMAP_DEPTH = 3
 _MAX_SITEMAP_URLS = 20000
+
+# Utility addresses that are never documentation: seeder self-descriptions and
+# common static resources. Mirrors the blueprint nonsense-URL filter idea.
+_NONSENSE_PATH_SUFFIXES = (
+    "/robots.txt",
+    "/sitemap.xml",
+    "/sitemap_index.xml",
+    "/sitemap-index.xml",
+    "/ads.txt",
+    "/humans.txt",
+    "/security.txt",
+    "/crossdomain.xml",
+    "/browserconfig.xml",
+    "/manifest.json",
+    "/favicon.ico",
+    "/apple-touch-icon.png",
+)
+_NONSENSE_SEGMENTS = (
+    "/sitemap",
+    "/.well-known/",
+)
+
+# Process-local seed cache: start URL → (stored_at, result). Bounded and TTL-guarded.
+_SEED_CACHE: dict[str, tuple[float, "SeedResult"]] = {}  # noqa: UP037 — SeedResult is defined below
+_SEED_CACHE_CAP = 256
+
+
+def _is_nonsense_url(url: str) -> bool:
+    try:
+        path = urlsplit(url).path.lower()
+    except ValueError:
+        return True
+    if path.endswith(_NONSENSE_PATH_SUFFIXES):
+        return True
+    return any(seg in path for seg in _NONSENSE_SEGMENTS)
 
 
 def _clean_link_token(token: str) -> str:
@@ -57,9 +94,15 @@ class SeedResult:
 
 
 class UrlSeeder:
-    def __init__(self, client: httpx.AsyncClient, robots: RobotsChecker | None) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        robots: RobotsChecker | None,
+        cache_ttl_hours: float = 0.0,
+    ) -> None:
         self._client = client
         self._robots = robots
+        self._cache_ttl = max(0.0, cache_ttl_hours) * 3600
 
     async def discover(
         self,
@@ -67,8 +110,15 @@ class UrlSeeder:
         *,
         prefilter: bool = False,
         max_pages: int | None = None,
+        query: str | None = None,
+        score_threshold: float | None = None,
+        force: bool = False,
     ) -> SeedResult:
         """Discover doc URLs from the start URL; fall back to directory-level llms.txt, else walk the sitemap queue."""
+        if not force and self._cache_ttl > 0:
+            hit = _SEED_CACHE.get(start_url)
+            if hit is not None and time.time() - hit[0] < self._cache_ttl:
+                return hit[1]
         parts = urlsplit(start_url)
         host = parts.netloc
 
@@ -93,6 +143,8 @@ class UrlSeeder:
         for url in result.urls:
             if url in seen:
                 continue
+            if _is_nonsense_url(url) or not content_type_allowed(url, None):
+                continue
             if urlsplit(url).netloc != host:
                 if url not in cross_site:
                     cross_site.append(url)
@@ -103,13 +155,17 @@ class UrlSeeder:
                 continue
             seen.add(url)
             urls.append(url)
-            if max_pages is not None and len(urls) >= max_pages:
-                # The count cap applies only to the filtered set; whether more candidates remain decides the truncated flag
-                truncated = truncated or len(result.urls) > len(urls)
-                break
+        if query and query.strip():
+            if score_threshold is not None:
+                urls = [u for u in urls if score_url(u, query) >= score_threshold]
+            urls = sort_by_relevance(urls, query)
+        if max_pages is not None and len(urls) > max_pages:
+            # The count cap applies only to the filtered set; whether more candidates remain decides the truncated flag
+            truncated = True
+            urls = urls[:max_pages]
 
         if not urls:
-            return SeedResult(
+            outcome = SeedResult(
                 urls=[],
                 source="none",
                 attempted=attempted,
@@ -118,15 +174,22 @@ class UrlSeeder:
                 failed=transient,
                 cross_site=cross_site,
             )
-        return SeedResult(
-            urls=urls,
-            source=result.source,
-            attempted=attempted,
-            errors=errors,
-            truncated=truncated,
-            failed=False,
-            cross_site=cross_site,
-        )
+        else:
+            outcome = SeedResult(
+                urls=urls,
+                source=result.source,
+                attempted=attempted,
+                errors=errors,
+                truncated=truncated,
+                failed=False,
+                cross_site=cross_site,
+            )
+        if self._cache_ttl > 0:
+            while len(_SEED_CACHE) >= _SEED_CACHE_CAP:
+                oldest = next(iter(_SEED_CACHE))
+                del _SEED_CACHE[oldest]
+            _SEED_CACHE[start_url] = (time.time(), outcome)
+        return outcome
 
     # ── llms.txt (with directory-level fallback and doc variants) ──
 
@@ -370,6 +433,8 @@ class UrlSeeder:
         if resp.status_code >= 400:
             return False
         ctype = resp.headers.get("content-type", "")
+        if not content_type_allowed(url, ctype):
+            return False
         allowed = ("text/html", "text/plain", "application/xhtml", "text/markdown")
         return any(a in ctype for a in allowed)
 

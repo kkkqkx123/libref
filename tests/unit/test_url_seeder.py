@@ -11,6 +11,7 @@ import sqlite3
 import httpx
 
 from libref.crawler import RobotsChecker, UrlSeeder
+from libref.crawler.url_seeder import _SEED_CACHE
 
 
 def make_client(handler) -> httpx.AsyncClient:
@@ -84,6 +85,7 @@ def test_discover_filters_and_dedup():
             return httpx.Response(200, text="User-agent: *\nDisallow: /private\n")
         raise AssertionError(request.url.path)
 
+    _SEED_CACHE.clear()
     client = make_client(handler)
     conn = sqlite3.connect(":memory:")
     robots = RobotsChecker(conn, client)
@@ -112,6 +114,7 @@ def test_discover_head_prefilter():
             return httpx.Response(404)
         raise AssertionError(request.url.path)
 
+    _SEED_CACHE.clear()
     client = make_client(handler)
     conn = sqlite3.connect(":memory:")
     robots = RobotsChecker(conn, client)

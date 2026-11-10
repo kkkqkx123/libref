@@ -10,6 +10,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -22,9 +23,11 @@ from libref.crawler import (
     RobotsChecker,
     UrlSeeder,
     build_scope,
-    extract_to_markdown,
     looks_like_js_rendered,
+    scrape_html,
 )
+from libref.crawler.extract import ScrapeResult
+from libref.crawler.scope import sort_by_relevance
 from libref.llm import EmbedFn
 from libref.services.jobs import Job, JobManager
 from libref.services.libraries import LibraryService
@@ -211,6 +214,14 @@ def normalize_text_content(raw: str) -> str:
     return normalize_markdown(raw)
 
 
+@dataclass
+class _FetchDetail:
+    """Per-page follow-up data: followable out-links plus the canonical alias."""
+
+    links: list[str] = field(default_factory=list)
+    canonical: str = ""
+
+
 def _plan_targets(
     seed, start_url: str, scope: dict[str, Any] | None, max_pages: int | None
 ):
@@ -220,6 +231,9 @@ def _plan_targets(
     accepted, rejected = policy.filter(candidates)
     if not accepted and policy.accept(start_url):
         accepted = [start_url]
+    query = (scope or {}).get("crawl_query")
+    if query and query.strip():
+        accepted = sort_by_relevance(accepted, query)
     ingest_truncated = False
     if max_pages is not None and len(accepted) > max_pages:
         accepted = accepted[:max_pages]
@@ -303,6 +317,7 @@ class IngestService:
         self._budgets = _doc_budgets(settings)
         self._clean_fingerprint = _budget_fingerprint(self._budgets)
         self._clean_cache: dict[str, str] = {}
+        self._scrape_cache: dict[str, ScrapeResult] = {}
         self._snapshots = None
         if bool(settings.snapshot_enabled):
             from libref.store.snapshots import SnapshotStore
@@ -538,6 +553,8 @@ class IngestService:
                 "seed_truncated",
                 "snapshot_written",
                 "snapshot_quota_skipped",
+                "deep_discovered",
+                "deep_truncated",
                 "elapsed_ms",
                 *(f"{step}_ms" for step in PIPELINE_STEPS),
             )
@@ -552,15 +569,29 @@ class IngestService:
                     ttl_days=self._settings.robots_cache_ttl_days,
                     user_agent=self._settings.user_agent,
                 )
-                seeder = UrlSeeder(client, robots)
+                seeder = UrlSeeder(
+                    client,
+                    robots,
+                    cache_ttl_hours=self._settings.seeder_cache_ttl_hours,
+                )
                 fetcher = HttpFetcher(
                     client,
                     max_retries=self._settings.fetch_max_retries,
                     default_delay=self._settings.crawl_delay_default,
                 )
                 discover_start = _time.monotonic()
+                # Refresh intent re-discovers: reusing seeds within TTL would hide
+                # added or removed pages from the sitemap on every refresh.
+                force_seed = bool((scope or {}).get("refresh_seed", False)) or (
+                    resolved_from == "refresh"
+                )
                 seed = await seeder.discover(
-                    start_url, prefilter=prefilter, max_pages=None
+                    start_url,
+                    prefilter=prefilter,
+                    max_pages=None,
+                    query=(scope or {}).get("crawl_query"),
+                    score_threshold=(scope or {}).get("score_threshold"),
+                    force=force_seed,
                 )
                 counts["discover_ms"] = int((_time.monotonic() - discover_start) * 1000)
                 accepted, rejected, truncated = _plan_targets(
@@ -587,8 +618,15 @@ class IngestService:
                 )
 
                 sem = asyncio.Semaphore(self._settings.fetch_concurrency)
+                follow = bool(
+                    (scope or {}).get("follow_links", False)
+                    or self._settings.follow_links_default
+                )
+                policy = build_scope(start_url, scope)
+                visited: set[str] = set(accepted)
+                pending: list[tuple[str, int]] = []
 
-                async def process(url: str) -> None:
+                async def process(url: str, depth: int) -> None:
                     async with sem:
                         try:
                             page = store.get_page(version_id, url)
@@ -597,6 +635,7 @@ class IngestService:
                                 empty_dropped,
                                 render_skipped,
                                 stage_ms,
+                                detail,
                             ) = await self._fetch_and_store(
                                 fetcher,
                                 robots,
@@ -610,11 +649,12 @@ class IngestService:
                             )
                         except Exception as exc:  # noqa: BLE001 — a single page's failure is recorded as an outcome and does not block the batch
                             logger.debug("page failed url=%s: %s", url, exc)
-                            result, empty_dropped, render_skipped, stage_ms = (
+                            result, empty_dropped, render_skipped, stage_ms, detail = (
                                 StoreResult("failed"),
                                 0,
                                 False,
                                 {},
+                                _FetchDetail(),
                             )
                         _record_outcome(
                             counts,
@@ -625,21 +665,55 @@ class IngestService:
                             render_skipped,
                             stage_ms,
                         )
+                        if detail.canonical and detail.canonical != url:
+                            visited.add(detail.canonical)
+                        if follow:
+                            for link in detail.links:
+                                if link in visited:
+                                    continue
+                                if (
+                                    policy.max_depth is not None
+                                    and depth + 1 > policy.max_depth
+                                ):
+                                    counts["deep_truncated"] = 1
+                                    continue
+                                if not policy.accept(link):
+                                    continue
+                                visited.add(link)
+                                pending.append((link, depth + 1))
                         _beat()
 
-                await asyncio.gather(*(process(u) for u in accepted))
-                removed_all.extend(
-                    self._sweep_absent(
-                        store,
-                        library_id,
-                        version_id,
-                        seed,
-                        accepted,
-                        truncated=truncated,
-                        counts=counts,
-                        snapshot_ctx=(ecosystem, library, version),
+                await asyncio.gather(*(process(u, 0) for u in accepted))
+                if follow:
+                    while pending:
+                        if max_pages is not None and len(visited) >= max_pages:
+                            counts["deep_truncated"] = 1
+                            break
+                        batch = pending
+                        pending = []
+                        if max_pages is not None:
+                            room = max_pages - len(visited)
+                            if len(batch) > room:
+                                counts["deep_truncated"] = 1
+                                batch = batch[:room]
+                        counts["deep_discovered"] += len(batch)
+                        await asyncio.gather(*(process(u, d) for u, d in batch))
+                        _beat()
+                # Absent sweeping is seed-driven; link-followed pages are outside
+                # the seed set, so the sweep is skipped in follow mode entirely.
+                if not follow:
+                    removed_all.extend(
+                        self._sweep_absent(
+                            store,
+                            library_id,
+                            version_id,
+                            seed,
+                            accepted,
+                            truncated=truncated,
+                            counts=counts,
+                            snapshot_ctx=(ecosystem, library, version),
+                        )
                     )
-                )
                 vectors_start = _time.monotonic()
                 await self._sync_vectors(
                     store, counts, removed_all, inserted_all, version_id=version_id
@@ -767,15 +841,32 @@ class IngestService:
         elif kind == "source":
             cleaned = wrap_source_content(raw, url)
         else:
-            try:
-                cleaned = extract_to_markdown(raw, url)
-            except Exception:  # noqa: BLE001
-                cleaned = ""
+            cleaned = self._scrape_cached(raw, url).markdown
         while len(self._clean_cache) >= self._settings.ingest_clean_cache_cap:
             oldest = next(iter(self._clean_cache))
             del self._clean_cache[oldest]
         self._clean_cache[digest] = cleaned
         return cleaned
+
+    def _scrape_cached(self, raw: str, url: str) -> ScrapeResult:
+        """Structured scrape cache: same content and same budget fingerprint hit reuses directly."""
+        import hashlib as _hashlib
+
+        digest = _hashlib.sha1(
+            f"html\0{self._clean_fingerprint}\0{raw}".encode("utf-8", "ignore")
+        ).hexdigest()
+        hit = self._scrape_cache.get(digest)
+        if hit is not None:
+            return hit
+        try:
+            scraped = scrape_html(raw, url)
+        except Exception:  # noqa: BLE001
+            scraped = ScrapeResult()
+        while len(self._scrape_cache) >= self._settings.ingest_clean_cache_cap:
+            oldest = next(iter(self._scrape_cache))
+            del self._scrape_cache[oldest]
+        self._scrape_cache[digest] = scraped
+        return scraped
 
     async def _fetch_and_store(
         self,
@@ -789,7 +880,7 @@ class IngestService:
         *,
         scope: dict[str, Any] | None = None,
         snapshot_ctx: tuple[str, str, str] | None = None,
-    ) -> tuple[StoreResult, int, bool, dict[str, int]]:
+    ) -> tuple[StoreResult, int, bool, dict[str, int], _FetchDetail]:
         import time as _time
 
         stage_ms: dict[str, int] = {f"{step}_ms": 0 for step in PIPELINE_STEPS}
@@ -797,7 +888,7 @@ class IngestService:
         stage_ms["snapshot_quota_skipped"] = 0
         fetch_start = _time.monotonic()
         if not await robots.can_fetch(url):
-            return StoreResult("skipped"), 0, False, stage_ms
+            return StoreResult("skipped"), 0, False, stage_ms, _FetchDetail()
         delay = await robots.crawl_delay(url)
         result = await fetcher.fetch(
             url,
@@ -812,6 +903,7 @@ class IngestService:
                 0,
                 False,
                 stage_ms,
+                _FetchDetail(),
             )
         if result.status == "absent":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)
@@ -820,6 +912,7 @@ class IngestService:
                 0,
                 False,
                 stage_ms,
+                _FetchDetail(),
             )
         if result.status == "failed":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)
@@ -828,6 +921,7 @@ class IngestService:
                 0,
                 False,
                 stage_ms,
+                _FetchDetail(),
             )
         if self._snapshots is not None and snapshot_ctx is not None and result.content:
             try:
@@ -850,7 +944,22 @@ class IngestService:
         raw_body = result.content or ""
         kind = classify_content(result.content_type, url)
         clean_start = _time.monotonic()
-        markdown = self._clean_with_cache(kind, raw_body, url)
+        detail = _FetchDetail()
+        if kind == "html":
+            scraped = self._scrape_cached(raw_body, url)
+            markdown = scraped.markdown
+            detail = _FetchDetail(
+                links=[]
+                if scraped.nofollow
+                else scraped.internal_links + scraped.external_links,
+                canonical=scraped.canonical,
+            )
+            if scraped.noindex:
+                stage_ms["fetch_ms"] = int((clean_start - fetch_start) * 1000)
+                stage_ms["clean_ms"] = int((_time.monotonic() - clean_start) * 1000)
+                return StoreResult("skipped"), 0, False, stage_ms, _FetchDetail()
+        else:
+            markdown = self._clean_with_cache(kind, raw_body, url)
         render_attempted = False
         if not markdown:
             if looks_like_js_rendered(raw_body, markdown):
@@ -866,19 +975,40 @@ class IngestService:
                             render_html,
                         )
 
+                        wait_for = (scope or {}).get("render_wait_for") or (
+                            self._settings.render_wait_for
+                        )
+                        timeout_ms = (scope or {}).get("render_timeout_ms") or (
+                            self._settings.render_timeout_ms
+                        )
                         rendered = (
-                            await render_html(url)
+                            await render_html(
+                                url, timeout_ms=int(timeout_ms), wait_for=wait_for
+                            )
                             if is_playwright_available()
                             else None
                         )
                     except Exception:  # noqa: BLE001
                         rendered = None
                     if rendered:
-                        markdown = self._clean_with_cache("html", rendered, url)
+                        rescraped = self._scrape_cached(rendered, url)
+                        markdown = rescraped.markdown
+                        detail = _FetchDetail(
+                            links=[]
+                            if rescraped.nofollow
+                            else rescraped.internal_links + rescraped.external_links,
+                            canonical=rescraped.canonical,
+                        )
                 if not markdown:
                     stage_ms["fetch_ms"] = int((clean_start - fetch_start) * 1000)
                     stage_ms["clean_ms"] = int((_time.monotonic() - clean_start) * 1000)
-                    return StoreResult("skipped"), 0, render_attempted, stage_ms
+                    return (
+                        StoreResult("skipped"),
+                        0,
+                        render_attempted,
+                        stage_ms,
+                        _FetchDetail(),
+                    )
             stage_ms["fetch_ms"] = int((clean_start - fetch_start) * 1000)
             stage_ms["clean_ms"] = int((_time.monotonic() - clean_start) * 1000)
             return (
@@ -894,6 +1024,7 @@ class IngestService:
                 0,
                 render_attempted,
                 stage_ms,
+                _FetchDetail(),
             )
         stage_ms["fetch_ms"] = int((clean_start - fetch_start) * 1000)
         clean_end = _time.monotonic()
@@ -907,6 +1038,7 @@ class IngestService:
                 0,
                 render_attempted,
                 stage_ms,
+                detail,
             )
         split_start = _time.monotonic()
         dual = split_markdown_dual(markdown, url, budgets=self._budgets)
@@ -925,4 +1057,4 @@ class IngestService:
             last_modified=result.last_modified,
         )
         stage_ms["store_ms"] = int((_time.monotonic() - split_end) * 1000)
-        return stored, dual.empty_dropped, render_attempted, stage_ms
+        return stored, dual.empty_dropped, render_attempted, stage_ms, detail
