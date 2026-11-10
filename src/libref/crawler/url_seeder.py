@@ -420,14 +420,14 @@ class UrlSeeder:
         return payload.decode("utf-8", errors="replace"), None, False
 
     async def _get_bytes(self, url: str) -> tuple[bytes | None, str | None, bool]:
+        from libref.crawler.http import resilient_get
+
         try:
-            resp = await self._client.get(url)
+            resp = await resilient_get(self._client, url)
         except httpx.HTTPError as exc:
             return None, f"{type(exc).__name__}: {exc}", True
-        if resp.status_code >= 500:
+        if resp.status_code == 429 or resp.status_code >= 500:
             return None, f"HTTP {resp.status_code}", True
-        if resp.status_code == 429:
-            return None, "HTTP 429", True
         if resp.status_code >= 400:
             return None, f"HTTP {resp.status_code}", False
         return resp.content, None, False

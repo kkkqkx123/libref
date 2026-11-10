@@ -12,9 +12,11 @@ import json
 import sqlite3
 import time
 
+import httpx
 from pydantic import BaseModel, Field
 
 from libref.crawler.registry import SUPPORTED_ECOSYSTEMS, RegistryError
+from libref.services.resolver import is_fresh
 
 
 class DiscoveryCandidate(BaseModel):
@@ -129,7 +131,7 @@ class DiscoveryService:
         cached = self._read_cache(scope, query)
         ttl = float(setting_or_default(self._settings, "discovery_cache_ttl_days"))
         offline = bool(setting_or_default(self._settings, "discovery_offline"))
-        if cached is not None and time.time() - cached["fetched_at"] < ttl * 86400:
+        if cached is not None and is_fresh(cached["fetched_at"], ttl):
             return [
                 DiscoveryCandidate(**c).model_dump()
                 for c in cached["candidates"][:topn]
@@ -207,14 +209,18 @@ class DiscoveryService:
         ]
 
     async def _search_npm(self, client, query: str) -> list[DiscoveryCandidate]:
+        from libref.crawler.http import resilient_get
         from libref.crawler.registry import fetch_snapshot, is_repo_host_url
         from libref.crawler.registry.npm import npm_search_url, parse_npm_search
 
-        resp = await client.get(
-            npm_search_url(query, 20), headers={"Accept": "application/json"}
-        )
-        if resp.status_code >= 500 or resp.status_code == 429:
-            raise RegistryError("retryable", f"npm search HTTP {resp.status_code}")
+        try:
+            resp = await resilient_get(
+                client,
+                npm_search_url(query, 20),
+                headers={"Accept": "application/json"},
+            )
+        except httpx.HTTPError as exc:
+            raise RegistryError("retryable", f"npm search unreachable: {exc}") from None
         if resp.status_code >= 400:
             raise RegistryError("retryable", f"npm search HTTP {resp.status_code}")
         out: list[DiscoveryCandidate] = []
@@ -269,14 +275,20 @@ class DiscoveryService:
         return out
 
     async def _search_maven(self, client, query: str) -> list[DiscoveryCandidate]:
+        from libref.crawler.http import resilient_get
         from libref.crawler.registry import fetch_snapshot
         from libref.crawler.registry.maven import maven_search_url, parse_maven_search
 
-        resp = await client.get(
-            maven_search_url(query, 20), headers={"Accept": "application/json"}
-        )
-        if resp.status_code >= 500 or resp.status_code == 429:
-            raise RegistryError("retryable", f"maven search HTTP {resp.status_code}")
+        try:
+            resp = await resilient_get(
+                client,
+                maven_search_url(query, 20),
+                headers={"Accept": "application/json"},
+            )
+        except httpx.HTTPError as exc:
+            raise RegistryError(
+                "retryable", f"maven search unreachable: {exc}"
+            ) from None
         if resp.status_code >= 400:
             raise RegistryError("retryable", f"maven search HTTP {resp.status_code}")
         out: list[DiscoveryCandidate] = []
@@ -328,11 +340,18 @@ class DiscoveryService:
         )
 
         token = str(setting_or_default(self._settings, "discovery_github_token") or "")
-        resp = await client.get(
-            github_search_url(query, 10), headers=github_search_headers(token)
-        )
-        if resp.status_code >= 500 or resp.status_code == 429:
-            raise RegistryError("retryable", f"github search HTTP {resp.status_code}")
+        from libref.crawler.http import resilient_get
+
+        try:
+            resp = await resilient_get(
+                client,
+                github_search_url(query, 10),
+                headers=github_search_headers(token),
+            )
+        except httpx.HTTPError as exc:
+            raise RegistryError(
+                "retryable", f"github search unreachable: {exc}"
+            ) from None
         if resp.status_code >= 400:
             raise RegistryError("retryable", f"github search HTTP {resp.status_code}")
         return [

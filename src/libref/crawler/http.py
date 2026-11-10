@@ -8,6 +8,7 @@ under a test transport, matching httpx's native behavior.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import os
 from urllib.request import getproxies
@@ -100,3 +101,42 @@ def build_async_client(
     return httpx.AsyncClient(
         proxy=proxy_url, mounts=proxy_bypass_mounts(no_proxy_text), **kwargs
     )
+
+
+_RETRYABLE_TRANSPORT = (httpx.HTTPError, OSError, TimeoutError)
+
+
+def _retry_after_delay(resp: httpx.Response, attempt: int) -> float:
+    try:
+        seen = float(resp.headers.get("retry-after", "0"))
+    except ValueError:
+        seen = 0.0
+    return min(max(seen, 0.05 * (2**attempt)), 0.4)
+
+
+async def resilient_get(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    headers: dict[str, str] | None = None,
+    retries: int = 3,
+) -> httpx.Response:
+    """Shared retry for registry, discovery, and seeding: retry transport errors and 429/5xx, return the final response otherwise."""
+    last_error: str | None = None
+    last_resp: httpx.Response | None = None
+    for attempt in range(retries + 1):
+        try:
+            resp = await client.get(url, headers=headers)
+        except _RETRYABLE_TRANSPORT as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+            await asyncio.sleep(min(0.05 * (2**attempt), 0.4))
+            continue
+        if resp.status_code == 429 or resp.status_code >= 500:
+            last_resp = resp
+            last_error = f"HTTP {resp.status_code}"
+            await asyncio.sleep(_retry_after_delay(resp, attempt))
+            continue
+        return resp
+    if last_resp is not None:
+        return last_resp
+    raise httpx.TransportError(last_error or "request unreachable")

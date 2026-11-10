@@ -123,7 +123,7 @@ def _write_cache_locked(
     conn.commit()
 
 
-def _is_fresh(fetched_at: float, ttl_days: float) -> bool:
+def is_fresh(fetched_at: float, ttl_days: float) -> bool:
     return (time.time() - fetched_at) < ttl_days * 86400
 
 
@@ -268,160 +268,110 @@ def _build_repo_resolution(
     )
 
 
-async def resolve_package(
-    conn: sqlite3.Connection,
-    client,
-    settings,
+def _builder_for(target: str):
+    if target == "docs":
+        return _build_resolution
+    if target == "repo":
+        return _build_repo_resolution
+    raise ValueError(f"unsupported resolve target: {target}")
+
+
+def _override_hit_for(
+    target: str, override_docs: str | None, override_repo: str | None
+) -> bool:
+    if target == "docs":
+        return bool(override_docs or override_repo)
+    return bool(override_repo)
+
+
+def _explicit_docs_resolution(
     ecosystem: str | None,
     name: str,
-    requested_version: str | None = None,
-    explicit_url: str | None = None,
+    requested_version: str | None,
+    explicit_url: str,
+    *,
+    allow_private: bool,
 ) -> Resolution:
-    """Single entry point for name resolution: explicit addresses pass through, the rest go through overrides + cache + registry."""
-    allow_private = bool(settings.registry_allow_private)
-    if explicit_url is not None:
-        if requested_version is None:
-            raise ValueError("explicit address requires a version")
-        clean = sanitize_http_url(explicit_url, allow_private=allow_private)
-        if clean is None:
-            raise ValueError(f"invalid documentation address: {explicit_url}")
-        eco = ecosystem.strip().lower() if ecosystem else "custom"
-        label = name.strip()
-        if eco in ("pypi", "npm", "maven"):
-            label = normalize_name(eco, name)
-        return Resolution(
-            ecosystem=eco,
-            name=label,
-            requested_version=requested_version,
-            version=requested_version,
-            registry_confirmed=True,
-            docs_url=clean,
-            candidates=[clean],
-            source="explicit",
-        )
-
-    eco, norm, override_docs, override_repo, ttl, offline, cached = _registry_context(
-        conn, settings, ecosystem, name
-    )
-    override_hit = bool(override_docs or override_repo)
-    if offline:
-        if cached is None:
-            raise RegistryError("retryable", "offline cache miss")
-        return _build_resolution(
-            ecosystem=eco,
-            name=norm,
-            requested=requested_version,
-            versions=cached["versions"],
-            stable=cached["stable"],
-            homepage=cached["homepage"],
-            repo_url=cached["repo_url"],
-            override_docs=override_docs,
-            override_repo=override_repo,
-            registry_docs=cached["docs_url"],
-            candidates=cached["candidates"],
-            source="override" if override_hit else "registry",
-        )
-    if cached is not None and _is_fresh(cached["fetched_at"], ttl):
-        return _build_resolution(
-            ecosystem=eco,
-            name=norm,
-            requested=requested_version,
-            versions=cached["versions"],
-            stable=cached["stable"],
-            homepage=cached["homepage"],
-            repo_url=cached["repo_url"],
-            override_docs=override_docs,
-            override_repo=override_repo,
-            registry_docs=cached["docs_url"],
-            candidates=cached["candidates"],
-            source="override" if override_hit else "registry",
-        )
-    try:
-        snap = await fetch_snapshot(eco, norm, client, settings)
-    except RegistryError as exc:
-        if exc.kind == "retryable" and cached is not None:
-            return _build_resolution(
-                ecosystem=eco,
-                name=norm,
-                requested=requested_version,
-                versions=cached["versions"],
-                stable=cached["stable"],
-                homepage=cached["homepage"],
-                repo_url=cached["repo_url"],
-                override_docs=override_docs,
-                override_repo=override_repo,
-                registry_docs=cached["docs_url"],
-                candidates=cached["candidates"],
-                source="override" if override_hit else "registry-stale",
-            )
-        raise
-    _store_snapshot(conn, eco, norm, snap)
-    return _build_resolution(
+    if requested_version is None:
+        raise ValueError("explicit address requires a version")
+    clean = sanitize_http_url(explicit_url, allow_private=allow_private)
+    if clean is None:
+        raise ValueError(f"invalid documentation address: {explicit_url}")
+    eco = ecosystem.strip().lower() if ecosystem else "custom"
+    label = name.strip()
+    if eco in ("pypi", "npm", "maven"):
+        label = normalize_name(eco, name)
+    return Resolution(
         ecosystem=eco,
-        name=norm,
-        requested=requested_version,
-        versions=snap.versions,
-        stable=snap.stable,
-        homepage=snap.homepage,
-        repo_url=snap.repo_url,
-        override_docs=override_docs,
-        override_repo=override_repo,
-        registry_docs=snap.doc_candidates[0] if snap.doc_candidates else None,
-        candidates=snap.doc_candidates,
-        source="override" if override_hit else "registry",
+        name=label,
+        requested_version=requested_version,
+        version=requested_version,
+        registry_confirmed=True,
+        docs_url=clean,
+        candidates=[clean],
+        source="explicit",
     )
 
 
-async def resolve_repo(
-    conn: sqlite3.Connection,
-    client,
-    settings,
+def _explicit_repo_resolution(
     ecosystem: str | None,
     name: str,
-    requested_version: str | None = None,
-    explicit_source: str | None = None,
+    requested_version: str | None,
+    explicit_source: str,
+    *,
+    allow_private: bool,
 ) -> Resolution:
     from pathlib import Path
 
-    allow_private = bool(settings.registry_allow_private)
-    if explicit_source is not None:
-        text = str(explicit_source).strip()
-        if not text:
-            raise ValueError("empty repo source")
-        if not Path(text).is_dir():
-            cleaned = sanitize_http_url(text, allow_private=allow_private)
-            if cleaned is None:
-                cleaned = sanitize_http_url(
-                    text.removeprefix("git+"), allow_private=allow_private
-                )
-            if cleaned is None:
-                raise ValueError(f"invalid repo address: {explicit_source}")
-            text = cleaned
-        if requested_version is None:
-            raise ValueError("explicit repo source requires a version")
-        eco = ecosystem.strip().lower() if ecosystem else "custom"
-        label = name.strip()
-        if eco in ("pypi", "npm", "maven"):
-            label = normalize_name(eco, name)
-        return Resolution(
-            ecosystem=eco,
-            name=label,
-            requested_version=requested_version,
-            version=requested_version,
-            registry_confirmed=True,
-            docs_url=None,
-            candidates=[],
-            source="explicit",
-            repo_url=text,
-        )
+    text = str(explicit_source).strip()
+    if not text:
+        raise ValueError("empty repo source")
+    if not Path(text).is_dir():
+        cleaned = sanitize_http_url(text, allow_private=allow_private)
+        if cleaned is None:
+            cleaned = sanitize_http_url(
+                text.removeprefix("git+"), allow_private=allow_private
+            )
+        if cleaned is None:
+            raise ValueError(f"invalid repo address: {explicit_source}")
+        text = cleaned
+    if requested_version is None:
+        raise ValueError("explicit repo source requires a version")
+    eco = ecosystem.strip().lower() if ecosystem else "custom"
+    label = name.strip()
+    if eco in ("pypi", "npm", "maven"):
+        label = normalize_name(eco, name)
+    return Resolution(
+        ecosystem=eco,
+        name=label,
+        requested_version=requested_version,
+        version=requested_version,
+        registry_confirmed=True,
+        docs_url=None,
+        candidates=[],
+        source="explicit",
+        repo_url=text,
+    )
+
+
+async def _resolve_via_registry(
+    conn,
+    client,
+    settings,
+    ecosystem: str | None,
+    name: str,
+    requested_version: str | None,
+    target: str,
+) -> Resolution:
     eco, norm, override_docs, override_repo, ttl, offline, cached = _registry_context(
         conn, settings, ecosystem, name
     )
-    override_hit = bool(override_repo)
+    override_hit = _override_hit_for(target, override_docs, override_repo)
+    builder = _builder_for(target)
     if offline:
         if cached is None:
             raise RegistryError("retryable", "offline cache miss")
-        return _build_repo_resolution(
+        return builder(
             ecosystem=eco,
             name=norm,
             requested=requested_version,
@@ -435,10 +385,11 @@ async def resolve_repo(
             candidates=cached["candidates"],
             source="override" if override_hit else "registry",
         )
-    if cached is not None and _is_fresh(cached["fetched_at"], ttl):
-        repo_url = override_repo or cached["repo_url"]
-        if repo_url is not None:
-            return _build_repo_resolution(
+    if cached is not None and is_fresh(cached["fetched_at"], ttl):
+        if target == "repo" and (override_repo or cached["repo_url"]) is None:
+            pass
+        else:
+            return builder(
                 ecosystem=eco,
                 name=norm,
                 requested=requested_version,
@@ -456,14 +407,13 @@ async def resolve_repo(
         snap = await fetch_snapshot(eco, norm, client, settings)
     except RegistryError as exc:
         if exc.kind == "retryable" and cached is not None:
-            repo_url = override_repo or cached["repo_url"]
-            if repo_url is None:
+            if target == "repo" and (override_repo or cached["repo_url"]) is None:
                 raise RegistryError(
                     "no_docs",
                     "registry has no repository address",
                     hint={"homepage": cached["homepage"]},
                 ) from None
-            return _build_repo_resolution(
+            return builder(
                 ecosystem=eco,
                 name=norm,
                 requested=requested_version,
@@ -479,7 +429,8 @@ async def resolve_repo(
             )
         raise
     _store_snapshot(conn, eco, norm, snap)
-    return _build_repo_resolution(
+    registry_docs = snap.doc_candidates[0] if snap.doc_candidates else None
+    return builder(
         ecosystem=eco,
         name=norm,
         requested=requested_version,
@@ -489,9 +440,54 @@ async def resolve_repo(
         repo_url=snap.repo_url,
         override_docs=override_docs,
         override_repo=override_repo,
-        registry_docs=snap.doc_candidates[0] if snap.doc_candidates else None,
+        registry_docs=registry_docs,
         candidates=list(snap.doc_candidates),
         source="override" if override_hit else "registry",
+    )
+
+
+async def resolve_package(
+    conn: sqlite3.Connection,
+    client,
+    settings,
+    ecosystem: str | None,
+    name: str,
+    requested_version: str | None = None,
+    explicit_url: str | None = None,
+) -> Resolution:
+    """Single entry point for name resolution: explicit addresses pass through, the rest go through overrides + cache + registry."""
+    if explicit_url is not None:
+        return _explicit_docs_resolution(
+            ecosystem,
+            name,
+            requested_version,
+            explicit_url,
+            allow_private=bool(settings.registry_allow_private),
+        )
+    return await _resolve_via_registry(
+        conn, client, settings, ecosystem, name, requested_version, "docs"
+    )
+
+
+async def resolve_repo(
+    conn: sqlite3.Connection,
+    client,
+    settings,
+    ecosystem: str | None,
+    name: str,
+    requested_version: str | None = None,
+    explicit_source: str | None = None,
+) -> Resolution:
+    if explicit_source is not None:
+        return _explicit_repo_resolution(
+            ecosystem,
+            name,
+            requested_version,
+            explicit_source,
+            allow_private=bool(settings.registry_allow_private),
+        )
+    return await _resolve_via_registry(
+        conn, client, settings, ecosystem, name, requested_version, "repo"
     )
 
 

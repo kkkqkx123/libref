@@ -10,7 +10,6 @@ To add an ecosystem, add registry/<eco>.py and append its name to SUPPORTED_ECOS
 
 from __future__ import annotations
 
-import asyncio
 import ipaddress
 import re
 from typing import Any
@@ -252,50 +251,30 @@ def best_effort_stable(versions: list[str]) -> str | None:
 async def _get_json(
     client: httpx.AsyncClient, url: str, *, retries: int = 3
 ) -> httpx.Response:
-    error: str | None = None
-    retry_after = 0.0
-    for attempt in range(retries + 1):
-        try:
-            resp = await client.get(url, headers={"Accept": "application/json"})
-        except (httpx.HTTPError, OSError, TimeoutError) as exc:
-            error = f"{type(exc).__name__}: {exc}"
-            await asyncio.sleep(min(0.05 * (2**attempt), 0.4))
-            continue
-        if resp.status_code == 404:
-            return resp
-        if resp.status_code == 429 or resp.status_code >= 500:
-            error = f"HTTP {resp.status_code}"
-            try:
-                retry_after = float(resp.headers.get("retry-after", "0"))
-            except ValueError:
-                retry_after = 0.0
-            await asyncio.sleep(min(max(retry_after, 0.05 * (2**attempt)), 0.4))
-            continue
-        return resp
-    raise RegistryError("retryable", f"registry unreachable: {error}")
+    from libref.crawler.http import resilient_get
+
+    try:
+        return await resilient_get(
+            client, url, headers={"Accept": "application/json"}, retries=retries
+        )
+    except httpx.HTTPError as exc:
+        raise RegistryError("retryable", f"registry unreachable: {exc}") from None
 
 
 async def _get_text(
     client: httpx.AsyncClient, url: str, *, retries: int = 3
 ) -> httpx.Response:
-    error: str | None = None
-    for attempt in range(retries + 1):
-        try:
-            resp = await client.get(
-                url, headers={"Accept": "text/xml, application/xml, */*"}
-            )
-        except (httpx.HTTPError, OSError, TimeoutError) as exc:
-            error = f"{type(exc).__name__}: {exc}"
-            await asyncio.sleep(min(0.05 * (2**attempt), 0.4))
-            continue
-        if resp.status_code == 404:
-            return resp
-        if resp.status_code == 429 or resp.status_code >= 500:
-            error = f"HTTP {resp.status_code}"
-            await asyncio.sleep(min(0.05 * (2**attempt), 0.4))
-            continue
-        return resp
-    raise RegistryError("retryable", f"registry unreachable: {error}")
+    from libref.crawler.http import resilient_get
+
+    try:
+        return await resilient_get(
+            client,
+            url,
+            headers={"Accept": "text/xml, application/xml, */*"},
+            retries=retries,
+        )
+    except httpx.HTTPError as exc:
+        raise RegistryError("retryable", f"registry unreachable: {exc}") from None
 
 
 async def fetch_snapshot(
