@@ -481,7 +481,8 @@ class HybridRetriever:
         clusters = _cluster_sets(self._conn, vids)
         health_rows = [{"support": s} for plist in patterns.values() for _, s in plist]
         health = reuse_diversity(
-            health_rows, [{"members": m} for cl in clusters.values() for m in cl]
+            health_rows,
+            [{"members": members} for sets in clusters.values() for members in sets],
         )
         alpha = capped_alpha(raw_alpha, float(health.get("reusability", 0.0)))
         scored: list[tuple[float, int]] = []

@@ -28,10 +28,13 @@ user_agent = "libref-crawler/0.1"
 render_js_default = false
 
 [storage]
-# 向量索引（Qdrant，可重建派生索引；崩溃后按 SQLite 重灌）
+# 向量索引：默认本地 simvec，Qdrant 为可选后端；集合名两后端共用，可重建派生索引，崩溃后按 SQLite 重灌
 qdrant_url = "http://localhost:6333"
-qdrant_collection = "libref_chunks"
+vector_collection = "libref_chunks"
 qdrant_timeout = 5.0
+vector_backend = "simvec"
+# simvec_dir = "data/simvec"
+# simvec_lib = "libsimvec.so"
 
 [chunking]
 # 文档分块双路预算：向量路按 token，全文路按词项
@@ -114,12 +117,3 @@ snapshot_quota_mb = 512
 # repos_dir = "data/repos"
 repos_quota_mb = 2048
 deletion_log_ttl_days = 30.0
-
-# 预留节已启用：接口鉴权节与界面节均为正式配置（见下）。
-[mcp.auth]
-# mcp_token 经环境变量注入，此处只登记开关。
-mcp_require_auth = false
-
-[web]
-web_host = "127.0.0.1"
-web_port = 8001

@@ -91,7 +91,7 @@ def test_normalize_signature_stable():
         {"callee": "a.b", "args": ["x", "y"]},
         {"callee": "c", "args": []},
     ]
-    assert normalize_signature(calls, [0, 1]) == "a.b:2|c:0"
+    assert normalize_signature(calls, [0, 1]) == "a.b(_,_)|c()"
 
 
 def test_reuse_diversity_logs():
@@ -102,6 +102,8 @@ def test_reuse_diversity_logs():
     assert health["total_support"] == 6
     assert health["reusability"] > 0
     assert health["clusters"] == 2
+    single = reuse_diversity([{"support": 5}], [{"members": {"a"}}])
+    assert single["reusability"] == 0.0
 
 
 def test_pattern_contains_all_and_capped_alpha():

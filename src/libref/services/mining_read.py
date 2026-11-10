@@ -39,13 +39,9 @@ def _render_evidence(
     group: dict[str, Any], calls: list[dict[str, Any]], matched: list[int]
 ) -> str:
     """Render matched calls with neighbours and explicit gaps, body verbatim."""
-    keep: set[int] = set(matched)
-    if matched:
-        if matched[0] - 1 >= 0:
-            keep.add(matched[0] - 1)
-        if matched[-1] + 1 < len(calls):
-            keep.add(matched[-1] + 1)
-    ordered = sorted(keep)
+    from libref.mining.idiom import neighbour_keep
+
+    ordered = neighbour_keep(list(matched), len(calls))
     parts: list[str] = []
     prev: int | None = None
     for idx in ordered:
@@ -418,16 +414,31 @@ class MiningReadService:
         try:
             rows = self._conn.execute(
                 "SELECT pattern, pattern_hash, model, prompt_version, name,"
-                " summary, category_path, workflow, related_apis"
+                " summary, category_path, workflow, related_apis, updated_at"
                 " FROM pattern_labels"
                 f" WHERE version_id IN ({placeholders})"
-                " ORDER BY pattern_hash, model, prompt_version",
+                " ORDER BY updated_at DESC, pattern_hash, model, prompt_version",
                 tuple(vids),
             ).fetchall()
         except Exception:  # noqa: BLE001 -- labels are optional before migration
             return []
         out = []
-        for raw, phash, model, pver, name, summary, cat, workflow, related in rows:
+        seen: set[str] = set()
+        for (
+            raw,
+            phash,
+            model,
+            pver,
+            name,
+            summary,
+            cat,
+            workflow,
+            related,
+            _updated,
+        ) in rows:
+            if str(phash) in seen:
+                continue
+            seen.add(str(phash))
             try:
                 names = json.loads(raw) if raw else []
             except ValueError:

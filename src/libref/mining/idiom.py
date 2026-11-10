@@ -16,6 +16,7 @@ from typing import Any
 __all__ = [
     "deduplicate_evidence",
     "mask_arg",
+    "neighbour_keep",
     "normalize_signature",
     "reuse_diversity",
     "synthesize_snippet",
@@ -61,6 +62,19 @@ def _masked_call(callee: str, args: list[str]) -> str:
     return f"{callee}({masked})"
 
 
+def neighbour_keep(matched: list[int], total: int) -> list[int]:
+    """Ordered indices to retain: matched calls plus one neighbour on each side."""
+    if not matched or total <= 0:
+        return []
+    ordered = sorted(set(matched))
+    keep: set[int] = set(ordered)
+    if ordered[0] - 1 >= 0:
+        keep.add(ordered[0] - 1)
+    if ordered[-1] + 1 < total:
+        keep.add(ordered[-1] + 1)
+    return sorted(i for i in keep if 0 <= i < total)
+
+
 def synthesize_snippet(
     pattern: list[str],
     calls: list[dict[str, Any]],
@@ -69,18 +83,14 @@ def synthesize_snippet(
     """Assemble a readable snippet from matched calls with neighbours and holes."""
     if not pattern or not calls or not matched:
         return {"lines": [], "skipped": 0, "invalid": True}
-    ordered = sorted(set(matched))
-    keep: set[int] = set(ordered)
-    if ordered:
-        if ordered[0] - 1 >= 0:
-            keep.add(ordered[0] - 1)
-        if ordered[-1] + 1 < len(calls):
-            keep.add(ordered[-1] + 1)
-    hit = set(ordered)
+    ordered = neighbour_keep(list(matched), len(calls))
+    if not ordered:
+        return {"lines": [], "skipped": 0, "invalid": True}
+    hit = set(matched)
     lines: list[dict[str, Any]] = []
     skipped = 0
     prev: int | None = None
-    for idx in sorted(keep):
+    for idx in ordered:
         if prev is not None and idx - prev > 1:
             skipped += idx - prev - 1
             gap_calls = calls[prev + 1 : idx]
@@ -116,7 +126,8 @@ def normalize_signature(calls: list[dict[str, Any]], matched: list[int]) -> str:
         if 0 <= idx < len(calls):
             call = calls[idx]
             args = call.get("args") or []
-            parts.append(f"{call.get('callee')}:{len(args)}")
+            masked = ",".join(mask_arg(str(a)) for a in args)
+            parts.append(f"{call.get('callee')}({masked})")
     return "|".join(parts)
 
 
@@ -181,7 +192,7 @@ def reuse_diversity(
     """Health signals computed from fetched rows: average reuse and coverage diversity."""
     total = sum(int(p.get("support", 0) or 0) for p in patterns)
     count = len(patterns)
-    reuse = math.log(total / count) if count > 0 and total > count else 0.0
+    reuse = math.log(total / count) if count >= 2 and total > count else 0.0
     diversity = math.log(len(clusters)) if clusters else 0.0
     return {
         "patterns": count,

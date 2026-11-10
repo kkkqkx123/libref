@@ -202,6 +202,7 @@ class ChatClient:
             "model": self._model,
             "messages": messages,
             "stream": False,
+            "temperature": 0.0,
             "enable_thinking": self._thinking,
         }
 
@@ -274,6 +275,7 @@ class ChatClient:
             "model": self._model,
             "messages": messages,
             "stream": True,
+            "temperature": 0.0,
             "enable_thinking": self._thinking,
         }
         if self._resilience is not None:

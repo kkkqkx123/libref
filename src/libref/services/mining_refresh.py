@@ -303,8 +303,16 @@ def mine_patterns(
             f" AND pattern NOT IN ({placeholders})",
             (version_id, *wanted),
         )
+        if _label_table_ready(conn):
+            conn.execute(
+                f"DELETE FROM pattern_labels WHERE version_id=?"
+                f" AND pattern NOT IN ({placeholders})",
+                (version_id, *wanted),
+            )
     else:
         conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
+        if _label_table_ready(conn):
+            conn.execute("DELETE FROM pattern_labels WHERE version_id=?", (version_id,))
     refresh_feature_tree(
         conn, library_id, version_id, include_ambiguous=include_ambiguous
     )
@@ -464,6 +472,7 @@ async def induce_labels(
     )
     prompt_version = str(setting_or_default(settings, "induction_prompt_version"))
     model = str(setting_or_default(settings, "chat_model"))
+    batch_size = max(1, int(setting_or_default(settings, "induction_batch")))
     reader = MiningReadService(conn)
     patterns = reader.list_patterns(
         library, version, ecosystem, limit=max(1, want_topn)
@@ -483,28 +492,53 @@ async def induce_labels(
         if exists and int(exists[0]) > 0:
             skipped += 1
             continue
-        shapes = []
-        try:
-            shapes = reader.arg_shapes(names[0], library, version, ecosystem, limit=3)
-        except Exception:  # noqa: BLE001 -- shapes are advisory for prompts
-            shapes = []
+        shapes: list[dict[str, Any]] = []
         siblings: list[str] = []
-        try:
-            for rel in reader.related_apis(
-                names[0], library, version, ecosystem, limit=6
-            ):
-                siblings.append(str(rel.get("api") or ""))
-        except Exception:  # noqa: BLE001 -- siblings are advisory for prompts
-            siblings = []
-        allowed = set(names) | {s for s in siblings if s}
+        for api in names:
+            try:
+                api_shapes = reader.arg_shapes(
+                    api,
+                    library,
+                    version,
+                    ecosystem,
+                    limit=2,
+                    include_ambiguous=include_ambiguous,
+                )
+            except Exception:  # noqa: BLE001 -- shapes are advisory for prompts
+                api_shapes = []
+            for shape in api_shapes:
+                shapes.append(
+                    {
+                        "api": api,
+                        "args": shape.get("args"),
+                        "count": shape.get("count", 0),
+                    }
+                )
+            try:
+                api_related = reader.related_apis(
+                    api,
+                    library,
+                    version,
+                    ecosystem,
+                    limit=4,
+                    include_ambiguous=include_ambiguous,
+                )
+            except Exception:  # noqa: BLE001 -- siblings are advisory for prompts
+                api_related = []
+            for rel in api_related:
+                text = str(rel.get("api") or "")
+                if text and text not in siblings:
+                    siblings.append(text)
+        shapes = shapes[:6]
+        siblings = siblings[:6]
+        allowed = set(names) | set(siblings)
+        scope = f"{library}@{version}" + (f"({ecosystem})" if ecosystem else "")
         item = InductionInput(
             pattern=names,
             support=int(entry.get("support", 1) or 1),
-            arg_shapes=[
-                {"args": s.get("args"), "count": s.get("count", 0)} for s in shapes
-            ],
-            representative=names[0],
-            siblings=[s for s in siblings if s],
+            arg_shapes=shapes,
+            siblings=siblings,
+            scope=scope,
         )
         try:
             import asyncio as _asyncio
@@ -540,6 +574,8 @@ async def induce_labels(
             ),
         )
         labeled += 1
+        if labeled % batch_size == 0:
+            conn.commit()
     conn.commit()
     return {"disabled": False, "labeled": labeled, "failed": failed, "skipped": skipped}
 
