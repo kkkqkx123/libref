@@ -12,7 +12,14 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-MANIFEST_FILES = ("go.mod", "Cargo.toml")
+MANIFEST_FILES = (
+    "go.mod",
+    "Cargo.toml",
+    "package.json",
+    "pyproject.toml",
+    "requirements.txt",
+    "pom.xml",
+)
 
 
 class ManifestDep(BaseModel):
@@ -173,8 +180,146 @@ def _csproj_requires(text: str) -> list[tuple[str, str]]:
     return out
 
 
+def _package_json_identity(text: str) -> str | None:
+    import json
+
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    name = str(data.get("name") or "").strip()
+    return name or None
+
+
+def _package_json_requires(text: str) -> list[tuple[str, str]]:
+    import json
+
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return []
+    if not isinstance(data, dict):
+        return []
+    out: list[tuple[str, str]] = []
+    for section in ("dependencies", "devDependencies", "peerDependencies"):
+        deps = data.get(section)
+        if not isinstance(deps, dict):
+            continue
+        for name, spec in deps.items():
+            req = str(spec or "").strip().lstrip("^~>=< \t")
+            if name and str(name) not in [seen for seen, _ in out]:
+                out.append((str(name), req))
+    return out
+
+
+def _pep508_name(spec: str) -> str:
+    import re
+
+    head = re.split(r"[\s\[;><=!~]+", spec.strip(), maxsplit=1)[0]
+    return head.strip()
+
+
+def _pyproject_identity(text: str) -> str | None:
+    try:
+        import tomllib
+    except ImportError:  # pragma: no cover - Python 3.11+ always ships tomllib
+        return None
+    try:
+        data = tomllib.loads(text)
+    except ValueError:
+        return None
+    project = data.get("project") if isinstance(data, dict) else None
+    if not isinstance(project, dict):
+        return None
+    name = str(project.get("name") or "").strip()
+    return name or None
+
+
+def _pyproject_requires(text: str) -> list[tuple[str, str]]:
+    try:
+        import tomllib
+    except ImportError:  # pragma: no cover - Python 3.11+ always ships tomllib
+        return []
+    try:
+        data = tomllib.loads(text)
+    except ValueError:
+        return []
+    project = data.get("project") if isinstance(data, dict) else None
+    if not isinstance(project, dict):
+        return []
+    out: list[tuple[str, str]] = []
+    deps = project.get("dependencies")
+    if isinstance(deps, list):
+        for spec in deps:
+            name = _pep508_name(str(spec))
+            if name and name not in [seen for seen, _ in out]:
+                out.append((name, str(spec).strip()))
+    return out
+
+
+def _requirements_requires(text: str) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(("#", "-")):
+            continue
+        line = line.split("#", 1)[0].strip().split(";", 1)[0].strip()
+        if not line or "://" in line or line.startswith("."):
+            continue
+        name = _pep508_name(line)
+        if name and name not in [seen for seen, _ in out]:
+            out.append((name, line[len(name) :].strip()))
+    return out
+
+
+def _pom_text(node) -> str:
+    return "".join(node.itertext()).strip() if node is not None else ""
+
+
+def _pom_identity(text: str) -> str | None:
+    try:
+        xml_root = ET.fromstring(text)
+    except ET.ParseError:
+        return None
+    group = _pom_text(xml_root.find("{*}groupId"))
+    artifact = _pom_text(xml_root.find("{*}artifactId"))
+    if not group:
+        parent = xml_root.find("{*}parent")
+        if parent is not None:
+            group = _pom_text(parent.find("{*}groupId"))
+    if not artifact or not group:
+        return None
+    return f"{group}:{artifact}"
+
+
+def _pom_requires(text: str) -> list[tuple[str, str]]:
+    try:
+        xml_root = ET.fromstring(text)
+    except ET.ParseError:
+        return []
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for deps in xml_root.iter():
+        if _local(deps.tag) != "dependencies":
+            continue
+        for dep in list(deps):
+            if _local(dep.tag) != "dependency":
+                continue
+            group = _pom_text(dep.find("{*}groupId"))
+            artifact = _pom_text(dep.find("{*}artifactId"))
+            version = _pom_text(dep.find("{*}version"))
+            if _pom_text(dep.find("{*}scope")) == "system":
+                continue
+            if group and artifact and f"{group}:{artifact}" not in seen:
+                seen.add(f"{group}:{artifact}")
+                out.append((f"{group}:{artifact}", version))
+    return out
+
+
 def manifest_identity(root) -> tuple[str, str] | None:
-    """Module identity from the first manifest found: go.mod wins, then Cargo.toml, then csproj."""
+    """Module identity from the first manifest found: go.mod, Cargo.toml, package.json, pyproject.toml, pom.xml, then csproj."""
     base = Path(root)
     go_text = _read_text(base, "go.mod")
     if go_text is not None:
@@ -186,6 +331,33 @@ def manifest_identity(root) -> tuple[str, str] | None:
         name = _cargo_package_name(cargo_text)
         if name:
             return ("crates", name)
+    package_text = _read_text(base, "package.json")
+    if package_text is not None:
+        name = _package_json_identity(package_text)
+        if name:
+            try:
+                from libref.crawler.registry import normalize_name
+
+                name = normalize_name("npm", name)
+            except ValueError:
+                pass
+            return ("npm", name)
+    pyproject_text = _read_text(base, "pyproject.toml")
+    if pyproject_text is not None:
+        name = _pyproject_identity(pyproject_text)
+        if name:
+            try:
+                from libref.crawler.registry import normalize_name
+
+                name = normalize_name("pypi", name)
+            except ValueError:
+                pass
+            return ("pypi", name)
+    pom_text = _read_text(base, "pom.xml")
+    if pom_text is not None:
+        name = _pom_identity(pom_text)
+        if name:
+            return ("maven", name)
     for csproj in _csproj_files(base)[:1]:
         try:
             text = csproj.read_text(encoding="utf-8")
@@ -225,6 +397,22 @@ def manifest_dependencies(root) -> list[ManifestDep]:
     if cargo_text is not None:
         for name, req in _cargo_requires(cargo_text):
             _push("crates", name, req, "Cargo.toml")
+    package_text = _read_text(base, "package.json")
+    if package_text is not None:
+        for name, req in _package_json_requires(package_text):
+            _push("npm", name, req, "package.json")
+    pyproject_text = _read_text(base, "pyproject.toml")
+    if pyproject_text is not None:
+        for name, req in _pyproject_requires(pyproject_text):
+            _push("pypi", name, req, "pyproject.toml")
+    requirements_text = _read_text(base, "requirements.txt")
+    if requirements_text is not None:
+        for name, req in _requirements_requires(requirements_text):
+            _push("pypi", name, req, "requirements.txt")
+    pom_text = _read_text(base, "pom.xml")
+    if pom_text is not None:
+        for name, req in _pom_requires(pom_text):
+            _push("maven", name, req, "pom.xml")
     for csproj in _csproj_files(base):
         try:
             rel = csproj.relative_to(base).as_posix()
@@ -248,4 +436,17 @@ def normalize_dep_name(ecosystem: str, name: str) -> str:
         return text.lower()
     if ecosystem == "nuget":
         return text.lower()
+    if ecosystem == "pypi":
+        import re
+
+        return re.sub(r"[-_.]+", "-", text).lower()
+    if ecosystem == "npm":
+        return text.lower()
+    if ecosystem == "maven":
+        try:
+            from libref.crawler.registry.maven import normalize_maven_name
+
+            return normalize_maven_name(text)
+        except ValueError:
+            return ""
     return text

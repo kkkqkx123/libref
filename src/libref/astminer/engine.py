@@ -254,6 +254,10 @@ def _build_decls(
         kind = _rules.refine_kind(kinds)
         if kind is None:
             continue
+        if kind == "class" and any(
+            child.type == "interface" for child in node.children
+        ):
+            kind = "interface"
         name = _entity_name(captures, roots, source)
         if not name:
             continue
@@ -361,8 +365,9 @@ def _build_decls(
         )
         stack.append(decls[-1])
     _attach_bases_innermost(decls, decl_nodes, dep_spans)
-    _claim_file_scoped(decls, cands)
+    _claim_file_scoped(decls, cands, cfg.name)
     _reparent_by_owner(decls, cands, impl_anchors, module)
+    _merge_partial_decls(decls)
     return decls
 
 
@@ -380,12 +385,52 @@ def _attach_bases_innermost(decls, decl_nodes, dep_spans) -> None:
             best.bases.append(text)
 
 
-def _claim_file_scoped(decls: list[ApiDeclRecord], cands: list[dict]) -> None:
+_PACKAGE_CLAIM_LANGUAGES = frozenset({"java", "csharp", "kotlin", "groovy"})
+
+_PARTIAL_MERGE_KINDS = frozenset({"class", "interface", "struct", "record", "enum"})
+
+
+def _merge_partial_decls(decls: list[ApiDeclRecord]) -> None:
+    first_at: dict[tuple[str | None, str], int] = {}
+    drop: set[int] = set()
+    for index, decl in enumerate(decls):
+        if decl.kind not in _PARTIAL_MERGE_KINDS:
+            continue
+        key = (decl.parent, decl.qualified_name)
+        prev = first_at.get(key)
+        if prev is None:
+            first_at[key] = index
+            continue
+        anchor = decls[prev]
+        anchor.start_byte = min(anchor.start_byte, decl.start_byte)
+        anchor.end_byte = max(anchor.end_byte, decl.end_byte)
+        anchor.line_start = min(anchor.line_start, decl.line_start)
+        anchor.line_end = max(anchor.line_end, decl.line_end)
+        for base in decl.bases:
+            if base not in anchor.bases:
+                anchor.bases.append(base)
+        anchor.has_doc = anchor.has_doc or decl.has_doc
+        if not anchor.signature and decl.signature:
+            anchor.signature = decl.signature
+        drop.add(index)
+    for index in sorted(drop, reverse=True):
+        del decls[index]
+
+
+def _claim_file_scoped(
+    decls: list[ApiDeclRecord], cands: list[dict], language: str | None = None
+) -> None:
     owners = [
         decl
         for decl, cand in zip(decls, cands)
         if cand.get("file_scoped") and decl.parent is None
     ]
+    if not owners and language in _PACKAGE_CLAIM_LANGUAGES:
+        packages = [
+            decl for decl in decls if decl.kind == "package" and decl.parent is None
+        ]
+        if len(packages) == 1:
+            owners = packages
     if len(owners) != 1:
         return
     owner = owners[0]
@@ -487,6 +532,10 @@ def _call_texts(
     if func and receiver is not None and "." in func:
         head, _, _ = func.rpartition(".")
         return func, head or None, func
+    if func and receiver is None and "." in func:
+        head, _, tail = func.rpartition(".")
+        if head and tail and "(" not in func and ")" not in func:
+            return func, head, tail
     return func, receiver, func
 
 

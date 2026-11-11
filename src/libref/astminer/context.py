@@ -55,6 +55,8 @@ def determine_module_path(rel_path: str, language: str) -> str | None:
             return None
         if path.endswith("/__init__.py"):
             path = path[: -len("/__init__.py")]
+        elif path.endswith(".pyi"):
+            path = path[: -len(".pyi")]
         elif path.endswith(".py"):
             path = path[: -len(".py")]
         else:
@@ -115,10 +117,8 @@ def determine_module_path(rel_path: str, language: str) -> str | None:
                 break
         return path.replace("/", ".") or None
     if language == "groovy":
-        for suffix in (".groovy", ".gradle"):
-            if path.endswith(suffix):
-                path = path[: -len(suffix)]
-                break
+        if path.endswith(".groovy"):
+            path = path[: -len(".groovy")]
         else:
             return None
         for root in _GROOVY_SOURCE_ROOTS:

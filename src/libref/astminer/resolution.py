@@ -95,12 +95,24 @@ _NODE_BUILTINS = frozenset(
 _TEST_DIR_NAMES = frozenset({"test", "tests", "testing", "__tests__"})
 
 
+def _language_for_file(path: str | None) -> str | None:
+    if not path:
+        return None
+    from pathlib import Path as _Path
+
+    from libref.astminer import config as _config
+
+    cfg = _config.config_for_suffix(_Path(path).suffix)
+    return cfg.name if cfg is not None else None
+
+
 def resolve_calls(
     decls: list[ApiDeclRecord],
     file_aliases: dict[str, list[tuple[str, str]]],
     calls: list[RawCall],
     repo: str,
     commit_sha: str = "",
+    language: str | None = None,
 ) -> list[CallInstanceRecord]:
     by_file: dict[str, set[str]] = {}
     parent_by_qual: dict[str, str | None] = {}
@@ -143,6 +155,7 @@ def resolve_calls(
             same_file,
             alias_map,
             parent_by_qual,
+            language=language or _language_for_file(call.caller_file),
             caller_file=call.caller_file,
             file_by_qual=file_by_qual,
             params_by_qual=params_by_qual,
@@ -185,6 +198,7 @@ def resolve_one(
     alias_map: dict[str, str],
     parent_by_qual: dict[str, str | None] | None = None,
     *,
+    language: str | None = None,
     caller_file: str | None = None,
     file_by_qual: dict[str, str] | None = None,
     params_by_qual: dict[str, list[str]] | None = None,
@@ -195,7 +209,7 @@ def resolve_one(
     if not raw:
         return raw, "AMBIGUOUS"
     head, _, _rest = raw.partition(".")
-    if is_builtin_bare(raw, alias_map) and raw not in same_file:
+    if is_builtin_bare(raw, alias_map, language) and raw not in same_file:
         return raw, "AMBIGUOUS"
     if head in _SELF_HEADS and caller:
         base = caller.rpartition(".")[0] if "." in caller else caller

@@ -19,11 +19,13 @@ CALL_NODE_TYPES = frozenset(
         "invocation_expression",
         "go_statement",
         "defer_statement",
+        "jsx_opening_element",
+        "jsx_self_closing_element",
     }
 )
 
 
-BUILTIN_BARE_CALLS = frozenset(
+_PYTHON_BARE_CALLS = frozenset(
     {
         "str",
         "int",
@@ -40,6 +42,11 @@ BUILTIN_BARE_CALLS = frozenset(
         "isinstance",
         "type",
         "super",
+    }
+)
+
+_JAVASCRIPT_BARE_CALLS = frozenset(
+    {
         "String",
         "Number",
         "Boolean",
@@ -54,10 +61,57 @@ BUILTIN_BARE_CALLS = frozenset(
     }
 )
 
+_KOTLIN_BARE_CALLS = frozenset(
+    {
+        "listOf",
+        "mutableListOf",
+        "mapOf",
+        "mutableMapOf",
+        "setOf",
+        "mutableSetOf",
+        "arrayOf",
+        "sequenceOf",
+        "println",
+        "print",
+        "error",
+        "lazy",
+    }
+)
 
-def is_builtin_bare(raw: str, alias_map: dict[str, str]) -> bool:
+_GROOVY_BARE_CALLS = frozenset(
+    {
+        "println",
+        "print",
+        "printf",
+        "sprintf",
+    }
+)
+
+BUILTIN_BARE_CALLS = (
+    _PYTHON_BARE_CALLS
+    | _JAVASCRIPT_BARE_CALLS
+    | _KOTLIN_BARE_CALLS
+    | _GROOVY_BARE_CALLS
+)
+
+BUILTIN_BARE_BY_LANGUAGE: dict[str, frozenset[str]] = {
+    "python": _PYTHON_BARE_CALLS,
+    "javascript": _JAVASCRIPT_BARE_CALLS,
+    "kotlin": _KOTLIN_BARE_CALLS,
+    "groovy": _GROOVY_BARE_CALLS,
+}
+
+
+def is_builtin_bare(
+    raw: str, alias_map: dict[str, str], language: str | None = None
+) -> bool:
     head = raw.partition(".")[0]
-    return bool(head) and head in BUILTIN_BARE_CALLS and head not in alias_map
+    table = (
+        BUILTIN_BARE_BY_LANGUAGE.get(language, BUILTIN_BARE_CALLS)
+        if language is not None
+        else BUILTIN_BARE_CALLS
+    )
+    return bool(head) and head in table and head not in alias_map
 
 
 def slice_text(node: Any, source: bytes) -> str:

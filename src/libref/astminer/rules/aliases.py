@@ -152,6 +152,42 @@ def _javascript_aliases(
 
         return normalize_js_specifier(raw_mod, importer_file)
 
+    dyn_name = first_node(captures, ".import.dynamic.name")
+    dyn_module = first_node(captures, ".import.dynamic.module")
+    if root.type == "variable_declarator" and dyn_name is not None:
+        mod = (
+            _normalized(_module_path(dyn_module, source))
+            if dyn_module is not None
+            else ""
+        )
+        name = slice_text(dyn_name, source).strip()
+        if name and mod:
+            return [(name, mod)]
+        return []
+    if root.type == "export_statement":
+        module = first_node(captures, ".export.module")
+        if module is None:
+            return []
+        mod = _normalized(_module_path(module, source))
+        if not mod:
+            return []
+        reexported: list[tuple[str, str]] = []
+        for name, nodes in captures.items():
+            if not name.endswith(".export.spec"):
+                continue
+            for spec in nodes:
+                idents = [
+                    slice_text(child, source).strip()
+                    for child in spec.children
+                    if child.type == "identifier"
+                ]
+                idents = [text for text in idents if text]
+                if not idents:
+                    continue
+                original = idents[0]
+                alias = idents[1] if len(idents) > 1 else original
+                reexported.append((alias, f"{mod}.{original}"))
+        return [(alias, full) for alias, full in reexported if alias and full]
     module = first_node(captures, ".import.module")
     if root.type == "import_statement" and module is not None:
         mod = _normalized(_module_path(module, source))

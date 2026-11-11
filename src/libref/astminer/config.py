@@ -21,7 +21,7 @@ class LanguageConfig:
 PYTHON_CONFIG = LanguageConfig(
     name="python",
     grammar="tree_sitter_python",
-    file_suffixes=(".py",),
+    file_suffixes=(".py", ".pyi"),
     config_version=1,
 )
 
@@ -70,7 +70,7 @@ KOTLIN_CONFIG = LanguageConfig(
 GROOVY_CONFIG = LanguageConfig(
     name="groovy",
     grammar="tree_sitter_groovy",
-    file_suffixes=(".groovy", ".gradle"),
+    file_suffixes=(".groovy",),
     config_version=1,
 )
 

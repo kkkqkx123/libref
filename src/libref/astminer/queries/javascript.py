@@ -64,6 +64,18 @@ def call_query() -> str:
     property: (property_identifier) @call.method.function)
   arguments: (arguments)? @call.method.arguments) @call.method
 
+(call_expression
+  function: (member_expression
+    object: (call_expression) @call.method.chained.from
+    property: (property_identifier) @call.method.chained.to)
+  arguments: (arguments)? @call.method.arguments) @call.method.chained
+
+(jsx_opening_element
+  [(identifier) (member_expression)] @call.jsx.name) @call.jsx
+
+(jsx_self_closing_element
+  [(identifier) (member_expression)] @call.jsx.name) @call.jsx
+
 (new_expression
   constructor: (_) @call.constructor.name
   arguments: (arguments)? @call.constructor.arguments) @call.constructor
@@ -99,13 +111,36 @@ def dependency_query() -> str:
     arguments: (arguments
       (string) @dependency.require.module))) @dependency.require.destruct
 
+(variable_declarator
+  name: (identifier) @dependency.import.dynamic.name
+  value: (call_expression
+    function: (import)
+    arguments: (arguments
+      (string) @dependency.import.dynamic.module))) @dependency.import.dynamic
+
+(variable_declarator
+  name: (identifier) @dependency.import.dynamic.name
+  value: (await_expression
+    (call_expression
+      function: (import)
+      arguments: (arguments
+        (string) @dependency.import.dynamic.module)))) @dependency.import.dynamic
+
 (export_statement
   (export_clause)
   source: (string) @dependency.export.module) @dependency.export
+
+(export_statement
+  (export_clause
+    (export_specifier) @dependency.export.spec)
+  source: (string) @dependency.export.module) @dependency.export.named
 """
 
 
 def comment_query() -> str:
     return r"""
 (comment) @comment.line
+
+((comment) @comment.doc
+  (#match? @comment.doc "^/\\*\\*"))
 """

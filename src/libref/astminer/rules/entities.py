@@ -115,7 +115,11 @@ def collect_simple_var_aliases(root: Any, source: bytes) -> list[tuple[str, str]
         elif node.type == "variable_declarator":
             name_node = node.child_by_field_name("name")
             value_node = node.child_by_field_name("value")
-            if name_node is not None and value_node is not None:
+            if (
+                name_node is not None
+                and value_node is not None
+                and name_node.type == "identifier"
+            ):
                 var = slice_text(name_node, source).strip()
                 target = _call_target_name(value_node, source)
                 if var and target:
@@ -152,7 +156,12 @@ def _call_target_name(node: Any, source: bytes) -> str:
                 break
     if fn is None:
         return ""
-    return generic_dotted(fn, source).strip()[:128]
+    if fn.type == "import":
+        return ""
+    text = generic_dotted(fn, source).strip()[:128]
+    if text in ("require", "import"):
+        return ""
+    return text
 
 
 def _split_aliased(node: Any, source: bytes) -> tuple[str, str]:

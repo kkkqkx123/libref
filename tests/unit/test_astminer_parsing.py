@@ -188,17 +188,17 @@ def test_kotlin_minimal_fixture_shapes(monkeypatch, tmp_path):
         "kotlin_shapes.kt", ast_config.KOTLIN_CONFIG, data
     )
     by_qual = {d.qualified_name: d for d in decls}
-    assert by_qual["kotlin_shapes.Cache"].kind == "class"
-    assert by_qual["kotlin_shapes.Cache"].bases == ["Repo"]
-    assert by_qual["kotlin_shapes.Cache.find"].kind == "method"
-    assert by_qual["kotlin_shapes.Cache.find"].params == ["id"]
-    assert by_qual["kotlin_shapes.top"].params == ["x", "y"]
+    assert by_qual["demo.store.Cache"].kind == "class"
+    assert by_qual["demo.store.Cache"].bases == ["Repo"]
+    assert by_qual["demo.store.Cache.find"].kind == "method"
+    assert by_qual["demo.store.Cache.find"].params == ["id"]
+    assert by_qual["demo.store.top"].params == ["x", "y"]
     assert ("List", "java.util.List") in aliases
     assert ("U", "demo.Util") in aliases
     by_raw = {c.raw_callee: c for c in raw}
-    assert by_raw["U.load"].caller == "kotlin_shapes.Cache.find"
-    assert by_raw["items.firstOrNull"].caller == "kotlin_shapes.Cache.find"
-    assert by_raw["x.toString"].caller == "kotlin_shapes.top"
+    assert by_raw["U.load"].caller == "demo.store.Cache.find"
+    assert by_raw["items.firstOrNull"].caller == "demo.store.Cache.find"
+    assert by_raw["x.toString"].caller == "demo.store.top"
 
 
 def test_groovy_minimal_fixture_shapes(monkeypatch, tmp_path):
@@ -207,18 +207,18 @@ def test_groovy_minimal_fixture_shapes(monkeypatch, tmp_path):
         "groovy_shapes.groovy", ast_config.GROOVY_CONFIG, data
     )
     by_qual = {d.qualified_name: d for d in decls}
-    assert by_qual["groovy_shapes.Cache"].kind == "class"
-    assert by_qual["groovy_shapes.Cache"].bases == ["Base"]
-    assert by_qual["groovy_shapes.Cache.name"].kind == "field"
-    assert by_qual["groovy_shapes.Cache.run"].kind == "method"
-    assert by_qual["groovy_shapes.top"].kind == "function"
-    assert by_qual["groovy_shapes.top"].params == ["x"]
+    assert by_qual["demo.store.Cache"].kind == "class"
+    assert by_qual["demo.store.Cache"].bases == ["Base"]
+    assert by_qual["demo.store.Cache.name"].kind == "field"
+    assert by_qual["demo.store.Cache.run"].kind == "method"
+    assert by_qual["demo.store.top"].kind == "function"
+    assert by_qual["demo.store.top"].params == ["x"]
     assert ("List", "java.util.List") in aliases
     assert ("load", "demo.Util.load") in aliases
     by_raw = {c.raw_callee: c for c in raw}
-    assert by_raw["this.helper"].caller == "groovy_shapes.Cache.run"
-    assert by_raw["items.first"].caller == "groovy_shapes.Cache.run"
-    assert by_raw["x.toString"].caller == "groovy_shapes.top"
+    assert by_raw["this.helper"].caller == "demo.store.Cache.run"
+    assert by_raw["items.first"].caller == "demo.store.Cache.run"
+    assert by_raw["x.toString"].caller == "demo.store.top"
     assert by_raw["Cache"].caller is None
 
 
@@ -269,8 +269,8 @@ def test_kotlin_delegation_bases_cover_by_and_generic(monkeypatch, tmp_path):
         "C.kt", ast_config.KOTLIN_CONFIG, data
     )
     by_qual = {d.qualified_name: d for d in decls}
-    assert "Repo" in by_qual["C"].bases
-    assert any("Base" in b for b in by_qual["C"].bases)
+    assert "Repo" in by_qual["demo.store.C"].bases
+    assert any("Base" in b for b in by_qual["demo.store.C"].bases)
 
 
 def test_groovy_qualified_extends_base(monkeypatch, tmp_path):
@@ -279,7 +279,7 @@ def test_groovy_qualified_extends_base(monkeypatch, tmp_path):
         "C.groovy", ast_config.GROOVY_CONFIG, data
     )
     by_qual = {d.qualified_name: d for d in decls}
-    assert any("foo.Bar" in b or b == "foo.Bar" for b in by_qual["C"].bases)
+    assert any("foo.Bar" in b or b == "foo.Bar" for b in by_qual["a.C"].bases)
 
 
 def test_jvm_stdlib_targets_are_ambiguous(monkeypatch, tmp_path):

@@ -14,7 +14,7 @@ def entity_query() -> str:
     return r"""
 (class_definition
   name: (identifier) @entity.class.name @entity.class.signature.name
-  [(identifier) (qualified_name) (dotted_identifier)] @entity.class.signature.base
+  [(identifier) (qualified_name) (dotted_identifier)]? @entity.class.signature.base
   body: (closure) @entity.class.body) @entity.class
 
 (class_definition
@@ -80,4 +80,7 @@ def dependency_query() -> str:
 def comment_query() -> str:
     return r"""
 (comment) @comment.line
+
+((comment) @comment.doc
+  (#match? @comment.doc "^(/\\*\\*|///)"))
 """

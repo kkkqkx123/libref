@@ -201,4 +201,7 @@ def dependency_query() -> str:
 def comment_query() -> str:
     return r"""
 (comment) @comment.line
+
+((comment) @comment.doc
+  (#match? @comment.doc "^///"))
 """

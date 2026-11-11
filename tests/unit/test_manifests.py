@@ -117,4 +117,78 @@ def test_normalize_dep_name() -> None:
     assert normalize_dep_name("go", "github.com/Acme/Demo") == "github.com/Acme/Demo"
     assert normalize_dep_name("crates", "Serde") == "serde"
     assert normalize_dep_name("nuget", "Newtonsoft.Json") == "newtonsoft.json"
+    assert normalize_dep_name("pypi", "Acme_Demo") == "acme-demo"
+    assert normalize_dep_name("npm", "Lodash") == "lodash"
+    assert normalize_dep_name("maven", "org.demo:lib") == "org.demo:lib"
+    assert normalize_dep_name("maven", "broken") == ""
     assert normalize_dep_name("custom", "X") == "X"
+
+
+def test_package_json_identity_and_requires(tmp_path) -> None:
+    from libref.astminer.manifests import manifest_dependencies, manifest_identity
+
+    _write(
+        tmp_path,
+        "package.json",
+        '{"name": "@acme/demo", "dependencies": {"lodash": "^4.17.21"},'
+        ' "devDependencies": {"jest": "29.0.0"}}',
+    )
+    assert manifest_identity(tmp_path) == ("npm", "@acme/demo")
+    assert [(d.ecosystem, d.name, d.req) for d in manifest_dependencies(tmp_path)] == [
+        ("npm", "lodash", "4.17.21"),
+        ("npm", "jest", "29.0.0"),
+    ]
+    assert all(d.source_file == "package.json" for d in manifest_dependencies(tmp_path))
+    _write(tmp_path, "package.json", "not json")
+    assert manifest_identity(tmp_path) is None
+    assert manifest_dependencies(tmp_path) == []
+
+
+def test_pyproject_and_requirements_requires(tmp_path) -> None:
+    from libref.astminer.manifests import manifest_dependencies, manifest_identity
+
+    _write(
+        tmp_path,
+        "pyproject.toml",
+        '[project]\nname = "Acme-Demo"\ndependencies = ["requests>=2", "click"]\n',
+    )
+    assert manifest_identity(tmp_path) == ("pypi", "acme-demo")
+    deps = manifest_dependencies(tmp_path)
+    assert [(d.ecosystem, d.name) for d in deps] == [
+        ("pypi", "requests"),
+        ("pypi", "click"),
+    ]
+    assert all(d.source_file == "pyproject.toml" for d in deps)
+    _write(tmp_path, "pyproject.toml", "[project\nname = \n")
+    assert manifest_identity(tmp_path) is None
+    _write(tmp_path, "requirements.txt", "requests>=2\n# comment\nclick\n")
+    assert [(d.name, d.req) for d in manifest_dependencies(tmp_path)] == [
+        ("requests", ">=2"),
+        ("click", ""),
+    ]
+
+
+def test_pom_identity_and_requires(tmp_path) -> None:
+    from libref.astminer.manifests import manifest_dependencies, manifest_identity
+
+    _write(
+        tmp_path,
+        "pom.xml",
+        "<project>"
+        "<groupId>org.demo</groupId><artifactId>lib</artifactId>"
+        "<dependencies>"
+        "<dependency><groupId>junit</groupId><artifactId>junit</artifactId>"
+        "<version>4.13</version></dependency>"
+        "<dependency><groupId>org.demo</groupId><artifactId>plain</artifactId>"
+        "</dependency></dependencies></project>",
+    )
+    assert manifest_identity(tmp_path) == ("maven", "org.demo:lib")
+    deps = manifest_dependencies(tmp_path)
+    assert [(d.ecosystem, d.name, d.req) for d in deps] == [
+        ("maven", "junit:junit", "4.13"),
+        ("maven", "org.demo:plain", ""),
+    ]
+    assert all(d.source_file == "pom.xml" for d in deps)
+    _write(tmp_path, "pom.xml", "<project><broken")
+    assert manifest_identity(tmp_path) is None
+    assert manifest_dependencies(tmp_path) == []

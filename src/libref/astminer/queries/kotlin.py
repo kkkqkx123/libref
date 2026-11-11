@@ -37,6 +37,13 @@ def entity_query() -> str:
     (variable_declaration
       (identifier) @entity.field.name @entity.field.signature.name)) @entity.field)
 
+(class_declaration
+  (primary_constructor
+    (class_parameters
+      (class_parameter
+        ["val" "var"]
+        (identifier) @entity.field.name @entity.field.signature.name) @entity.field)))
+
 (package_header
   (qualified_identifier) @entity.package.name) @entity.package
 """

@@ -20,6 +20,7 @@ from libref.astminer.rules.entities import (
     refine_kind,
 )
 from libref.astminer.rules.text import (
+    BUILTIN_BARE_BY_LANGUAGE,
     BUILTIN_BARE_CALLS,
     CALL_NODE_TYPES,
     count_arguments,
@@ -37,6 +38,7 @@ from libref.astminer.rules.text import (
 )
 
 __all__ = [
+    "BUILTIN_BARE_BY_LANGUAGE",
     "BUILTIN_BARE_CALLS",
     "CALLABLE_DECL_KINDS",
     "CALL_NODE_TYPES",
