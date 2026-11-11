@@ -71,6 +71,7 @@ def build_mcp_server(
         window_radius: int | None = None,
         expand_window: bool = False,
         suggest: bool = False,
+        include_prerelease: bool = False,
     ) -> dict[str, Any]:
         """Hybrid fused recall with degraded flag; precise uses exact full-text only."""
         if not query.strip():
@@ -110,7 +111,10 @@ def build_mcp_server(
         if suggest and not results:
             try:
                 out["suggestions"] = await discovery_svc.search_async(
-                    library or query, ecosystem, limit
+                    library or query,
+                    ecosystem,
+                    limit,
+                    include_prerelease=include_prerelease,
                 )
             except ValueError as exc:
                 return _invalid(str(exc))
@@ -397,6 +401,7 @@ def build_mcp_server(
         name: str,
         version: str | None = None,
         target: Literal["docs", "repo"] = "docs",
+        include_prerelease: bool = False,
     ) -> dict[str, Any]:
         """Resolve a package address; fetches the registry and refreshes the cache."""
         from libref.crawler.http import build_async_client
@@ -415,6 +420,7 @@ def build_mcp_server(
                     name,
                     version,
                     target,
+                    include_prerelease,
                 )
         except ValueError as exc:
             return {"error": "invalid", "message": str(exc)}

@@ -69,7 +69,18 @@ def parse_pypi_payload(
     info = payload.get("info") or {}
     stable = info.get("version")
     releases = payload.get("releases") or {}
-    versions = [str(v) for v in releases]
+    versions = []
+    for raw_version, files in releases.items():
+        text = str(raw_version)
+        if not text or text in versions:
+            continue
+        if isinstance(files, list) and files and all(
+            isinstance(item, dict) and item.get("yanked") for item in files
+        ):
+            continue
+        versions.append(text)
+    if stable not in versions:
+        stable = None
     homepage = sanitize_http_url(info.get("home_page"), allow_private=allow_private)
     candidates = rank_pypi_candidates(
         info.get("project_urls"), info.get("home_page"), allow_private=allow_private

@@ -91,6 +91,7 @@ def build_web_app(
         expand_window: bool = False,
         window_radius: int | None = None,
         suggest: bool = False,
+        include_prerelease: bool = False,
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         params = SearchQuery(
@@ -103,6 +104,7 @@ def build_web_app(
             expand_window=expand_window,
             window_radius=window_radius,
             suggest=suggest,
+            include_prerelease=include_prerelease,
         )
         try:
             results, degraded = await svc.search_with_mode(
@@ -121,7 +123,10 @@ def build_web_app(
         if params.suggest and not results:
             try:
                 out["suggestions"] = await discovery.search_async(
-                    params.library or params.query, params.ecosystem, params.limit
+                    params.library or params.query,
+                    params.ecosystem,
+                    params.limit,
+                    include_prerelease=params.include_prerelease,
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc

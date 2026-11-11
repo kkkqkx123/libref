@@ -103,6 +103,8 @@ def parse_nuget_registration(
     versions: list[str] = []
     project_url: str | None = None
     for entry in _timeline_entries(payload):
+        if entry.get("listed") is False:
+            continue
         version = str(entry.get("version") or "").strip()
         if version and version not in versions:
             versions.append(version)

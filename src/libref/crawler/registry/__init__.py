@@ -284,6 +284,8 @@ def pick_repo_url(
 
 
 def _version_key(value: str) -> list[tuple[int, Any]]:
+    """Approximate ordering: split on separator characters and compare digit chunks
+    numerically, other chunks case-insensitively. Not PEP 440 or SemVer."""
     key: list[tuple[int, Any]] = []
     for chunk in re.split(r"[.\-+_]", value):
         key.append((0, int(chunk)) if chunk.isdigit() else (1, chunk.lower()))
@@ -295,6 +297,9 @@ def best_effort_stable(
 ) -> str | None:
     """Fallback when no stable release exists: filter pre-release suffixes, then take the max by version comparison.
 
+    Approximation: ordering uses the chunk-wise version key, not PEP 440 or
+    SemVer; pre-release detection is suffix-hint based, except NuGet which
+    treats any hyphenated version as pre-release.
     With inclusion enabled the timeline maximum wins directly, prereleases included."""
     if not versions:
         return None

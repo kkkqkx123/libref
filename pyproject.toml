@@ -21,7 +21,7 @@ dependencies = [
     "tree-sitter>=0.24",
     "tree-sitter-c-sharp>=0.23.5",
     "tree-sitter-go>=0.25.0",
-    "tree-sitter-groovy>=0.1.2",
+    "tree-sitter-groovy",
     "tree-sitter-java>=0.23",
     "tree-sitter-javascript>=0.25.0",
     "tree-sitter-kotlin>=1.1.0",

@@ -1457,6 +1457,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Suggest unindexed libraries from registries when local hits are empty",
     )
+    p_search.add_argument(
+        "--include-prerelease",
+        action="store_true",
+        help="Include prerelease versions when ranking suggestion candidates",
+    )
     p_search.set_defaults(func=cmd_search)
 
     p_discover = sub.add_parser(

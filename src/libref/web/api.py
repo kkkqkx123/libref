@@ -17,6 +17,7 @@ class SearchQuery(BaseModel):
     expand_window: bool = False
     window_radius: int | None = None
     suggest: bool = False
+    include_prerelease: bool = False
 
 
 class LibrarySearchQuery(BaseModel):
