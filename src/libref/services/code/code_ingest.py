@@ -7,13 +7,45 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
 import httpx
+
+from libref.services.code.repo_chunks import _store_source_chunks, _sweep_source_pages
+from libref.services.code.repo_collect import _collect_repo
+from libref.services.code.repo_ids import call_uid, entity_uid
+from libref.services.code.repo_persist import (
+    _check_manifest_identity,
+    _persist_calls,
+    _persist_entities,
+    _persist_repo_deps,
+)
+from libref.services.code.repo_source import (
+    list_repo_dependencies,
+    lookup_index_source_cached,
+)
 
 logger = logging.getLogger(__name__)
 
 INDEX_REPO_JOB_KIND = "index_repo"
+
+
+__all__ = [
+    "INDEX_REPO_JOB_KIND",
+    "_collect_repo",
+    "_persist_calls",
+    "_persist_entities",
+    "_store_source_chunks",
+    "_sweep_source_pages",
+    "build_repo_runner",
+    "call_uid",
+    "entity_uid",
+    "index_repo",
+    "index_repo_async",
+    "index_repo_by_name",
+    "index_repo_by_name_async",
+    "list_repo_dependencies",
+    "lookup_index_source_cached",
+]
 
 
 @asynccontextmanager
@@ -22,446 +54,6 @@ async def _client(settings) -> AsyncIterator[httpx.AsyncClient]:
 
     async with build_async_client(settings) as client:
         yield client
-
-
-def entity_uid(version_id: int, qualified_name: str, kind: str) -> str:
-    import hashlib
-
-    blob = f"{version_id}\0{qualified_name}\0{kind}".encode()
-    return hashlib.sha1(blob).hexdigest()
-
-
-def call_uid(
-    repo: str,
-    caller_file: str,
-    line_start: int,
-    line_end: int,
-    callee: str,
-    args: list[str],
-) -> str:
-    import hashlib
-
-    blob = "\0".join(
-        [repo, caller_file, str(line_start), str(line_end), callee, "\x1f".join(args)]
-    ).encode()
-    return hashlib.sha1(blob).hexdigest()
-
-
-def _read_go_module_prefix(root) -> str:
-    from pathlib import Path
-
-    try:
-        text = (Path(root) / "go.mod").read_text(encoding="utf-8")
-    except OSError:
-        return ""
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("module"):
-            rest = stripped[len("module") :].strip().strip("\"'")
-            return rest.split()[0] if rest else ""
-    return ""
-
-
-def _collect_repo(
-    conn,
-    repo_name: str,
-    root,
-    files: list[str],
-) -> tuple[
-    list,
-    dict[str, list[tuple[str, str]]],
-    list,
-    dict[str, int],
-    dict[str, tuple[str, int]],
-]:
-    import hashlib
-    from pathlib import Path
-
-    from libref.astminer import cache as ast_cache
-    from libref.astminer import config as ast_config
-    from libref.astminer import engine as ast_engine
-    from libref.astminer import rules as ast_rules
-
-    go_prefix = _read_go_module_prefix(root).replace("/", ".")
-    all_decls: list = []
-    file_aliases: dict[str, list[tuple[str, str]]] = {}
-    all_raw: list = []
-    counts = {"files": 0, "parsed": 0, "cached": 0}
-    live: dict[str, tuple[str, int]] = {}
-    for rel in files:
-        counts["files"] += 1
-        cfg = ast_config.config_for_suffix(Path(rel).suffix)
-        if cfg is None:
-            continue
-        fp = ast_config.grammar_fingerprint(cfg)
-        live[rel] = (fp, cfg.config_version)
-        data = (root / rel).read_bytes()
-        sha = hashlib.sha1(data).hexdigest()
-        hit = ast_cache.lookup(conn, repo_name, rel, fp, cfg.config_version)
-        if hit is not None and hit[0] == sha:
-            counts["cached"] += 1
-            decls, aliases, raw_calls = ast_cache.decode_records(hit[1], rel)
-            all_decls.extend(decls)
-            if go_prefix and cfg.name == "go":
-                aliases = [
-                    (name, ast_rules.normalize_go_import(target, go_prefix))
-                    for name, target in aliases
-                ]
-            file_aliases[rel] = aliases
-            all_raw.extend(raw_calls)
-            continue
-        counts["parsed"] += 1
-        decls, aliases, raw_calls = ast_engine.extract_file(rel, cfg, data)
-        all_decls.extend(decls)
-        if go_prefix and cfg.name == "go":
-            aliases = [
-                (name, ast_rules.normalize_go_import(target, go_prefix))
-                for name, target in aliases
-            ]
-        file_aliases[rel] = list(aliases)
-        all_raw.extend(raw_calls)
-        ast_cache.store(
-            conn,
-            repo_name,
-            rel,
-            sha,
-            fp,
-            cfg.config_version,
-            ast_cache.encode_records(decls, aliases, raw_calls),
-        )
-    return all_decls, file_aliases, all_raw, counts, live
-
-
-def _sweep_source_pages(conn, repo_name: str, live: set[str]) -> list[int]:
-    """Delete source pages whose files vanished; returns removed document ids."""
-    prefix = f"repo://{repo_name}/"
-    rows = conn.execute(
-        "SELECT id, url FROM pages WHERE url LIKE ? ESCAPE '\\'",
-        (prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%",),
-    ).fetchall()
-    removed: list[int] = []
-    for page_id, url in rows:
-        rel = str(url)[len(prefix) :]
-        if rel in live:
-            continue
-        row = conn.execute(
-            "SELECT version_id FROM pages WHERE id=?", (page_id,)
-        ).fetchone()
-        if row is None:
-            continue
-        docs = conn.execute(
-            "SELECT id FROM documents WHERE page_id=?", (page_id,)
-        ).fetchall()
-        removed.extend(int(r[0]) for r in docs)
-        conn.execute("DELETE FROM pages WHERE id=?", (page_id,))
-    return removed
-
-
-def _store_source_chunks(
-    conn,
-    repo_name: str,
-    root,
-    live_files: list[str],
-    all_decls,
-    library_id: int,
-    version_id: int,
-    budgets=None,
-) -> tuple[int, int, list[int], list[int]]:
-    """Chunk source code and store it: assemble grouped by file, reuse the documents table for storing; returns chunk count, empty chunks, delete/insert ids."""
-    from libref.astminer import grouping as _grouping
-    from libref.astminer import source_chunk as _source_chunk
-    from libref.chunking import default_budgets
-    from libref.store.document_store import DocumentStore
-
-    resolved = budgets or default_budgets()
-    by_file: dict[str, list] = {}
-    for decl in all_decls:
-        by_file.setdefault(decl.file, []).append(decl)
-    store = DocumentStore(conn)
-    n_chunks = 0
-    dropped = 0
-    removed_all: list[int] = []
-    inserted_all: list[int] = []
-    for rel in sorted(live_files):
-        decls = by_file.get(rel, [])
-        if not decls:
-            continue
-        try:
-            data = (root / rel).read_bytes()
-        except OSError:
-            continue
-        groups = _grouping.build_groups(decls, data, rel)
-        by_qual = {d.qualified_name: d for d in decls}
-        split = _source_chunk.build_source_chunks(
-            groups, by_qual, data, rel, budgets=resolved, repo=repo_name
-        )
-        dropped += split.empty_dropped
-        page_url = f"repo://{repo_name}/{rel}"
-        raw_chunks = [_source_chunk.as_chunk(c, page_url) for c in split.chunks]
-        if not raw_chunks:
-            continue
-        for order, chunk in enumerate(raw_chunks):
-            chunk.sort_order = order
-        from libref.store.document_store import DocumentInput
-
-        inputs = [
-            DocumentInput(
-                url=c.url,
-                path=c.path,
-                title=c.title,
-                content=c.content,
-                sort_order=c.sort_order,
-                chunk_path=getattr(c, "chunk_path", "embedding"),
-                source_group_id=getattr(c, "source_group_id", ""),
-                chunk_id=getattr(c, "chunk_id", ""),
-                span_kind=getattr(c, "span_kind", "document_range"),
-                merged_from=list(getattr(c, "merged_from", []) or []),
-                overlap_from=getattr(c, "overlap_from", None),
-                content_hash=getattr(c, "content_hash", ""),
-                keywords=list(getattr(c, "keywords", []) or []),
-                content_type=getattr(c, "content_type", "text/markdown"),
-                start_char=getattr(c, "start_char", -1),
-                end_char=getattr(c, "end_char", -1),
-                prev_chunk_id=getattr(c, "prev_chunk_id", None),
-                next_chunk_id=getattr(c, "next_chunk_id", None),
-                entities=list(getattr(c, "entities", []) or []),
-            )
-            for c in raw_chunks
-        ]
-        result = store.store_page(
-            version_id,
-            library_id,
-            page_url,
-            "stored",
-            chunks=inputs,
-            raw_content=data.decode("utf-8", "replace"),
-        )
-        removed_all.extend(result.removed_ids)
-        inserted_all.extend(result.inserted_ids)
-        n_chunks += len(inputs)
-    return n_chunks, dropped, removed_all, inserted_all
-
-
-def _persist_entities(
-    conn, library_id: int, version_id: int, all_decls
-) -> tuple[int, int]:
-    import json as _decl_json
-
-    pending: dict[tuple[str, str], Any] = {}
-    for decl in all_decls:
-        pending[(decl.qualified_name, decl.kind)] = decl
-    conn.executemany(
-        "INSERT INTO api_entities(entity_uid, library_id, version_id,"
-        " qualified_name, kind, parent, signature, params, bases,"
-        " start_byte, end_byte, depth) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        " ON CONFLICT(entity_uid) DO UPDATE SET parent=excluded.parent,"
-        " signature=excluded.signature, params=excluded.params, bases=excluded.bases,"
-        " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
-        " depth=excluded.depth",
-        [
-            (
-                entity_uid(version_id, qualified_name, kind),
-                library_id,
-                version_id,
-                qualified_name,
-                kind,
-                decl.parent,
-                decl.signature,
-                _decl_json.dumps(list(decl.params), ensure_ascii=False),
-                _decl_json.dumps(list(decl.bases), ensure_ascii=False),
-                decl.start_byte,
-                decl.end_byte,
-                decl.depth,
-            )
-            for (qualified_name, kind), decl in pending.items()
-        ],
-    )
-    wanted = sorted(entity_uid(version_id, q, k) for q, k in pending)
-    keep = set(wanted)
-    existing = [
-        r[0]
-        for r in conn.execute(
-            "SELECT entity_uid FROM api_entities WHERE version_id=?", (version_id,)
-        ).fetchall()
-    ]
-    dead = [u for u in existing if u not in keep]
-    swept = 0
-    for start in range(0, len(dead), 500):
-        batch = dead[start : start + 500]
-        placeholders = ",".join("?" for _ in batch)
-        cur = conn.execute(
-            "DELETE FROM api_entities WHERE version_id=?"
-            f" AND entity_uid IN ({placeholders})",
-            (version_id, *batch),
-        )
-        swept += int(cur.rowcount or 0)
-    return len(pending), swept
-
-
-def _persist_calls(
-    conn, library_id: int, version_id: int, resolved, commit_sha: str = ""
-) -> tuple[int, int]:
-    import json as _uid_json
-
-    from libref.mining import scope_key as _scope_key
-
-    entity_ids = {
-        r[0]: r[1]
-        for r in conn.execute(
-            "SELECT qualified_name || '|' || kind, id FROM api_entities"
-            " WHERE version_id=?",
-            (version_id,),
-        )
-    }
-    kinds = ("function", "method", "class", "interface", "enum", "constructor")
-    batch: list[tuple] = []
-    review_uids: list[str] = []
-    wanted: set[str] = set()
-    for call in resolved:
-        args_json = _uid_json.dumps(list(call.args), ensure_ascii=False)
-        uid = call_uid(
-            call.repo,
-            call.caller_file,
-            call.line_start,
-            call.line_end,
-            call.callee,
-            list(call.args),
-        )
-        wanted.add(uid)
-        ent_id = None
-        for kind in kinds:
-            ent_id = entity_ids.get(f"{call.callee}|{kind}")
-            if ent_id is not None:
-                break
-        batch.append(
-            (
-                uid,
-                ent_id,
-                call.callee,
-                args_json,
-                call.repo,
-                call.caller_file,
-                call.line_start,
-                call.line_end,
-                call.confidence,
-                library_id,
-                version_id,
-                call.caller,
-                call.receiver,
-                call.func,
-                call.argument_count,
-                call.call_order,
-                call.start_byte,
-                call.end_byte,
-                commit_sha or call.commit_sha,
-                _scope_key(str(call.caller_file), call.caller),
-            )
-        )
-        needs_review = call.confidence == "AMBIGUOUS" or (
-            call.confidence == "INFERRED" and ent_id is None
-        )
-        if needs_review:
-            review_uids.append(uid)
-    if batch:
-        conn.executemany(
-            "INSERT INTO call_instances(call_uid, callee_entity_id, callee_name, args,"
-            " repo, caller_file, line_start, line_end, confidence,"
-            " library_id, version_id, caller, receiver, func, argument_count,"
-            " call_order, start_byte, end_byte, commit_sha, scope)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(call_uid) DO UPDATE SET callee_entity_id=excluded.callee_entity_id,"
-            " callee_name=excluded.callee_name, args=excluded.args,"
-            " confidence=excluded.confidence, library_id=excluded.library_id,"
-            " version_id=excluded.version_id, caller=excluded.caller,"
-            " receiver=excluded.receiver, func=excluded.func,"
-            " argument_count=excluded.argument_count, call_order=excluded.call_order,"
-            " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
-            " commit_sha=excluded.commit_sha, scope=excluded.scope",
-            batch,
-        )
-    if review_uids:
-        pending_ids: list[int] = []
-        for start in range(0, len(review_uids), 500):
-            chunk = review_uids[start : start + 500]
-            placeholders = ",".join("?" for _ in chunk)
-            pending_ids.extend(
-                int(r[0])
-                for r in conn.execute(
-                    f"SELECT id FROM call_instances WHERE call_uid IN ({placeholders})",
-                    chunk,
-                ).fetchall()
-            )
-        if pending_ids:
-            conn.executemany(
-                "INSERT INTO review_status(entity_type, entity_id, status)"
-                " VALUES('call_instance', ?, 'pending')"
-                " ON CONFLICT(entity_type, entity_id) DO NOTHING",
-                [(i,) for i in pending_ids],
-            )
-    keep = set(wanted)
-    existing = [
-        (int(r[0]), str(r[1]))
-        for r in conn.execute(
-            "SELECT id, call_uid FROM call_instances WHERE version_id=?", (version_id,)
-        ).fetchall()
-    ]
-    dead_rows = [(i, u) for i, u in existing if u not in keep]
-    swept = 0
-    for start in range(0, len(dead_rows), 500):
-        swept_chunk = dead_rows[start : start + 500]
-        placeholders = ",".join("?" for _ in swept_chunk)
-        conn.execute(
-            "DELETE FROM review_status WHERE entity_type='call_instance'"
-            f" AND entity_id IN ({placeholders})",
-            [i for i, _ in swept_chunk],
-        )
-        cur = conn.execute(
-            "DELETE FROM call_instances WHERE version_id=?"
-            f" AND call_uid IN ({placeholders})",
-            (version_id, *[u for _, u in swept_chunk]),
-        )
-        swept += int(cur.rowcount or 0)
-    return len(resolved), swept
-
-
-def lookup_index_source_cached(
-    conn, ecosystem: str, library: str, version: str
-) -> tuple[str, str] | None:
-    from pathlib import Path
-
-    from libref.crawler.registry import canonical_ecosystem
-
-    eco = canonical_ecosystem(ecosystem) or ecosystem
-    repo_name = f"{eco}/{library}/{version}"
-    row = conn.execute(
-        "SELECT url, local_path FROM repos WHERE name=?", (repo_name,)
-    ).fetchone()
-    if row is not None:
-        url, local_path = row[0], row[1]
-        if local_path and Path(str(local_path)).is_dir():
-            return str(local_path), "repos"
-        if url:
-            return str(url), "repos"
-    lib_row = conn.execute(
-        "SELECT repo_url FROM libraries WHERE ecosystem=? AND name=?",
-        (eco, library),
-    ).fetchone()
-    if lib_row is not None and lib_row[0]:
-        return str(lib_row[0]), "libraries"
-    from libref.crawler.registry import SUPPORTED_ECOSYSTEMS
-
-    if eco in SUPPORTED_ECOSYSTEMS:
-        try:
-            from libref.crawler.registry import normalize_name
-            from libref.services.registry.resolver import read_cache
-
-            norm = normalize_name(eco, library)
-            cached = read_cache(conn, eco, norm)
-        except ValueError:
-            cached = None
-        if cached is not None and cached.get("repo_url"):
-            return str(cached["repo_url"]), "registry-cache"
-    return None
 
 
 async def index_repo_async(
@@ -614,99 +206,6 @@ async def _index_repo_inner(
             version_id=version_id,
         )
     return counts
-
-
-def _check_manifest_identity(ecosystem: str, library: str, root) -> None:
-    """Warn when the checked-out manifests declare a different identity; never blocks."""
-    from libref.astminer import manifests as _manifests
-    from libref.crawler.registry import SUPPORTED_ECOSYSTEMS, canonical_ecosystem
-
-    eco = canonical_ecosystem(ecosystem) if ecosystem else None
-    if eco not in SUPPORTED_ECOSYSTEMS:
-        return
-    declared = _manifests.manifest_identity(root)
-    if declared is None or declared == (eco, library):
-        return
-    logger.warning(
-        "manifest identity mismatch: requested %s:%s declared %s:%s; continuing",
-        eco,
-        library,
-        declared[0],
-        declared[1],
-    )
-
-
-def _persist_repo_deps(conn, library_id: int, version_id: int, root) -> int:
-    """Manifest-declared dependency edges: version-scoped full refresh, unparsable manifests yield nothing."""
-    from libref.astminer import gradle as _gradle
-    from libref.astminer import manifests as _manifests
-
-    deps = _manifests.manifest_dependencies(root) + _gradle.gradle_dependencies(root)
-    conn.execute("DELETE FROM repo_dependencies WHERE version_id=?", (version_id,))
-    if deps:
-        conn.executemany(
-            "INSERT INTO repo_dependencies(library_id, version_id, ecosystem, name, req, source_file)"
-            " VALUES(?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(version_id, ecosystem, name, source_file) DO UPDATE SET req=excluded.req",
-            [
-                (
-                    library_id,
-                    version_id,
-                    d.ecosystem,
-                    d.name,
-                    d.req,
-                    d.source_file,
-                )
-                for d in deps
-            ],
-        )
-    conn.commit()
-    return len(deps)
-
-
-def list_repo_dependencies(
-    conn,
-    library: str,
-    version: str,
-    dep_ecosystem: str | None = None,
-    *,
-    ecosystem: str | None = None,
-) -> list[dict]:
-    """Read model over manifest-declared dependency edges for one library version.
-
-    The positional filter selects the dependency ecosystem; the keyword-only
-    filter selects the owning library ecosystem for same-name disambiguation."""
-    from libref.crawler.registry import canonical_ecosystem
-
-    owner = canonical_ecosystem(ecosystem) if ecosystem is not None else None
-    if ecosystem is not None and owner is None:
-        raise ValueError(f"unsupported ecosystem: {ecosystem}")
-    dep = canonical_ecosystem(dep_ecosystem) if dep_ecosystem is not None else None
-    if dep_ecosystem is not None and dep is None:
-        raise ValueError(f"unsupported ecosystem: {dep_ecosystem}")
-    query = (
-        "SELECT d.ecosystem, d.name, d.req, d.source_file"
-        " FROM repo_dependencies d JOIN versions v ON v.id = d.version_id"
-        " JOIN libraries l ON l.id = d.library_id"
-        " WHERE l.name = ? AND v.version = ?"
-    )
-    params: list[str] = [library, version]
-    if owner is not None:
-        query += " AND l.ecosystem = ?"
-        params.append(owner)
-    if dep is not None:
-        query += " AND d.ecosystem = ?"
-        params.append(dep)
-    rows = conn.execute(query + " ORDER BY d.ecosystem, d.name", params).fetchall()
-    return [
-        {
-            "ecosystem": r[0],
-            "name": r[1],
-            "req": r[2],
-            "source_file": r[3],
-        }
-        for r in rows
-    ]
 
 
 def index_repo(
