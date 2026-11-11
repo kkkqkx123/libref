@@ -226,6 +226,7 @@ def test_empty_source_yields_empty(monkeypatch, tmp_path):
     for cfg, path in (
         (ast_config.PYTHON_CONFIG, "empty.py"),
         (ast_config.JAVASCRIPT_CONFIG, "empty.js"),
+        (ast_config.TYPESCRIPT_CONFIG, "empty.ts"),
         (ast_config.JAVA_CONFIG, "Empty.java"),
         (ast_config.RUST_CONFIG, "empty.rs"),
         (ast_config.GO_CONFIG, "empty.go"),

@@ -225,3 +225,72 @@ def test_require_destructuring_leaves_no_junk_alias() -> None:
     assert ("e", "r2.e") in aliases
     assert ("g", "r2.f") in aliases
     assert all("{" not in alias and "}" not in alias for alias, _ in aliases)
+
+
+def test_kotlin_secondary_constructor_entity() -> None:
+    decls, _aliases, raw = ast_engine.extract_file(
+        "C.kt",
+        ast_config.KOTLIN_CONFIG,
+        b"package demo\nclass C { constructor(y: String) { foo(y) } }\n",
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["demo.C.constructor"].kind == "constructor"
+    assert by_qual["demo.C.constructor"].params == ["y"]
+    by_raw = {c.raw_callee: c for c in raw}
+    assert by_raw["foo"].caller == "demo.C.constructor"
+
+
+def test_typescript_shapes_extract() -> None:
+    decls, aliases, raw = ast_engine.extract_file(
+        "m.ts",
+        ast_config.TYPESCRIPT_CONFIG,
+        b"interface Foo extends Bar { x: string; }\n"
+        b"type X = string | number;\n"
+        b"enum Color { Red, Green = 2 }\n"
+        b"class C extends Base implements I { constructor(private x: number) {} m() { this.f(); } }\n"
+        b"function greet(name: string): string { return name; }\n"
+        b'import {a} from "m";\n',
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["m.Foo"].kind == "interface"
+    assert by_qual["m.Foo"].bases == ["Bar"]
+    assert by_qual["m.X"].kind == "type"
+    assert by_qual["m.Color"].kind == "enum"
+    assert by_qual["m.Color.Red"].kind == "enum_constant"
+    assert by_qual["m.Color.Green"].kind == "enum_constant"
+    assert by_qual["m.C"].bases == ["Base", "I"]
+    assert by_qual["m.C.m"].kind == "method"
+    assert by_qual["m.greet"].params == ["name"]
+    assert ("a", "m.a") in aliases
+    by_raw = {c.raw_callee: c for c in raw}
+    assert by_raw["this.f"].caller == "m.C.m"
+
+
+def test_typescript_suffix_and_module() -> None:
+    assert ast_config.config_for_suffix(".ts") is ast_config.TYPESCRIPT_CONFIG
+    assert ast_config.config_for_suffix(".tsx") is ast_config.TYPESCRIPT_CONFIG
+    assert ast_config.config_for_suffix(".mts") is ast_config.TYPESCRIPT_CONFIG
+    assert ast_context.determine_module_path("src/a/b.ts", "typescript") == "src.a.b"
+    decls, _aliases, _raw = ast_engine.extract_file(
+        "a.ts", ast_config.TYPESCRIPT_CONFIG, b"function f(x: number): void {}\n"
+    )
+    assert {d.qualified_name for d in decls} == {"a.f"}
+
+
+def test_groovy_enum_extracts() -> None:
+    decls, _aliases, _raw = ast_engine.extract_file(
+        "m.groovy", ast_config.GROOVY_CONFIG, b"enum Color { RED, GREEN, BLUE }\n"
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["m.Color"].kind == "enum"
+    assert by_qual["m.Color.RED"].kind == "enum_constant"
+    assert by_qual["m.Color.GREEN"].kind == "enum_constant"
+    assert by_qual["m.Color.BLUE"].kind == "enum_constant"
+    decls, _aliases, _raw = ast_engine.extract_file(
+        "m.groovy",
+        ast_config.GROOVY_CONFIG,
+        b"package demo\nenum Color { RED, GREEN; String label }\n",
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["demo.Color"].kind == "enum"
+    assert by_qual["demo.Color.label"].kind == "field"

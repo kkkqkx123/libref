@@ -460,7 +460,7 @@ def _is_test_path(path: str | None) -> bool:
     check = stem or filename
     if check.startswith("test_") or check.endswith("_test") or check == "test":
         return True
-    if filename.endswith((".test.js", ".spec.js")):
+    if filename.endswith((".test.js", ".spec.js", ".test.ts", ".spec.ts", ".test.tsx")):
         return True
     return filename.endswith("test.java") or filename.startswith("test")
 

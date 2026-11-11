@@ -24,9 +24,10 @@ dependencies = [
     "tree-sitter-groovy",
     "tree-sitter-java>=0.23",
     "tree-sitter-javascript>=0.25.0",
-    "tree-sitter-kotlin>=1.1.0",
+    "tree-sitter-kotlin",
     "tree-sitter-python>=0.23",
     "tree-sitter-rust>=0.24.2",
+    "tree-sitter-typescript>=0.23.2",
     "uvicorn[standard]>=0.54.0",
 ]
 
@@ -55,10 +56,12 @@ markers = [
 [tool.uv.workspace]
 members = [
     "vendor/tree-sitter-groovy",
+    "vendor/tree-sitter-kotlin",
 ]
 
 [tool.uv.sources]
 tree-sitter-groovy = { workspace = true, editable = true }
+tree-sitter-kotlin = { workspace = true, editable = true }
 
 [dependency-groups]
 dev = [

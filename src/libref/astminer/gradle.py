@@ -168,8 +168,8 @@ def _dep_queries():
         kotlin,
         r"""
 (call_expression
-  [(identifier) (navigation_expression)] @dep.config
-  [(value_arguments) (annotated_lambda)] @dep.args) @dep.call
+  [(simple_identifier) (navigation_expression)] @dep.config
+  (call_suffix)? @dep.args) @dep.call
 """,
     )
     return ((groovy, groovy_query), (kotlin, kotlin_query))

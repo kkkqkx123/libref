@@ -24,6 +24,8 @@ def build_aliases(
         return _java_aliases(root, source)
     if language == "javascript":
         return _javascript_aliases(root, captures, source, importer_file)
+    if language == "typescript":
+        return _javascript_aliases(root, captures, source, importer_file)
     if language == "rust":
         return _rust_aliases(root, captures, source, current_module)
     if language == "go":
@@ -340,8 +342,13 @@ def _qualified_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:
     path_node = None
     alias_node = None
     for child in root.children:
+        if child.type == "import_alias":
+            for sub in child.children:
+                if sub.type in ("type_identifier", "identifier"):
+                    alias_node = sub
+            continue
         if (
-            child.type in ("qualified_identifier", "qualified_name")
+            child.type in ("qualified_identifier", "qualified_name", "identifier")
             and path_node is None
         ):
             path_node = child

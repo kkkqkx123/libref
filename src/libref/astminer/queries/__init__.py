@@ -12,6 +12,7 @@ from libref.astminer.queries import javascript as _javascript
 from libref.astminer.queries import kotlin as _kotlin
 from libref.astminer.queries import python as _python
 from libref.astminer.queries import rust as _rust
+from libref.astminer.queries import typescript as _typescript
 
 QUERY_VERSION = 1
 
@@ -23,6 +24,7 @@ _MODULES = {
     "csharp": _csharp,
     "go": _go,
     "javascript": _javascript,
+    "typescript": _typescript,
     "rust": _rust,
     "kotlin": _kotlin,
     "groovy": _groovy,

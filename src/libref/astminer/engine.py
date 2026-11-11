@@ -254,10 +254,14 @@ def _build_decls(
         kind = _rules.refine_kind(kinds)
         if kind is None:
             continue
-        if kind == "class" and any(
-            child.type == "interface" for child in node.children
-        ):
-            kind = "interface"
+        if kind == "class":
+            for child in node.children:
+                if child.type == "interface":
+                    kind = "interface"
+                    break
+                if child.type == "enum":
+                    kind = "enum"
+                    break
         name = _entity_name(captures, roots, source)
         if not name:
             continue

@@ -16,6 +16,7 @@ class LanguageConfig:
     grammar: str
     file_suffixes: tuple[str, ...]
     config_version: int = 1
+    language_fn: str = "language"
 
 
 PYTHON_CONFIG = LanguageConfig(
@@ -74,10 +75,19 @@ GROOVY_CONFIG = LanguageConfig(
     config_version=1,
 )
 
+TYPESCRIPT_CONFIG = LanguageConfig(
+    name="typescript",
+    grammar="tree_sitter_typescript",
+    file_suffixes=(".ts", ".mts", ".cts", ".tsx"),
+    config_version=1,
+    language_fn="language_tsx",
+)
+
 LANGUAGE_CONFIGS: dict[str, LanguageConfig] = {
     "python": PYTHON_CONFIG,
     "java": JAVA_CONFIG,
     "javascript": JAVASCRIPT_CONFIG,
+    "typescript": TYPESCRIPT_CONFIG,
     "rust": RUST_CONFIG,
     "go": GO_CONFIG,
     "csharp": CSHARP_CONFIG,
@@ -115,6 +125,7 @@ def grammar_fingerprint(cfg: LanguageConfig) -> str:
             runtime,
             wheel,
             cfg.grammar,
+            getattr(cfg, "language_fn", "language"),
             cfg.name,
             str(cfg.config_version),
             _queries.fingerprint_fragment(cfg.name),
@@ -128,7 +139,7 @@ def load_language(cfg: LanguageConfig):
     from tree_sitter import Language
 
     mod = importlib.import_module(cfg.grammar)
-    return Language(mod.language())
+    return Language(getattr(mod, getattr(cfg, "language_fn", "language"))())
 
 
 def check_config(cfg: LanguageConfig) -> None:

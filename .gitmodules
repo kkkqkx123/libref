@@ -4,3 +4,6 @@
 [submodule "vendor/tree-sitter-groovy"]
 	path = vendor/tree-sitter-groovy
 	url = https://github.com/kkkqkx123/tree-sitter-groovy
+[submodule "vendor/tree-sitter-kotlin"]
+	path = vendor/tree-sitter-kotlin
+	url = https://github.com/kkkqkx123/tree-sitter-kotlin

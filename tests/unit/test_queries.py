@@ -10,32 +10,14 @@ from libref.astminer import queries as ast_queries
 
 
 def test_all_queries_compile(monkeypatch, tmp_path):
-    for cfg in (
-        ast_config.PYTHON_CONFIG,
-        ast_config.JAVA_CONFIG,
-        ast_config.JAVASCRIPT_CONFIG,
-        ast_config.RUST_CONFIG,
-        ast_config.GO_CONFIG,
-        ast_config.CSHARP_CONFIG,
-        ast_config.KOTLIN_CONFIG,
-        ast_config.GROOVY_CONFIG,
-    ):
+    for cfg in ast_config.LANGUAGE_CONFIGS.values():
         language = ast_config.load_language(cfg)
         for kind in ast_queries.KINDS:
             Query(language, ast_queries.get(cfg.name, kind))
 
 
 def test_check_config_compiles_queries(monkeypatch, tmp_path):
-    for cfg in (
-        ast_config.PYTHON_CONFIG,
-        ast_config.JAVA_CONFIG,
-        ast_config.JAVASCRIPT_CONFIG,
-        ast_config.RUST_CONFIG,
-        ast_config.GO_CONFIG,
-        ast_config.CSHARP_CONFIG,
-        ast_config.KOTLIN_CONFIG,
-        ast_config.GROOVY_CONFIG,
-    ):
+    for cfg in ast_config.LANGUAGE_CONFIGS.values():
         ast_config.check_config(cfg)
 
 

@@ -97,6 +97,7 @@ BUILTIN_BARE_CALLS = (
 BUILTIN_BARE_BY_LANGUAGE: dict[str, frozenset[str]] = {
     "python": _PYTHON_BARE_CALLS,
     "javascript": _JAVASCRIPT_BARE_CALLS,
+    "typescript": _JAVASCRIPT_BARE_CALLS,
     "kotlin": _KOTLIN_BARE_CALLS,
     "groovy": _GROOVY_BARE_CALLS,
 }
@@ -247,13 +248,13 @@ def count_arguments(args_node: Any) -> int:
 
 
 def param_name(pnode: Any, source: bytes) -> str:
-    if pnode.type == "identifier":
+    if pnode.type in ("identifier", "simple_identifier"):
         return slice_text(pnode, source).strip()
     named = pnode.child_by_field_name("name")
     if named is not None:
         return slice_text(named, source).strip()
     for child in pnode.children:
-        if child.type == "identifier":
+        if child.type in ("identifier", "simple_identifier"):
             return slice_text(child, source).strip()
     for child in pnode.children:
         if child.is_named:

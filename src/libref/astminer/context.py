@@ -13,6 +13,7 @@ _JAVA_SOURCE_ROOTS = (
 )
 
 _JS_SUFFIXES = (".js", ".mjs", ".cjs", ".jsx")
+_TS_SUFFIXES = (".ts", ".mts", ".cts", ".tsx")
 _RUST_STRIP_ROOTS = ("src/",)
 _KOTLIN_SOURCE_ROOTS = (
     "src/main/kotlin/",
@@ -71,8 +72,9 @@ def determine_module_path(rel_path: str, language: str) -> str | None:
                 path = path[len(root) :]
                 break
         return path.replace("/", ".") or None
-    if language == "javascript":
-        for suffix in _JS_SUFFIXES:
+    if language in ("javascript", "typescript"):
+        suffixes = _JS_SUFFIXES if language == "javascript" else _TS_SUFFIXES
+        for suffix in suffixes:
             if path.endswith(suffix):
                 stem = path[: -len(suffix)]
                 break
@@ -159,8 +161,13 @@ def normalize_js_specifier(specifier: str, importer_file: str | None) -> str:
     joined = joined.removeprefix("./")
     while joined.startswith("../"):
         joined = joined[3:]
-    candidate = joined if joined.endswith(_JS_SUFFIXES) else joined + ".js"
+    candidate = (
+        joined if joined.endswith(_JS_SUFFIXES + _TS_SUFFIXES) else joined + ".js"
+    )
     module = determine_module_path(candidate, "javascript")
+    if module:
+        return module
+    module = determine_module_path(candidate, "typescript")
     if module:
         return module
     return joined.replace("/", ".").strip(".") or raw
