@@ -118,12 +118,13 @@ libref/
     ├── test_migrations.py      # [P0] 迁移可重放/失败回滚
     ├── test_fts_sync.py        # [P0] FTS 触发器增/改/删同步
     ├── test_config.py          # [P0] 配置默认值/环境覆盖
-    ├── test_vec_store.py       # [P0] Qdrant 后端集成测试（服务不可达自动 skip）
     ├── test_simvec_store.py    # 本地 simvec 后端集成测试（构建物缺席自动 skip）
     ├── test_chunking.py        # [P1]
     ├── test_url_seeder.py      # [P1]（本地 fixtures，不联网）
     ├── test_astminer.py        # [P2]（tree-sitter 抽取 vs stdlib ast 抽样 diff）
     └── test_retriever.py       # [P3] MRR/Recall@k 基准（CI 门禁）
+    ```
+    tests/e2e/test_vec_store.py # Qdrant 后端端到端测试（需 LIBREF_RUN_E2E=1，服务不可达自动 skip；会话共享最小预设集合）
 ```
 
 ## 2. 模块依赖规则（硬约束）

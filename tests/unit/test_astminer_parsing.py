@@ -182,6 +182,46 @@ def test_csharp_minimal_fixture_shapes(monkeypatch, tmp_path):
     assert by_raw["cache.Get"].caller == "Store.Cache.Run"
 
 
+def test_kotlin_minimal_fixture_shapes(monkeypatch, tmp_path):
+    data = (FIXTURES / "kotlin_shapes.kt").read_bytes()
+    decls, aliases, raw = ast_engine.extract_file(
+        "kotlin_shapes.kt", ast_config.KOTLIN_CONFIG, data
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["kotlin_shapes.Cache"].kind == "class"
+    assert by_qual["kotlin_shapes.Cache"].bases == ["Repo"]
+    assert by_qual["kotlin_shapes.Cache.find"].kind == "method"
+    assert by_qual["kotlin_shapes.Cache.find"].params == ["id"]
+    assert by_qual["kotlin_shapes.top"].params == ["x", "y"]
+    assert ("List", "java.util.List") in aliases
+    assert ("U", "demo.Util") in aliases
+    by_raw = {c.raw_callee: c for c in raw}
+    assert by_raw["U.load"].caller == "kotlin_shapes.Cache.find"
+    assert by_raw["items.firstOrNull"].caller == "kotlin_shapes.Cache.find"
+    assert by_raw["x.toString"].caller == "kotlin_shapes.top"
+
+
+def test_groovy_minimal_fixture_shapes(monkeypatch, tmp_path):
+    data = (FIXTURES / "groovy_shapes.groovy").read_bytes()
+    decls, aliases, raw = ast_engine.extract_file(
+        "groovy_shapes.groovy", ast_config.GROOVY_CONFIG, data
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["groovy_shapes.Cache"].kind == "class"
+    assert by_qual["groovy_shapes.Cache"].bases == ["Base"]
+    assert by_qual["groovy_shapes.Cache.name"].kind == "field"
+    assert by_qual["groovy_shapes.Cache.run"].kind == "method"
+    assert by_qual["groovy_shapes.top"].kind == "function"
+    assert by_qual["groovy_shapes.top"].params == ["x"]
+    assert ("List", "java.util.List") in aliases
+    assert ("load", "demo.Util.load") in aliases
+    by_raw = {c.raw_callee: c for c in raw}
+    assert by_raw["this.helper"].caller == "groovy_shapes.Cache.run"
+    assert by_raw["items.first"].caller == "groovy_shapes.Cache.run"
+    assert by_raw["x.toString"].caller == "groovy_shapes.top"
+    assert by_raw["Cache"].caller is None
+
+
 def test_empty_source_yields_empty(monkeypatch, tmp_path):
     for cfg, path in (
         (ast_config.PYTHON_CONFIG, "empty.py"),
@@ -190,6 +230,8 @@ def test_empty_source_yields_empty(monkeypatch, tmp_path):
         (ast_config.RUST_CONFIG, "empty.rs"),
         (ast_config.GO_CONFIG, "empty.go"),
         (ast_config.CSHARP_CONFIG, "Empty.cs"),
+        (ast_config.KOTLIN_CONFIG, "Empty.kt"),
+        (ast_config.GROOVY_CONFIG, "empty.groovy"),
     ):
         decls, aliases, raw = ast_engine.extract_file(path, cfg, b"")
         assert decls == [] and aliases == [] and raw == []

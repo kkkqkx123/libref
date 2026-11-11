@@ -1,3 +1,6 @@
 [submodule "crates/simvec"]
 	path = crates/simvec
 	url = https://github.com/kkkqkx123/simvec.git
+[submodule "vendor/tree-sitter-groovy"]
+	path = vendor/tree-sitter-groovy
+	url = https://github.com/kkkqkx123/tree-sitter-groovy

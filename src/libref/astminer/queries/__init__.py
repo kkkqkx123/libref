@@ -6,8 +6,10 @@ import hashlib
 
 from libref.astminer.queries import csharp as _csharp
 from libref.astminer.queries import go as _go
+from libref.astminer.queries import groovy as _groovy
 from libref.astminer.queries import java as _java
 from libref.astminer.queries import javascript as _javascript
+from libref.astminer.queries import kotlin as _kotlin
 from libref.astminer.queries import python as _python
 from libref.astminer.queries import rust as _rust
 
@@ -22,6 +24,8 @@ _MODULES = {
     "go": _go,
     "javascript": _javascript,
     "rust": _rust,
+    "kotlin": _kotlin,
+    "groovy": _groovy,
 }
 
 

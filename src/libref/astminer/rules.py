@@ -8,6 +8,8 @@ CALL_NODE_TYPES = frozenset(
     {
         "call",
         "call_expression",
+        "function_call",
+        "juxt_function_call",
         "method_invocation",
         "new_expression",
         "object_creation_expression",
@@ -446,6 +448,10 @@ def build_aliases(
         return _go_aliases(root, captures, source)
     if language == "csharp":
         return _csharp_aliases(root, captures, source)
+    if language == "kotlin":
+        return _kotlin_aliases(root, source)
+    if language == "groovy":
+        return _groovy_aliases(root, source)
     return []
 
 
@@ -599,6 +605,43 @@ def _javascript_aliases(
                         found.append((alias, f"{mod}.{original}"))
         return found
     return []
+
+
+def _kotlin_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:
+    return _qualified_aliases(root, source)
+
+
+def _groovy_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:
+    return _qualified_aliases(root, source)
+
+
+def _qualified_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:
+    for child in root.children:
+        if child.type in ("asterisk", "wildcard_import"):
+            return []
+    path_node = None
+    alias_node = None
+    for child in root.children:
+        if (
+            child.type in ("qualified_identifier", "qualified_name")
+            and path_node is None
+        ):
+            path_node = child
+        elif child.type == "identifier" and path_node is not None:
+            alias_node = child
+    if path_node is None:
+        return []
+    full = generic_dotted(path_node, source).strip()
+    if not full:
+        return []
+    if alias_node is not None:
+        alias = slice_text(alias_node, source).strip()
+        if alias:
+            return [(alias, full)]
+    alias = full.split(".")[-1]
+    if not alias:
+        return []
+    return [(alias, full)]
 
 
 def _java_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:

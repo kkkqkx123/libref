@@ -60,6 +60,20 @@ CSHARP_CONFIG = LanguageConfig(
     config_version=1,
 )
 
+KOTLIN_CONFIG = LanguageConfig(
+    name="kotlin",
+    grammar="tree_sitter_kotlin",
+    file_suffixes=(".kt", ".kts"),
+    config_version=1,
+)
+
+GROOVY_CONFIG = LanguageConfig(
+    name="groovy",
+    grammar="tree_sitter_groovy",
+    file_suffixes=(".groovy", ".gradle"),
+    config_version=1,
+)
+
 LANGUAGE_CONFIGS: dict[str, LanguageConfig] = {
     "python": PYTHON_CONFIG,
     "java": JAVA_CONFIG,
@@ -67,6 +81,8 @@ LANGUAGE_CONFIGS: dict[str, LanguageConfig] = {
     "rust": RUST_CONFIG,
     "go": GO_CONFIG,
     "csharp": CSHARP_CONFIG,
+    "kotlin": KOTLIN_CONFIG,
+    "groovy": GROOVY_CONFIG,
 }
 
 

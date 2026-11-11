@@ -614,9 +614,10 @@ async def _index_repo_inner(
 
 def _persist_repo_deps(conn, library_id: int, version_id: int, root) -> int:
     """Manifest-declared dependency edges: version-scoped full refresh, unparsable manifests yield nothing."""
+    from libref.astminer import gradle as _gradle
     from libref.astminer import manifests as _manifests
 
-    deps = _manifests.manifest_dependencies(root)
+    deps = _manifests.manifest_dependencies(root) + _gradle.gradle_dependencies(root)
     conn.execute("DELETE FROM repo_dependencies WHERE version_id=?", (version_id,))
     if deps:
         conn.executemany(

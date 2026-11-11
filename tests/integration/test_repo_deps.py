@@ -40,6 +40,20 @@ def _add_manifests(repo: Path) -> None:
         "</Project>\n",
         encoding="utf-8",
     )
+    (repo / "gradle").mkdir(exist_ok=True)
+    (repo / "gradle" / "libs.versions.toml").write_text(
+        '[versions]\njunit = "5.0"\n'
+        "[libraries]\n"
+        'junit = { module = "org.junit:junit", version.ref = "junit" }\n',
+        encoding="utf-8",
+    )
+    (repo / "build.gradle").write_text(
+        "dependencies {\n"
+        "    implementation 'org.demo:lib:1.0.0'\n"
+        "    testImplementation(libs.junit)\n"
+        "}\n",
+        encoding="utf-8",
+    )
 
 
 def test_manifest_deps_persisted_and_refreshed(conn, tmp_path) -> None:
@@ -48,7 +62,7 @@ def test_manifest_deps_persisted_and_refreshed(conn, tmp_path) -> None:
     counts = index_repo(
         conn, "tri-deps", "0.1", str(repo), repos_dir=tmp_path / "repos"
     )
-    assert counts["manifest_deps"] == 5
+    assert counts["manifest_deps"] == 7
 
     deps = list_repo_dependencies(conn, "tri-deps", "0.1")
     assert [(d["ecosystem"], d["name"], d["req"]) for d in deps] == [
@@ -56,9 +70,16 @@ def test_manifest_deps_persisted_and_refreshed(conn, tmp_path) -> None:
         ("crates", "tokio", "1.2"),
         ("go", "github.com/foo/bar", "v1.2.3"),
         ("go", "golang.org/x/tools", "v0.1.0"),
+        ("maven", "org.demo:lib", "1.0.0"),
+        ("maven", "org.junit:junit", "5.0"),
         ("nuget", "newtonsoft.json", "13.0.1"),
     ]
-    assert {d["source_file"] for d in deps} == {"go.mod", "Cargo.toml", "Demo.csproj"}
+    assert {d["source_file"] for d in deps} == {
+        "go.mod",
+        "Cargo.toml",
+        "Demo.csproj",
+        "build.gradle",
+    }
 
     scoped = list_repo_dependencies(conn, "tri-deps", "0.1", "go")
     assert [d["name"] for d in scoped] == ["github.com/foo/bar", "golang.org/x/tools"]
@@ -67,8 +88,8 @@ def test_manifest_deps_persisted_and_refreshed(conn, tmp_path) -> None:
     second = index_repo(
         conn, "tri-deps", "0.1", str(repo), repos_dir=tmp_path / "repos"
     )
-    assert second["manifest_deps"] == 5
-    assert len(list_repo_dependencies(conn, "tri-deps", "0.1")) == 5
+    assert second["manifest_deps"] == 7
+    assert len(list_repo_dependencies(conn, "tri-deps", "0.1")) == 7
 
 
 def test_repo_without_manifests_yields_no_deps(conn, tmp_path) -> None:

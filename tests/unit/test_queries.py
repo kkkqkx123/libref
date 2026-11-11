@@ -17,6 +17,8 @@ def test_all_queries_compile(monkeypatch, tmp_path):
         ast_config.RUST_CONFIG,
         ast_config.GO_CONFIG,
         ast_config.CSHARP_CONFIG,
+        ast_config.KOTLIN_CONFIG,
+        ast_config.GROOVY_CONFIG,
     ):
         language = ast_config.load_language(cfg)
         for kind in ast_queries.KINDS:
@@ -31,6 +33,8 @@ def test_check_config_compiles_queries(monkeypatch, tmp_path):
         ast_config.RUST_CONFIG,
         ast_config.GO_CONFIG,
         ast_config.CSHARP_CONFIG,
+        ast_config.KOTLIN_CONFIG,
+        ast_config.GROOVY_CONFIG,
     ):
         ast_config.check_config(cfg)
 

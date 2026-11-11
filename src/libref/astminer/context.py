@@ -14,6 +14,26 @@ _JAVA_SOURCE_ROOTS = (
 
 _JS_SUFFIXES = (".js", ".mjs", ".cjs")
 _RUST_STRIP_ROOTS = ("src/",)
+_KOTLIN_SOURCE_ROOTS = (
+    "src/main/kotlin/",
+    "src/test/kotlin/",
+    "src/main/java/",
+    "src/test/java/",
+    "src/main/",
+    "src/test/",
+    "src/",
+    "main/kotlin/",
+    "kotlin/",
+)
+_GROOVY_SOURCE_ROOTS = (
+    "src/main/groovy/",
+    "src/test/groovy/",
+    "src/main/",
+    "src/test/",
+    "src/",
+    "main/groovy/",
+    "groovy/",
+)
 
 
 def _clean_path(rel_path: str) -> str | None:
@@ -82,6 +102,30 @@ def determine_module_path(rel_path: str, language: str) -> str | None:
         if not path.lower().endswith(".cs"):
             return None
         return path[: -len(".cs")].replace("/", ".") or None
+    if language == "kotlin":
+        for suffix in (".kt", ".kts"):
+            if path.endswith(suffix):
+                path = path[: -len(suffix)]
+                break
+        else:
+            return None
+        for root in _KOTLIN_SOURCE_ROOTS:
+            if path.startswith(root):
+                path = path[len(root) :]
+                break
+        return path.replace("/", ".") or None
+    if language == "groovy":
+        for suffix in (".groovy", ".gradle"):
+            if path.endswith(suffix):
+                path = path[: -len(suffix)]
+                break
+        else:
+            return None
+        for root in _GROOVY_SOURCE_ROOTS:
+            if path.startswith(root):
+                path = path[len(root) :]
+                break
+        return path.replace("/", ".") or None
     return None
 
 

@@ -1,11 +1,17 @@
-"""QdrantVecStore integration tests (real connection to localhost:6333, skip if unreachable).
+"""QdrantVecStore end-to-end tests (real connection to localhost:6333).
 
-Uses a dedicated test collection, deleted afterwards. Acceptance criteria: docs/plan/qdrant-migration.md §7.
+Skipped by default; requires LIBREF_RUN_E2E=1 to enable. External-service
+integration is validated on demand, not in the routine gate.
+
+One minimal-preset collection per session, payload-scrubbed between tests, deleted
+afterwards. Acceptance criteria: docs/plan/qdrant-migration.md §7.
 """
 
 from __future__ import annotations
 
+import os
 import sqlite3
+import uuid
 
 import pytest
 from qdrant_client import QdrantClient
@@ -13,8 +19,12 @@ from qdrant_client import QdrantClient
 from libref.db import apply_migrations, open_db
 from libref.store.vec_store import QdrantVecStore
 
-COLLECTION = "libref_test_chunks"
+COLLECTION_PREFIX = "libref_test"
 URL = "http://localhost:6333"
+# Test client headroom: collection DDL with wait=true stalls under full-suite
+# load on a tight box; the serving default stays 5.0s in production code.
+_TEST_VERSIONS = (1, 10, 20)
+_TEST_DIM = 4
 
 
 def _server_up() -> bool:
@@ -26,9 +36,13 @@ def _server_up() -> bool:
 
 
 pytestmark = [
-    pytest.mark.integration,
+    pytest.mark.e2e,
     pytest.mark.requires_qdrant,
     pytest.mark.skipif(not _server_up(), reason="Qdrant server unreachable"),
+    pytest.mark.skipif(
+        os.environ.get("LIBREF_RUN_E2E") != "1",
+        reason="e2e requires LIBREF_RUN_E2E=1 and a local Qdrant",
+    ),
 ]
 
 
@@ -40,15 +54,56 @@ def conn(tmp_path) -> sqlite3.Connection:
     c.close()
 
 
+@pytest.fixture(scope="session")
+def shared_collection() -> str:
+    """One minimal-preset collection per session; pid plus random suffix isolates concurrent runs."""
+    from qdrant_client import QdrantClient, models
+
+    name = f"{COLLECTION_PREFIX}_{os.getpid()}_{uuid.uuid4().hex[:8]}"
+    client = QdrantClient(url=URL, timeout=30.0)
+    client.create_collection(
+        collection_name=name,
+        vectors_config=models.VectorParams(
+            size=_TEST_DIM,
+            distance=models.Distance.COSINE,
+            hnsw_config=models.HnswConfigDiff(
+                m=8, ef_construct=32, full_scan_threshold=100
+            ),
+            quantization_config=models.ScalarQuantization(
+                scalar=models.ScalarQuantizationConfig(
+                    type=models.ScalarType.INT8, quantile=0.99, always_ram=True
+                )
+            ),
+        ),
+    )
+    client.create_payload_index(
+        collection_name=name,
+        field_name="version_id",
+        field_schema=models.IntegerIndexParams(
+            type=models.IntegerIndexType.INTEGER, is_principal=True
+        ),
+    )
+    client.create_payload_index(
+        collection_name=name,
+        field_name="library_id",
+        field_schema=models.PayloadSchemaType.INTEGER,
+    )
+    yield name
+    if client.collection_exists(name):
+        client.delete_collection(name)
+
+
+def _scrub(store: QdrantVecStore) -> None:
+    for version in _TEST_VERSIONS:
+        store.delete_version(version)
+
+
 @pytest.fixture()
-def store(conn) -> QdrantVecStore:
-    s = QdrantVecStore(URL, COLLECTION)
-    s.client.delete_collection(COLLECTION) if s.client.collection_exists(
-        COLLECTION
-    ) else None
+def store(conn, shared_collection) -> QdrantVecStore:
+    s = QdrantVecStore(URL, shared_collection, timeout=30.0)
+    _scrub(s)
     yield s
-    if s.client.collection_exists(COLLECTION):
-        s.client.delete_collection(COLLECTION)
+    _scrub(s)
 
 
 def _meta(conn: sqlite3.Connection, key: str) -> str | None:
@@ -60,7 +115,7 @@ def test_ensure_collection_and_meta(
     store: QdrantVecStore, conn, monkeypatch, tmp_path
 ) -> None:
     store.ensure_collection(conn, "BAAI/bge-small-zh", 4)
-    assert store.client.collection_exists(COLLECTION)
+    assert store.client.collection_exists(store.collection)
     assert _meta(conn, "vec_model") == "BAAI/bge-small-zh"
     assert _meta(conn, "vec_dim") == "4"
     store.ensure_collection(conn, "BAAI/bge-small-zh", 4)  # idempotent
