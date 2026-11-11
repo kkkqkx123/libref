@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from mcp.server.mcpserver import MCPServer
 
-from libref.config import LibrefSettings, load_settings
+from libref.config import ConfigError, LibrefSettings, load_settings
 from libref.crawler.registry import RegistryError
 from libref.observe import setup_logging
 from libref.services.code.code_ingest import list_repo_dependencies
@@ -47,11 +47,46 @@ def _check_limit(
     return None
 
 
+ALL_MCP_TOOLS: frozenset[str] = frozenset(
+    {
+        "search",
+        "library_search",
+        "web_search",
+        "github_search",
+        "answer",
+        "read_doc",
+        "catalog",
+        "repo_dependencies",
+        "api_insight",
+        "pattern_insight",
+        "mining_health",
+        "review",
+        "job_show",
+        "resolve",
+    }
+)
+
+
+def _effective_tools(settings: LibrefSettings) -> set[str]:
+    """Visible tool names after allowlist minus denylist; unknown names fail fast."""
+    allowed = (
+        set(settings.mcp_enabled_tools)
+        if settings.mcp_enabled_tools is not None
+        else set(ALL_MCP_TOOLS)
+    )
+    denied = set(settings.mcp_disabled_tools or [])
+    unknown = (allowed | denied) - ALL_MCP_TOOLS
+    if unknown:
+        raise ConfigError(f"unknown MCP tools: {sorted(unknown)}")
+    return allowed - denied
+
+
 def build_mcp_server(
     conn: sqlite3.Connection, settings: LibrefSettings | None = None
 ) -> MCPServer:
-    """Build the MCPServer instance and register document tools."""
+    """Build the MCPServer instance and register only the visible tools."""
     resolve_settings = settings or load_settings()
+    enabled = _effective_tools(resolve_settings)
     setup_logging(resolve_settings)
     mcp = MCPServer("libref")
     search_svc, _gateway = build_search_service(conn, resolve_settings)
@@ -61,7 +96,6 @@ def build_mcp_server(
     mining = MiningReadService(conn)
     review_svc = ReviewService(conn)
 
-    @mcp.tool()
     async def search(
         query: str,
         library: str | None = None,
@@ -126,7 +160,6 @@ def build_mcp_server(
                 return _failed(str(exc))
         return out
 
-    @mcp.tool()
     async def library_search(
         query: str,
         ecosystem: str | None = None,
@@ -152,7 +185,6 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return _failed(str(exc))
 
-    @mcp.tool()
     async def web_search(
         query: str,
         limit: int = 10,
@@ -172,7 +204,6 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return _failed(str(exc))
 
-    @mcp.tool()
     async def github_search(
         query: str,
         limit: int = 10,
@@ -192,7 +223,6 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return _failed(str(exc))
 
-    @mcp.tool()
     async def answer(
         query: str,
         library: str | None = None,
@@ -229,7 +259,6 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return {"error": "failed", "message": str(exc)}
 
-    @mcp.tool()
     def read_doc(
         url: str,
         library: str | None = None,
@@ -275,7 +304,6 @@ def build_mcp_server(
             return _not_found(f"page not found: {url}")
         return page
 
-    @mcp.tool()
     def catalog(
         library: str | None = None, ecosystem: str | None = None
     ) -> dict[str, Any]:
@@ -287,7 +315,6 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return _failed(str(exc))
 
-    @mcp.tool()
     def repo_dependencies(
         library: str,
         version: str,
@@ -314,7 +341,6 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return _failed(str(exc))
 
-    @mcp.tool()
     def api_insight(
         view: Literal["usage", "related", "args", "common"],
         api: str | None = None,
@@ -351,7 +377,6 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return _failed(str(exc))
 
-    @mcp.tool()
     def pattern_insight(
         view: Literal[
             "patterns", "evidence", "tree", "clusters", "health", "labels", "snippets"
@@ -405,7 +430,6 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return _failed(str(exc))
 
-    @mcp.tool()
     def mining_health(
         library: str | None = None,
         version: str | None = None,
@@ -421,7 +445,6 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return _failed(str(exc))
 
-    @mcp.tool()
     def review(
         action: Literal["list", "approve", "conflict", "reopen"],
         entity_id: int | None = None,
@@ -448,7 +471,6 @@ def build_mcp_server(
             return _items(result)
         return result
 
-    @mcp.tool()
     def job_show(job_id: int | None = None, limit: int = 20) -> dict[str, Any]:
         """Show job results, listing recent jobs when no id is given."""
         from libref.services.infra.jobs import JobManager
@@ -463,7 +485,6 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return _failed(str(exc))
 
-    @mcp.tool()
     async def resolve(
         ecosystem: str | None,
         name: str,
@@ -510,5 +531,25 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return {"error": "failed", "message": str(exc)}
         return resolution.model_dump()
+
+    visible: dict[str, Any] = {
+        "search": search,
+        "library_search": library_search,
+        "web_search": web_search,
+        "github_search": github_search,
+        "answer": answer,
+        "read_doc": read_doc,
+        "catalog": catalog,
+        "repo_dependencies": repo_dependencies,
+        "api_insight": api_insight,
+        "pattern_insight": pattern_insight,
+        "mining_health": mining_health,
+        "review": review,
+        "job_show": job_show,
+        "resolve": resolve,
+    }
+    for name, func in visible.items():
+        if name in enabled:
+            mcp.tool()(func)
 
     return mcp

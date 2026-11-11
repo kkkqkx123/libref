@@ -46,6 +46,20 @@ def _load_settings(args: argparse.Namespace, overrides: dict | None = None):
     return settings
 
 
+def _split_tool_arg(text: str) -> list[str]:
+    """Split a comma-separated tool list from the CLI; blanks drop out."""
+    return [part.strip().lower() for part in text.split(",") if part.strip()]
+
+
+def _mcp_tools_overrides(args: argparse.Namespace) -> dict:
+    overrides: dict = {}
+    if getattr(args, "enabled_tools", None) is not None:
+        overrides["mcp_enabled_tools"] = _split_tool_arg(args.enabled_tools)
+    if getattr(args, "disabled_tools", None) is not None:
+        overrides["mcp_disabled_tools"] = _split_tool_arg(args.disabled_tools)
+    return overrides
+
+
 def _registry_overrides(args: argparse.Namespace) -> dict:
     overrides: dict = {}
     if getattr(args, "offline", False):

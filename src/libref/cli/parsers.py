@@ -371,6 +371,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp.add_argument("--host", default=None, help="HTTP listen address")
     p_mcp.add_argument("--port", type=int, default=None, help="HTTP listen port")
     p_mcp.add_argument("--path", default=None, help="HTTP endpoint path")
+    p_mcp.add_argument(
+        "--enabled-tools",
+        default=None,
+        help="Comma-separated tool allowlist; defaults to the config value (all tools when unset)",
+    )
+    p_mcp.add_argument(
+        "--disabled-tools",
+        default=None,
+        help="Comma-separated tool denylist; defaults to the config value",
+    )
     p_mcp.set_defaults(func=cmd_serve_mcp)
 
     p_web = sub.add_parser(

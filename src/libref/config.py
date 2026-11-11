@@ -10,14 +10,35 @@ import json
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import Field, ValidationError, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import BeforeValidator, Field, ValidationError, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class ConfigError(Exception):
     """Config load failure; the message names the source file or environment variable."""
+
+
+def _split_tool_names(value):
+    """Normalize a tool allowlist or denylist from file, env, or CLI into lowercase deduped names."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            try:
+                value = json.loads(text)
+            except ValueError:
+                value = [text]
+        else:
+            value = text.split(",")
+    if not isinstance(value, list):
+        value = [value]
+    cleaned = [str(item).strip().lower() for item in value if str(item).strip()]
+    return list(dict.fromkeys(cleaned))
 
 
 class LibrefSettings(BaseSettings):
@@ -128,6 +149,13 @@ class LibrefSettings(BaseSettings):
     mcp_host: str = "127.0.0.1"
     mcp_port: int = Field(default=8000, ge=1, le=65535)
     mcp_path: str = "/mcp"
+    # Tool visibility: allowlist minus denylist; an unset allowlist means all tools.
+    mcp_enabled_tools: Annotated[
+        list[str] | None, NoDecode, BeforeValidator(_split_tool_names)
+    ] = None
+    mcp_disabled_tools: Annotated[
+        list[str], NoDecode, BeforeValidator(_split_tool_names)
+    ] = Field(default_factory=list)
     # API auth: token only via env var, never files; a token must be set before external exposure.
     mcp_token: str | None = None
     mcp_require_auth: bool = False
@@ -334,7 +362,15 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "material_limit",
         }
     ),
-    "mcp": frozenset({"mcp_host", "mcp_port", "mcp_path"}),
+    "mcp": frozenset(
+        {
+            "mcp_host",
+            "mcp_port",
+            "mcp_path",
+            "mcp_enabled_tools",
+            "mcp_disabled_tools",
+        }
+    ),
     "mcp.auth": frozenset({"mcp_token", "mcp_require_auth"}),
     "web": frozenset({"web_host", "web_port"}),
     "retention": frozenset(

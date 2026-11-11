@@ -9,6 +9,7 @@ from libref.cli.common import (
     _build_vector,
     _connect,
     _load_settings,
+    _mcp_tools_overrides,
     applied_count,
 )
 from libref.config import redacted_dict, resolve_config_file, settings_fingerprint
@@ -249,7 +250,7 @@ def cmd_config_show(args: argparse.Namespace) -> int:
 def cmd_serve_mcp(args: argparse.Namespace) -> int:
     from libref.mcp_server import build_mcp_server, check_startup
 
-    settings = _load_settings(args)
+    settings = _load_settings(args, _mcp_tools_overrides(args))
     if args.http:
         host = args.host or settings.mcp_host
         try:
