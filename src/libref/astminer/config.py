@@ -35,7 +35,7 @@ JAVA_CONFIG = LanguageConfig(
 JAVASCRIPT_CONFIG = LanguageConfig(
     name="javascript",
     grammar="tree_sitter_javascript",
-    file_suffixes=(".js", ".mjs", ".cjs"),
+    file_suffixes=(".js", ".mjs", ".cjs", ".jsx"),
     config_version=1,
 )
 

@@ -55,6 +55,8 @@ except AttributeError:  # pragma: no cover - fallback for older interpreters
 _JAVA_STDLIB_PREFIXES = ("java.", "javax.", "jdk.", "sun.", "com.sun.")
 _RUST_STDLIB_PREFIXES = ("std.", "core.", "alloc.")
 _CSHARP_STDLIB_PREFIXES = ("System.",)
+_KOTLIN_STDLIB_PREFIXES = ("kotlin.", "kotlinx.")
+_GROOVY_STDLIB_PREFIXES = ("groovy.", "org.codehaus.groovy.")
 _NODE_BUILTINS = frozenset(
     {
         "fs",
@@ -424,6 +426,9 @@ def _is_stdlib_target(resolved: str) -> bool:
         if resolved.startswith(prefix):
             return True
     for prefix in _RUST_STDLIB_PREFIXES + _CSHARP_STDLIB_PREFIXES:
+        if resolved.startswith(prefix):
+            return True
+    for prefix in _KOTLIN_STDLIB_PREFIXES + _GROOVY_STDLIB_PREFIXES:
         if resolved.startswith(prefix):
             return True
     return False

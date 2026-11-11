@@ -250,3 +250,50 @@ def test_rust_self_and_alias_fallback_resolution(monkeypatch, tmp_path):
     by_raw = {(c.caller_file, c.raw_callee): c for c in resolved}
     assert by_raw[("m.rs", "Self.new")].confidence == "EXTRACTED"
     assert by_raw[("m.rs", "Self.new")].callee == "m.Cache.new"
+
+
+def test_kotlin_wildcard_import_yields_no_alias(monkeypatch, tmp_path):
+    _decls, aliases, _raw = ast_engine.extract_file(
+        "m.kt", ast_config.KOTLIN_CONFIG, b"package a\nimport foo.*\nfun f(){ g() }\n"
+    )
+    assert aliases == []
+
+
+def test_kotlin_delegation_bases_cover_by_and_generic(monkeypatch, tmp_path):
+    data = (
+        b"package demo.store\n"
+        b"class C(val x: Int) : Repo by delegate, Base<String>() {\n"
+        b" fun m(){}\n}\n"
+    )
+    decls, _aliases, _raw = ast_engine.extract_file(
+        "C.kt", ast_config.KOTLIN_CONFIG, data
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert "Repo" in by_qual["C"].bases
+    assert any("Base" in b for b in by_qual["C"].bases)
+
+
+def test_groovy_qualified_extends_base(monkeypatch, tmp_path):
+    data = b"package a\nclass C extends foo.Bar {\n def m(){}\n}\n"
+    decls, _aliases, _raw = ast_engine.extract_file(
+        "C.groovy", ast_config.GROOVY_CONFIG, data
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert any("foo.Bar" in b or b == "foo.Bar" for b in by_qual["C"].bases)
+
+
+def test_jvm_stdlib_targets_are_ambiguous(monkeypatch, tmp_path):
+    assert ast_resolution._is_stdlib_target("kotlin.collections.listOf")
+    assert ast_resolution._is_stdlib_target("kotlinx.coroutines.launch")
+    assert ast_resolution._is_stdlib_target("groovy.lang.Closure.call")
+    assert ast_resolution._is_stdlib_target(
+        "org.codehaus.groovy.runtime.DefaultGroovyMethods.plus"
+    )
+
+
+def test_jsx_suffix_resolves_module(monkeypatch, tmp_path):
+    from libref.astminer import context as ast_context
+
+    assert ast_context.determine_module_path("ui/App.jsx", "javascript") == "ui.App"
+    assert ast_context.determine_module_path("App.jsx", "javascript") == "App"
+    assert ast_config.config_for_suffix(".jsx") is ast_config.JAVASCRIPT_CONFIG

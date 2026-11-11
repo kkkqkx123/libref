@@ -12,7 +12,7 @@ _JAVA_SOURCE_ROOTS = (
     "java/",
 )
 
-_JS_SUFFIXES = (".js", ".mjs", ".cjs")
+_JS_SUFFIXES = (".js", ".mjs", ".cjs", ".jsx")
 _RUST_STRIP_ROOTS = ("src/",)
 _KOTLIN_SOURCE_ROOTS = (
     "src/main/kotlin/",

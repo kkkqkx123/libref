@@ -299,7 +299,7 @@ def _python_aliases(
 
 def _qualified_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:
     for child in root.children:
-        if child.type in ("asterisk", "wildcard_import"):
+        if child.type in ("asterisk", "wildcard_import", "*"):
             return []
     path_node = None
     alias_node = None

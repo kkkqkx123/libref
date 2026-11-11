@@ -14,7 +14,7 @@ def entity_query() -> str:
     return r"""
 (class_definition
   name: (identifier) @entity.class.name @entity.class.signature.name
-  (identifier) @entity.class.signature.base
+  [(identifier) (qualified_name) (dotted_identifier)] @entity.class.signature.base
   body: (closure) @entity.class.body) @entity.class
 
 (class_definition

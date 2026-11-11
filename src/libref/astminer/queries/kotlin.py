@@ -10,7 +10,11 @@ def entity_query() -> str:
   (type_parameters)? @entity.class.signature.type_params
   (delegation_specifiers
     (delegation_specifier
-      (user_type) @entity.class.signature.base))?
+      [
+        (user_type) @entity.class.signature.base
+        (explicit_delegation (user_type) @entity.class.signature.base)
+        (constructor_invocation (user_type) @entity.class.signature.base)
+      ]))?
   (class_body)? @entity.class.body) @entity.class
 
 (object_declaration

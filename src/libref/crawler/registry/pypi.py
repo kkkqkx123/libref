@@ -74,8 +74,10 @@ def parse_pypi_payload(
         text = str(raw_version)
         if not text or text in versions:
             continue
-        if isinstance(files, list) and files and all(
-            isinstance(item, dict) and item.get("yanked") for item in files
+        if (
+            isinstance(files, list)
+            and files
+            and all(isinstance(item, dict) and item.get("yanked") for item in files)
         ):
             continue
         versions.append(text)
