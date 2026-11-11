@@ -405,7 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_repo.add_argument(
         "--ecosystem",
         default=None,
-        help="Resolve by name: pypi|npm|maven|go|crates|nuget; defaults to explicit custom",
+        help="Resolve by name: pypi|npm|maven|go|crates|nuget; mutually exclusive with source",
     )
     p_repo.add_argument(
         "--include-prerelease",

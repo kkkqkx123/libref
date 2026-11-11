@@ -67,6 +67,7 @@ from libref.services.registry.discovery import DiscoveryService
 from libref.services.registry.libraries import LibraryService, mining_version_ids
 from libref.services.registry.resolver import (
     infer_ecosystem,
+    resolve,
     resolve_package,
     resolve_repo,
 )
@@ -120,6 +121,7 @@ __all__ = [
     "reconcile_version",
     "refresh_clusters",
     "refresh_feature_tree",
+    "resolve",
     "resolve_package",
     "resolve_repo",
     "run_scrape_job_sync",

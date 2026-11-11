@@ -287,7 +287,11 @@ async def index_repo_by_name_async(
     if explicit_source is not None:
         if version is None:
             raise ValueError("explicit repo source requires a version")
-        eco = ecosystem.strip().lower() if ecosystem else "custom"
+        if ecosystem is not None:
+            raise ValueError(
+                "explicit source and ecosystem resolution are mutually exclusive"
+            )
+        eco = "custom"
         vec_store = None
         embed = None
         try:

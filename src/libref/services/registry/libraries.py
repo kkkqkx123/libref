@@ -41,7 +41,8 @@ class LibraryService:
 
     def list_libraries(self) -> list[dict[str, Any]]:
         rows = self._conn.execute(
-            "SELECT l.id, l.ecosystem, l.name, l.description, l.docs_url, l.resolved_from, "
+            "SELECT l.id, l.ecosystem, l.name, l.description, l.homepage, l.docs_url, "
+            "l.repo_url, l.resolved_from, l.resolved_at, "
             "(SELECT count(*) FROM versions v WHERE v.library_id = l.id) AS versions "
             "FROM libraries l ORDER BY l.ecosystem, l.name"
         ).fetchall()
@@ -54,9 +55,12 @@ class LibraryService:
                     "ecosystem": r[1],
                     "name": r[2],
                     "description": normalize_markdown(raw) if raw else raw,
-                    "docs_url": r[4],
-                    "resolved_from": r[5],
-                    "versions": r[6],
+                    "homepage": r[4],
+                    "docs_url": r[5],
+                    "repo_url": r[6],
+                    "resolved_from": r[7],
+                    "resolved_at": r[8],
+                    "versions": r[9],
                 }
             )
         return out

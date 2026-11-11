@@ -31,7 +31,6 @@ from libref.crawler.registry import (
     normalize_name,
     sanitize_http_url,
 )
-from libref.crawler.registry.overrides import get_override
 from libref.crawler.robots import RobotsChecker, ensure_robots_cache
 from libref.crawler.scope import (
     FilterStats,
@@ -65,7 +64,6 @@ __all__ = [
     "ensure_robots_cache",
     "extract_to_markdown",
     "fetch_snapshot",
-    "get_override",
     "is_data_table",
     "is_playwright_available",
     "looks_like_js_rendered",

@@ -110,7 +110,7 @@ def ensure_overrides_file(path: str | Path) -> None:
         mtime = resolved.stat().st_mtime
     except OSError:
         raise ValueError(f"overrides file not found: {resolved}") from None
-    if _FILE_MTIMES.get(str(resolved)) == mtime and _FILE_OVERRIDES:
+    if _FILE_MTIMES.get(str(resolved)) == mtime:
         return
     load_overrides_file(resolved)
 

@@ -41,22 +41,12 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
             if args.version is None:
                 print("explicit mode requires library version source", file=sys.stderr)
                 return 2
-            from libref.crawler.registry import (
-                SUPPORTED_ECOSYSTEMS,
-                canonical_ecosystem,
-                normalize_name,
-            )
-
-            eco_name = (
-                canonical_ecosystem(args.ecosystem)
-                if args.ecosystem is not None
-                else None
-            )
-            if eco_name in SUPPORTED_ECOSYSTEMS:
-                library = normalize_name(eco_name, args.library)
-                ecosystem = eco_name
-            else:
-                library, ecosystem = args.library.strip(), (args.ecosystem or "custom")
+            if args.ecosystem is not None:
+                print(
+                    "--ecosystem and source are mutually exclusive", file=sys.stderr
+                )
+                return 2
+            library, ecosystem = args.library.strip(), "custom"
             version, source = args.version, args.source
             resolved_from, registry_confirmed = "explicit", True
         else:
