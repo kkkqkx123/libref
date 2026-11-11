@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 INDEX_REPO_JOB_KIND = "index_repo"
 
@@ -577,6 +580,7 @@ async def _index_repo_inner(
     n_calls, swept_calls = _persist_calls(
         conn, library_id, version_id, resolved, commit
     )
+    _check_manifest_identity(ecosystem, library, root)
     n_deps = _persist_repo_deps(conn, library_id, version_id, root)
     counts["manifest_deps"] = n_deps
     n_chunks, chunk_dropped, removed_ids, inserted_ids = _store_source_chunks(
@@ -612,6 +616,26 @@ async def _index_repo_inner(
     return counts
 
 
+def _check_manifest_identity(ecosystem: str, library: str, root) -> None:
+    """Warn when the checked-out manifests declare a different identity; never blocks."""
+    from libref.astminer import manifests as _manifests
+    from libref.crawler.registry import SUPPORTED_ECOSYSTEMS, canonical_ecosystem
+
+    eco = canonical_ecosystem(ecosystem) if ecosystem else None
+    if eco not in SUPPORTED_ECOSYSTEMS:
+        return
+    declared = _manifests.manifest_identity(root)
+    if declared is None or declared == (eco, library):
+        return
+    logger.warning(
+        "manifest identity mismatch: requested %s:%s declared %s:%s; continuing",
+        eco,
+        library,
+        declared[0],
+        declared[1],
+    )
+
+
 def _persist_repo_deps(conn, library_id: int, version_id: int, root) -> int:
     """Manifest-declared dependency edges: version-scoped full refresh, unparsable manifests yield nothing."""
     from libref.astminer import gradle as _gradle
@@ -645,28 +669,35 @@ def list_repo_dependencies(
     library: str,
     version: str,
     dep_ecosystem: str | None = None,
+    *,
+    ecosystem: str | None = None,
 ) -> list[dict]:
     """Read model over manifest-declared dependency edges for one library version.
 
-    The optional filter selects the dependency ecosystem, not the owning library."""
-    if dep_ecosystem is None:
-        rows = conn.execute(
-            "SELECT d.ecosystem, d.name, d.req, d.source_file"
-            " FROM repo_dependencies d JOIN versions v ON v.id = d.version_id"
-            " JOIN libraries l ON l.id = d.library_id"
-            " WHERE l.name = ? AND v.version = ?"
-            " ORDER BY d.ecosystem, d.name",
-            (library, version),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT d.ecosystem, d.name, d.req, d.source_file"
-            " FROM repo_dependencies d JOIN versions v ON v.id = d.version_id"
-            " JOIN libraries l ON l.id = d.library_id"
-            " WHERE l.name = ? AND v.version = ? AND d.ecosystem = ?"
-            " ORDER BY d.ecosystem, d.name",
-            (library, version, dep_ecosystem),
-        ).fetchall()
+    The positional filter selects the dependency ecosystem; the keyword-only
+    filter selects the owning library ecosystem for same-name disambiguation."""
+    from libref.crawler.registry import canonical_ecosystem
+
+    owner = canonical_ecosystem(ecosystem) if ecosystem is not None else None
+    if ecosystem is not None and owner is None:
+        raise ValueError(f"unsupported ecosystem: {ecosystem}")
+    dep = canonical_ecosystem(dep_ecosystem) if dep_ecosystem is not None else None
+    if dep_ecosystem is not None and dep is None:
+        raise ValueError(f"unsupported ecosystem: {dep_ecosystem}")
+    query = (
+        "SELECT d.ecosystem, d.name, d.req, d.source_file"
+        " FROM repo_dependencies d JOIN versions v ON v.id = d.version_id"
+        " JOIN libraries l ON l.id = d.library_id"
+        " WHERE l.name = ? AND v.version = ?"
+    )
+    params: list[str] = [library, version]
+    if owner is not None:
+        query += " AND l.ecosystem = ?"
+        params.append(owner)
+    if dep is not None:
+        query += " AND d.ecosystem = ?"
+        params.append(dep)
+    rows = conn.execute(query + " ORDER BY d.ecosystem, d.name", params).fetchall()
     return [
         {
             "ecosystem": r[0],

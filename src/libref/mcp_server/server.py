@@ -10,6 +10,7 @@ from mcp.server.mcpserver import MCPServer
 from libref.config import LibrefSettings, load_settings
 from libref.crawler.registry import RegistryError
 from libref.observe import setup_logging
+from libref.services.code.code_ingest import list_repo_dependencies
 from libref.services.code.mining_read import MiningReadService
 from libref.services.docs.pages import PageService
 from libref.services.factory import build_discovery_service, build_search_service
@@ -241,6 +242,33 @@ def build_mcp_server(
         """Browse the catalog: libraries when no name is given, versions otherwise."""
         try:
             return _items(catalog_svc.catalog(library, ecosystem))
+        except ValueError as exc:
+            return _invalid(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _failed(str(exc))
+
+    @mcp.tool()
+    def repo_dependencies(
+        library: str,
+        version: str,
+        ecosystem: str | None = None,
+        dep_ecosystem: str | None = None,
+    ) -> dict[str, Any]:
+        """Manifest-declared dependencies for one library version, rebuilt at index time."""
+        if not library.strip():
+            return _invalid("library is empty")
+        if not version.strip():
+            return _invalid("version is empty")
+        try:
+            return _items(
+                list_repo_dependencies(
+                    conn,
+                    library,
+                    version,
+                    dep_ecosystem,
+                    ecosystem=ecosystem,
+                )
+            )
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001

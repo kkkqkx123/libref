@@ -8,6 +8,7 @@ from libref.services.code.code_ingest import (
     index_repo,
     index_repo_by_name,
     index_repo_by_name_async,
+    list_repo_dependencies,
     lookup_index_source_cached,
 )
 from libref.services.code.mining_read import MiningReadService, is_subsequence
@@ -107,6 +108,7 @@ __all__ = [
     "infer_ecosystem",
     "is_subsequence",
     "list_deletions",
+    "list_repo_dependencies",
     "lookup_index_source_cached",
     "material_block",
     "mine_job_params",

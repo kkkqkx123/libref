@@ -725,6 +725,31 @@ def cmd_catalog(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_repo_deps(args: argparse.Namespace) -> int:
+    import json
+
+    from libref.services.code.code_ingest import list_repo_dependencies
+
+    conn = _connect(_load_settings(args))
+    try:
+        try:
+            rows = list_repo_dependencies(
+                conn,
+                args.library,
+                args.version,
+                getattr(args, "dep_ecosystem", None),
+                ecosystem=getattr(args, "ecosystem", None),
+            )
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 2
+    finally:
+        conn.close()
+    for r in rows:
+        print(json.dumps(r, ensure_ascii=False))
+    return 0
+
+
 def cmd_induce_labels(args: argparse.Namespace) -> int:
     import asyncio
     import json as _json
@@ -1595,6 +1620,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
     )
     p_repo.set_defaults(func=cmd_index_repo)
+
+    p_deps = sub.add_parser(
+        "repo-deps", help="List manifest-declared dependencies", parents=[_config_parent]
+    )
+    p_deps.add_argument("library")
+    p_deps.add_argument("version")
+    p_deps.add_argument("--ecosystem", default=None)
+    p_deps.add_argument("--dep-ecosystem", default=None)
+    p_deps.set_defaults(func=cmd_repo_deps)
 
     p_mine = sub.add_parser(
         "mine", help="Mine closed call-sequence patterns", parents=[_config_parent]
