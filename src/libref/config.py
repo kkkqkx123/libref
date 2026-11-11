@@ -103,6 +103,9 @@ class LibrefSettings(BaseSettings):
             "pypi": "https://pypi.org/pypi",
             "npm": "https://registry.npmjs.org",
             "maven": "https://repo1.maven.org/maven2",
+            "go": "https://proxy.golang.org",
+            "crates": "https://crates.io",
+            "nuget": "https://api.nuget.org/v3/registration5-gz-semver2",
         }
     )
     registry_overrides_file: Path | None = None

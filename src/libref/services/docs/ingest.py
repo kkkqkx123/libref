@@ -454,6 +454,7 @@ class IngestService:
         max_pages: int | None = None,
         prefilter: bool = False,
         scope: dict[str, Any] | None = None,
+        include_prerelease: bool = False,
     ) -> dict[str, int]:
         """Scrape after resolving by name: resolve the address and version first, then run the standard scrape path."""
         return asyncio.run(
@@ -464,6 +465,7 @@ class IngestService:
                 max_pages=max_pages,
                 prefilter=prefilter,
                 scope=scope,
+                include_prerelease=include_prerelease,
             )
         )
 
@@ -476,6 +478,7 @@ class IngestService:
         max_pages: int | None = None,
         prefilter: bool = False,
         scope: dict[str, Any] | None = None,
+        include_prerelease: bool = False,
     ) -> dict[str, int]:
         """Async entry for scraping after name resolution, reused by the job worker."""
         from libref.services.registry.resolver import resolve_package
@@ -488,6 +491,7 @@ class IngestService:
                 ecosystem,
                 package,
                 requested_version,
+                include_prerelease=include_prerelease,
             )
         assert resolution.docs_url is not None
         return await self._scrape_async(

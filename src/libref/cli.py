@@ -263,7 +263,9 @@ def cmd_smoke(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def _resolve_for_cli(settings, conn, ecosystem, library, requested_version):
+def _resolve_for_cli(
+    settings, conn, ecosystem, library, requested_version, include_prerelease=False
+):
     """CLI resolution form: ecosystem plus name resolve to address and version; on failure print the classified error."""
     import asyncio
 
@@ -280,6 +282,7 @@ def _resolve_for_cli(settings, conn, ecosystem, library, requested_version):
                 library,
                 requested_version,
                 "docs",
+                include_prerelease,
             )
 
     return asyncio.run(_run())
@@ -308,6 +311,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     args.ecosystem,
                     args.library,
                     args.version,
+                    bool(getattr(args, "include_prerelease", False)),
                 )
             except ValueError as exc:
                 print(f"invalid: {exc}", file=sys.stderr)
@@ -430,6 +434,7 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                             args.library,
                             args.version,
                             "repo",
+                            bool(getattr(args, "include_prerelease", False)),
                         )
 
                 resolution = asyncio.run(_resolve())
@@ -610,6 +615,7 @@ def _print_suggestions(conn, settings, args: argparse.Namespace) -> int:
                 getattr(args, "library", None) or args.query,
                 getattr(args, "ecosystem", None),
                 args.limit,
+                include_prerelease=bool(getattr(args, "include_prerelease", False)),
             )
         )
     except ValueError as exc:
@@ -851,6 +857,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                     args.name,
                     getattr(args, "version", None),
                     getattr(args, "target", "docs"),
+                    bool(getattr(args, "include_prerelease", False)),
                 )
 
         try:
@@ -1260,7 +1267,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument(
         "--ecosystem",
         default=None,
-        help="Resolve by name: pypi|npm|maven; Java coordinates look like group:artifact",
+        help="Resolve by name: pypi|npm|maven|go|crates|nuget; Java coordinates look like group:artifact",
+    )
+    p_ingest.add_argument(
+        "--include-prerelease",
+        action="store_true",
+        help="Resolve to the newest version including prereleases",
     )
     p_ingest.add_argument(
         "--offline",
@@ -1449,13 +1461,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_discover = sub.add_parser(
         "discover",
-        help="Fuzzy discovery across registries (pypi/npm/maven; py/js/java aliases accepted)",
+        help="Fuzzy discovery across registries (pypi/npm/maven/go/crates/nuget; language aliases accepted)",
         parents=[_config_parent],
     )
     p_discover.add_argument("query")
     p_discover.add_argument("--library", default=None)
     p_discover.add_argument("--ecosystem", default=None)
     p_discover.add_argument("--limit", type=int, default=10)
+    p_discover.add_argument(
+        "--include-prerelease",
+        action="store_true",
+        help="Include prerelease versions when ranking candidates",
+    )
     p_discover.set_defaults(func=cmd_discover)
 
     p_answer = sub.add_parser(
@@ -1547,7 +1564,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_repo.add_argument(
         "--ecosystem",
         default=None,
-        help="Resolve by name: pypi|npm|maven; defaults to explicit custom",
+        help="Resolve by name: pypi|npm|maven|go|crates|nuget; defaults to explicit custom",
+    )
+    p_repo.add_argument(
+        "--include-prerelease",
+        action="store_true",
+        help="Resolve to the newest version including prereleases",
     )
     p_repo.add_argument(
         "--offline",
@@ -1677,6 +1699,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--target",
         default="docs",
         choices=["docs", "repo"],
+    )
+    p_resolve.add_argument(
+        "--include-prerelease",
+        action="store_true",
+        help="Resolve to the newest version including prereleases",
     )
     p_resolve.set_defaults(func=cmd_resolve)
 

@@ -110,6 +110,15 @@ def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"message": "not found"})
     if host == "api.github.com":
         return httpx.Response(200, json=GITHUB_PAYLOAD)
+    # New-ecosystem fan-out yields empty results under this closed-world handler.
+    if host == "pkg.go.dev":
+        return httpx.Response(200, text="<html></html>")
+    if host == "proxy.golang.org":
+        return httpx.Response(404, json={})
+    if host == "crates.io":
+        return httpx.Response(200, json={"crates": []})
+    if host == "azuresearch-usnc.nuget.org":
+        return httpx.Response(200, json={"data": []})
     raise AssertionError(f"{host}{path}")
 
 
@@ -201,7 +210,7 @@ def test_disabled_and_invalid_inputs(conn, monkeypatch, tmp_path) -> None:
     with pytest.raises(ValueError, match="empty"):
         run(svc.search_async("  ", None, 10, counting_client([])))
     with pytest.raises(ValueError, match="unsupported ecosystem"):
-        run(svc.search_async("demo", "cargo", 10, counting_client([])))
+        run(svc.search_async("demo", "rubygems", 10, counting_client([])))
     with pytest.raises(ValueError, match="between 1 and 100"):
         run(svc.search_async("demo", None, 0, counting_client([])))
 

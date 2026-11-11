@@ -135,14 +135,23 @@ def build_web_app(
         query: str,
         ecosystem: str | None = None,
         limit: int = 10,
+        include_prerelease: bool = False,
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         from libref.web.api import LibrarySearchQuery
 
-        params = LibrarySearchQuery(query=query, ecosystem=ecosystem, limit=limit)
+        params = LibrarySearchQuery(
+            query=query,
+            ecosystem=ecosystem,
+            limit=limit,
+            include_prerelease=include_prerelease,
+        )
         try:
             items = await discovery.search_async(
-                params.query, params.ecosystem, params.limit
+                params.query,
+                params.ecosystem,
+                params.limit,
+                include_prerelease=params.include_prerelease,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -382,13 +391,18 @@ def build_web_app(
         ecosystem: str | None = None,
         version: str | None = None,
         target: Literal["docs", "repo"] = "docs",
+        include_prerelease: bool = False,
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         from libref.crawler.http import build_async_client
         from libref.services.registry.resolver import resolve as _resolve
 
         params = ResolveQuery(
-            ecosystem=ecosystem, name=name, version=version, target=target
+            ecosystem=ecosystem,
+            name=name,
+            version=version,
+            target=target,
+            include_prerelease=include_prerelease,
         )
         try:
             async with build_async_client(settings) as client:
@@ -400,6 +414,7 @@ def build_web_app(
                     params.name,
                     params.version,
                     params.target,
+                    params.include_prerelease,
                 )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

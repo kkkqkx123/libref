@@ -445,7 +445,9 @@ def lookup_index_source_cached(
     ).fetchone()
     if lib_row is not None and lib_row[0]:
         return str(lib_row[0]), "libraries"
-    if eco in ("pypi", "npm", "maven"):
+    from libref.crawler.registry import SUPPORTED_ECOSYSTEMS
+
+    if eco in SUPPORTED_ECOSYSTEMS:
         try:
             from libref.crawler.registry import normalize_name
             from libref.services.registry.resolver import read_cache
@@ -575,6 +577,8 @@ async def _index_repo_inner(
     n_calls, swept_calls = _persist_calls(
         conn, library_id, version_id, resolved, commit
     )
+    n_deps = _persist_repo_deps(conn, library_id, version_id, root)
+    counts["manifest_deps"] = n_deps
     n_chunks, chunk_dropped, removed_ids, inserted_ids = _store_source_chunks(
         conn, repo_name, root, sorted(live), all_decls, library_id, version_id
     )
@@ -606,6 +610,71 @@ async def _index_repo_inner(
             version_id=version_id,
         )
     return counts
+
+
+def _persist_repo_deps(conn, library_id: int, version_id: int, root) -> int:
+    """Manifest-declared dependency edges: version-scoped full refresh, unparsable manifests yield nothing."""
+    from libref.astminer import manifests as _manifests
+
+    deps = _manifests.manifest_dependencies(root)
+    conn.execute("DELETE FROM repo_dependencies WHERE version_id=?", (version_id,))
+    if deps:
+        conn.executemany(
+            "INSERT INTO repo_dependencies(library_id, version_id, ecosystem, name, req, source_file)"
+            " VALUES(?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(version_id, ecosystem, name, source_file) DO UPDATE SET req=excluded.req",
+            [
+                (
+                    library_id,
+                    version_id,
+                    d.ecosystem,
+                    d.name,
+                    d.req,
+                    d.source_file,
+                )
+                for d in deps
+            ],
+        )
+    conn.commit()
+    return len(deps)
+
+
+def list_repo_dependencies(
+    conn,
+    library: str,
+    version: str,
+    dep_ecosystem: str | None = None,
+) -> list[dict]:
+    """Read model over manifest-declared dependency edges for one library version.
+
+    The optional filter selects the dependency ecosystem, not the owning library."""
+    if dep_ecosystem is None:
+        rows = conn.execute(
+            "SELECT d.ecosystem, d.name, d.req, d.source_file"
+            " FROM repo_dependencies d JOIN versions v ON v.id = d.version_id"
+            " JOIN libraries l ON l.id = d.library_id"
+            " WHERE l.name = ? AND v.version = ?"
+            " ORDER BY d.ecosystem, d.name",
+            (library, version),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT d.ecosystem, d.name, d.req, d.source_file"
+            " FROM repo_dependencies d JOIN versions v ON v.id = d.version_id"
+            " JOIN libraries l ON l.id = d.library_id"
+            " WHERE l.name = ? AND v.version = ? AND d.ecosystem = ?"
+            " ORDER BY d.ecosystem, d.name",
+            (library, version, dep_ecosystem),
+        ).fetchall()
+    return [
+        {
+            "ecosystem": r[0],
+            "name": r[1],
+            "req": r[2],
+            "source_file": r[3],
+        }
+        for r in rows
+    ]
 
 
 def index_repo(
@@ -653,6 +722,7 @@ def index_repo_by_name(
     update: bool = False,
     repos_dir=None,
     explicit_source: str | None = None,
+    include_prerelease: bool = False,
 ) -> dict[str, int]:
     return asyncio.run(
         index_repo_by_name_async(
@@ -664,6 +734,7 @@ def index_repo_by_name(
             update=update,
             repos_dir=repos_dir,
             explicit_source=explicit_source,
+            include_prerelease=include_prerelease,
         )
     )
 
@@ -678,6 +749,7 @@ async def index_repo_by_name_async(
     update: bool = False,
     repos_dir=None,
     explicit_source: str | None = None,
+    include_prerelease: bool = False,
 ) -> dict[str, int]:
     from libref.services.registry.resolver import resolve_repo
 
@@ -717,6 +789,7 @@ async def index_repo_by_name_async(
             ecosystem,
             library,
             version,
+            include_prerelease=include_prerelease,
         )
     assert resolution.repo_url is not None
     vec_store = None

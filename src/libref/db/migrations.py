@@ -18,6 +18,7 @@ from libref.db.schema import (
     PAGES_CONTENT_HASH_SQL,
     PATTERN_LABEL_SQL,
     QUERY_SUPPORT_SQL,
+    REPO_DEPS_SQL,
     REPOS_ASTCACHE_SQL,
     VEC_VERSION_META_SQL,
     VECTOR_META_SQL,
@@ -46,6 +47,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(11, "query-support", QUERY_SUPPORT_SQL),
     Migration(12, "call-scope", CALL_SCOPE_SQL),
     Migration(13, "discovery-cache", DISCOVERY_CACHE_SQL),
+    Migration(14, "repo-dependencies", REPO_DEPS_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

@@ -45,10 +45,14 @@ def get_override(ecosystem: str, normalized_name: str) -> dict[str, str] | None:
 
 
 def _check_entry(raw: dict) -> tuple[tuple[str, str], dict[str, str]]:
-    from libref.crawler.registry import canonical_ecosystem, normalize_name
+    from libref.crawler.registry import (
+        SUPPORTED_ECOSYSTEMS,
+        canonical_ecosystem,
+        normalize_name,
+    )
 
     eco = canonical_ecosystem(str(raw.get("ecosystem", "")))
-    if eco not in ("pypi", "npm", "maven"):
+    if eco not in SUPPORTED_ECOSYSTEMS:
         raise ValueError(f"unsupported ecosystem in overrides file: {raw!r}")
     norm = normalize_name(eco, str(raw.get("name", "")))
     if not norm:

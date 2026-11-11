@@ -334,6 +334,21 @@ CREATE TABLE discovery_cache(
 );
 """
 
+# ── Manifest-declared repo dependencies: version-scoped edges, rebuilt on every index ──
+REPO_DEPS_SQL = """
+CREATE TABLE repo_dependencies(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  ecosystem TEXT NOT NULL,
+  name TEXT NOT NULL,
+  req TEXT NOT NULL DEFAULT '',
+  source_file TEXT NOT NULL DEFAULT '',
+  UNIQUE(version_id, ecosystem, name, source_file)
+);
+CREATE INDEX IF NOT EXISTS idx_repo_dependencies_version ON repo_dependencies(version_id);
+"""
+
 # ── Pattern-level semantic labels: rebuildable model output, never mixed with static facts ──
 PATTERN_LABEL_SQL = """
 CREATE TABLE pattern_labels(

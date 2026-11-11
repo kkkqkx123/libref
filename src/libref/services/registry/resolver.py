@@ -21,12 +21,12 @@ from libref.crawler.registry.overrides import ensure_overrides_file, get_overrid
 
 
 def infer_ecosystem(explicit: str | None, name: str) -> str:
-    """Ecosystem determination: explicit wins; bare names are not guessed; only scope and coordinate shape are inferable."""
-    from libref.crawler.registry import canonical_ecosystem
+    """Ecosystem determination: explicit wins; bare names are not guessed; only scope, coordinate, and module-path shapes are inferable."""
+    from libref.crawler.registry import SUPPORTED_ECOSYSTEMS, canonical_ecosystem
 
     if explicit is not None:
         eco = canonical_ecosystem(explicit)
-        if eco not in ("pypi", "npm", "maven"):
+        if eco not in SUPPORTED_ECOSYSTEMS:
             raise ValueError(f"unsupported ecosystem: {explicit}")
         if eco == "pypi" and name.strip().startswith("@"):
             raise ValueError("pypi package must not start with '@'")
@@ -38,7 +38,11 @@ def infer_ecosystem(explicit: str | None, name: str) -> str:
         return "npm"
     if ":" in stripped:
         return "maven"
-    raise ValueError("ecosystem required: pass --ecosystem pypi|npm|maven")
+    if "/" in stripped:
+        return "go"
+    raise ValueError(
+        "ecosystem required: pass --ecosystem pypi|npm|maven|go|crates|nuget"
+    )
 
 
 def read_cache(conn: sqlite3.Connection, ecosystem: str, name: str) -> dict | None:
@@ -130,10 +134,17 @@ def is_fresh(fetched_at: float, ttl_days: float) -> bool:
 
 
 def _pick_version(
-    versions: list[str], stable: str | None, requested: str | None
+    versions: list[str],
+    stable: str | None,
+    requested: str | None,
+    include_prerelease: bool = False,
 ) -> tuple[str, bool]:
     if requested is not None:
         return requested, requested in versions
+    if include_prerelease:
+        best = best_effort_stable(versions, include_prerelease=True)
+        if best is not None:
+            return best, True
     if stable:
         return stable, True
     best = best_effort_stable(versions)
@@ -156,6 +167,7 @@ def _build_resolution(
     registry_docs: str | None,
     candidates: list[str],
     source: str,
+    include_prerelease: bool = False,
 ) -> Resolution:
     docs_url = override_docs or registry_docs
     repo = override_repo or repo_url
@@ -165,7 +177,7 @@ def _build_resolution(
             "registry has no documentation address",
             hint={"homepage": homepage, "repo_url": repo},
         )
-    version, confirmed = _pick_version(versions, stable, requested)
+    version, confirmed = _pick_version(versions, stable, requested, include_prerelease)
     final_candidates = [docs_url]
     for c in candidates:
         if c != docs_url and c not in final_candidates:
@@ -246,6 +258,7 @@ def _build_repo_resolution(
     registry_docs: str | None,
     candidates: list[str],
     source: str,
+    include_prerelease: bool = False,
 ) -> Resolution:
     """Repo resolution assembly: override repo wins; missing repo raises no_docs directly, symmetric with the docs resolution."""
     repo = override_repo or repo_url
@@ -255,7 +268,7 @@ def _build_repo_resolution(
             "registry has no repository address",
             hint={"homepage": homepage},
         )
-    version, confirmed = _pick_version(versions, stable, requested)
+    version, confirmed = _pick_version(versions, stable, requested, include_prerelease)
     return Resolution(
         ecosystem=ecosystem,
         name=name,
@@ -372,6 +385,7 @@ async def _resolve_via_registry(
     name: str,
     requested_version: str | None,
     target: str,
+    include_prerelease: bool = False,
 ) -> Resolution:
     eco, norm, override_docs, override_repo, ttl, offline, cached = _registry_context(
         conn, settings, ecosystem, name
@@ -394,8 +408,15 @@ async def _resolve_via_registry(
             registry_docs=cached["docs_url"],
             candidates=cached["candidates"],
             source="override" if override_hit else "registry",
+            include_prerelease=include_prerelease,
         )
-    if cached is not None and is_fresh(cached["fetched_at"], ttl):
+    # A fresh canonical cache serves the default path only: a flag query refetches so
+    # the resolved version and its documentation address stay coherent.
+    if (
+        cached is not None
+        and is_fresh(cached["fetched_at"], ttl)
+        and not include_prerelease
+    ):
         if target == "repo" and (override_repo or cached["repo_url"]) is None:
             pass
         else:
@@ -412,9 +433,10 @@ async def _resolve_via_registry(
                 registry_docs=cached["docs_url"],
                 candidates=cached["candidates"],
                 source="override" if override_hit else "registry",
+                include_prerelease=include_prerelease,
             )
     try:
-        snap = await fetch_snapshot(eco, norm, client, settings)
+        snap = await fetch_snapshot(eco, norm, client, settings, include_prerelease)
     except RegistryError as exc:
         if exc.kind == "retryable" and cached is not None:
             if target == "repo" and (override_repo or cached["repo_url"]) is None:
@@ -436,9 +458,11 @@ async def _resolve_via_registry(
                 registry_docs=cached["docs_url"],
                 candidates=cached["candidates"],
                 source="override" if override_hit else "registry-stale",
+                include_prerelease=include_prerelease,
             )
         raise
-    _store_snapshot(conn, eco, norm, snap)
+    if not include_prerelease:
+        _store_snapshot(conn, eco, norm, snap)
     registry_docs = snap.doc_candidates[0] if snap.doc_candidates else None
     return builder(
         ecosystem=eco,
@@ -453,6 +477,7 @@ async def _resolve_via_registry(
         registry_docs=registry_docs,
         candidates=list(snap.doc_candidates),
         source="override" if override_hit else "registry",
+        include_prerelease=include_prerelease,
     )
 
 
@@ -464,6 +489,7 @@ async def resolve_package(
     name: str,
     requested_version: str | None = None,
     explicit_url: str | None = None,
+    include_prerelease: bool = False,
 ) -> Resolution:
     """Single entry point for name resolution: explicit addresses pass through, the rest go through overrides + cache + registry."""
     if explicit_url is not None:
@@ -475,7 +501,14 @@ async def resolve_package(
             allow_private=bool(settings.registry_allow_private),
         )
     return await _resolve_via_registry(
-        conn, client, settings, ecosystem, name, requested_version, "docs"
+        conn,
+        client,
+        settings,
+        ecosystem,
+        name,
+        requested_version,
+        "docs",
+        include_prerelease,
     )
 
 
@@ -487,6 +520,7 @@ async def resolve_repo(
     name: str,
     requested_version: str | None = None,
     explicit_source: str | None = None,
+    include_prerelease: bool = False,
 ) -> Resolution:
     if explicit_source is not None:
         return _explicit_repo_resolution(
@@ -497,7 +531,14 @@ async def resolve_repo(
             allow_private=bool(settings.registry_allow_private),
         )
     return await _resolve_via_registry(
-        conn, client, settings, ecosystem, name, requested_version, "repo"
+        conn,
+        client,
+        settings,
+        ecosystem,
+        name,
+        requested_version,
+        "repo",
+        include_prerelease,
     )
 
 
@@ -509,14 +550,27 @@ async def resolve(
     name: str,
     requested_version: str | None = None,
     target: str = "docs",
+    include_prerelease: bool = False,
 ) -> Resolution:
     """Unified resolve: documentation address by default, repository address when requested."""
     if target == "docs":
         return await resolve_package(
-            conn, client, settings, ecosystem, name, requested_version
+            conn,
+            client,
+            settings,
+            ecosystem,
+            name,
+            requested_version,
+            include_prerelease=include_prerelease,
         )
     if target == "repo":
         return await resolve_repo(
-            conn, client, settings, ecosystem, name, requested_version
+            conn,
+            client,
+            settings,
+            ecosystem,
+            name,
+            requested_version,
+            include_prerelease=include_prerelease,
         )
     raise ValueError(f"unsupported resolve target: {target}")

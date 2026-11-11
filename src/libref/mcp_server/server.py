@@ -126,15 +126,20 @@ def build_mcp_server(
         query: str,
         ecosystem: str | None = None,
         limit: int = 10,
+        include_prerelease: bool = False,
     ) -> dict[str, Any]:
-        """Fuzzy discovery across registries (pypi/npm/maven; py/js/java aliases accepted)."""
+        """Fuzzy discovery across registries (pypi/npm/maven/go/crates/nuget; language aliases accepted)."""
         if not query.strip():
             return _invalid("query is empty")
         bad = _check_limit(limit, low=1, high=100)
         if bad is not None:
             return _invalid(bad)
         try:
-            return _items(await discovery_svc.search_async(query, ecosystem, limit))
+            return _items(
+                await discovery_svc.search_async(
+                    query, ecosystem, limit, include_prerelease=include_prerelease
+                )
+            )
         except ValueError as exc:
             return _invalid(str(exc))
         except RegistryError as exc:

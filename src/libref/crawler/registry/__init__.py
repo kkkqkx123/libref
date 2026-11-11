@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 import httpx
 from pydantic import BaseModel, Field
 
-SUPPORTED_ECOSYSTEMS = ("pypi", "npm", "maven")
+SUPPORTED_ECOSYSTEMS = ("pypi", "npm", "maven", "go", "crates", "nuget")
 
 ECOSYSTEM_ALIASES = {
     "py": "pypi",
@@ -29,6 +29,15 @@ ECOSYSTEM_ALIASES = {
     "node": "npm",
     "nodejs": "npm",
     "java": "maven",
+    "golang": "go",
+    "rust": "crates",
+    "rs": "crates",
+    "cargo": "crates",
+    "crates.io": "crates",
+    "csharp": "nuget",
+    "c#": "nuget",
+    "cs": "nuget",
+    "dotnet": "nuget",
 }
 
 
@@ -46,15 +55,20 @@ DEFAULT_REGISTRY_BASES = {
     "pypi": "https://pypi.org/pypi",
     "npm": "https://registry.npmjs.org",
     "maven": "https://repo1.maven.org/maven2",
+    "go": "https://proxy.golang.org",
+    "crates": "https://crates.io",
+    "nuget": "https://api.nuget.org/v3/registration5-gz-semver2",
 }
 
 # Named whole-group mirror presets; an explicit registry_bases takes per-key precedence over this table.
+# Only mirrors with a verified same-interface address are listed; missing keys fall back to the default base.
 REGISTRY_MIRRORS = {
     "default": dict(DEFAULT_REGISTRY_BASES),
     "cn": {
         "pypi": "https://pypi.tuna.tsinghua.edu.cn/pypi",
         "npm": "https://registry.npmmirror.com",
         "maven": "https://maven.aliyun.com/repository/public",
+        "go": "https://goproxy.cn",
     },
 }
 
@@ -134,6 +148,18 @@ def normalize_name(ecosystem: str, name: str) -> str:
         from libref.crawler.registry.maven import normalize_maven_name
 
         return normalize_maven_name(name)
+    if eco == "go":
+        from libref.crawler.registry.go import normalize_go_name
+
+        return normalize_go_name(name)
+    if eco == "crates":
+        from libref.crawler.registry.crates import normalize_crates_name
+
+        return normalize_crates_name(name)
+    if eco == "nuget":
+        from libref.crawler.registry.nuget import normalize_nuget_name
+
+        return normalize_nuget_name(name)
     raise ValueError(f"unsupported ecosystem: {ecosystem}")
 
 
@@ -264,10 +290,16 @@ def _version_key(value: str) -> list[tuple[int, Any]]:
     return key
 
 
-def best_effort_stable(versions: list[str]) -> str | None:
-    """Fallback when no stable release exists: filter pre-release suffixes, then take the max by version comparison."""
+def best_effort_stable(
+    versions: list[str], *, include_prerelease: bool = False
+) -> str | None:
+    """Fallback when no stable release exists: filter pre-release suffixes, then take the max by version comparison.
+
+    With inclusion enabled the timeline maximum wins directly, prereleases included."""
     if not versions:
         return None
+    if include_prerelease:
+        return max(versions, key=_version_key)
     plain = [v for v in versions if not any(h in v.lower() for h in _PRERELEASE_HINTS)]
     return max(plain or versions, key=_version_key)
 
@@ -302,8 +334,13 @@ async def _get_text(
 
 
 async def fetch_snapshot(
-    ecosystem: str, raw_name: str, client: httpx.AsyncClient, settings
+    ecosystem: str,
+    raw_name: str,
+    client: httpx.AsyncClient,
+    settings,
+    include_prerelease: bool = False,
 ) -> RegistrySnapshot:
+    """Registry snapshot: versions always span the full timeline; the stable pick widens to prereleases only when asked."""
     eco = canonical_ecosystem(ecosystem) or ecosystem.strip().lower()
     if eco not in SUPPORTED_ECOSYSTEMS:
         raise ValueError(f"unsupported ecosystem: {ecosystem}")
@@ -323,6 +360,8 @@ async def fetch_snapshot(
         stable, versions, homepage, candidates, repo_url = parse_pypi_payload(
             resp.json(), allow_private=allow_private
         )
+        if include_prerelease:
+            stable = best_effort_stable(versions, include_prerelease=True) or stable
     elif eco == "npm":
         from libref.crawler.registry.npm import npm_snapshot_url, parse_npm_payload
 
@@ -335,6 +374,94 @@ async def fetch_snapshot(
         stable, versions, homepage, candidates, repo_url = parse_npm_payload(
             resp.json(), allow_private=allow_private
         )
+        if include_prerelease:
+            stable = best_effort_stable(versions, include_prerelease=True) or stable
+    elif eco == "go":
+        from libref.crawler.registry.go import (
+            go_latest_url,
+            go_list_url,
+            parse_go_latest,
+            parse_go_list,
+            rank_go_candidates,
+        )
+
+        base = registry_base_for(eco, settings)
+        latest_resp = await _get_json(client, go_latest_url(base, name))
+        if latest_resp.status_code in (404, 410):
+            raise RegistryError("not_found", f"package not found: go:{name}")
+        if latest_resp.status_code >= 400:
+            raise RegistryError("retryable", f"registry HTTP {latest_resp.status_code}")
+        stable = parse_go_latest(latest_resp.json())
+        list_resp = await _get_text(client, go_list_url(base, name))
+        versions = parse_go_list(list_resp.text) if list_resp.status_code < 400 else []
+        if stable is not None and stable not in versions:
+            versions.append(stable)
+        if not versions:
+            raise RegistryError("not_found", f"package not found: go:{name}")
+        if include_prerelease:
+            stable = best_effort_stable(versions, include_prerelease=True) or stable
+        homepage, candidates, repo_url = (
+            None,
+            rank_go_candidates(name, stable, allow_private=allow_private),
+            None,
+        )
+    elif eco == "crates":
+        from libref.crawler.registry.crates import (
+            crates_snapshot_url,
+            parse_crates_snapshot,
+        )
+
+        base = registry_base_for(eco, settings)
+        resp = await _get_json(client, crates_snapshot_url(base, name))
+        if resp.status_code == 404:
+            raise RegistryError("not_found", f"package not found: crates:{name}")
+        if resp.status_code >= 400:
+            raise RegistryError("retryable", f"registry HTTP {resp.status_code}")
+        stable, versions, homepage, candidates, repo_url = parse_crates_snapshot(
+            resp.json(),
+            allow_private=allow_private,
+            include_prerelease=include_prerelease,
+        )
+        if not versions:
+            raise RegistryError("not_found", f"package not found: crates:{name}")
+    elif eco == "nuget":
+        from libref.crawler.registry.nuget import (
+            nuget_page_urls,
+            nuget_snapshot_url,
+            parse_nuget_registration,
+            pick_nuget_stable,
+            rank_nuget_candidates,
+        )
+
+        base = registry_base_for(eco, settings)
+        resp = await _get_json(client, nuget_snapshot_url(base, name))
+        if resp.status_code == 404:
+            raise RegistryError("not_found", f"package not found: nuget:{name}")
+        if resp.status_code >= 400:
+            raise RegistryError("retryable", f"registry HTTP {resp.status_code}")
+        payload = resp.json()
+        versions, homepage = parse_nuget_registration(
+            payload, allow_private=allow_private
+        )
+        for page_url in nuget_page_urls(payload):
+            page_resp = await _get_json(client, page_url)
+            if page_resp.status_code >= 400:
+                continue
+            page_versions, page_home = parse_nuget_registration(
+                page_resp.json(), allow_private=allow_private
+            )
+            for version in page_versions:
+                if version not in versions:
+                    versions.append(version)
+            if homepage is None:
+                homepage = page_home
+        if not versions:
+            raise RegistryError("not_found", f"package not found: nuget:{name}")
+        stable = pick_nuget_stable(versions, include_prerelease=include_prerelease)
+        candidates = rank_nuget_candidates(
+            homepage, name, stable, allow_private=allow_private
+        )
+        repo_url = None
     else:
         from libref.crawler.registry.maven import (
             maven_metadata_url,
@@ -354,6 +481,8 @@ async def fetch_snapshot(
         stable, versions = parse_maven_metadata(meta_resp.text)
         if not versions:
             raise RegistryError("not_found", f"package not found: maven:{name}")
+        if include_prerelease:
+            stable = best_effort_stable(versions, include_prerelease=True) or stable
         pom_version = stable or best_effort_stable(versions) or versions[0]
         pom_resp = await _get_text(
             client, maven_pom_url(base, group, artifact, pom_version)

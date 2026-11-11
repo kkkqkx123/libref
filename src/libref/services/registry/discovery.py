@@ -55,6 +55,27 @@ def _normalize_query(ecosystem: str, query: str) -> str:
         from libref.crawler.registry.npm import normalize_npm_name
 
         return normalize_npm_name(text)
+    if eco == "go":
+        from libref.crawler.registry.go import normalize_go_name
+
+        try:
+            return normalize_go_name(text)
+        except ValueError:
+            return text
+    if eco == "crates":
+        from libref.crawler.registry.crates import normalize_crates_name
+
+        try:
+            return normalize_crates_name(text)
+        except ValueError:
+            return text.lower()
+    if eco == "nuget":
+        from libref.crawler.registry.nuget import normalize_nuget_name
+
+        try:
+            return normalize_nuget_name(text)
+        except ValueError:
+            return text.lower()
     return text.lower()
 
 
@@ -94,8 +115,13 @@ class DiscoveryService:
         query: str,
         ecosystem: str | None = None,
         limit: int | None = None,
+        include_prerelease: bool = False,
     ) -> list[dict]:
-        return asyncio.run(self.search_async(query, ecosystem, limit))
+        return asyncio.run(
+            self.search_async(
+                query, ecosystem, limit, include_prerelease=include_prerelease
+            )
+        )
 
     async def search_async(
         self,
@@ -103,6 +129,7 @@ class DiscoveryService:
         ecosystem: str | None = None,
         limit: int | None = None,
         client=None,
+        include_prerelease: bool = False,
     ) -> list[dict]:
         from libref.config import setting_or_default
         from libref.crawler.http import build_async_client
@@ -124,15 +151,22 @@ class DiscoveryService:
             raise ValueError("limit must be between 1 and 100")
         if client is None:
             async with build_async_client(self._settings) as owned:
-                return await self._search_with(owned, query, eco, topn)
-        return await self._search_with(client, query, eco, topn)
+                return await self._search_with(
+                    owned, query, eco, topn, include_prerelease
+                )
+        return await self._search_with(client, query, eco, topn, include_prerelease)
 
     async def _search_with(
-        self, client, query: str, ecosystem: str | None, topn: int
+        self,
+        client,
+        query: str,
+        ecosystem: str | None,
+        topn: int,
+        include_prerelease: bool = False,
     ) -> list[dict]:
         from libref.config import setting_or_default
 
-        scope = ecosystem or "*"
+        scope = (ecosystem or "*") + ("+pre" if include_prerelease else "")
         cached = self._read_cache(scope, query)
         ttl = float(setting_or_default(self._settings, "discovery_cache_ttl_days"))
         offline = bool(setting_or_default(self._settings, "discovery_offline"))
@@ -148,12 +182,18 @@ class DiscoveryService:
                 DiscoveryCandidate(**c).model_dump()
                 for c in cached["candidates"][:topn]
             ]
-        ecos = [ecosystem] if ecosystem else ["npm", "maven", "pypi"]
+        ecos = (
+            [ecosystem]
+            if ecosystem
+            else ["npm", "maven", "pypi", "go", "crates", "nuget"]
+        )
         gathered: list[DiscoveryCandidate] = []
         failures = 0
         for eco in ecos:
             try:
-                gathered.extend(await self._search_one(client, eco, query))
+                gathered.extend(
+                    await self._search_one(client, eco, query, include_prerelease)
+                )
             except RegistryError:
                 failures += 1
         if self._github_eligible(ecosystem):
@@ -176,20 +216,28 @@ class DiscoveryService:
         return bool(token and str(token).strip())
 
     async def _search_one(
-        self, client, ecosystem: str, query: str
+        self, client, ecosystem: str, query: str, include_prerelease: bool = False
     ) -> list[DiscoveryCandidate]:
         from libref.crawler.registry import canonical_ecosystem
 
         eco = canonical_ecosystem(ecosystem) or ecosystem
         if eco == "pypi":
-            return await self._search_pypi(client, query)
+            return await self._search_pypi(client, query, include_prerelease)
         if eco == "npm":
-            return await self._search_npm(client, query)
+            return await self._search_npm(client, query, include_prerelease)
         if eco == "maven":
-            return await self._search_maven(client, query)
+            return await self._search_maven(client, query, include_prerelease)
+        if eco == "go":
+            return await self._search_go(client, query, include_prerelease)
+        if eco == "crates":
+            return await self._search_crates(client, query, include_prerelease)
+        if eco == "nuget":
+            return await self._search_nuget(client, query, include_prerelease)
         raise ValueError(f"unsupported ecosystem: {ecosystem}")
 
-    async def _search_pypi(self, client, query: str) -> list[DiscoveryCandidate]:
+    async def _search_pypi(
+        self, client, query: str, include_prerelease: bool = False
+    ) -> list[DiscoveryCandidate]:
         from libref.crawler.http import resilient_get
         from libref.crawler.registry import fetch_snapshot
         from libref.crawler.registry.pypi import (
@@ -199,7 +247,9 @@ class DiscoveryService:
 
         async def _exact_snapshot(name: str):
             try:
-                return await fetch_snapshot("pypi", name, client, self._settings)
+                return await fetch_snapshot(
+                    "pypi", name, client, self._settings, include_prerelease
+                )
             except RegistryError as exc:
                 if exc.kind == "not_found":
                     return None
@@ -284,7 +334,9 @@ class DiscoveryService:
             )
         return out
 
-    async def _search_npm(self, client, query: str) -> list[DiscoveryCandidate]:
+    async def _search_npm(
+        self, client, query: str, include_prerelease: bool = False
+    ) -> list[DiscoveryCandidate]:
         from libref.crawler.http import resilient_get
         from libref.crawler.registry import fetch_snapshot, is_repo_host_url
         from libref.crawler.registry.npm import npm_search_url_for, parse_npm_search
@@ -305,7 +357,11 @@ class DiscoveryService:
             if item["name"].lower() == norm:
                 try:
                     snap = await fetch_snapshot(
-                        "npm", item["name"], client, self._settings
+                        "npm",
+                        item["name"],
+                        client,
+                        self._settings,
+                        include_prerelease,
                     )
                 except RegistryError:
                     snap = None
@@ -350,7 +406,9 @@ class DiscoveryService:
             )
         return out
 
-    async def _search_maven(self, client, query: str) -> list[DiscoveryCandidate]:
+    async def _search_maven(
+        self, client, query: str, include_prerelease: bool = False
+    ) -> list[DiscoveryCandidate]:
         from libref.crawler.http import resilient_get
         from libref.crawler.registry import fetch_snapshot
         from libref.crawler.registry.maven import maven_search_url, parse_maven_search
@@ -378,7 +436,11 @@ class DiscoveryService:
             if item["name"] == norm:
                 try:
                     snap = await fetch_snapshot(
-                        "maven", item["name"], client, self._settings
+                        "maven",
+                        item["name"],
+                        client,
+                        self._settings,
+                        include_prerelease,
                     )
                 except RegistryError:
                     snap = None
@@ -401,6 +463,230 @@ class DiscoveryService:
                     popularity=_popularity(item["popularity"]),
                     updated=str(item["updated"] or ""),
                     exact=item["name"] == norm,
+                    rank=item["position"],
+                    source=source,
+                )
+            )
+        return out
+
+    async def _search_go(
+        self, client, query: str, include_prerelease: bool = False
+    ) -> list[DiscoveryCandidate]:
+        from libref.crawler.http import resilient_get
+        from libref.crawler.registry import fetch_snapshot
+        from libref.crawler.registry.go import go_search_url, parse_go_search_html
+
+        try:
+            resp = await resilient_get(
+                client,
+                go_search_url(query),
+                headers={"Accept": "text/html, */*"},
+            )
+        except httpx.HTTPError as exc:
+            raise RegistryError("retryable", f"go search unreachable: {exc}") from None
+        if resp.status_code >= 400:
+            raise RegistryError("retryable", f"go search HTTP {resp.status_code}")
+        out: list[DiscoveryCandidate] = []
+        norm = _normalize_query("go", query)
+        for item in parse_go_search_html(resp.text, limit=20):
+            docs: list[str] = []
+            version = item["version"]
+            source = "search:go"
+            if item["name"] == norm:
+                try:
+                    snap = await fetch_snapshot(
+                        "go",
+                        item["name"],
+                        client,
+                        self._settings,
+                        include_prerelease,
+                    )
+                except RegistryError:
+                    snap = None
+                if snap is not None:
+                    docs = list(snap.doc_candidates)
+                    version = snap.stable or version
+                    source = "registry"
+            if not docs:
+                from libref.crawler.registry.go import go_docs_url
+
+                docs = [go_docs_url(item["name"])]
+            out.append(
+                DiscoveryCandidate(
+                    ecosystem="go",
+                    name=item["name"],
+                    version=version,
+                    description=item["description"],
+                    docs_url=docs[0] if docs else None,
+                    candidates=docs,
+                    homepage=None,
+                    repo_url=None,
+                    popularity=0.0,
+                    updated="",
+                    exact=item["name"] == norm,
+                    rank=item["position"],
+                    source=source,
+                )
+            )
+        if not out:
+            try:
+                snap = await fetch_snapshot(
+                    "go", query.strip(), client, self._settings, include_prerelease
+                )
+            except RegistryError as exc:
+                if exc.kind == "not_found":
+                    return []
+                raise
+            docs = list(snap.doc_candidates)
+            out.append(
+                DiscoveryCandidate(
+                    ecosystem="go",
+                    name=snap.name,
+                    version=snap.stable or "",
+                    description="",
+                    docs_url=docs[0] if docs else None,
+                    candidates=docs,
+                    homepage=snap.homepage,
+                    repo_url=snap.repo_url,
+                    popularity=0.0,
+                    updated="",
+                    exact=True,
+                    source="registry",
+                )
+            )
+        return out
+
+    async def _search_crates(
+        self, client, query: str, include_prerelease: bool = False
+    ) -> list[DiscoveryCandidate]:
+        from libref.crawler.http import resilient_get
+        from libref.crawler.registry import (
+            fetch_snapshot,
+            is_repo_host_url,
+            registry_base_for,
+        )
+        from libref.crawler.registry.crates import (
+            crates_search_url,
+            parse_crates_search,
+        )
+
+        try:
+            base = registry_base_for("crates", self._settings)
+        except ValueError:
+            base = "https://crates.io"
+        try:
+            resp = await resilient_get(
+                client,
+                crates_search_url(base, query, 20),
+                headers={"Accept": "application/json"},
+            )
+        except httpx.HTTPError as exc:
+            raise RegistryError(
+                "retryable", f"crates search unreachable: {exc}"
+            ) from None
+        if resp.status_code >= 400:
+            raise RegistryError("retryable", f"crates search HTTP {resp.status_code}")
+        out: list[DiscoveryCandidate] = []
+        norm = _normalize_query("crates", query)
+        for item in parse_crates_search(resp.json()):
+            docs = [item["docs_url"]] if item.get("docs_url") else []
+            homepage = item["homepage"]
+            repo = item["repo_url"]
+            version = item["version"]
+            source = "search:crates"
+            if item["name"].lower() == norm:
+                try:
+                    snap = await fetch_snapshot(
+                        "crates",
+                        item["name"],
+                        client,
+                        self._settings,
+                        include_prerelease,
+                    )
+                except RegistryError:
+                    snap = None
+                if snap is not None:
+                    docs = list(snap.doc_candidates)
+                    homepage = snap.homepage
+                    repo = snap.repo_url
+                    version = snap.stable or version
+                    source = "registry"
+            if not docs and homepage and not is_repo_host_url(homepage):
+                docs = [homepage]
+            out.append(
+                DiscoveryCandidate(
+                    ecosystem="crates",
+                    name=item["name"],
+                    version=version,
+                    description=item["description"],
+                    docs_url=docs[0] if docs else None,
+                    candidates=docs,
+                    homepage=homepage,
+                    repo_url=repo,
+                    popularity=_popularity(item["popularity"]),
+                    updated=str(item["updated"] or ""),
+                    exact=item["name"].lower() == norm,
+                    rank=item["position"],
+                    source=source,
+                )
+            )
+        return out
+
+    async def _search_nuget(
+        self, client, query: str, include_prerelease: bool = False
+    ) -> list[DiscoveryCandidate]:
+        from libref.crawler.http import resilient_get
+        from libref.crawler.registry import fetch_snapshot, is_repo_host_url
+        from libref.crawler.registry.nuget import nuget_search_url, parse_nuget_search
+
+        try:
+            resp = await resilient_get(
+                client,
+                nuget_search_url(query, 20),
+                headers={"Accept": "application/json"},
+            )
+        except httpx.HTTPError as exc:
+            raise RegistryError(
+                "retryable", f"nuget search unreachable: {exc}"
+            ) from None
+        if resp.status_code >= 400:
+            raise RegistryError("retryable", f"nuget search HTTP {resp.status_code}")
+        out: list[DiscoveryCandidate] = []
+        norm = _normalize_query("nuget", query)
+        for item in parse_nuget_search(resp.json()):
+            homepage = item["homepage"]
+            docs = [homepage] if homepage and not is_repo_host_url(homepage) else []
+            version = item["version"]
+            source = "search:nuget"
+            if item["name"].lower() == norm:
+                try:
+                    snap = await fetch_snapshot(
+                        "nuget",
+                        item["name"],
+                        client,
+                        self._settings,
+                        include_prerelease,
+                    )
+                except RegistryError:
+                    snap = None
+                if snap is not None:
+                    docs = list(snap.doc_candidates)
+                    homepage = snap.homepage
+                    version = snap.stable or version
+                    source = "registry"
+            out.append(
+                DiscoveryCandidate(
+                    ecosystem="nuget",
+                    name=item["name"],
+                    version=version,
+                    description=item["description"],
+                    docs_url=docs[0] if docs else None,
+                    candidates=docs,
+                    homepage=homepage,
+                    repo_url=None,
+                    popularity=_popularity(item["popularity"]),
+                    updated="",
+                    exact=item["name"].lower() == norm,
                     rank=item["position"],
                     source=source,
                 )

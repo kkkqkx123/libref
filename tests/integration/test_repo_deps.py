@@ -1,0 +1,81 @@
+"""Manifest dependency edges: end to end from repo manifests to version-scoped rows."""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+
+import pytest
+
+from libref.services.code.code_ingest import index_repo, list_repo_dependencies
+
+pytestmark = pytest.mark.integration
+
+
+def _copy_tri_repo(tmp_path: Path) -> Path:
+    src = Path(__file__).resolve().parent.parent / "fixtures" / "mini_repo_tri"
+    dst = tmp_path / "mini_repo_tri"
+    shutil.copytree(src, dst)
+    return dst
+
+
+def _add_manifests(repo: Path) -> None:
+    go_mod = repo / "go.mod"
+    go_mod.write_text(
+        go_mod.read_text(encoding="utf-8")
+        + "\nrequire (\n\tgithub.com/foo/bar v1.2.3\n\tgolang.org/x/tools v0.1.0\n)\n",
+        encoding="utf-8",
+    )
+    (repo / "Cargo.toml").write_text(
+        '[package]\nname = "demo"\nversion = "0.1.0"\n\n'
+        '[dependencies]\nserde = "1.0"\n'
+        'tokio = { version = "1.2" }\n',
+        encoding="utf-8",
+    )
+    (repo / "Demo.csproj").write_text(
+        '<Project Sdk="Microsoft.NET.Sdk">\n'
+        "  <ItemGroup>\n"
+        '    <PackageReference Include="Newtonsoft.Json" Version="13.0.1" />\n'
+        "  </ItemGroup>\n"
+        "</Project>\n",
+        encoding="utf-8",
+    )
+
+
+def test_manifest_deps_persisted_and_refreshed(conn, tmp_path) -> None:
+    repo = _copy_tri_repo(tmp_path)
+    _add_manifests(repo)
+    counts = index_repo(
+        conn, "tri-deps", "0.1", str(repo), repos_dir=tmp_path / "repos"
+    )
+    assert counts["manifest_deps"] == 5
+
+    deps = list_repo_dependencies(conn, "tri-deps", "0.1")
+    assert [(d["ecosystem"], d["name"], d["req"]) for d in deps] == [
+        ("crates", "serde", "1.0"),
+        ("crates", "tokio", "1.2"),
+        ("go", "github.com/foo/bar", "v1.2.3"),
+        ("go", "golang.org/x/tools", "v0.1.0"),
+        ("nuget", "newtonsoft.json", "13.0.1"),
+    ]
+    assert {d["source_file"] for d in deps} == {"go.mod", "Cargo.toml", "Demo.csproj"}
+
+    scoped = list_repo_dependencies(conn, "tri-deps", "0.1", "go")
+    assert [d["name"] for d in scoped] == ["github.com/foo/bar", "golang.org/x/tools"]
+    assert list_repo_dependencies(conn, "tri-deps", "0.1", "pypi") == []
+
+    second = index_repo(
+        conn, "tri-deps", "0.1", str(repo), repos_dir=tmp_path / "repos"
+    )
+    assert second["manifest_deps"] == 5
+    assert len(list_repo_dependencies(conn, "tri-deps", "0.1")) == 5
+
+
+def test_repo_without_manifests_yields_no_deps(conn, tmp_path) -> None:
+    repo = _copy_tri_repo(tmp_path)
+    (repo / "go.mod").unlink()
+    counts = index_repo(
+        conn, "tri-nodeps", "0.1", str(repo), repos_dir=tmp_path / "repos"
+    )
+    assert counts["manifest_deps"] == 0
+    assert list_repo_dependencies(conn, "tri-nodeps", "0.1") == []

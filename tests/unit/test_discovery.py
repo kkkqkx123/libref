@@ -172,7 +172,10 @@ def test_canonical_ecosystem_aliases() -> None:
     assert canonical_ecosystem("java") == "maven"
     assert canonical_ecosystem("pypi") == "pypi"
     assert canonical_ecosystem(None) is None
-    assert canonical_ecosystem("cargo") is None
+    assert canonical_ecosystem("golang") == "go"
+    assert canonical_ecosystem("cargo") == "crates"
+    assert canonical_ecosystem("dotnet") == "nuget"
+    assert canonical_ecosystem("rubygems") is None
 
 
 def test_pypi_search_parses_project_anchors() -> None:

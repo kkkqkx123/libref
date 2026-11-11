@@ -23,6 +23,7 @@ class LibrarySearchQuery(BaseModel):
     query: str = Field(min_length=1)
     ecosystem: str | None = None
     limit: int = Field(default=10, ge=1, le=100)
+    include_prerelease: bool = False
 
 
 class AnswerQuery(BaseModel):
@@ -95,6 +96,7 @@ class ResolveQuery(BaseModel):
     name: str = Field(min_length=1)
     version: str | None = None
     target: Literal["docs", "repo"] = "docs"
+    include_prerelease: bool = False
 
 
 class JobQuery(BaseModel):
