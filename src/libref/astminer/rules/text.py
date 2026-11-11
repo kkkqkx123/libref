@@ -277,6 +277,15 @@ def params_from_params_node(params_node: Any, source: bytes) -> list[str]:
 
 def type_text_of_param(pnode: Any, source: bytes) -> str:
     for child in pnode.children:
+        if child.type == "type_annotation":
+            for sub in child.children:
+                if sub.is_named:
+                    text = slice_text(sub, source).strip()
+                    if text:
+                        return text[:128]
+            text = slice_text(child, source).lstrip(":").strip()
+            if text:
+                return text[:128]
         if child.type == "type":
             text = slice_text(child, source).strip()
             if text:
@@ -320,7 +329,7 @@ def param_types_from_params_node(params_node: Any, source: bytes) -> list[str]:
 def shaped_return(node: Any | None, source: bytes) -> str:
     if node is None:
         return ""
-    return slice_text(node, source).strip()[:128]
+    return slice_text(node, source).strip().lstrip(":").strip()[:128]
 
 
 def normalize_owner_text(text: str) -> str:

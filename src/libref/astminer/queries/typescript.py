@@ -62,31 +62,52 @@ def entity_query() -> str:
 (enum_assignment
   name: (property_identifier) @entity.enum_constant.name @entity.enum_constant.signature.name) @entity.enum_constant
 
+(internal_module
+  (identifier) @entity.package.name) @entity.package
+
 (function_declaration
   name: (identifier) @entity.function.name @entity.function.signature.name
   (type_parameters)? @entity.function.signature.type_params
   parameters: (formal_parameters) @entity.function.params @entity.function.signature.params
+  (type_annotation)? @entity.function.return_type @entity.function.signature.return_type
   body: (statement_block) @entity.function.body) @entity.function
 
 (generator_function_declaration
   name: (identifier) @entity.generator.name @entity.generator.signature.name
   parameters: (formal_parameters) @entity.generator.params @entity.generator.signature.params
+  (type_annotation)? @entity.generator.return_type @entity.generator.signature.return_type
   body: (statement_block) @entity.generator.body) @entity.generator
 
 (class_body
   (method_definition
     name: (property_identifier) @entity.method.name @entity.method.signature.name
     parameters: (formal_parameters) @entity.method.params @entity.method.signature.params
+    (type_annotation)? @entity.method.return_type @entity.method.signature.return_type
     body: (statement_block)? @entity.method.body) @entity.method)
 
 (class_body
   (abstract_method_signature
     name: (property_identifier) @entity.method.name @entity.method.signature.name
-    parameters: (formal_parameters) @entity.method.params @entity.method.signature.params) @entity.method)
+    parameters: (formal_parameters) @entity.method.params @entity.method.signature.params
+    (type_annotation)? @entity.method.return_type @entity.method.signature.return_type) @entity.method)
 
 (class_body
   (public_field_definition
     name: (property_identifier) @entity.field.name @entity.field.signature.name) @entity.field)
+
+(class_body
+  (method_definition
+    (formal_parameters
+      (required_parameter
+        (accessibility_modifier)
+        (identifier) @entity.field.name @entity.field.signature.name) @entity.field)))
+
+(class_body
+  (method_definition
+    (formal_parameters
+      (optional_parameter
+        "readonly"
+        (identifier) @entity.field.name @entity.field.signature.name) @entity.field)))
 
 (object
   (method_definition
@@ -98,17 +119,19 @@ def entity_query() -> str:
   key: (property_identifier) @entity.arrow.name @entity.arrow.signature.name
   value: (arrow_function
     parameters: (formal_parameters) @entity.arrow.params @entity.arrow.signature.params
+    (type_annotation)? @entity.arrow.return_type @entity.arrow.signature.return_type
     body: (_) @entity.arrow.body)) @entity.arrow
 
 (variable_declarator
   name: (identifier) @entity.arrow.name @entity.arrow.signature.name
   value: (arrow_function
     parameters: (formal_parameters) @entity.arrow.params @entity.arrow.signature.params
+    (type_annotation)? @entity.arrow.return_type @entity.arrow.signature.return_type
     body: (_) @entity.arrow.body)) @entity.arrow
 
 (variable_declarator
   name: (identifier) @entity.variable.name
-  value: (_) @entity.variable.value) @entity.variable
+  value: (_)? @entity.variable.value) @entity.variable
 """
 
 
@@ -194,6 +217,11 @@ def dependency_query() -> str:
   (export_clause
     (export_specifier) @dependency.export.spec)
   source: (string) @dependency.export.module) @dependency.export.named
+
+(import_statement
+  (import_require_clause
+    (identifier) @dependency.require.name
+    (string) @dependency.require.module)) @dependency.require.import
 """
 
 

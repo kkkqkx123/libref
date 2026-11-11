@@ -389,7 +389,9 @@ def _attach_bases_innermost(decls, decl_nodes, dep_spans) -> None:
             best.bases.append(text)
 
 
-_PACKAGE_CLAIM_LANGUAGES = frozenset({"java", "csharp", "kotlin", "groovy"})
+_PACKAGE_CLAIM_LANGUAGES = frozenset(
+    {"java", "csharp", "kotlin", "groovy", "typescript"}
+)
 
 _PARTIAL_MERGE_KINDS = frozenset({"class", "interface", "struct", "record", "enum"})
 

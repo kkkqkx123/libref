@@ -294,3 +294,38 @@ def test_groovy_enum_extracts() -> None:
     by_qual = {d.qualified_name: d for d in decls}
     assert by_qual["demo.Color"].kind == "enum"
     assert by_qual["demo.Color.label"].kind == "field"
+
+
+def test_typescript_namespace_claim_and_returns() -> None:
+    decls, aliases, raw = ast_engine.extract_file(
+        "m.ts",
+        ast_config.TYPESCRIPT_CONFIG,
+        b"namespace Demo { export class C { m(): string { return this.n(); } } }\n"
+        b"function top(x: number, y?: string): string { return x; }\n"
+        b"import F = require('./r');\n"
+        b"declare module 'm' { export const x: number; }\n",
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["Demo"].kind == "package"
+    assert by_qual["Demo.C.m"].return_type == "string"
+    assert by_qual["Demo.top"].params == ["x", "y"]
+    assert by_qual["Demo.top"].param_types == ["number", "string"]
+    assert by_qual["Demo.top"].return_type == "string"
+    assert ("F", "r") in aliases
+    assert by_qual["Demo.x"].kind == "variable"
+    by_raw = {c.raw_callee: c for c in raw}
+    assert by_raw["this.n"].receiver == "this"
+    assert by_raw["this.n"].func == "n"
+
+
+def test_typescript_ctor_param_properties_are_fields() -> None:
+    decls, _aliases, _raw = ast_engine.extract_file(
+        "d.ts",
+        ast_config.TYPESCRIPT_CONFIG,
+        b"class D { constructor(private x: number, readonly y?: string, z: boolean) {} }\n",
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    assert by_qual["d.D.constructor.x"].kind == "field"
+    assert by_qual["d.D.constructor.y"].kind == "field"
+    assert "d.D.constructor.z" not in by_qual
+    assert by_qual["d.D.constructor"].params == ["x", "y", "z"]

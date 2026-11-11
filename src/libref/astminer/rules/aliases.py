@@ -166,6 +166,18 @@ def _javascript_aliases(
         if name and mod:
             return [(name, mod)]
         return []
+    req_name = first_node(captures, ".require.name")
+    req_module = first_node(captures, ".require.module")
+    if root.type == "import_statement" and req_name is not None:
+        mod = (
+            _normalized(_module_path(req_module, source))
+            if req_module is not None
+            else ""
+        )
+        name = slice_text(req_name, source).strip()
+        if name and mod:
+            return [(name, mod)]
+        return []
     if root.type == "export_statement":
         module = first_node(captures, ".export.module")
         if module is None:
