@@ -22,7 +22,8 @@ WEB_SEARCH_USER_AGENT = (
 )
 
 
-def web_search_url(query: str) -> str:
+def web_search_url(query: str, per_page: int = 20) -> str:
+    _ = max(1, min(int(per_page), 100))
     return f"{WEB_SEARCH_URL}?{urlencode({'q': query.strip()})}"
 
 

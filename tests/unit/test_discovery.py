@@ -164,6 +164,39 @@ def test_rank_popularity_breaks_cross_source_tie(monkeypatch, tmp_path) -> None:
     assert [c.name for c in ranked] == ["m-one", "n-one"]
 
 
+def test_rank_registry_source_beats_external_heat(monkeypatch, tmp_path) -> None:
+    external = _candidate(
+        "acme/demo",
+        ecosystem="github",
+        docs_url="https://demo.dev/",
+        popularity=900000.0,
+        rank=0,
+        source="search:github",
+    )
+    registry = _candidate(
+        "demo",
+        docs_url="https://demo.dev/",
+        popularity=1.0,
+        rank=5,
+        source="registry",
+    )
+    ranked = rank_candidates([external, registry], "zzz")
+    assert [c.name for c in ranked] == ["demo", "acme/demo"]
+
+
+def test_next_actions_mention_explicit_search_entries() -> None:
+    from libref.services.registry.resolver import next_actions_for
+
+    repo_actions = next_actions_for("pypi", "demo", "repo", "no_docs")
+    tools = [a for a in repo_actions if a["kind"] == "tool"]
+    assert {a["mcp_tool"] for a in tools} >= {"library_search", "github_search"}
+    assert any("search-github" in a["cli"] for a in tools)
+    docs_actions = next_actions_for("pypi", "demo", "docs", "no_docs")
+    tools = [a for a in docs_actions if a["kind"] == "tool"]
+    assert {a["mcp_tool"] for a in tools} >= {"library_search", "web_search"}
+    assert any("search-web" in a["cli"] for a in tools)
+
+
 def test_canonical_ecosystem_aliases() -> None:
     from libref.crawler.registry import canonical_ecosystem
 

@@ -50,6 +50,38 @@ def cmd_search_web(args: argparse.Namespace) -> int:
         conn.close()
 
 
+def cmd_search_github(args: argparse.Namespace) -> int:
+    import asyncio as _asyncio
+    import json as _json
+
+    from libref.services.factory import build_discovery_service
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        try:
+            candidates = _asyncio.run(
+                build_discovery_service(conn, settings).search_github_async(
+                    args.query, args.limit
+                )
+            )
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 2
+        except RegistryError as exc:
+            print(f"discovery failed [{exc.kind}]: {exc}", file=sys.stderr)
+            return 1
+        if not candidates:
+            print("(no suggestions)")
+            return 0
+        print("suggestions:")
+        for c in candidates:
+            print(_json.dumps(c, ensure_ascii=False))
+        return 0
+    finally:
+        conn.close()
+
+
 def cmd_catalog(args: argparse.Namespace) -> int:
     import json
 

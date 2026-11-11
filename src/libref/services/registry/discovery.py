@@ -99,14 +99,40 @@ def _popularity(value: object) -> float:
         return 0.0
 
 
+def _map_github_items(items: list[dict]) -> list[DiscoveryCandidate]:
+    return [
+        DiscoveryCandidate(
+            ecosystem="github",
+            name=item["name"],
+            version=item["version"],
+            description=item["description"],
+            docs_url=item["homepage"],
+            candidates=[item["homepage"]] if item["homepage"] else [],
+            homepage=item["homepage"],
+            repo_url=item["repo_url"],
+            popularity=_popularity(item["popularity"]),
+            updated=str(item["updated"] or ""),
+            exact=False,
+            rank=item["position"],
+            source="search:github",
+        )
+        for item in items
+    ]
+
+
+def _source_tier(source: str) -> int:
+    return 0 if source == "registry" else 1
+
+
 def rank_candidates(
     items: list[DiscoveryCandidate], query: str
 ) -> list[DiscoveryCandidate]:
-    """Deterministic order: docs first, exact match next, native order, popularity, freshness last."""
+    """Deterministic order: registry source first, then docs, exact match, native order, popularity, freshness."""
     norm = query.strip().lower()
     return sorted(
         items,
         key=lambda c: (
+            _source_tier(c.source),
             0 if (c.docs_url or c.candidates) else 1,
             0 if c.name.lower() == norm else 1,
             c.rank,
@@ -236,7 +262,7 @@ class DiscoveryService:
         try:
             resp = await resilient_get(
                 client,
-                web_search_url(query),
+                web_search_url(query, topn),
                 headers={
                     "Accept": "text/html, */*",
                     "User-Agent": WEB_SEARCH_USER_AGENT,
@@ -272,6 +298,84 @@ class DiscoveryService:
             )
         self._write_cache("web", query, [c.model_dump() for c in out])
         return _annotate([c.model_dump() for c in out])
+
+    def search_github(
+        self,
+        query: str,
+        limit: int | None = None,
+    ) -> list[dict]:
+        return asyncio.run(self.search_github_async(query, limit))
+
+    async def search_github_async(
+        self,
+        query: str,
+        limit: int | None = None,
+        client=None,
+    ) -> list[dict]:
+        """Explicit hosted search; standalone entry outside the registry fan-out."""
+        from libref.config import setting_or_default
+        from libref.crawler.http import build_async_client
+
+        if not query.strip():
+            raise ValueError("empty discovery query")
+        if not bool(setting_or_default(self._settings, "discovery_enabled")):
+            raise ValueError("library discovery is disabled")
+        topn = (
+            limit
+            if limit is not None
+            else int(setting_or_default(self._settings, "discovery_topn"))
+        )
+        if topn < 1 or topn > 100:
+            raise ValueError("limit must be between 1 and 100")
+        if client is None:
+            async with build_async_client(self._settings) as owned:
+                return await self._search_github_with(owned, query, topn)
+        return await self._search_github_with(client, query, topn)
+
+    async def _search_github_with(self, client, query: str, topn: int) -> list[dict]:
+        from libref.config import setting_or_default
+        from libref.crawler.github import (
+            github_search_headers,
+            github_search_url,
+            parse_github_search,
+        )
+        from libref.crawler.http import resilient_get
+
+        cached = self._read_cache("github", query)
+        ttl = float(setting_or_default(self._settings, "discovery_cache_ttl_days"))
+        offline = bool(setting_or_default(self._settings, "discovery_offline"))
+        if cached is not None and is_fresh(cached["fetched_at"], ttl):
+            return _annotate(
+                [
+                    DiscoveryCandidate(**c).model_dump()
+                    for c in cached["candidates"][:topn]
+                ]
+            )
+        if offline:
+            if cached is None:
+                raise RegistryError("retryable", "offline cache miss")
+            return _annotate(
+                [
+                    DiscoveryCandidate(**c).model_dump()
+                    for c in cached["candidates"][:topn]
+                ]
+            )
+        token = str(setting_or_default(self._settings, "discovery_github_token") or "")
+        try:
+            resp = await resilient_get(
+                client,
+                github_search_url(f"{query.strip()} in:name", topn),
+                headers=github_search_headers(token),
+            )
+        except httpx.HTTPError as exc:
+            raise RegistryError(
+                "retryable", f"github search unreachable: {exc}"
+            ) from None
+        if resp.status_code >= 400:
+            raise RegistryError("retryable", f"github search HTTP {resp.status_code}")
+        out = _map_github_items(parse_github_search(resp.json()))
+        self._write_cache("github", query, [c.model_dump() for c in out])
+        return _annotate([c.model_dump() for c in out[:topn]])
 
     async def _search_with(
         self,
@@ -837,24 +941,7 @@ class DiscoveryService:
             ) from None
         if resp.status_code >= 400:
             raise RegistryError("retryable", f"github search HTTP {resp.status_code}")
-        return [
-            DiscoveryCandidate(
-                ecosystem="github",
-                name=item["name"],
-                version=item["version"],
-                description=item["description"],
-                docs_url=item["homepage"],
-                candidates=[item["homepage"]] if item["homepage"] else [],
-                homepage=item["homepage"],
-                repo_url=item["repo_url"],
-                popularity=_popularity(item["popularity"]),
-                updated=str(item["updated"] or ""),
-                exact=False,
-                rank=item["position"],
-                source="search:github",
-            )
-            for item in parse_github_search(resp.json())
-        ]
+        return _map_github_items(parse_github_search(resp.json()))
 
     def _read_cache(self, ecosystem: str, query: str) -> dict | None:
         row = self._conn.execute(

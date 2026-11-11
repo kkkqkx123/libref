@@ -198,8 +198,18 @@ def next_actions_for(
     if target == "repo":
         actions.append(
             {
+                "kind": "tool",
+                "mcp_tool": "github_search",
+                "cli": f'libref search-github "{query}"',
+                "arguments": {"query": query},
+                "purpose": "hosted search for clonable repositories; results are unverified, confirm then use an explicit source",
+            }
+        )
+        actions.append(
+            {
                 "kind": "manual",
-                "detail": f"search the web for the official source repository of {query}, "
+                "detail": f"search the web for the official source repository of {query} "
+                "(or run libref search-github / MCP github_search), "
                 "then rerun with an explicit source "
                 "(libref index-repo <library> <version> <url-or-local-path>), "
                 "or add a repo_url entry to the registry overrides file",
@@ -208,8 +218,18 @@ def next_actions_for(
     else:
         actions.append(
             {
+                "kind": "tool",
+                "mcp_tool": "web_search",
+                "cli": f'libref search-web "{query}"',
+                "arguments": {"query": query},
+                "purpose": "keyless web search for docs or repos; results are unverified, confirm then use an explicit address",
+            }
+        )
+        actions.append(
+            {
                 "kind": "manual",
-                "detail": f"search the web for the official documentation of {query}, "
+                "detail": f"search the web for the official documentation of {query} "
+                "(or run libref search-web / MCP web_search), "
                 "then rerun with an explicit address "
                 "(libref ingest <library> <version> <url>), "
                 "or add a docs_url entry to the registry overrides file",

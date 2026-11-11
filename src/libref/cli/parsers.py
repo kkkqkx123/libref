@@ -40,6 +40,7 @@ from libref.cli.registry_commands import (
     cmd_catalog,
     cmd_discover,
     cmd_resolve,
+    cmd_search_github,
     cmd_search_web,
 )
 from libref.crawler.registry import REGISTRY_MIRRORS
@@ -305,6 +306,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_search_web.add_argument("query")
     p_search_web.add_argument("--limit", type=int, default=10)
     p_search_web.set_defaults(func=cmd_search_web)
+
+    p_search_github = sub.add_parser(
+        "search-github",
+        help="Explicit hosted search for repos; results are unverified",
+        parents=[_config_parent],
+    )
+    p_search_github.add_argument("query")
+    p_search_github.add_argument("--limit", type=int, default=10)
+    p_search_github.set_defaults(func=cmd_search_github)
 
     p_answer = sub.add_parser(
         "answer",
