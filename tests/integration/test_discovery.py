@@ -106,6 +106,8 @@ def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, text=MAVEN_POM)
     if host == "pypi.org" and path == "/pypi/demo/json":
         return httpx.Response(200, json=PYPI_PAYLOAD)
+    if host == "pypi.org" and path == "/search":
+        return httpx.Response(200, text="<html></html>")
     if host == "pypi.org":
         return httpx.Response(404, json={"message": "not found"})
     if host == "api.github.com":
@@ -267,3 +269,88 @@ def test_pypi_fuzzy_search_lists_multiple_candidates(
     assert items[0]["exact"] is True
     assert items[0]["docs_url"] == "https://demo.readthedocs.io/"
     assert items[1]["source"] == "search:pypi"
+
+
+def test_npm_search_failure_falls_back_to_exact_snapshot(
+    conn, monkeypatch, tmp_path
+) -> None:
+    svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
+
+    def failing_search(request: httpx.Request) -> httpx.Response:
+        host, path = request.url.host, request.url.path
+        if host == "registry.npmjs.org" and path == "/-/v1/search":
+            return httpx.Response(500, json={})
+        if host == "registry.npmjs.org" and path == "/demo":
+            return httpx.Response(200, json=NPM_SNAPSHOT)
+        raise AssertionError(f"{host}{path}")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(failing_search))
+    try:
+        items = run(svc.search_async("demo", "npm", 10, client))
+    finally:
+        run(client.aclose())
+    assert len(items) == 1
+    assert items[0]["name"] == "demo"
+    assert items[0]["source"] == "registry"
+    assert items[0]["version"] == "3.0.0"
+
+
+def test_npm_search_level_addresses_sanitized(conn, monkeypatch, tmp_path) -> None:
+    svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
+    payload = {
+        "objects": [
+            {
+                "package": {
+                    "name": "demo",
+                    "version": "1.0.0",
+                    "description": "demo",
+                    "links": {
+                        "homepage": "http://192.168.1.10/docs",
+                        "repository": "http://192.168.1.10/demo",
+                    },
+                },
+                "score": {"final": 1.0},
+                "downloads": {"monthly": 3},
+            }
+        ]
+    }
+
+    def private_search(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "registry.npmjs.org":
+            return httpx.Response(200, json=payload)
+        raise AssertionError(f"{request.url.host}{request.url.path}")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(private_search))
+    try:
+        items = run(svc.search_async("unrelated-query", "npm", 10, client))
+    finally:
+        run(client.aclose())
+    assert items[0]["homepage"] is None
+    assert items[0]["repo_url"] is None
+    assert items[0]["docs_url"] is None
+
+
+def test_go_search_enriches_missing_exact(conn, monkeypatch, tmp_path) -> None:
+    svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
+
+    def go_handler(request: httpx.Request) -> httpx.Response:
+        host, path = request.url.host, request.url.path
+        if host == "pkg.go.dev":
+            return httpx.Response(
+                200, text='<a href="/github.com/acme/other">other</a>'
+            )
+        if host == "proxy.golang.org" and path == "/github.com/acme/demo/@latest":
+            return httpx.Response(200, json={"Version": "v1.2.3"})
+        if host == "proxy.golang.org" and path == "/github.com/acme/demo/@v/list":
+            return httpx.Response(200, text="v1.2.3\n")
+        raise AssertionError(f"{host}{path}")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(go_handler))
+    try:
+        items = run(svc.search_async("github.com/acme/demo", "go", 10, client))
+    finally:
+        run(client.aclose())
+    exact = [i for i in items if i["exact"]]
+    assert exact and exact[0]["source"] == "registry"
+    assert exact[0]["name"] == "github.com/acme/demo"
+    assert exact[0]["repo_url"] == "https://github.com/acme/demo"

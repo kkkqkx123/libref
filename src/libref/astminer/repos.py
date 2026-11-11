@@ -98,13 +98,29 @@ class RepoManager:
         maybe_local = Path(source)
         if maybe_local.is_dir():
             local = maybe_local.resolve()
-            self._record(conn, name, source, "local", str(local))
-            return local, "local"
+            if (local / ".git").is_dir():
+                try:
+                    commit = self._head_commit(local)
+                except Exception:  # noqa: BLE001 — corrupt git dir degrades to local marker
+                    commit = "local"
+            else:
+                commit = "local"
+            self._record(conn, name, source, commit, str(local))
+            return local, commit
         target = self._base / name
         base_real = self._base.resolve()
         target_real = target.resolve()
         if target_real != base_real and base_real not in target_real.parents:
             raise ValueError(f"invalid repo name: {name!r}")
+        if target.exists() and not target.is_dir():
+            raise ValueError(f"repo path exists and is not a directory: {target}")
+        if target.is_dir() and not (target / ".git").is_dir():
+            if any(target.iterdir()):
+                raise ValueError(
+                    f"repo directory is not a git checkout: {target} "
+                    "(remove it or index a different version)"
+                )
+            target.rmdir()
         if target.is_dir() and (target / ".git").is_dir():
             if update:
                 self._pull(target)
@@ -120,20 +136,31 @@ class RepoManager:
         from dulwich import porcelain
 
         Path(target).parent.mkdir(parents=True, exist_ok=True)
-        porcelain.clone(url, str(target), depth=1)
+        try:
+            porcelain.clone(url, str(target), depth=1)
+        except Exception as exc:
+            raise RuntimeError(f"clone failed for {url}: {exc}") from exc
 
     def _pull(self, target: Path) -> None:
         from dulwich import porcelain
 
-        porcelain.pull(str(target))
+        try:
+            porcelain.pull(str(target))
+        except Exception as exc:
+            raise RuntimeError(f"pull failed for {target}: {exc}") from exc
 
     def _head_commit(self, target: Path) -> str:
         from dulwich.repo import Repo
 
-        repo = Repo(str(target))
+        try:
+            repo = Repo(str(target))
+        except Exception as exc:
+            raise RuntimeError(f"cannot open repo at {target}: {exc}") from exc
         try:
             head = repo.head()
             return head.decode() if isinstance(head, bytes) else str(head)
+        except Exception as exc:
+            raise RuntimeError(f"cannot read HEAD for {target}: {exc}") from exc
         finally:
             repo.close()
 

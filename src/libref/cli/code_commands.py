@@ -42,9 +42,7 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                 print("explicit mode requires library version source", file=sys.stderr)
                 return 2
             if args.ecosystem is not None:
-                print(
-                    "--ecosystem and source are mutually exclusive", file=sys.stderr
-                )
+                print("--ecosystem and source are mutually exclusive", file=sys.stderr)
                 return 2
             library, ecosystem = args.library.strip(), "custom"
             version, source = args.version, args.source
@@ -138,6 +136,9 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
             )
         except ValueError as exc:
             print(f"invalid: {exc}", file=sys.stderr)
+            return 1
+        except Exception as exc:  # noqa: BLE001 — any fetch failure exits 1 without a traceback
+            print(f"failed: {exc}", file=sys.stderr)
             return 1
     finally:
         conn.close()

@@ -8,9 +8,12 @@ user-explicit URLs. Stale entries are not downgraded; the CI gate prompts re-ver
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
+
+logger = logging.getLogger(__name__)
 
 # (ecosystem, normalized_name) -> {docs_url, repo_url, source, verified_at}
 # At least one of docs_url / repo_url must be present, serving doc crawling and code indexing respectively.
@@ -109,7 +112,8 @@ def ensure_overrides_file(path: str | Path) -> None:
     try:
         mtime = resolved.stat().st_mtime
     except OSError:
-        raise ValueError(f"overrides file not found: {resolved}") from None
+        logger.warning("overrides file not found: %s; continuing without it", resolved)
+        return
     if _FILE_MTIMES.get(str(resolved)) == mtime:
         return
     load_overrides_file(resolved)

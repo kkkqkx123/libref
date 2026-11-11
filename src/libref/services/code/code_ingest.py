@@ -29,6 +29,16 @@ logger = logging.getLogger(__name__)
 INDEX_REPO_JOB_KIND = "index_repo"
 
 
+def _same_source(left: str | None, right: str | None) -> bool:
+    """Source identity ignoring a git prefix and trailing slashes."""
+
+    def _norm(value: str | None) -> str:
+        return (value or "").strip().removeprefix("git+").rstrip("/")
+
+    both = (_norm(left), _norm(right))
+    return bool(both[0]) and both[0] == both[1]
+
+
 __all__ = [
     "INDEX_REPO_JOB_KIND",
     "_collect_repo",
@@ -117,7 +127,7 @@ async def _index_repo_inner(
 
     settings_dir = Path(repos_dir)
     if not source:
-        hit = lookup_index_source_cached(conn, ecosystem, library, version)
+        hit = lookup_index_source_cached(conn, ecosystem, library, version, settings)
         if hit is None:
             raise ValueError(
                 "repo source unknown: pass an explicit address or resolve by name "
@@ -148,7 +158,9 @@ async def _index_repo_inner(
     ).fetchone()
     if existing is not None:
         old_url, old_path = existing[0], existing[1]
-        if old_url != source and str(source) != str(old_path):
+        if not _same_source(old_url, source) and not _same_source(
+            str(source), str(old_path or "")
+        ):
             raise ValueError(
                 f"version already indexed from different source: {old_url}"
             )

@@ -256,12 +256,18 @@ def _build_resolution(
 ) -> Resolution:
     docs_url = override_docs or registry_docs
     repo = override_repo or repo_url
+    final_candidates = [docs_url] if docs_url is not None else []
+    for c in candidates:
+        if c != docs_url and c not in final_candidates:
+            final_candidates.append(c)
     if docs_url is None:
         hint = _context_hint(ecosystem, name, requested)
         if homepage is not None:
             hint["homepage"] = homepage
         if repo is not None:
             hint["repo_url"] = repo
+        if final_candidates:
+            hint["candidates"] = final_candidates[:5]
         raise RegistryError(
             "no_docs",
             "registry has no documentation address",
@@ -275,10 +281,6 @@ def _build_resolution(
         if not exc.hint:
             exc.hint = _context_hint(ecosystem, name, requested)
         raise
-    final_candidates = [docs_url]
-    for c in candidates:
-        if c != docs_url and c not in final_candidates:
-            final_candidates.append(c)
     return Resolution(
         ecosystem=ecosystem,
         name=name,
@@ -357,14 +359,19 @@ def _build_repo_resolution(
     source: str,
     include_prerelease: bool = False,
 ) -> Resolution:
-    """Repo resolution assembly: override repo wins; missing repo raises no_docs directly, symmetric with the docs resolution."""
+    """Repo resolution assembly: override repo wins; missing repo raises no_repo directly, symmetric with the docs resolution."""
     repo = override_repo or repo_url
     if repo is None:
+        known_docs = override_docs or registry_docs
         hint = _context_hint(ecosystem, name, requested)
         if homepage is not None:
             hint["homepage"] = homepage
+        if known_docs is not None:
+            hint["docs_url"] = known_docs
+        if candidates:
+            hint["candidates"] = list(candidates)[:5]
         raise RegistryError(
-            "no_docs",
+            "no_repo",
             "registry has no repository address",
             hint=hint,
         )
@@ -402,7 +409,7 @@ def _override_hit_for(
     target: str, override_docs: str | None, override_repo: str | None
 ) -> bool:
     if target == "docs":
-        return bool(override_docs or override_repo)
+        return bool(override_docs)
     return bool(override_repo)
 
 
@@ -556,8 +563,12 @@ async def _resolve_via_registry(
                 hint = _context_hint(eco, norm, requested_version)
                 if cached["homepage"] is not None:
                     hint["homepage"] = cached["homepage"]
+                if cached["docs_url"] is not None:
+                    hint["docs_url"] = cached["docs_url"]
+                if cached["candidates"]:
+                    hint["candidates"] = list(cached["candidates"])[:5]
                 raise RegistryError(
-                    "no_docs",
+                    "no_repo",
                     "registry has no repository address",
                     hint=hint,
                 ) from None
@@ -573,7 +584,7 @@ async def _resolve_via_registry(
                 override_repo=override_repo,
                 registry_docs=cached["docs_url"],
                 candidates=cached["candidates"],
-                source="override" if override_hit else "registry-stale",
+                source="override-stale" if override_hit else "registry-stale",
                 include_prerelease=include_prerelease,
             )
         raise

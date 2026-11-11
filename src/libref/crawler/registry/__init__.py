@@ -100,7 +100,7 @@ _PRERELEASE_HINTS = (
 
 
 class RegistryError(Exception):
-    """Classified registry query failure: not_found / retryable / no_docs."""
+    """Classified registry query failure: not_found / retryable / no_docs / no_repo."""
 
     def __init__(
         self, kind: str, message: str, hint: dict[str, Any] | None = None

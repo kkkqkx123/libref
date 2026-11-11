@@ -64,3 +64,102 @@ def test_ingest_repo_end_to_end(conn, tmp_path, monkeypatch):
         pass
     else:
         raise AssertionError("different source for same version must be rejected")
+
+
+def test_lookup_prefers_override_and_expires_cache(conn, tmp_path, monkeypatch):
+    import time
+
+    from libref.services.code.repo_source import lookup_index_source_cached
+    from libref.services.registry.resolver import write_cache
+    from tests.conftest import make_registry_settings
+
+    write_cache(
+        conn,
+        ecosystem="pypi",
+        name="requests",
+        docs_url=None,
+        candidates=[],
+        versions=["1.0"],
+        stable="1.0",
+        homepage=None,
+        repo_url="https://github.com/org/repo",
+        fetched_at=time.time(),
+    )
+    assert lookup_index_source_cached(conn, "pypi", "requests", "1.0") == (
+        "https://github.com/org/repo",
+        "registry-cache",
+    )
+    settings = make_registry_settings(monkeypatch, tmp_path)
+    assert lookup_index_source_cached(conn, "pypi", "requests", "1.0", settings) == (
+        "https://github.com/org/repo",
+        "registry-cache",
+    )
+    conn.execute(
+        "UPDATE registry_cache SET fetched_at=? WHERE ecosystem='pypi' AND name='requests'",
+        (time.time() - 10 * 86400,),
+    )
+    conn.commit()
+    assert lookup_index_source_cached(conn, "pypi", "requests", "1.0", settings) is None
+    override_file = tmp_path / "overrides.json"
+    override_file.write_text(
+        json.dumps(
+            [
+                {
+                    "ecosystem": "pypi",
+                    "name": "requests",
+                    "repo_url": "https://github.com/org/override",
+                    "source": "file",
+                    "verified_at": "2026-11-01",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    file_settings = make_registry_settings(
+        monkeypatch, tmp_path, registry_overrides_file=override_file
+    )
+    assert lookup_index_source_cached(
+        conn, "pypi", "requests", "1.0", file_settings
+    ) == ("https://github.com/org/override", "override")
+
+
+def test_same_source_ignores_trailing_slash(conn, tmp_path, monkeypatch):
+    repo = copy_mini_repo(tmp_path)
+    repos_dir = tmp_path / "repos"
+    index_repo(conn, "demo", "0.1", str(repo), repos_dir=repos_dir)
+    second = index_repo(conn, "demo", "0.1", str(repo) + "/", repos_dir=repos_dir)
+    assert second["files"] == 5
+
+
+def test_ensure_residual_dir_handling(conn, tmp_path):
+    from libref.astminer.repos import RepoManager
+
+    mgr = RepoManager(tmp_path / "repos")
+    dirty = tmp_path / "repos" / "custom" / "demo" / "1.0"
+    dirty.mkdir(parents=True)
+    (dirty / "leftover.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="not a git checkout"):
+        mgr.ensure(conn, "custom/demo/1.0", "https://example.com/repo.git")
+    empty = tmp_path / "repos" / "custom" / "demo" / "2.0"
+    empty.mkdir(parents=True)
+    with pytest.raises(RuntimeError, match="clone failed"):
+        mgr.ensure(conn, "custom/demo/2.0", "https://example.com/repo.git")
+
+
+def test_ensure_local_git_records_head(conn, tmp_path):
+    from dulwich import porcelain
+
+    from libref.astminer.repos import RepoManager
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "a.py").write_text("x = 1\n", encoding="utf-8")
+    repo = porcelain.init(str(src))
+    porcelain.add(str(src), paths=["a.py"])
+    porcelain.commit(str(src), message=b"init", author=b"t <t@t>", committer=b"t <t@t>")
+    expected = repo.head().decode()
+    repo.close()
+    mgr = RepoManager(tmp_path / "repos")
+    local, commit = mgr.ensure(conn, "demo", str(src))
+    assert local == src.resolve()
+    assert commit == expected

@@ -4,13 +4,17 @@ from __future__ import annotations
 
 
 def lookup_index_source_cached(
-    conn, ecosystem: str, library: str, version: str
+    conn, ecosystem: str, library: str, version: str, settings=None
 ) -> tuple[str, str] | None:
     from pathlib import Path
 
     from libref.crawler.registry import canonical_ecosystem
 
     eco = canonical_ecosystem(ecosystem) or ecosystem
+    if settings is not None:
+        override_hit = _override_repo_for(eco, library, settings)
+        if override_hit is not None:
+            return override_hit, "override"
     repo_name = f"{eco}/{library}/{version}"
     row = conn.execute(
         "SELECT url, local_path FROM repos WHERE name=?", (repo_name,)
@@ -39,8 +43,37 @@ def lookup_index_source_cached(
         except ValueError:
             cached = None
         if cached is not None and cached.get("repo_url"):
-            return str(cached["repo_url"]), "registry-cache"
+            if settings is None:
+                return str(cached["repo_url"]), "registry-cache"
+            from libref.services.registry.resolver import is_fresh
+
+            ttl = float(getattr(settings, "registry_cache_ttl_days", 1.0))
+            if is_fresh(cached.get("fetched_at", 0.0), ttl):
+                return str(cached["repo_url"]), "registry-cache"
     return None
+
+
+def _override_repo_for(eco: str, library: str, settings) -> str | None:
+    """Manual override repo for the index path: file wins, sanitized, miss stays silent."""
+    overrides_file = getattr(settings, "registry_overrides_file", None)
+    if overrides_file is None:
+        return None
+    from libref.crawler.registry import normalize_name, sanitize_http_url
+    from libref.crawler.registry.overrides import ensure_overrides_file, get_override
+
+    ensure_overrides_file(overrides_file)
+    try:
+        norm = normalize_name(eco, library)
+    except ValueError:
+        return None
+    hit = get_override(eco, norm)
+    if hit is None or not hit.get("repo_url"):
+        return None
+    allow_private = bool(getattr(settings, "registry_allow_private", False))
+    return sanitize_http_url(
+        str(hit["repo_url"]).strip().removeprefix("git+"),
+        allow_private=allow_private,
+    )
 
 
 def list_repo_dependencies(

@@ -424,7 +424,7 @@ def build_web_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RegistryError as exc:
-            if exc.kind == "no_docs":
+            if exc.kind in ("no_docs", "no_repo"):
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return resolution.model_dump()

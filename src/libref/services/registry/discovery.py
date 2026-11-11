@@ -127,17 +127,17 @@ def _source_tier(source: str) -> int:
 def rank_candidates(
     items: list[DiscoveryCandidate], query: str
 ) -> list[DiscoveryCandidate]:
-    """Deterministic order: registry source first, then docs, exact match, native order, popularity, freshness."""
+    """Deterministic order: registry source first, then docs, exact match, native order, popularity, freshness (newest wins ties)."""
     norm = query.strip().lower()
+    by_fresh = sorted(items, key=lambda c: c.updated or "", reverse=True)
     return sorted(
-        items,
+        by_fresh,
         key=lambda c: (
             _source_tier(c.source),
             0 if (c.docs_url or c.candidates) else 1,
             0 if c.name.lower() == norm else 1,
             c.rank,
             -_popularity(c.popularity),
-            c.updated or "",
         ),
     )
 
@@ -413,24 +413,62 @@ class DiscoveryService:
             else ["npm", "maven", "pypi", "go", "crates", "nuget"]
         )
         gathered: list[DiscoveryCandidate] = []
-        failures = 0
+        failures: list[str] = []
         for eco in ecos:
             try:
                 gathered.extend(
                     await self._search_one(client, eco, query, include_prerelease)
                 )
-            except RegistryError:
-                failures += 1
+            except RegistryError as exc:
+                failures.append(f"{eco}: {exc}")
         if self._github_eligible(ecosystem):
             try:
                 gathered.extend(await self._search_github(client, query))
-            except RegistryError:
-                failures += 1
+            except RegistryError as exc:
+                failures.append(f"github: {exc}")
         if not gathered and failures:
-            raise RegistryError("retryable", "all discovery sources unreachable")
+            raise RegistryError(
+                "retryable",
+                "all discovery sources unreachable (" + "; ".join(failures) + ")",
+            )
         ranked = rank_candidates(gathered, query)
         self._write_cache(scope, query, [c.model_dump() for c in ranked])
         return _annotate([c.model_dump() for c in ranked[:topn]])
+
+    def _allow_private(self) -> bool:
+        from libref.config import setting_or_default
+
+        return bool(setting_or_default(self._settings, "registry_allow_private"))
+
+    async def _snapshot_candidate(
+        self, client, ecosystem: str, query: str, include_prerelease: bool = False
+    ) -> DiscoveryCandidate | None:
+        """Exact-name registry enrichment for degraded search: snapshot hit only, miss stays silent."""
+        from libref.crawler.registry import fetch_snapshot
+
+        try:
+            snap = await fetch_snapshot(
+                ecosystem, query.strip(), client, self._settings, include_prerelease
+            )
+        except RegistryError as exc:
+            if exc.kind == "not_found":
+                return None
+            raise
+        docs = list(snap.doc_candidates)
+        return DiscoveryCandidate(
+            ecosystem=snap.ecosystem,
+            name=snap.name,
+            version=snap.stable or "",
+            description="",
+            docs_url=docs[0] if docs else None,
+            candidates=docs,
+            homepage=snap.homepage,
+            repo_url=snap.repo_url,
+            popularity=0.0,
+            updated="",
+            exact=True,
+            source="registry",
+        )
 
     def _github_eligible(self, ecosystem: str | None) -> bool:
         from libref.config import setting_or_default
@@ -493,7 +531,7 @@ class DiscoveryService:
             ) from None
         if resp.status_code == 200:
             items = parse_pypi_search_html(resp.text, limit=20)
-        search_degraded = resp.status_code == 429 or resp.status_code >= 500
+        search_degraded = resp.status_code != 200
         if not items:
             snap = await _exact_snapshot(query.strip())
             if snap is None:
@@ -563,7 +601,11 @@ class DiscoveryService:
         self, client, query: str, include_prerelease: bool = False
     ) -> list[DiscoveryCandidate]:
         from libref.crawler.http import resilient_get
-        from libref.crawler.registry import fetch_snapshot, is_repo_host_url
+        from libref.crawler.registry import (
+            fetch_snapshot,
+            is_repo_host_url,
+            sanitize_http_url,
+        )
         from libref.crawler.registry.npm import npm_search_url_for, parse_npm_search
 
         try:
@@ -573,9 +615,20 @@ class DiscoveryService:
                 headers={"Accept": "application/json"},
             )
         except httpx.HTTPError as exc:
+            fallback = await self._snapshot_candidate(
+                client, "npm", query, include_prerelease
+            )
+            if fallback is not None:
+                return [fallback]
             raise RegistryError("retryable", f"npm search unreachable: {exc}") from None
         if resp.status_code >= 400:
+            fallback = await self._snapshot_candidate(
+                client, "npm", query, include_prerelease
+            )
+            if fallback is not None:
+                return [fallback]
             raise RegistryError("retryable", f"npm search HTTP {resp.status_code}")
+        allow_private = self._allow_private()
         out: list[DiscoveryCandidate] = []
         norm = _normalize_query("npm", query)
         for item in parse_npm_search(resp.json()):
@@ -610,7 +663,8 @@ class DiscoveryService:
                         )
                     )
                     continue
-            homepage = item["homepage"]
+            homepage = sanitize_http_url(item["homepage"], allow_private=allow_private)
+            repo = sanitize_http_url(item["repo_url"], allow_private=allow_private)
             docs = [homepage] if homepage and not is_repo_host_url(homepage) else []
             out.append(
                 DiscoveryCandidate(
@@ -621,7 +675,7 @@ class DiscoveryService:
                     docs_url=docs[0] if docs else None,
                     candidates=docs,
                     homepage=homepage,
-                    repo_url=item["repo_url"],
+                    repo_url=repo,
                     popularity=_popularity(item["popularity"]),
                     updated=str(item["updated"] or ""),
                     exact=item["name"].lower() == norm,
@@ -645,10 +699,20 @@ class DiscoveryService:
                 headers={"Accept": "application/json"},
             )
         except httpx.HTTPError as exc:
+            fallback = await self._snapshot_candidate(
+                client, "maven", query, include_prerelease
+            )
+            if fallback is not None:
+                return [fallback]
             raise RegistryError(
                 "retryable", f"maven search unreachable: {exc}"
             ) from None
         if resp.status_code >= 400:
+            fallback = await self._snapshot_candidate(
+                client, "maven", query, include_prerelease
+            )
+            if fallback is not None:
+                return [fallback]
             raise RegistryError("retryable", f"maven search HTTP {resp.status_code}")
         out: list[DiscoveryCandidate] = []
         norm = _normalize_query("maven", query)
@@ -698,7 +762,7 @@ class DiscoveryService:
         self, client, query: str, include_prerelease: bool = False
     ) -> list[DiscoveryCandidate]:
         from libref.crawler.http import resilient_get
-        from libref.crawler.registry import fetch_snapshot
+        from libref.crawler.registry import fetch_snapshot, sanitize_http_url
         from libref.crawler.registry.go import go_search_url, parse_go_search_html
 
         try:
@@ -708,9 +772,20 @@ class DiscoveryService:
                 headers={"Accept": "text/html, */*"},
             )
         except httpx.HTTPError as exc:
+            fallback = await self._snapshot_candidate(
+                client, "go", query, include_prerelease
+            )
+            if fallback is not None:
+                return [fallback]
             raise RegistryError("retryable", f"go search unreachable: {exc}") from None
         if resp.status_code >= 400:
+            fallback = await self._snapshot_candidate(
+                client, "go", query, include_prerelease
+            )
+            if fallback is not None:
+                return [fallback]
             raise RegistryError("retryable", f"go search HTTP {resp.status_code}")
+        allow_private = self._allow_private()
         out: list[DiscoveryCandidate] = []
         norm = _normalize_query("go", query)
         for item in parse_go_search_html(resp.text, limit=20):
@@ -735,7 +810,10 @@ class DiscoveryService:
             if not docs:
                 from libref.crawler.registry.go import go_docs_url
 
-                docs = [go_docs_url(item["name"])]
+                clean = sanitize_http_url(
+                    go_docs_url(item["name"]), allow_private=allow_private
+                )
+                docs = [clean] if clean else []
             out.append(
                 DiscoveryCandidate(
                     ecosystem="go",
@@ -753,6 +831,15 @@ class DiscoveryService:
                     source=source,
                 )
             )
+        if out and not any(c.exact for c in out):
+            try:
+                extra = await self._snapshot_candidate(
+                    client, "go", query, include_prerelease
+                )
+            except RegistryError:
+                extra = None
+            if extra is not None and all(c.name != extra.name for c in out):
+                out.append(extra)
         if not out:
             try:
                 snap = await fetch_snapshot(
@@ -789,6 +876,7 @@ class DiscoveryService:
             fetch_snapshot,
             is_repo_host_url,
             registry_base_for,
+            sanitize_http_url,
         )
         from libref.crawler.registry.crates import (
             crates_search_url,
@@ -806,17 +894,31 @@ class DiscoveryService:
                 headers={"Accept": "application/json"},
             )
         except httpx.HTTPError as exc:
+            fallback = await self._snapshot_candidate(
+                client, "crates", query, include_prerelease
+            )
+            if fallback is not None:
+                return [fallback]
             raise RegistryError(
                 "retryable", f"crates search unreachable: {exc}"
             ) from None
         if resp.status_code >= 400:
+            fallback = await self._snapshot_candidate(
+                client, "crates", query, include_prerelease
+            )
+            if fallback is not None:
+                return [fallback]
             raise RegistryError("retryable", f"crates search HTTP {resp.status_code}")
+        allow_private = self._allow_private()
         out: list[DiscoveryCandidate] = []
         norm = _normalize_query("crates", query)
         for item in parse_crates_search(resp.json()):
-            docs = [item["docs_url"]] if item.get("docs_url") else []
-            homepage = item["homepage"]
-            repo = item["repo_url"]
+            raw_docs = sanitize_http_url(
+                item.get("docs_url"), allow_private=allow_private
+            )
+            docs = [raw_docs] if raw_docs else []
+            homepage = sanitize_http_url(item["homepage"], allow_private=allow_private)
+            repo = sanitize_http_url(item["repo_url"], allow_private=allow_private)
             version = item["version"]
             source = "search:crates"
             if item["name"].lower() == norm:
@@ -861,7 +963,11 @@ class DiscoveryService:
         self, client, query: str, include_prerelease: bool = False
     ) -> list[DiscoveryCandidate]:
         from libref.crawler.http import resilient_get
-        from libref.crawler.registry import fetch_snapshot, is_repo_host_url
+        from libref.crawler.registry import (
+            fetch_snapshot,
+            is_repo_host_url,
+            sanitize_http_url,
+        )
         from libref.crawler.registry.nuget import nuget_search_url, parse_nuget_search
 
         try:
@@ -871,15 +977,26 @@ class DiscoveryService:
                 headers={"Accept": "application/json"},
             )
         except httpx.HTTPError as exc:
+            fallback = await self._snapshot_candidate(
+                client, "nuget", query, include_prerelease
+            )
+            if fallback is not None:
+                return [fallback]
             raise RegistryError(
                 "retryable", f"nuget search unreachable: {exc}"
             ) from None
         if resp.status_code >= 400:
+            fallback = await self._snapshot_candidate(
+                client, "nuget", query, include_prerelease
+            )
+            if fallback is not None:
+                return [fallback]
             raise RegistryError("retryable", f"nuget search HTTP {resp.status_code}")
+        allow_private = self._allow_private()
         out: list[DiscoveryCandidate] = []
         norm = _normalize_query("nuget", query)
         for item in parse_nuget_search(resp.json()):
-            homepage = item["homepage"]
+            homepage = sanitize_http_url(item["homepage"], allow_private=allow_private)
             docs = [homepage] if homepage and not is_repo_host_url(homepage) else []
             version = item["version"]
             source = "search:nuget"

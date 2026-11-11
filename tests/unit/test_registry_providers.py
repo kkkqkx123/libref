@@ -168,6 +168,9 @@ def test_nuget_normalize_and_registration() -> None:
     assert pick_nuget_stable(versions) == "2.0.0"
     assert pick_nuget_stable(["1.0.0-alpha"]) == "1.0.0-alpha"
     assert pick_nuget_stable([]) is None
+    assert pick_nuget_stable(["1.0.0", "2.0.0", "1.5.0"]) == "2.0.0"
+    assert pick_nuget_stable(["1.0.0-alpha", "0.9.0"]) == "0.9.0"
+    assert pick_nuget_stable(["1.0.0-alpha"], include_prerelease=True) == "1.0.0-alpha"
     assert (
         nuget_package_url("Demo", "2.0.0")
         == "https://www.nuget.org/packages/Demo/2.0.0"
@@ -192,6 +195,32 @@ def test_nuget_normalize_and_registration() -> None:
     )
     assert hits[0]["name"] == "Demo"
     assert hits[0]["popularity"] == 7
+
+
+def test_parse_maven_pom_prefers_top_level_url() -> None:
+    from libref.crawler.registry.maven import parse_maven_pom
+
+    pom = (
+        "<project><licenses><license><name>x</name>"
+        "<url>https://license.example/</url></license></licenses>"
+        "<url>https://demo.apache.org/</url>"
+        "<scm><url>scm:git:https://github.com/apache/demo.git</url></scm>"
+        "</project>"
+    )
+    homepage, candidates, repo_url = parse_maven_pom(pom)
+    assert homepage == "https://demo.apache.org/"
+    assert candidates == ["https://demo.apache.org/"]
+    assert repo_url == "https://github.com/apache/demo.git"
+
+
+def test_parse_maven_metadata_without_versioning_falls_back() -> None:
+    from libref.crawler.registry.maven import parse_maven_metadata
+
+    stable, versions = parse_maven_metadata(
+        "<metadata><version>1.0</version></metadata>"
+    )
+    assert versions == ["1.0"]
+    assert stable is None
 
 
 def test_go_repo_url_prefers_origin_then_host_path() -> None:

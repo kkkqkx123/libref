@@ -137,6 +137,16 @@ def test_rank_docs_availability_first(monkeypatch, tmp_path) -> None:
     assert ranked[0].name == "react-dom"
 
 
+def test_rank_freshness_newest_wins_ties(monkeypatch, tmp_path) -> None:
+    old = _candidate("demo", updated="2026-01-01T00:00:00Z")
+    new = _candidate("demo", updated="2026-06-01T00:00:00Z")
+    ranked = rank_candidates([old, new], "demo")
+    assert [c.updated for c in ranked] == [
+        "2026-06-01T00:00:00Z",
+        "2026-01-01T00:00:00Z",
+    ]
+
+
 def test_rank_exact_match_before_popular(monkeypatch, tmp_path) -> None:
     popular = _candidate("react-dom", popularity=999.0)
     exact = _candidate("React", docs_url="https://react.dev/", popularity=1.0)

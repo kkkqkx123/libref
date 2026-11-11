@@ -87,15 +87,12 @@ def nuget_page_urls(payload: dict[str, Any], *, limit: int = 2) -> list[str]:
 def pick_nuget_stable(
     versions: list[str], *, include_prerelease: bool = False
 ) -> str | None:
-    """Latest non-prerelease in timeline order; prerelease only when nothing else exists.
+    """Latest non-prerelease by version comparison; prerelease only when nothing else exists.
 
-    With inclusion enabled the timeline maximum wins directly, prereleases included."""
-    if include_prerelease:
-        return versions[-1] if versions else None
-    for version in reversed(versions):
-        if not _is_prerelease(version):
-            return version
-    return versions[-1] if versions else None
+    With inclusion enabled the comparison maximum wins directly, prereleases included."""
+    from libref.crawler.registry import best_effort_stable
+
+    return best_effort_stable(versions, include_prerelease=include_prerelease)
 
 
 def parse_nuget_registration(

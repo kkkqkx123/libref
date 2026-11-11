@@ -95,14 +95,28 @@ def parse_maven_metadata(xml_text: str) -> tuple[str | None, list[str]]:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
         return None, []
-    versions: list[str] = []
+    versioning: ET.Element | None = None
     for node in root.iter():
-        if _local(node.tag) == "version" and node.text and node.text.strip():
-            # Only collect version entries under versioning; version elements in
-            # dependency declarations share the tag but differ in structure. Parent-chain
-            # checks would be too convoluted; all version elements in the metadata file
-            # are released versions, so collect them directly.
-            versions.append(node.text.strip())
+        if _local(node.tag) == "versioning":
+            versioning = node
+            break
+    scope = versioning if versioning is not None else root
+    versions: list[str] = []
+    if versioning is not None:
+        versions_node: ET.Element | None = None
+        for child in list(versioning):
+            if _local(child.tag) == "versions":
+                versions_node = child
+                break
+        for node in list(versions_node) if versions_node is not None else []:
+            if _local(node.tag) == "version" and node.text and node.text.strip():
+                versions.append(node.text.strip())
+    else:
+        for node in root.iter():
+            if _local(node.tag) == "version" and node.text and node.text.strip():
+                # Degenerate metadata without a versioning wrapper; keep the old
+                # whole-document collection so resolution still yields something.
+                versions.append(node.text.strip())
     # Deduplicate, preserving order
     seen: set[str] = set()
     ordered: list[str] = []
@@ -112,7 +126,7 @@ def parse_maven_metadata(xml_text: str) -> tuple[str | None, list[str]]:
             ordered.append(v)
     stable: str | None = None
     for key in ("release", "latest"):
-        text = _first_text(root, (key,))
+        text = _first_text(scope, (key,))
         if text:
             stable = text
             break
@@ -157,23 +171,35 @@ def parse_maven_pom(
     except ET.ParseError:
         return None, [], None
     project_url: str | None = None
-    for node in root.iter():
-        # Project URL is the top-level url; urls under scm are handled separately
-        if _local(node.tag) == "url" and node.text and node.text.strip():
-            project_url = node.text.strip()
+    for child in list(root):
+        # Project URL is a direct child of the project root; nested urls under
+        # licenses, developers, or scm must not win over it.
+        if _local(child.tag) == "url" and child.text and child.text.strip():
+            project_url = child.text.strip()
             break
+    if project_url is None:
+        for node in root.iter():
+            if _local(node.tag) == "url" and node.text and node.text.strip():
+                project_url = node.text.strip()
+                break
     scm_url: str | None = None
-    in_scm = False
-    for node in root.iter():
-        tag = _local(node.tag)
-        if tag == "scm":
-            in_scm = True
+    for child in list(root):
+        if _local(child.tag) != "scm":
+            continue
+        for node in child.iter():
+            if _local(node.tag) == "url" and node.text and node.text.strip():
+                scm_url = _clean_scm_url(node.text)
+                break
+        break
+    if scm_url is None:
+        for node in root.iter():
+            if _local(node.tag) != "scm":
+                continue
             for child in list(node):
                 if _local(child.tag) == "url" and child.text and child.text.strip():
                     scm_url = _clean_scm_url(child.text)
                     break
             break
-    _ = in_scm
     homepage = sanitize_http_url(project_url, allow_private=allow_private)
     candidates = rank_maven_candidates(project_url, allow_private=allow_private)
     repo_url = sanitize_http_url(_clean_scm_url(scm_url), allow_private=allow_private)

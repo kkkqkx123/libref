@@ -163,7 +163,14 @@ def format_registry_error(exc, *, target: str = "docs") -> str:
 
     lines = [f"resolve failed [{exc.kind}]: {exc}"]
     hint = getattr(exc, "hint", None) or {}
-    for key in ("ecosystem", "name", "requested_version", "homepage", "repo_url"):
+    for key in (
+        "ecosystem",
+        "name",
+        "requested_version",
+        "homepage",
+        "repo_url",
+        "docs_url",
+    ):
         if hint.get(key) is not None:
             lines.append(f"  {key}: {hint[key]}")
     candidates = hint.get("candidates") or []

@@ -650,3 +650,97 @@ def test_npm_repo_homepage_excluded_from_candidates(conn, monkeypatch, tmp_path)
         run(client.aclose())
     assert exc.value.kind == "no_docs"
     assert exc.value.hint.get("repo_url") == "https://github.com/org/repo.git"
+
+
+def test_repo_only_override_does_not_claim_docs(conn, monkeypatch, tmp_path):
+    from libref.crawler.registry import overrides as ov
+
+    monkeypatch.setitem(
+        ov.OVERRIDES,
+        ("pypi", "requests"),
+        {
+            "repo_url": "https://github.com/org/other",
+            "source": "manual",
+            "verified_at": "2026-11-01",
+        },
+    )
+    settings = make_registry_settings(monkeypatch, tmp_path)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
+    try:
+        res = run(resolve_package(conn, client, settings, "pypi", "requests"))
+    finally:
+        run(client.aclose())
+    assert res.source == "registry"
+    assert res.docs_url == "https://requests.readthedocs.io/"
+    assert res.repo_url == "https://github.com/org/other"
+
+
+def test_stale_cache_with_override_reports_override_stale(conn, monkeypatch, tmp_path):
+    from libref.crawler.registry import overrides as ov
+
+    settings = make_registry_settings(monkeypatch, tmp_path)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
+    try:
+        run(resolve_package(conn, client, settings, "pypi", "requests"))
+    finally:
+        run(client.aclose())
+    conn.execute(
+        "UPDATE registry_cache SET fetched_at=? WHERE ecosystem='pypi' AND name='requests'",
+        (time.time() - 10 * 86400,),
+    )
+    conn.commit()
+    monkeypatch.setitem(
+        ov.OVERRIDES,
+        ("pypi", "requests"),
+        {
+            "docs_url": "https://override.example/docs",
+            "source": "manual",
+            "verified_at": "2026-11-01",
+        },
+    )
+
+    def failing(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={})
+
+    client2 = httpx.AsyncClient(transport=httpx.MockTransport(failing))
+    try:
+        res = run(resolve_package(conn, client2, settings, "pypi", "requests"))
+    finally:
+        run(client2.aclose())
+    assert res.source == "override-stale"
+    assert res.docs_url == "https://override.example/docs"
+
+
+def test_repo_missing_reports_no_repo_with_docs_hint(conn, monkeypatch, tmp_path):
+    from libref.services.registry.resolver import resolve_repo
+
+    settings = make_registry_settings(monkeypatch, tmp_path)
+    payload = {
+        "info": {
+            "version": "1.0",
+            "home_page": "https://example.com/",
+            "project_urls": {"Documentation": "https://docs.example/"},
+        },
+        "releases": {"1.0": []},
+    }
+    client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler(payload)))
+    try:
+        with pytest.raises(RegistryError) as exc:
+            run(resolve_repo(conn, client, settings, "pypi", "requests"))
+    finally:
+        run(client.aclose())
+    assert exc.value.kind == "no_repo"
+    assert exc.value.hint.get("docs_url") == "https://docs.example/"
+    assert exc.value.hint.get("candidates") == ["https://docs.example/"]
+
+
+def test_missing_overrides_file_warns_and_continues(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(
+        monkeypatch, tmp_path, registry_overrides_file=tmp_path / "gone.json"
+    )
+    client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler()))
+    try:
+        res = run(resolve_package(conn, client, settings, "pypi", "requests"))
+    finally:
+        run(client.aclose())
+    assert res.source == "registry"
