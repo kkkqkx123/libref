@@ -331,6 +331,13 @@ def extract_call_parts(
     return "", None, ""
 
 
+def _is_dotted_name(text: str) -> bool:
+    parts = (text or "").split(".")
+    if not parts:
+        return False
+    return all(part.isidentifier() for part in parts)
+
+
 def collect_simple_var_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
     stack = [root]
@@ -339,11 +346,12 @@ def collect_simple_var_aliases(root: Any, source: bytes) -> list[tuple[str, str]
         if node.type == "assignment":
             left = node.child_by_field_name("left")
             right = node.child_by_field_name("right")
-            if left is not None and right is not None and left.type == "identifier":
-                var = slice_text(left, source).strip()
-                target = _call_target_name(right, source)
-                if var and target:
-                    found.append((var, target))
+            if left is not None and right is not None:
+                var = generic_dotted(left, source).strip()[:128]
+                if var and _is_dotted_name(var):
+                    target = _call_target_name(right, source)
+                    if target:
+                        found.append((var, target))
         elif node.type == "variable_declarator":
             name_node = node.child_by_field_name("name")
             value_node = node.child_by_field_name("value")

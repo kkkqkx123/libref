@@ -154,3 +154,18 @@ def test_minlen_filters_short_patterns(conn, monkeypatch, tmp_path):
     assert any(len(r["pattern"]) == 2 for r in short)
     long_only = mine_patterns(conn, "demo", "t", minsup=2, minlen=3)
     assert long_only and all(len(r["pattern"]) >= 3 for r in long_only)
+
+
+def test_file_scope_calls_excluded_from_sequences(conn, monkeypatch, tmp_path):
+    _seed_calls(
+        conn,
+        library="demo",
+        version="noscope",
+        rows=[
+            ("s.a", "a.py", None, 1, 1, 10, "INFERRED", []),
+            ("s.b", "a.py", None, 2, 2, 20, "INFERRED", []),
+            ("s.a", "b.py", None, 1, 1, 10, "INFERRED", []),
+            ("s.b", "b.py", None, 2, 2, 20, "INFERRED", []),
+        ],
+    )
+    assert mine_patterns(conn, "demo", "noscope", minsup=2) == []

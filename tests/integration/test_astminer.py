@@ -270,7 +270,7 @@ def test_param_shadow_blocks_global_match(monkeypatch, tmp_path):
     assert resolved[0].confidence == "AMBIGUOUS"
 
 
-def test_directory_affinity_picks_unique_winner(monkeypatch, tmp_path):
+def test_layout_guess_is_ambiguous_without_scope_signal(monkeypatch, tmp_path):
     from libref.astminer.models import ApiDeclRecord, RawCall
 
     def _decl(qual, path):
@@ -296,8 +296,8 @@ def test_directory_affinity_picks_unique_winner(monkeypatch, tmp_path):
         )
     ]
     resolved = ast_resolution.resolve_calls(decls, {}, raw, "r")
-    assert resolved[0].callee == "pkg.mod_a.foo"
-    assert resolved[0].confidence == "INFERRED"
+    assert resolved[0].callee == "foo"
+    assert resolved[0].confidence == "AMBIGUOUS"
 
 
 def test_stdlib_alias_target_is_ambiguous(monkeypatch, tmp_path):
@@ -403,3 +403,189 @@ def test_cache_sweep_removes_stale(conn, monkeypatch, tmp_path):
     assert removed == 2
     assert ast_cache.lookup(conn, "r", "keep.py", fp, cfg.config_version) is not None
     assert ast_cache.lookup(conn, "r", "gone.py", fp, cfg.config_version) is None
+
+
+def test_diamond_base_method_is_ambiguous(monkeypatch, tmp_path):
+    from libref.astminer.models import ApiDeclRecord, RawCall
+
+    def _decl(qual, kind="method", path="b.py", bases=()):
+        return ApiDeclRecord(
+            qualified_name=qual,
+            kind=kind,
+            file=path,
+            line_start=1,
+            line_end=4,
+            bases=list(bases),
+        )
+
+    decls = [
+        _decl("b.BaseA", kind="class"),
+        _decl("b.BaseA.run"),
+        _decl("b.BaseB", kind="class"),
+        _decl("b.BaseB.run"),
+        _decl("b.Sub", kind="class", bases=["BaseA", "BaseB"]),
+        _decl("b.Sub.m"),
+    ]
+    raw = [
+        RawCall(
+            raw_callee="self.run",
+            caller_file="b.py",
+            caller="b.Sub.m",
+            line_start=2,
+            line_end=2,
+        )
+    ]
+    resolved = ast_resolution.resolve_calls(decls, {}, raw, "r")
+    assert resolved[0].confidence == "AMBIGUOUS"
+
+
+def test_single_base_method_resolves_extracted(monkeypatch, tmp_path):
+    from libref.astminer.models import ApiDeclRecord, RawCall
+
+    def _decl(qual, kind="method", path="b.py", bases=()):
+        return ApiDeclRecord(
+            qualified_name=qual,
+            kind=kind,
+            file=path,
+            line_start=1,
+            line_end=4,
+            bases=list(bases),
+        )
+
+    decls = [
+        _decl("b.Base", kind="class"),
+        _decl("b.Base.run"),
+        _decl("b.Sub", kind="class", bases=["Base"]),
+        _decl("b.Sub.m"),
+    ]
+    raw = [
+        RawCall(
+            raw_callee="self.run",
+            caller_file="b.py",
+            caller="b.Sub.m",
+            line_start=2,
+            line_end=2,
+        )
+    ]
+    resolved = ast_resolution.resolve_calls(decls, {}, raw, "r")
+    assert resolved[0].callee == "b.Base.run"
+    assert resolved[0].confidence == "EXTRACTED"
+
+
+def test_joint_reexport_and_chain_closure(monkeypatch, tmp_path):
+    from libref.astminer.models import ApiDeclRecord, RawCall
+
+    decls = [
+        ApiDeclRecord(
+            qualified_name="pkg.core.start",
+            kind="function",
+            file="pkg/core.py",
+            line_start=1,
+            line_end=2,
+        )
+    ]
+    raw = [
+        RawCall(
+            raw_callee="x",
+            caller_file="a.py",
+            caller=None,
+            line_start=1,
+            line_end=1,
+        )
+    ]
+    aliases = {
+        "pkg/__init__.py": [("start", "pkg.core.start")],
+        "a.py": [("start", "pkg.start"), ("x", "start")],
+    }
+    resolved = ast_resolution.resolve_calls(decls, aliases, raw, "r")
+    assert resolved[0].callee == "pkg.core.start"
+
+
+def test_attribute_receiver_alias_resolves(monkeypatch, tmp_path):
+    from libref.astminer.models import ApiDeclRecord, RawCall
+
+    decls = [
+        ApiDeclRecord(
+            qualified_name="m.Foo",
+            kind="class",
+            file="m.py",
+            line_start=1,
+            line_end=4,
+        ),
+        ApiDeclRecord(
+            qualified_name="m.Foo.bar",
+            kind="method",
+            file="m.py",
+            line_start=2,
+            line_end=3,
+        ),
+        ApiDeclRecord(
+            qualified_name="m.C.run",
+            kind="method",
+            file="m.py",
+            line_start=5,
+            line_end=8,
+        ),
+    ]
+    raw = [
+        RawCall(
+            raw_callee="self.x.bar",
+            caller_file="m.py",
+            caller="m.C.run",
+            line_start=6,
+            line_end=6,
+        )
+    ]
+    resolved = ast_resolution.resolve_calls(
+        decls, {"m.py": [("self.x", "m.Foo")]}, raw, "r"
+    )
+    assert resolved[0].callee == "m.Foo.bar"
+    assert resolved[0].confidence == "EXTRACTED"
+
+
+def test_factory_return_type_one_hop(monkeypatch, tmp_path):
+    from libref.astminer.models import ApiDeclRecord, RawCall
+
+    decls = [
+        ApiDeclRecord(
+            qualified_name="m.make",
+            kind="function",
+            file="m.py",
+            line_start=1,
+            line_end=3,
+            return_type="Foo",
+        ),
+        ApiDeclRecord(
+            qualified_name="m.Foo",
+            kind="class",
+            file="m.py",
+            line_start=4,
+            line_end=8,
+        ),
+        ApiDeclRecord(
+            qualified_name="m.Foo.bar",
+            kind="method",
+            file="m.py",
+            line_start=5,
+            line_end=6,
+        ),
+        ApiDeclRecord(
+            qualified_name="m.f",
+            kind="function",
+            file="m.py",
+            line_start=9,
+            line_end=12,
+        ),
+    ]
+    raw = [
+        RawCall(
+            raw_callee="x.bar",
+            caller_file="m.py",
+            caller="m.f",
+            line_start=10,
+            line_end=10,
+        )
+    ]
+    resolved = ast_resolution.resolve_calls(decls, {"m.py": [("x", "make")]}, raw, "r")
+    assert resolved[0].callee == "m.Foo.bar"
+    assert resolved[0].confidence == "EXTRACTED"

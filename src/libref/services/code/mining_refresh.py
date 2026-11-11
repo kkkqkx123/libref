@@ -224,6 +224,8 @@ def mine_patterns(
         return []
     groups: dict[str, list[tuple[int, int, int, int, str]]] = {}
     for callee, caller_file, caller, _conf, row_id, line_start, order, start in rows:
+        if caller is None or not str(caller).strip():
+            continue
         key = _scope_key(str(caller_file), caller)
         groups.setdefault(key, []).append(
             (int(line_start), int(start), int(order), int(row_id), str(callee))

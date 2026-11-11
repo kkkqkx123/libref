@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import posixpath
 import sys
 
 from libref.astminer.models import (
@@ -92,8 +91,6 @@ _NODE_BUILTINS = frozenset(
     }
 )
 
-_TEST_DIR_NAMES = frozenset({"test", "tests", "testing", "__tests__"})
-
 
 def _language_for_file(path: str | None) -> str | None:
     if not path:
@@ -104,6 +101,25 @@ def _language_for_file(path: str | None) -> str | None:
 
     cfg = _config.config_for_suffix(_Path(path).suffix)
     return cfg.name if cfg is not None else None
+
+
+def _build_suffix_index(declared: set[str]) -> dict[str, list[str]]:
+    index: dict[str, list[str]] = {}
+    for qual in declared:
+        slot = index.setdefault(qual, [])
+        if qual not in slot:
+            slot.append(qual)
+        parts = qual.split(".")
+        for start in range(1, len(parts)):
+            suffix = ".".join(parts[start:])
+            if not suffix:
+                continue
+            bucket = index.setdefault(suffix, [])
+            if qual not in bucket:
+                bucket.append(qual)
+    for key, value in index.items():
+        index[key] = sorted(value)
+    return index
 
 
 def resolve_calls(
@@ -118,17 +134,15 @@ def resolve_calls(
     parent_by_qual: dict[str, str | None] = {}
     params_by_qual: dict[str, list[str]] = {}
     param_types_by_qual: dict[str, dict[str, str]] = {}
-    arity_by_qual: dict[str, int] = {}
-    file_by_qual: dict[str, str] = {}
+    bases_by_qual: dict[str, list[str]] = {}
+    return_by_qual: dict[str, str] = {}
     for decl in decls:
         if decl.kind not in CALLABLE_DECL_KINDS:
             continue
         by_file.setdefault(decl.file, set()).add(decl.qualified_name)
         parent_by_qual.setdefault(decl.qualified_name, decl.parent)
-        file_by_qual.setdefault(decl.qualified_name, decl.file)
         params = list(decl.params or [])
         params_by_qual.setdefault(decl.qualified_name, params)
-        arity_by_qual.setdefault(decl.qualified_name, len(params))
         types = dict(param_types_by_qual.setdefault(decl.qualified_name, {}))
         for idx, name in enumerate(params):
             if not name or name in types:
@@ -139,9 +153,23 @@ def resolve_calls(
             if raw_type.strip():
                 types[name] = raw_type
         param_types_by_qual[decl.qualified_name] = types
+        if decl.bases:
+            slot = bases_by_qual.setdefault(decl.qualified_name, [])
+            for base in decl.bases:
+                if base and base not in slot:
+                    slot.append(base)
+        owner = _normalize_type_name(decl.return_type or "")
+        if owner and decl.qualified_name not in return_by_qual:
+            return_by_qual[decl.qualified_name] = owner
     declared = set(parent_by_qual)
+    suffix_index = _build_suffix_index(declared)
     alias_per_file = {path: dict(items) for path, items in file_aliases.items()}
-    _close_reexports(alias_per_file)
+    for _ in range(len(alias_per_file) + 2):
+        snapshot = {path: dict(mapping) for path, mapping in alias_per_file.items()}
+        _close_reexports(alias_per_file)
+        _close_alias_chains(alias_per_file)
+        if alias_per_file == snapshot:
+            break
     out: list[CallInstanceRecord] = []
     order_counter: dict[str, int] = {}
     ordered = sorted(calls, key=lambda c: (c.caller_file, c.caller or "", c.start_byte))
@@ -156,12 +184,11 @@ def resolve_calls(
             alias_map,
             parent_by_qual,
             language=language or _language_for_file(call.caller_file),
-            caller_file=call.caller_file,
-            file_by_qual=file_by_qual,
             params_by_qual=params_by_qual,
             param_types_by_qual=param_types_by_qual,
-            arity_by_qual=arity_by_qual,
-            argument_count=call.argument_count,
+            suffix_index=suffix_index,
+            bases_by_qual=bases_by_qual,
+            return_by_qual=return_by_qual,
         )
         scope = (
             f"{call.caller_file}::{call.caller}" if call.caller else call.caller_file
@@ -199,24 +226,18 @@ def resolve_one(
     parent_by_qual: dict[str, str | None] | None = None,
     *,
     language: str | None = None,
-    caller_file: str | None = None,
-    file_by_qual: dict[str, str] | None = None,
     params_by_qual: dict[str, list[str]] | None = None,
     param_types_by_qual: dict[str, dict[str, str]] | None = None,
-    arity_by_qual: dict[str, int] | None = None,
-    argument_count: int | None = None,
+    suffix_index: dict[str, list[str]] | None = None,
+    bases_by_qual: dict[str, list[str]] | None = None,
+    return_by_qual: dict[str, str] | None = None,
 ) -> tuple[str, Confidence]:
     if not raw:
         return raw, "AMBIGUOUS"
+    index = suffix_index if suffix_index is not None else _build_suffix_index(declared)
     head, _, _rest = raw.partition(".")
     if is_builtin_bare(raw, alias_map, language) and raw not in same_file:
         return raw, "AMBIGUOUS"
-    if head in _SELF_HEADS and caller:
-        base = caller.rpartition(".")[0] if "." in caller else caller
-        resolved = (base + raw[len(head) :]) if base else raw
-        if resolved in declared:
-            return resolved, "EXTRACTED"
-        return resolved, "AMBIGUOUS"
     if (
         "." not in raw
         and caller
@@ -224,21 +245,45 @@ def resolve_one(
         and _shadowed_by_param(raw, caller, parent_by_qual, params_by_qual)
     ):
         return raw, "AMBIGUOUS"
-    if head in alias_map:
-        resolved = alias_map[head] + raw[len(head) :]
+    expanded = _expand_alias(raw, alias_map)
+    if expanded is not None:
+        resolved = expanded
         if resolved in declared:
             return resolved, "EXTRACTED"
-        suffixed = [q for q in declared if q == resolved or q.endswith("." + resolved)]
+        suffixed = index.get(resolved, [])
         if len(suffixed) == 1 and suffixed[0] in same_file:
             return suffixed[0], "EXTRACTED"
         if _is_stdlib_target(resolved):
             return resolved, "AMBIGUOUS"
-        raw_hits = [q for q in declared if q == raw or q.endswith(f".{raw}")]
+        rewritten = _rewrite_factory_head(
+            resolved, declared, index, same_file, return_by_qual or {}
+        )
+        if rewritten is not None and rewritten != resolved:
+            resolved = rewritten
+            if resolved in declared:
+                return resolved, "EXTRACTED"
+            suffixed = index.get(resolved, [])
+            if len(suffixed) == 1:
+                if suffixed[0] in same_file:
+                    return suffixed[0], "EXTRACTED"
+                return suffixed[0], "INFERRED"
+        raw_hits = index.get(raw, [])
         if len(raw_hits) == 1:
             if raw_hits[0] in same_file:
                 return raw_hits[0], "EXTRACTED"
             return raw_hits[0], "INFERRED"
         return resolved, "INFERRED"
+    if head in _SELF_HEADS and caller:
+        base = caller.rpartition(".")[0] if "." in caller else caller
+        resolved = (base + raw[len(head) :]) if base else raw
+        if resolved in declared:
+            return resolved, "EXTRACTED"
+        inherited = _resolve_self_via_bases(
+            base, raw[len(head) :], declared, bases_by_qual or {}, index, same_file
+        )
+        if inherited is not None:
+            return inherited, "EXTRACTED"
+        return resolved, "AMBIGUOUS"
     if (
         "." in raw
         and head not in alias_map
@@ -246,11 +291,17 @@ def resolve_one(
         and param_types_by_qual is not None
     ):
         typed = _resolve_via_receiver_type(
-            raw, caller, parent_by_qual, param_types_by_qual, declared, same_file
+            raw,
+            caller,
+            parent_by_qual,
+            param_types_by_qual,
+            declared,
+            same_file,
+            index,
         )
         if typed is not None:
             return typed
-    candidates = [q for q in declared if q == raw or q.endswith(f".{raw}")]
+    candidates = list(index.get(raw, []))
     if not candidates:
         return raw, "AMBIGUOUS"
     same_hits = [q for q in candidates if q in same_file]
@@ -260,15 +311,7 @@ def resolve_one(
         candidates = same_hits
     elif raw in same_file:
         return raw, "EXTRACTED"
-    picked = _disambiguate(
-        candidates,
-        caller,
-        parent_by_qual,
-        caller_file=caller_file,
-        file_by_qual=file_by_qual,
-        arity_by_qual=arity_by_qual,
-        argument_count=argument_count,
-    )
+    picked = _disambiguate(candidates, caller, parent_by_qual)
     if picked is None:
         return raw, "AMBIGUOUS"
     if picked == raw or picked in same_file:
@@ -303,15 +346,145 @@ def _close_reexports(alias_per_file: dict[str, dict[str, str]]) -> None:
                     changed = True
 
 
+def _close_alias_chains(alias_per_file: dict[str, dict[str, str]]) -> None:
+    for mapping in alias_per_file.values():
+        if len(mapping) < 2:
+            continue
+        snapshot = dict(mapping)
+        for alias, full in snapshot.items():
+            if not full:
+                continue
+            seen = {alias}
+            current = full
+            for _ in range(len(snapshot) + 1):
+                head = current.partition(".")[0] if current else ""
+                if not head or head not in snapshot or head in seen:
+                    break
+                target = snapshot[head]
+                if not target:
+                    break
+                if "." in current:
+                    _, _, rest = current.partition(".")
+                    current = target + "." + rest if target else current
+                else:
+                    current = target
+                if current.partition(".")[0] == alias:
+                    current = full
+                    break
+                seen.add(head)
+            if current != full and current.partition(".")[0] != alias:
+                mapping[alias] = current
+
+
+def _expand_alias(raw: str, alias_map: dict[str, str]) -> str | None:
+    if not raw or not alias_map:
+        return None
+    parts = raw.split(".")
+    for length in range(len(parts), 0, -1):
+        prefix = ".".join(parts[:length])
+        target = alias_map.get(prefix)
+        if target:
+            if length == len(parts):
+                return target
+            return target + "." + ".".join(parts[length:])
+    return None
+
+
+def _owner_options(
+    name: str,
+    declared: set[str],
+    suffix_index: dict[str, list[str]],
+    same_file: set[str],
+) -> list[str]:
+    if name in declared:
+        return [name]
+    options = suffix_index.get(name, [])
+    if len(options) == 1:
+        return options
+    same = [q for q in options if q in same_file]
+    if len(same) == 1:
+        return same
+    return []
+
+
+def _rewrite_factory_head(
+    resolved: str,
+    declared: set[str],
+    suffix_index: dict[str, list[str]],
+    same_file: set[str],
+    return_by_qual: dict[str, str],
+) -> str | None:
+    if not resolved or "." not in resolved or not return_by_qual:
+        return None
+    parts = resolved.split(".")
+    for length in range(len(parts) - 1, 0, -1):
+        func_name = ".".join(parts[:length])
+        method_rest = ".".join(parts[length:])
+        if not method_rest:
+            continue
+        funcs = _owner_options(func_name, declared, suffix_index, same_file)
+        if len(funcs) != 1:
+            continue
+        owner_name = (return_by_qual.get(funcs[0]) or "").strip()
+        if not owner_name:
+            continue
+        owners = _owner_options(owner_name, declared, suffix_index, same_file)
+        if len(owners) != 1:
+            continue
+        return owners[0] + "." + method_rest
+    return None
+
+
+def _resolve_self_via_bases(
+    class_qual: str | None,
+    suffix: str,
+    declared: set[str],
+    bases_by_qual: dict[str, list[str]],
+    suffix_index: dict[str, list[str]],
+    same_file: set[str],
+) -> str | None:
+    if not class_qual or not suffix:
+        return None
+    seen: set[str] = {class_qual}
+    frontier: list[str] = [class_qual]
+    while frontier:
+        next_frontier: list[str] = []
+        level_hits: list[str] = []
+        for current in frontier:
+            for raw_base in bases_by_qual.get(current, []):
+                cleaned = _normalize_type_name(raw_base)
+                if not cleaned:
+                    continue
+                options = suffix_index.get(cleaned, [])
+                if not options:
+                    continue
+                if len(options) == 1:
+                    base_options = options
+                else:
+                    same = [q for q in options if q in same_file]
+                    if len(same) != 1:
+                        continue
+                    base_options = same
+                for base_qual in base_options:
+                    if base_qual in seen:
+                        continue
+                    seen.add(base_qual)
+                    hit = base_qual + suffix
+                    if hit in declared and hit not in level_hits:
+                        level_hits.append(hit)
+                    next_frontier.append(base_qual)
+        if len(set(level_hits)) == 1:
+            return level_hits[0]
+        if level_hits:
+            return None
+        frontier = next_frontier
+    return None
+
+
 def _disambiguate(
     candidates: list[str],
     caller: str | None,
     parent_by_qual: dict[str, str | None] | None,
-    *,
-    caller_file: str | None = None,
-    file_by_qual: dict[str, str] | None = None,
-    arity_by_qual: dict[str, int] | None = None,
-    argument_count: int | None = None,
 ) -> str | None:
     if len(candidates) == 1:
         return candidates[0]
@@ -324,17 +497,6 @@ def _disambiguate(
             candidates = scoped
             if len(candidates) == 1:
                 return candidates[0]
-    if argument_count is not None and arity_by_qual is not None and len(candidates) > 1:
-        matched = [c for c in candidates if arity_by_qual.get(c) == argument_count]
-        if len(matched) == 1:
-            return matched[0]
-        if matched:
-            candidates = matched
-    if caller_file is not None and file_by_qual is not None and len(candidates) > 1:
-        files = [file_by_qual.get(c) for c in candidates]
-        winner = _unique_candidate_by_affinity(caller_file, files)
-        if winner is not None:
-            return candidates[winner]
     return None
 
 
@@ -405,6 +567,7 @@ def _resolve_via_receiver_type(
     param_types_by_qual: dict[str, dict[str, str]],
     declared: set[str],
     same_file: set[str],
+    suffix_index: dict[str, list[str]] | None = None,
 ) -> tuple[str, Confidence] | None:
     head, _, rest = raw.partition(".")
     if not head or not rest:
@@ -416,7 +579,8 @@ def _resolve_via_receiver_type(
     resolved = owner + raw[len(head) :]
     if resolved in declared:
         return resolved, "EXTRACTED"
-    suffixed = [q for q in declared if q == resolved or q.endswith("." + resolved)]
+    index = suffix_index if suffix_index is not None else _build_suffix_index(declared)
+    suffixed = index.get(resolved, [])
     if len(suffixed) == 1:
         if suffixed[0] in same_file:
             return suffixed[0], "EXTRACTED"
@@ -446,66 +610,3 @@ def _is_stdlib_target(resolved: str) -> bool:
         if resolved.startswith(prefix):
             return True
     return False
-
-
-def _is_test_path(path: str | None) -> bool:
-    if not path:
-        return False
-    norm = path.replace("\\", "/").lower()
-    segments = [seg for seg in norm.split("/") if seg]
-    if any(seg in _TEST_DIR_NAMES for seg in segments[:-1]):
-        return True
-    filename = segments[-1] if segments else ""
-    stem, _, _ = filename.rpartition(".")
-    check = stem or filename
-    if check.startswith("test_") or check.endswith("_test") or check == "test":
-        return True
-    if filename.endswith((".test.js", ".spec.js", ".test.ts", ".spec.ts", ".test.tsx")):
-        return True
-    return filename.endswith("test.java") or filename.startswith("test")
-
-
-def _directory_segments(path: str) -> list[str]:
-    norm = posixpath.normpath(path.replace("\\", "/").lstrip("/"))
-    segments = [seg for seg in norm.split("/") if seg and seg != "."]
-    return segments[:-1] if segments else []
-
-
-def _common_prefix_len(left: list[str], right: list[str]) -> int:
-    count = 0
-    for a, b in zip(left, right):
-        if a != b:
-            break
-        count += 1
-    return count
-
-
-def _unique_candidate_by_affinity(
-    caller_file: str | None, candidate_paths: list[str | None]
-) -> int | None:
-    total = len(candidate_paths)
-    if total == 0:
-        return None
-    if total == 1:
-        return 0
-    pool: list[int] = list(range(total))
-    if caller_file:
-        caller_dir = _directory_segments(caller_file)
-        scores = [
-            _common_prefix_len(caller_dir, _directory_segments(p)) if p else 0
-            for p in candidate_paths
-        ]
-        best = max(scores)
-        if best > 0:
-            narrowed = [i for i in pool if scores[i] == best]
-            if len(narrowed) == 1:
-                return narrowed[0]
-            pool = narrowed
-    non_test = [i for i in pool if not _is_test_path(candidate_paths[i])]
-    if non_test and len(non_test) < len(pool):
-        if len(non_test) == 1:
-            return non_test[0]
-        pool = non_test
-    if len(pool) == 1:
-        return pool[0]
-    return None
