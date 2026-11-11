@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 
 from libref.astminer.queries import csharp as _csharp
 from libref.astminer.queries import go as _go
@@ -17,6 +18,238 @@ from libref.astminer.queries import typescript as _typescript
 QUERY_VERSION = 1
 
 KINDS = ("entity", "call", "dependency", "comment")
+
+# Capture naming contract: every @name in query text must satisfy the
+# vocabulary below. Shape per domain:
+#   entity.<category>[.signature.<attr> | .<role>...]
+#   call.<category>[.<role>...]
+#   dependency.<category>[.<role>...]
+#   comment.line | comment.doc
+ENTITY_CATEGORIES = frozenset(
+    {
+        "annotation",
+        "arrow",
+        "class",
+        "constructor",
+        "decorator",
+        "enum",
+        "enum_constant",
+        "field",
+        "function",
+        "generator",
+        "impl",
+        "interface",
+        "macro",
+        "method",
+        "module",
+        "object_method",
+        "package",
+        "record",
+        "struct",
+        "type",
+        "union",
+        "variable",
+    }
+)
+
+ENTITY_ROLES = frozenset(
+    {
+        "arguments",
+        "base",
+        "body",
+        "call",
+        "file_scoped",
+        "name",
+        "params",
+        "receiver",
+        "return_type",
+        "source",
+        "tag",
+        "type",
+        "value",
+    }
+)
+
+SIGNATURE_ROLES = frozenset(
+    {"base", "name", "params", "return_type", "source", "type", "type_params"}
+)
+
+CALL_CATEGORIES = frozenset(
+    {
+        "async",
+        "constructor",
+        "function",
+        "hof",
+        "macro",
+        "method",
+        "reference",
+        "super",
+    }
+)
+
+CALL_ROLES = frozenset(
+    {
+        "arguments",
+        "callback",
+        "chained",
+        "class",
+        "from",
+        "function",
+        "lambda",
+        "method",
+        "method_ref",
+        "name",
+        "object",
+        "static",
+        "super",
+        "to",
+    }
+)
+
+DEPENDENCY_CATEGORIES = frozenset(
+    {
+        "embedding",
+        "export",
+        "extend",
+        "implement",
+        "import",
+        "module",
+        "require",
+        "use",
+        "using",
+    }
+)
+
+DEPENDENCY_ROLES = frozenset(
+    {
+        "alias",
+        "callee",
+        "default",
+        "destruct",
+        "dynamic",
+        "exports",
+        "from",
+        "future",
+        "import",
+        "items",
+        "list",
+        "module",
+        "name",
+        "named",
+        "namespace",
+        "opens",
+        "path",
+        "provides",
+        "relative",
+        "requires",
+        "spec",
+        "static",
+        "uses",
+        "wildcard",
+    }
+)
+
+COMMENT_CAPTURES = frozenset({"comment.line", "comment.doc"})
+
+_CAPTURE_PATTERN = re.compile(r"@([A-Za-z_0-9.]+)")
+
+
+def capture_parts(name: str) -> tuple[str, ...]:
+    return tuple(name.split("."))
+
+
+def is_entity_root(name: str) -> bool:
+    parts = capture_parts(name)
+    return len(parts) == 2 and parts[0] == "entity" and parts[1] in ENTITY_CATEGORIES
+
+
+def is_signature_capture(name: str) -> bool:
+    parts = capture_parts(name)
+    return (
+        len(parts) == 4
+        and parts[0] == "entity"
+        and parts[2] == "signature"
+        and parts[3] in SIGNATURE_ROLES
+    )
+
+
+def _check_entity(parts: tuple[str, ...]) -> bool:
+    if len(parts) < 2 or parts[1] not in ENTITY_CATEGORIES:
+        return False
+    if len(parts) == 2:
+        return True
+    if len(parts) == 3:
+        return parts[2] in ENTITY_ROLES
+    if len(parts) == 4:
+        if parts[2] == "signature":
+            return parts[3] in SIGNATURE_ROLES
+        return parts[2] in ("call", "type") and parts[3] in ENTITY_ROLES
+    return False
+
+
+def _check_call(parts: tuple[str, ...]) -> bool:
+    return (
+        2 <= len(parts) <= 4
+        and parts[1] in CALL_CATEGORIES
+        and all(part in CALL_ROLES for part in parts[2:])
+    )
+
+
+def _check_dependency(parts: tuple[str, ...]) -> bool:
+    return (
+        2 <= len(parts) <= 4
+        and parts[1] in DEPENDENCY_CATEGORIES
+        and all(part in DEPENDENCY_ROLES for part in parts[2:])
+    )
+
+
+def is_known_capture(name: str) -> bool:
+    parts = capture_parts(name)
+    if not parts or len(parts) > 4:
+        return False
+    domain = parts[0]
+    if domain == "entity":
+        return _check_entity(parts)
+    if domain == "call":
+        return _check_call(parts)
+    if domain == "dependency":
+        return _check_dependency(parts)
+    if domain == "comment":
+        return name in COMMENT_CAPTURES
+    return False
+
+
+def validate_names(names) -> None:
+    unknown = sorted({name for name in names if not is_known_capture(name)})
+    if unknown:
+        raise ValueError(f"unknown captures: {', '.join('@' + n for n in unknown)}")
+
+
+def capture_names(language: str) -> set[str]:
+    found: set[str] = set()
+    for text in texts(language).values():
+        found.update(_CAPTURE_PATTERN.findall(text))
+    return found
+
+
+def validate_captures(language: str) -> None:
+    names = capture_names(language)
+    try:
+        validate_names(names)
+    except ValueError as exc:
+        raise ValueError(f"{language}: {exc}") from exc
+    from libref.astminer.rules import entities as _entities
+
+    handled = _entities.handled_entity_roots()
+    unhandled = sorted(
+        name for name in names if is_entity_root(name) and name not in handled
+    )
+    if unhandled:
+        raise ValueError(
+            f"{language}: entity roots without selection rule: "
+            + ", ".join("@" + name for name in unhandled)
+        )
+
 
 _MODULES = {
     "python": _python,

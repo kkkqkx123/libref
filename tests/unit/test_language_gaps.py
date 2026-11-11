@@ -182,15 +182,14 @@ def test_csharp_file_scoped_namespace_shape() -> None:
     assert by_qual["A.B.C.M"].kind == "method"
 
 
-def test_jsx_component_call_extracted() -> None:
+def test_jsx_component_yields_no_calls() -> None:
     decls, _aliases, raw = ast_engine.extract_file(
         "A.jsx",
         ast_config.JAVASCRIPT_CONFIG,
         b"function App(){ return <MyComp prop={1} />; }\n",
     )
     assert decls, "jsx file must still yield declarations"
-    by_raw = {c.raw_callee: c for c in raw}
-    assert by_raw["MyComp"].caller == "A.App"
+    assert raw == []
 
 
 def test_java_package_claim_over_path() -> None:

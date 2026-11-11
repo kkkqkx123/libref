@@ -46,7 +46,7 @@ def entity_query() -> str:
     name: (identifier) @entity.field.name)) @entity.field
 
 (local_variable_declaration
-  type: (_) @entity.variable.type
+  type: (_) @entity.variable.type @entity.variable.signature.type
   declarator: (variable_declarator
     name: (identifier) @entity.variable.name)) @entity.variable
 

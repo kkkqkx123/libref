@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+from dataclasses import dataclass, field
 from typing import Any
 
 from tree_sitter import Parser, Query, QueryCursor
@@ -12,7 +13,7 @@ from libref.astminer import rules as _rules
 from libref.astminer.config import LanguageConfig, grammar_fingerprint, load_language
 from libref.astminer.context import determine_module_path
 from libref.astminer.models import ApiDeclRecord, RawCall
-from libref.astminer.rules import normalize_owner_text
+from libref.astminer.rules import CapturedItem, normalize_owner_text
 
 _parsers: dict[str, tuple[str, Parser]] = {}
 
@@ -21,6 +22,36 @@ _compiled: dict[str, dict[str, Query]] = {}
 _CLASS_LIKE = frozenset(
     {"class", "interface", "enum", "record", "annotation", "struct", "union"}
 )
+
+_NON_CALL_ROOTS = frozenset(
+    {
+        "jsx_opening_element",
+        "jsx_self_closing_element",
+        "explicit_constructor_invocation",
+    }
+)
+
+
+@dataclass
+class _Entity:
+    """Assembly-stage entity: semantic identity resolved before record emit."""
+
+    node: Any
+    kind: str
+    name: str
+    items: list[CapturedItem] = field(default_factory=list)
+    owner: str = ""
+    file_scoped: bool = False
+    parent: str | None = None
+    depth: int = 0
+    signature: str = ""
+    params: list[str] = field(default_factory=list)
+    param_types: list[str] = field(default_factory=list)
+    return_type: str = ""
+    bases: list[str] = field(default_factory=list)
+    has_doc: bool = False
+    span_override: tuple[int, int, int, int] | None = None
+    impl_anchors: list[tuple[int, int, str]] = field(default_factory=list)
 
 
 def get_parser(cfg: LanguageConfig) -> Parser:
@@ -52,11 +83,13 @@ def node_text(node, source: bytes) -> str:
     return _rules.slice_text(node, source)
 
 
-def _largest(captures: dict[str, list]) -> tuple[str, Any] | None:
+def _largest_valid(captures: dict[str, list]) -> tuple[str, Any] | None:
     best: tuple[str, Any] | None = None
     best_size = -1
     for name, nodes in captures.items():
         for node in nodes:
+            if _rules.is_phantom(node):
+                continue
             size = node.end_byte - node.start_byte
             if size > best_size:
                 best_size = size
@@ -64,53 +97,21 @@ def _largest(captures: dict[str, list]) -> tuple[str, Any] | None:
     return best
 
 
-def _merge_matches(matches: list) -> list[tuple[Any, dict[str, list]]]:
-    merged: dict[tuple[int, int], tuple[Any, dict[str, list]]] = {}
+def _merge_matches(matches, source: bytes) -> list[tuple[Any, list[CapturedItem]]]:
+    merged: dict[tuple[int, int], tuple[Any, list[CapturedItem]]] = {}
     for _, captures in matches:
-        pick = _largest(captures)
+        pick = _largest_valid(captures)
         if pick is None:
             continue
         _, node = pick
         key = (node.start_byte, node.end_byte)
+        items = _rules.to_items(captures, source)
         slot = merged.get(key)
         if slot is None:
-            merged[key] = (
-                node,
-                {name: list(nodes) for name, nodes in captures.items()},
-            )
+            merged[key] = (node, items)
         else:
-            _, existing = slot
-            for name, nodes in captures.items():
-                existing.setdefault(name, []).extend(nodes)
+            slot[1].extend(items)
     return list(merged.values())
-
-
-def _entity_name(captures: dict[str, list], roots: set[str], source: bytes) -> str:
-    for root in roots:
-        for node in captures.get(f"{root}.name", []):
-            text = _rules.slice_text(node, source).strip()
-            if text:
-                return text
-    for name, nodes in captures.items():
-        if name.endswith(".signature.name") and nodes:
-            text = _rules.slice_text(nodes[0], source).strip()
-            if text:
-                return text
-    for suffix in (".name", ".func"):
-        for name, nodes in captures.items():
-            if name.endswith(suffix) and nodes:
-                text = _rules.slice_text(nodes[0], source).strip()
-                if text:
-                    return text
-    return ""
-
-
-def _decl_bases(captures: dict[str, list], source: bytes) -> list[str]:
-    bases: list[str] = []
-    for text in _rules.all_texts(captures, source, ".signature.base", ".base"):
-        if text not in bases:
-            bases.append(text)
-    return bases
 
 
 def extract_file(
@@ -166,7 +167,7 @@ def _comment_spans(
         for name, nodes in captures.items():
             for node in nodes:
                 span = (node.start_byte, node.end_byte)
-                if name.endswith((".docstring", ".doc")):
+                if name.endswith(".doc"):
                     doc.append(span)
                 elif name.endswith(".line"):
                     line.append(span)
@@ -227,24 +228,38 @@ def _build_decls(
 ) -> list[ApiDeclRecord]:
     doc_spans = list(doc_nodes or [])
     line_spans = list(line_nodes or [])
-    groups = _merge_matches(entity_matches)
-    cands: list[dict] = []
-    impl_anchors: list[tuple[int, int, str]] = []
-    for node, captures in groups:
-        roots = {
-            name
-            for name in captures
-            if name.startswith("entity.") and name.count(".") == 1
-        }
+    entities = _collect_entities(entity_matches, source)
+    anchors = _take_impl_anchors(entities)
+    dep_spans = _dependency_spans(dep_matches, source)
+    _nest_entities(source, entities, module, doc_spans, line_spans)
+    _attach_bases_innermost(entities, dep_spans)
+    _claim_file_scoped(entities, cfg.name)
+    _reparent_by_owner(entities, anchors, module)
+    _merge_partial_decls(entities)
+    return [_emit_record(entity, path) for entity in entities]
+
+
+def _collect_entities(entity_matches, source: bytes) -> list[_Entity]:
+    cands: list[_Entity] = []
+    for node, items in _merge_matches(entity_matches, source):
+        roots = _rules.root_names(items)
         if "entity.impl" in roots:
-            owner_node = _rules.first_node(captures, ".type.name")
+            owner_node = _rules.first_node(items, ".type.name")
             owner = (
                 normalize_owner_text(_rules.slice_text(owner_node, source))
                 if owner_node is not None
                 else ""
             )
             if owner:
-                impl_anchors.append((node.start_byte, node.end_byte, owner))
+                cands.append(
+                    _Entity(
+                        node=node,
+                        kind="",
+                        name="",
+                        items=[],
+                        impl_anchors=[(node.start_byte, node.end_byte, owner)],
+                    )
+                )
             continue
         kinds = {
             kind
@@ -262,129 +277,151 @@ def _build_decls(
                 if child.type == "enum":
                     kind = "enum"
                     break
-        name = _entity_name(captures, roots, source)
+        name = _rules.extract_entity_name(items, roots)
         if not name:
             continue
-        owner_node = _rules.first_node(captures, ".owner", ".receiver")
+        owner_node = _rules.first_node(items, ".owner", ".receiver")
         owner = (
             normalize_owner_text(_rules.slice_text(owner_node, source))
             if owner_node is not None
             else ""
         )
         cands.append(
-            {
-                "node": node,
-                "kind": kind,
-                "name": name,
-                "captures": captures,
-                "owner": owner,
-                "file_scoped": any(
-                    capture == "entity.package.file_scoped" for capture in captures
+            _Entity(
+                node=node,
+                kind=kind,
+                name=name,
+                items=items,
+                owner=owner,
+                file_scoped=any(
+                    item.name == "entity.package.file_scoped" for item in items
                 ),
-            }
+            )
         )
-    cands.sort(key=lambda c: (c["node"].start_byte, -c["node"].end_byte))
+    cands.sort(key=lambda c: (c.node.start_byte, -c.node.end_byte))
+    return cands
+
+
+def _take_impl_anchors(entities: list[_Entity]) -> list[tuple[int, int, str]]:
+    anchors: list[tuple[int, int, str]] = []
+    kept = [entity for entity in entities if entity.kind]
+    for entity in entities:
+        anchors.extend(entity.impl_anchors)
+    entities[:] = kept
+    return anchors
+
+
+def _dependency_spans(dep_matches, source: bytes) -> list[tuple[int, int, str]]:
     dep_spans: list[tuple[int, int, str]] = []
-    for node, captures in _merge_matches(dep_matches):
-        for suffix in (".extend.name", ".implement.name"):
-            for name, nodes in captures.items():
-                if name.endswith(suffix):
-                    for dep_node in nodes:
-                        text = _rules.generic_dotted(dep_node, source).strip()
-                        if text:
-                            dep_spans.append(
-                                (dep_node.start_byte, dep_node.end_byte, text)
-                            )
+    for _, items in _merge_matches(dep_matches, source):
+        for item in items:
+            if item.name.endswith((".extend.name", ".implement.name")) and (
+                item.node is not None
+            ):
+                text = _rules.generic_dotted(item.node, source).strip()
+                if text:
+                    dep_spans.append((item.start_byte, item.end_byte, text))
     dep_spans.sort()
-    decls: list[ApiDeclRecord] = []
-    decl_nodes: list = []
-    stack: list[ApiDeclRecord] = []
-    for cand in cands:
-        node = cand["node"]
+    return dep_spans
+
+
+def _nest_entities(source, entities, module, doc_spans, line_spans) -> None:
+    stack: list[_Entity] = []
+    for entity in entities:
+        node = entity.node
         while stack and not (
-            stack[-1].start_byte <= node.start_byte
-            and node.end_byte <= stack[-1].end_byte
+            stack[-1].node.start_byte <= node.start_byte
+            and node.end_byte <= stack[-1].node.end_byte
         ):
             stack.pop()
-        parent = stack[-1].qualified_name if stack else None
-        depth = len(stack)
-        kind = cand["kind"]
-        if kind == "function" and stack and stack[-1].kind in _CLASS_LIKE:
-            kind = "method"
-        if kind == "package" and parent is None:
-            qual = cand["name"]
-        elif parent:
-            qual = f"{parent}.{cand['name']}"
-        elif module and (module == cand["name"] or module.endswith("." + cand["name"])):
+        parent = stack[-1] if stack else None
+        entity.parent = parent.name if parent is not None else None
+        entity.depth = len(stack)
+        if (
+            entity.kind == "function"
+            and parent is not None
+            and parent.kind in _CLASS_LIKE
+        ):
+            entity.kind = "method"
+        if entity.kind == "package" and parent is None:
+            qual = entity.name
+        elif parent is not None:
+            qual = f"{parent.name}.{entity.name}"
+        elif module and (module == entity.name or module.endswith("." + entity.name)):
             qual = module
         elif module:
-            qual = f"{module}.{cand['name']}"
+            qual = f"{module}.{entity.name}"
         else:
-            qual = cand["name"]
-        captures = cand["captures"]
-        body = _rules.first_node(captures, ".body")
-        if body is not None:
-            signature = (
-                source[node.start_byte : body.start_byte]
-                .decode("utf-8", "replace")
-                .strip()
-            )
-        else:
-            signature = _rules.slice_text(node, source).strip()
-        params_node = _rules.first_node(captures, ".params", ".signature.params")
-        params = (
+            qual = entity.name
+        entity.name = qual
+        body = _rules.first_node(entity.items, ".body")
+        roots = _rules.root_names(entity.items)
+        entity.signature = _rules.compose_signature(
+            entity.items,
+            source,
+            node.start_byte,
+            node.end_byte,
+            body.start_byte if body is not None else None,
+            _rules.roots_expect_body(roots),
+        )
+        params_node = _rules.first_node(entity.items, ".params", ".signature.params")
+        entity.params = (
             _rules.params_from_params_node(params_node, source)
             if params_node is not None
             else []
         )
-        param_types = (
+        entity.param_types = (
             _rules.param_types_from_params_node(params_node, source)
             if params_node is not None
             else []
         )
         return_node = _rules.first_node(
-            captures, ".return_type", ".signature.return_type"
+            entity.items, ".return_type", ".signature.return_type"
         )
-        return_type = _rules.shaped_return(return_node, source)
-        bases = _decl_bases(captures, source)
-        decl_nodes.append(node)
-        decls.append(
-            ApiDeclRecord(
-                qualified_name=qual,
-                kind=kind,
-                file=path,
-                line_start=node.start_point[0] + 1,
-                line_end=node.end_point[0] + 1,
-                start_byte=node.start_byte,
-                end_byte=node.end_byte,
-                signature=signature,
-                params=params,
-                param_types=param_types,
-                return_type=return_type,
-                bases=bases,
-                parent=parent,
-                depth=depth,
-                has_doc=_has_doc(node, body, source, doc_spans, line_spans),
-            )
-        )
-        stack.append(decls[-1])
-    _attach_bases_innermost(decls, decl_nodes, dep_spans)
-    _claim_file_scoped(decls, cands, cfg.name)
-    _reparent_by_owner(decls, cands, impl_anchors, module)
-    _merge_partial_decls(decls)
-    return decls
+        entity.return_type = _rules.shaped_return(return_node, source)
+        entity.bases = _rules.extract_bases(entity.items)
+        entity.has_doc = _has_doc(node, body, source, doc_spans, line_spans)
+        stack.append(entity)
 
 
-def _attach_bases_innermost(decls, decl_nodes, dep_spans) -> None:
+def _emit_record(entity: _Entity, path: str) -> ApiDeclRecord:
+    node = entity.node
+    start, end = node.start_byte, node.end_byte
+    line_start, line_end = node.start_point[0] + 1, node.end_point[0] + 1
+    if entity.span_override is not None:
+        start, end, line_start, line_end = entity.span_override
+    return ApiDeclRecord(
+        qualified_name=entity.name,
+        kind=entity.kind,
+        file=path,
+        line_start=line_start,
+        line_end=line_end,
+        start_byte=start,
+        end_byte=end,
+        signature=entity.signature,
+        params=entity.params,
+        param_types=entity.param_types,
+        return_type=entity.return_type,
+        bases=entity.bases,
+        parent=entity.parent,
+        depth=entity.depth,
+        has_doc=entity.has_doc,
+    )
+
+
+def _attach_bases_innermost(
+    entities: list[_Entity], dep_spans: list[tuple[int, int, str]]
+) -> None:
     for start, end, text in dep_spans:
-        best: ApiDeclRecord | None = None
+        best: _Entity | None = None
         best_size: int | None = None
-        for decl, dnode in zip(decls, decl_nodes):
-            if not (dnode.start_byte <= start and end <= dnode.end_byte):
+        for entity in entities:
+            node = entity.node
+            if not (node.start_byte <= start and end <= node.end_byte):
                 continue
-            size = dnode.end_byte - dnode.start_byte
+            size = node.end_byte - node.start_byte
             if best is None or (best_size is not None and size < best_size):
-                best, best_size = decl, size
+                best, best_size = entity, size
         if best is not None and text not in best.bases:
             best.bases.append(text)
 
@@ -396,44 +433,53 @@ _PACKAGE_CLAIM_LANGUAGES = frozenset(
 _PARTIAL_MERGE_KINDS = frozenset({"class", "interface", "struct", "record", "enum"})
 
 
-def _merge_partial_decls(decls: list[ApiDeclRecord]) -> None:
+def _merge_partial_decls(entities: list[_Entity]) -> None:
     first_at: dict[tuple[str | None, str], int] = {}
     drop: set[int] = set()
-    for index, decl in enumerate(decls):
-        if decl.kind not in _PARTIAL_MERGE_KINDS:
+    for index, entity in enumerate(entities):
+        if entity.kind not in _PARTIAL_MERGE_KINDS:
             continue
-        key = (decl.parent, decl.qualified_name)
+        key = (entity.parent, entity.name)
         prev = first_at.get(key)
         if prev is None:
             first_at[key] = index
             continue
-        anchor = decls[prev]
-        anchor.start_byte = min(anchor.start_byte, decl.start_byte)
-        anchor.end_byte = max(anchor.end_byte, decl.end_byte)
-        anchor.line_start = min(anchor.line_start, decl.line_start)
-        anchor.line_end = max(anchor.line_end, decl.line_end)
-        for base in decl.bases:
+        anchor = entities[prev]
+        anchor_start, anchor_end = (
+            anchor.span_override[:2]
+            if anchor.span_override is not None
+            else (anchor.node.start_byte, anchor.node.end_byte)
+        )
+        anchor_lines = (
+            anchor.span_override[2:]
+            if anchor.span_override is not None
+            else (anchor.node.start_point[0] + 1, anchor.node.end_point[0] + 1)
+        )
+        start = min(anchor_start, entity.node.start_byte)
+        end = max(anchor_end, entity.node.end_byte)
+        line_start = min(anchor_lines[0], entity.node.start_point[0] + 1)
+        line_end = max(anchor_lines[1], entity.node.end_point[0] + 1)
+        anchor.span_override = (start, end, line_start, line_end)
+        for base in entity.bases:
             if base not in anchor.bases:
                 anchor.bases.append(base)
-        anchor.has_doc = anchor.has_doc or decl.has_doc
-        if not anchor.signature and decl.signature:
-            anchor.signature = decl.signature
+        anchor.has_doc = anchor.has_doc or entity.has_doc
+        if not anchor.signature and entity.signature:
+            anchor.signature = entity.signature
         drop.add(index)
     for index in sorted(drop, reverse=True):
-        del decls[index]
+        del entities[index]
 
 
-def _claim_file_scoped(
-    decls: list[ApiDeclRecord], cands: list[dict], language: str | None = None
-) -> None:
+def _claim_file_scoped(entities: list[_Entity], language: str | None = None) -> None:
     owners = [
-        decl
-        for decl, cand in zip(decls, cands)
-        if cand.get("file_scoped") and decl.parent is None
+        entity for entity in entities if entity.file_scoped and entity.parent is None
     ]
     if not owners and language in _PACKAGE_CLAIM_LANGUAGES:
         packages = [
-            decl for decl in decls if decl.kind == "package" and decl.parent is None
+            entity
+            for entity in entities
+            if entity.kind == "package" and entity.parent is None
         ]
         if len(packages) == 1:
             owners = packages
@@ -441,51 +487,50 @@ def _claim_file_scoped(
         return
     owner = owners[0]
     renamed: dict[str, str] = {}
-    for decl in decls:
-        if decl is owner or decl.parent is not None:
+    for entity in entities:
+        if entity is owner or entity.parent is not None:
             continue
-        old = decl.qualified_name
+        old = entity.name
         short = old.rpartition(".")[2] or old
-        decl.parent = owner.qualified_name
-        decl.qualified_name = f"{owner.qualified_name}.{short}"
-        decl.depth = owner.depth + 1
-        renamed[old] = decl.qualified_name
-    for decl in decls:
-        if decl.parent in renamed:
-            decl.parent = renamed[decl.parent]
-            old = decl.qualified_name
+        entity.parent = owner.name
+        entity.name = f"{owner.name}.{short}"
+        entity.depth = owner.depth + 1
+        renamed[old] = entity.name
+    for entity in entities:
+        if entity.parent in renamed:
+            entity.parent = renamed[entity.parent]
+            old = entity.name
             short = old.rpartition(".")[2] or old
-            decl.qualified_name = f"{decl.parent}.{short}"
-            renamed[old] = decl.qualified_name
+            entity.name = f"{entity.parent}.{short}"
+            renamed[old] = entity.name
 
 
 def _reparent_by_owner(
-    decls: list[ApiDeclRecord],
-    cands: list[dict],
+    entities: list[_Entity],
     impl_anchors: list[tuple[int, int, str]],
     module: str | None,
 ) -> None:
     depth_by_qual: dict[str, int] = {}
-    for decl in decls:
-        depth_by_qual.setdefault(decl.qualified_name, decl.depth)
-    for decl, cand in zip(decls, cands):
-        if decl.kind not in ("function", "method"):
+    for entity in entities:
+        depth_by_qual.setdefault(entity.name, entity.depth)
+    for entity in entities:
+        if entity.kind not in ("function", "method"):
             continue
-        owner = cand.get("owner") or ""
+        owner = entity.owner or ""
         if not owner and impl_anchors:
             for start, end, anchor_owner in impl_anchors:
-                if start <= decl.start_byte and decl.end_byte <= end:
+                if start <= entity.node.start_byte and entity.node.end_byte <= end:
                     owner = anchor_owner
                     break
         if not owner:
             continue
         base = f"{module}.{owner}" if module else owner
-        name = decl.qualified_name.rpartition(".")[2] or decl.qualified_name
-        decl.parent = base
-        decl.qualified_name = f"{base}.{name}"
-        decl.depth = depth_by_qual.get(base, 0) + 1
-        if decl.kind == "function":
-            decl.kind = "method"
+        short = entity.name.rpartition(".")[2] or entity.name
+        entity.parent = base
+        entity.name = f"{base}.{short}"
+        entity.depth = depth_by_qual.get(base, 0) + 1
+        if entity.kind == "function":
+            entity.kind = "method"
 
 
 def _build_aliases(
@@ -496,67 +541,29 @@ def _build_aliases(
     importer_file: str | None = None,
 ) -> list[tuple[str, str]]:
     aliases: list[tuple[str, str]] = []
-    for node, captures in _merge_matches(dep_matches):
+    for node, items in _merge_matches(dep_matches, source):
         for alias, full in _rules.build_aliases(
-            cfg.name, node, captures, source, module, importer_file
+            cfg.name, node, items, source, module, importer_file
         ):
             if alias and full:
                 aliases.append((alias, full))
     return aliases
 
 
-def _call_texts(
-    root, captures: dict[str, list], source: bytes
-) -> tuple[str, str | None, str]:
-    obj_node = _rules.first_node(captures, ".object", ".from")
-    func_node = _rules.first_node(captures, ".function", ".name", ".to")
-    receiver = None
-    if obj_node is not None:
-        receiver = _rules.generic_dotted(obj_node, source).strip() or None
-    func = ""
-    if func_node is not None:
-        if func_node.type == "identifier":
-            func = _rules.slice_text(func_node, source).strip()
-        else:
-            func = _rules.generic_dotted(func_node, source).strip()
-    if not func:
-        fn = root.child_by_field_name("function")
-        if fn is None:
-            fn = root.child_by_field_name("name")
-        if fn is not None:
-            func = _rules.generic_dotted(fn, source).strip()
-            recv_node = root.child_by_field_name("object")
-            if recv_node is not None and receiver is None:
-                receiver = _rules.generic_dotted(recv_node, source).strip() or None
-    if not func:
-        for child in root.children:
-            if child.type == "identifier":
-                func = _rules.slice_text(child, source).strip()
-                break
-    if receiver and func:
-        return f"{receiver}.{func}", receiver, func
-    if func and receiver is not None and "." in func:
-        head, _, _ = func.rpartition(".")
-        return func, head or None, func
-    if func and receiver is None and "." in func:
-        head, _, tail = func.rpartition(".")
-        if head and tail and "(" not in func and ")" not in func:
-            return func, head, tail
-    return func, receiver, func
-
-
 def _build_calls(path, cfg, source, call_matches, decls) -> list[RawCall]:
-    groups = _merge_matches(call_matches)
+    groups = _merge_matches(call_matches, source)
     calls: list[RawCall] = []
-    for node, captures in groups:
+    for node, items in groups:
+        if node.type in _NON_CALL_ROOTS:
+            continue
         if node.type not in _rules.CALL_NODE_TYPES:
             continue
         if _is_module_loader(node, source):
             continue
-        raw, receiver, func = _call_texts(node, captures, source)
+        raw, receiver, func = _rules.extract_call_parts(items, node, source)
         if not raw:
             continue
-        args_node = _rules.first_node(captures, ".arguments")
+        args_node = _rules.first_node(items, ".arguments")
         if args_node is None:
             args_node = node.child_by_field_name("arguments")
         if args_node is None:

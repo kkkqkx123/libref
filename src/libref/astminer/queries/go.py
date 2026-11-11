@@ -56,7 +56,7 @@ def entity_query() -> str:
 (var_declaration
   (var_spec
     name: (identifier) @entity.variable.name
-    type: (_)? @entity.variable.type
+    type: (_)? @entity.variable.type @entity.variable.signature.type
     value: (_)? @entity.variable.value)) @entity.variable
 
 (short_var_declaration
@@ -67,7 +67,7 @@ def entity_query() -> str:
 (const_declaration
   (const_spec
     name: (identifier) @entity.variable.name
-    type: (_)? @entity.variable.type
+    type: (_)? @entity.variable.type @entity.variable.signature.type
     value: (_)? @entity.variable.value)) @entity.variable
 
 (for_statement

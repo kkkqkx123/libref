@@ -90,7 +90,7 @@ def entity_query() -> str:
 
 (local_declaration_statement
   (variable_declaration
-    type: (_) @entity.variable.type
+    type: (_) @entity.variable.type @entity.variable.signature.type
     (variable_declarator
       (identifier) @entity.variable.name
       (_)? @entity.variable.value))) @entity.variable
@@ -113,7 +113,7 @@ def entity_query() -> str:
 
 (argument
   (declaration_expression
-    type: (_) @entity.variable.type
+    type: (_) @entity.variable.type @entity.variable.signature.type
     name: (identifier) @entity.variable.name) @entity.variable) @entity.variable
 """
 

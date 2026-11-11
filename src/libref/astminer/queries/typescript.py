@@ -153,12 +153,6 @@ def call_query() -> str:
     property: (property_identifier) @call.method.chained.to)
   arguments: (arguments)? @call.method.arguments) @call.method.chained
 
-(jsx_opening_element
-  [(identifier) (member_expression)] @call.jsx.name) @call.jsx
-
-(jsx_self_closing_element
-  [(identifier) (member_expression)] @call.jsx.name) @call.jsx
-
 (new_expression
   constructor: (_) @call.constructor.name
   arguments: (arguments)? @call.constructor.arguments) @call.constructor

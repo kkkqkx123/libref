@@ -150,3 +150,4 @@ def check_config(cfg: LanguageConfig) -> None:
 
     for kind in _queries.KINDS:
         Query(language, _queries.get(cfg.name, kind))
+    _queries.validate_captures(cfg.name)

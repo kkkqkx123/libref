@@ -32,7 +32,9 @@ def test_python_decorated_and_async_shapes(monkeypatch, tmp_path):
     decls, _aliases, raw = ast_engine.extract_file("m.py", cfg, source)
     by_qual = {d.qualified_name: d for d in decls}
     assert "m.fetch" in by_qual
-    assert by_qual["m.fetch"].signature.startswith("async def fetch")
+    signature = by_qual["m.fetch"].signature
+    assert "fetch" in signature and "url" in signature
+    assert "@" not in signature and "await get" not in signature
     assert "url" in by_qual["m.fetch"].params
     assert {c.raw_callee for c in raw} == {"functools.lru_cache", "get"}
 
@@ -339,3 +341,15 @@ def test_go_import_prefix_normalization(monkeypatch, tmp_path):
         == "example.com.demo"
     )
     assert ast_rules.normalize_go_import("fmt", "") == "fmt"
+
+
+def test_capture_contract_accepts_all_languages(monkeypatch, tmp_path):
+    for cfg in ast_config.LANGUAGE_CONFIGS.values():
+        ast_queries.validate_captures(cfg.name)
+
+
+def test_capture_contract_rejects_unknown_name(monkeypatch, tmp_path):
+    import pytest
+
+    with pytest.raises(ValueError):
+        ast_queries.validate_names(["entity.function.name", "entity.funciton.name"])

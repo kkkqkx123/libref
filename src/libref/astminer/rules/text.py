@@ -4,6 +4,47 @@ from __future__ import annotations
 
 from typing import Any
 
+MAX_SIGNATURE_LEN = 500
+
+_signature_missing_count = 0
+
+
+def signature_missing_count() -> int:
+    return _signature_missing_count
+
+
+def compose_signature(
+    items,
+    source: bytes,
+    main_start: int,
+    main_end: int,
+    body_start: int | None = None,
+    expect_body: bool = False,
+) -> str:
+    global _signature_missing_count
+    from libref.astminer import queries as _queries
+
+    parts = sorted(
+        (item for item in items if _queries.is_signature_capture(item.name)),
+        key=lambda item: item.start_byte,
+    )
+    composed = " ".join(item.text for item in parts if item.text)
+    if composed:
+        return composed
+    if body_start is not None and main_start < body_start < main_end:
+        header = source[main_start:body_start].decode("utf-8", "replace").strip()
+        if header:
+            return header
+        return ""
+    if expect_body:
+        _signature_missing_count += 1
+        return ""
+    fallback = source[main_start:main_end].decode("utf-8", "replace").strip()
+    if len(fallback) > MAX_SIGNATURE_LEN:
+        fallback = fallback[:MAX_SIGNATURE_LEN]
+    return fallback
+
+
 CALL_NODE_TYPES = frozenset(
     {
         "call",

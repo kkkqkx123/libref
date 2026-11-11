@@ -13,25 +13,25 @@ _RUST_STDLIB_HEADS = frozenset({"std", "core", "alloc"})
 def build_aliases(
     language: str,
     root: Any,
-    captures: dict[str, list],
+    items: list,
     source: bytes,
     current_module: str | None = None,
     importer_file: str | None = None,
 ) -> list[tuple[str, str]]:
     if language == "python":
-        return _python_aliases(root, captures, source, current_module)
+        return _python_aliases(root, items, source, current_module)
     if language == "java":
         return _java_aliases(root, source)
     if language == "javascript":
-        return _javascript_aliases(root, captures, source, importer_file)
+        return _javascript_aliases(root, items, source, importer_file)
     if language == "typescript":
-        return _javascript_aliases(root, captures, source, importer_file)
+        return _javascript_aliases(root, items, source, importer_file)
     if language == "rust":
-        return _rust_aliases(root, captures, source, current_module)
+        return _rust_aliases(root, items, source, current_module)
     if language == "go":
-        return _go_aliases(root, captures, source)
+        return _go_aliases(root, items, source)
     if language == "csharp":
-        return _csharp_aliases(root, captures, source)
+        return _csharp_aliases(root, items, source)
     if language == "kotlin":
         return _kotlin_aliases(root, source)
     if language == "groovy":
@@ -39,15 +39,13 @@ def build_aliases(
     return []
 
 
-def _csharp_aliases(
-    root: Any, captures: dict[str, list], source: bytes
-) -> list[tuple[str, str]]:
+def _csharp_aliases(root: Any, items: list, source: bytes) -> list[tuple[str, str]]:
     if root.type != "using_directive":
         return []
-    alias_node = first_node(captures, ".using.alias.name")
+    alias_node = first_node(items, ".using.alias.name")
     if alias_node is not None:
         alias = slice_text(alias_node, source).strip()
-        path_node = first_node(captures, ".using.alias.path")
+        path_node = first_node(items, ".using.alias.path")
         if path_node is None:
             for child in root.children:
                 if (
@@ -79,12 +77,10 @@ def _csharp_aliases(
     return [(alias, full)]
 
 
-def _go_aliases(
-    root: Any, captures: dict[str, list], source: bytes
-) -> list[tuple[str, str]]:
+def _go_aliases(root: Any, items: list, source: bytes) -> list[tuple[str, str]]:
     if root.type != "import_spec":
         return []
-    path_node = first_node(captures, ".import.alias.path", ".import.path")
+    path_node = first_node(items, ".import.alias.path", ".import.path")
     if path_node is None:
         return []
     raw_path = slice_text(path_node, source).strip().strip("\"'")
@@ -94,7 +90,7 @@ def _go_aliases(
     head = raw_path.split("/")[0]
     if "." not in head:
         return []
-    name_node = first_node(captures, ".import.alias.name")
+    name_node = first_node(items, ".import.alias.name")
     if name_node is not None:
         name = slice_text(name_node, source).strip()
         if (
@@ -145,7 +141,7 @@ def _java_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:
 
 def _javascript_aliases(
     root: Any,
-    captures: dict[str, list],
+    items: list,
     source: bytes,
     importer_file: str | None = None,
 ) -> list[tuple[str, str]]:
@@ -154,8 +150,8 @@ def _javascript_aliases(
 
         return normalize_js_specifier(raw_mod, importer_file)
 
-    dyn_name = first_node(captures, ".import.dynamic.name")
-    dyn_module = first_node(captures, ".import.dynamic.module")
+    dyn_name = first_node(items, ".import.dynamic.name")
+    dyn_module = first_node(items, ".import.dynamic.module")
     if root.type == "variable_declarator" and dyn_name is not None:
         mod = (
             _normalized(_module_path(dyn_module, source))
@@ -166,8 +162,8 @@ def _javascript_aliases(
         if name and mod:
             return [(name, mod)]
         return []
-    req_name = first_node(captures, ".require.name")
-    req_module = first_node(captures, ".require.module")
+    req_name = first_node(items, ".require.name")
+    req_module = first_node(items, ".require.module")
     if root.type == "import_statement" and req_name is not None:
         mod = (
             _normalized(_module_path(req_module, source))
@@ -179,78 +175,74 @@ def _javascript_aliases(
             return [(name, mod)]
         return []
     if root.type == "export_statement":
-        module = first_node(captures, ".export.module")
+        module = first_node(items, ".export.module")
         if module is None:
             return []
         mod = _normalized(_module_path(module, source))
         if not mod:
             return []
         reexported: list[tuple[str, str]] = []
-        for name, nodes in captures.items():
-            if not name.endswith(".export.spec"):
+        for item in items:
+            if not item.name.endswith(".export.spec") or item.node is None:
                 continue
-            for spec in nodes:
-                idents = [
-                    slice_text(child, source).strip()
-                    for child in spec.children
-                    if child.type == "identifier"
-                ]
-                idents = [text for text in idents if text]
-                if not idents:
-                    continue
-                original = idents[0]
-                alias = idents[1] if len(idents) > 1 else original
-                reexported.append((alias, f"{mod}.{original}"))
+            spec = item.node
+            idents = [
+                slice_text(child, source).strip()
+                for child in spec.children
+                if child.type == "identifier"
+            ]
+            idents = [text for text in idents if text]
+            if not idents:
+                continue
+            original = idents[0]
+            alias = idents[1] if len(idents) > 1 else original
+            reexported.append((alias, f"{mod}.{original}"))
         return [(alias, full) for alias, full in reexported if alias and full]
-    module = first_node(captures, ".import.module")
+    module = first_node(items, ".import.module")
     if root.type == "import_statement" and module is not None:
         mod = _normalized(_module_path(module, source))
         found: list[tuple[str, str]] = []
-        default = first_node(captures, ".default.name")
+        default = first_node(items, ".default.name")
         if default is not None:
             name = slice_text(default, source).strip()
             if name:
                 found.append((name, mod))
-        for name, nodes in captures.items():
-            if not name.endswith(".named.spec"):
+        for item in items:
+            if not item.name.endswith(".named.spec") or item.node is None:
                 continue
-            for spec in nodes:
-                orig_node = spec.child_by_field_name("name")
-                alias_node = spec.child_by_field_name("alias")
-                original = (
-                    slice_text(orig_node, source).strip()
-                    if orig_node is not None
-                    else ""
-                )
-                alias = (
-                    slice_text(alias_node, source).strip()
-                    if alias_node is not None
-                    else ""
-                )
-                if original:
-                    full = f"{mod}.{original}" if mod else original
-                    found.append((alias or original, full))
-        namespace = first_node(captures, ".namespace.name")
+            spec = item.node
+            orig_node = spec.child_by_field_name("name")
+            alias_node = spec.child_by_field_name("alias")
+            original = (
+                slice_text(orig_node, source).strip() if orig_node is not None else ""
+            )
+            alias = (
+                slice_text(alias_node, source).strip() if alias_node is not None else ""
+            )
+            if original:
+                full = f"{mod}.{original}" if mod else original
+                found.append((alias or original, full))
+        namespace = first_node(items, ".namespace.name")
         if namespace is not None:
             name = slice_text(namespace, source).strip()
             if name:
                 found.append((name, mod))
         return [(alias, full) for alias, full in found if alias and full]
     if root.type == "variable_declarator":
-        callee = first_node(captures, ".require.callee")
+        callee = first_node(items, ".require.callee")
         if callee is None or slice_text(callee, source).strip() != "require":
             return []
-        module = first_node(captures, ".require.module")
+        module = first_node(items, ".require.module")
         if module is None:
             return []
         mod = _normalized(_module_path(module, source))
         if not mod:
             return []
-        name_node = first_node(captures, ".require.name")
+        name_node = first_node(items, ".require.name")
         if name_node is not None:
             name = slice_text(name_node, source).strip()
             return [(name, mod)] if name else []
-        destruct = first_node(captures, ".require.destruct")
+        destruct = first_node(items, ".require.destruct")
         if destruct is None:
             return []
         found = []
@@ -284,35 +276,36 @@ def _module_path(node: Any, source: bytes) -> str:
 
 def _python_aliases(
     root: Any,
-    captures: dict[str, list],
+    items: list,
     source: bytes,
     current_module: str | None = None,
 ) -> list[tuple[str, str]]:
     if root.type == "import_statement":
-        alias_node = first_node(captures, ".alias.name")
+        alias_node = first_node(items, ".alias.name")
         if alias_node is not None:
-            module = first_node(captures, ".alias.module")
+            module = first_node(items, ".alias.path")
             full = generic_dotted(module, source).strip() if module is not None else ""
             alias = slice_text(alias_node, source).strip()
             if full and alias:
                 return [(alias, full)]
             return []
         found: list[tuple[str, str]] = []
-        for name, nodes in captures.items():
-            if not name.endswith(".module") or ".alias." in name:
+        for item in items:
+            if not item.name.endswith(".module") or ".alias." in item.name:
                 continue
-            for module in nodes:
-                full = generic_dotted(module, source).strip()
-                if full:
-                    found.append((full.split(".")[0], full))
+            if item.node is None:
+                continue
+            full = generic_dotted(item.node, source).strip()
+            if full:
+                found.append((full.split(".")[0], full))
         return found
     if root.type == "import_from_statement":
-        module = first_node(captures, ".from.module")
+        module = first_node(items, ".from.module")
         module_text = ""
         if module is not None:
             module_text = generic_dotted(module, source).strip().strip(".")
         else:
-            relative = first_node(captures, ".relative")
+            relative = first_node(items, ".relative")
             if relative is not None:
                 from libref.astminer.context import resolve_python_relative
 
@@ -383,17 +376,17 @@ def _qualified_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:
 
 def _rust_aliases(
     root: Any,
-    captures: dict[str, list],
+    items: list,
     source: bytes,
     current_module: str | None = None,
 ) -> list[tuple[str, str]]:
     if root.type != "use_declaration":
         return []
-    if first_node(captures, ".use.wildcard") is not None:
+    if first_node(items, ".use.wildcard") is not None:
         return []
-    alias_path = first_node(captures, ".use.alias.path")
+    alias_path = first_node(items, ".use.alias.path")
     if alias_path is not None:
-        alias_node = first_node(captures, ".use.alias.name")
+        alias_node = first_node(items, ".use.alias.name")
         alias = slice_text(alias_node, source).strip() if alias_node is not None else ""
         full = resolve_rust_use_path(
             _rust_path_segments(alias_path, source), current_module
@@ -401,16 +394,16 @@ def _rust_aliases(
         if not alias or not full or full.split(".")[0] in _RUST_STDLIB_HEADS:
             return []
         return [(alias, full)]
-    list_path = first_node(captures, ".use.list.path")
-    items = first_node(captures, ".use.list.items")
-    if list_path is not None and items is not None:
+    list_path = first_node(items, ".use.list.path")
+    list_node = first_node(items, ".use.list.items")
+    if list_path is not None and list_node is not None:
         base = resolve_rust_use_path(
             _rust_path_segments(list_path, source), current_module
         )
         if not base or base.split(".")[0] in _RUST_STDLIB_HEADS:
             return []
         found: list[tuple[str, str]] = []
-        for child in items.children:
+        for child in list_node.children:
             if child.type == "identifier":
                 name = slice_text(child, source).strip()
                 if name:
@@ -427,7 +420,7 @@ def _rust_aliases(
                 if original and alias:
                     found.append((alias, f"{base}.{original}"))
         return found
-    path_node = first_node(captures, ".use.path")
+    path_node = first_node(items, ".use.path")
     if path_node is None:
         return []
     full = resolve_rust_use_path(_rust_path_segments(path_node, source), current_module)

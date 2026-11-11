@@ -1,7 +1,9 @@
-"""Entity selection over capture names."""
+"""Capture conversion and entity selection over capture names."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from libref.astminer.rules.text import generic_dotted, slice_text
@@ -53,6 +55,57 @@ _ENTITY_KIND_BY_ROOT = {
 
 _KIND_PRIORITY = ("method", "function", "constructor")
 
+_BODY_OWNERS = frozenset(
+    {
+        "entity.function",
+        "entity.method",
+        "entity.constructor",
+        "entity.class",
+        "entity.interface",
+        "entity.struct",
+        "entity.enum",
+        "entity.union",
+    }
+)
+
+
+@dataclass
+class CapturedItem:
+    """One capture with text sliced once at conversion time."""
+
+    name: str
+    text: str
+    start_byte: int
+    end_byte: int
+    node: Any = None
+
+
+def to_items(captures: dict[str, list], source: bytes) -> list[CapturedItem]:
+    out: list[CapturedItem] = []
+    for name, nodes in captures.items():
+        for node in nodes:
+            out.append(
+                CapturedItem(
+                    name=name,
+                    text=slice_text(node, source).strip(),
+                    start_byte=node.start_byte,
+                    end_byte=node.end_byte,
+                    node=node,
+                )
+            )
+    return out
+
+
+def is_phantom(node: Any) -> bool:
+    if node.end_byte < node.start_byte:
+        return True
+    try:
+        start_point = node.start_point
+        end_point = node.end_point
+    except AttributeError:
+        return False
+    return end_point < start_point
+
 
 def entity_kind(root_captures: set[str]) -> str | None:
     for root in root_captures:
@@ -70,33 +123,183 @@ def refine_kind(kinds: set[str]) -> str | None:
     return min(kinds) if kinds else None
 
 
-def first_node(captures: dict[str, list], *suffixes: str) -> Any | None:
+def roots_expect_body(roots: set[str]) -> bool:
+    return any(root in _BODY_OWNERS for root in roots)
+
+
+def first_node(items: list[CapturedItem], *suffixes: str) -> Any | None:
     for suffix in suffixes:
-        best: Any | None = None
+        best: CapturedItem | None = None
         best_key: tuple[int, int] | None = None
-        for name, nodes in captures.items():
-            if name.count(".") < 2 or not name.endswith(suffix) or not nodes:
+        for item in items:
+            if item.name.count(".") < 2 or not item.name.endswith(suffix):
                 continue
-            specificity = name.count(".")
-            for node in nodes:
-                span = node.end_byte - node.start_byte
-                key = (specificity, -span)
-                if best_key is None or key > best_key:
-                    best_key = key
-                    best = node
+            specificity = item.name.count(".")
+            span = item.end_byte - item.start_byte
+            key = (specificity, -span)
+            if best_key is None or key > best_key:
+                best_key = key
+                best = item
         if best is not None:
-            return best
+            return best.node
     return None
 
 
-def all_texts(captures: dict[str, list], source: bytes, *suffixes: str) -> list[str]:
-    out: list[str] = []
-    for suffix in suffixes:
-        for name, nodes in captures.items():
-            if name.endswith(suffix):
-                for node in nodes:
-                    out.append(generic_dotted(node, source).strip())
-    return [text for text in out if text]
+def handled_entity_roots() -> set[str]:
+    return set(_ENTITY_KIND_BY_ROOT) | {"entity.impl"}
+
+
+def root_names(items: list[CapturedItem]) -> set[str]:
+    from libref.astminer import queries as _queries
+
+    return {item.name for item in items if _queries.is_entity_root(item.name)}
+
+
+def _name_from_root(items: list[CapturedItem], roots: set[str]) -> str:
+    for root in roots:
+        want = f"{root}.name"
+        for item in items:
+            if item.name == want and item.text:
+                return item.text
+    return ""
+
+
+def _name_from_signature(items: list[CapturedItem], roots: set[str]) -> str:
+    del roots
+    for item in items:
+        if item.name.endswith(".signature.name") and item.text:
+            return item.text
+    return ""
+
+
+def _name_from_suffix(items: list[CapturedItem], roots: set[str]) -> str:
+    del roots
+    for item in items:
+        if item.name.endswith(".name") and item.text:
+            return item.text
+    return ""
+
+
+_NAME_RULES: tuple[Callable[[list[CapturedItem], set[str]], str], ...] = (
+    _name_from_root,
+    _name_from_signature,
+    _name_from_suffix,
+)
+
+
+def extract_entity_name(items: list[CapturedItem], roots: set[str]) -> str:
+    for build in _NAME_RULES:
+        name = build(items, roots)
+        if name:
+            return name
+    return ""
+
+
+def extract_bases(items: list[CapturedItem]) -> list[str]:
+    bases: list[str] = []
+    for suffix in (".signature.base", ".base"):
+        for item in items:
+            if item.name.endswith(suffix) and item.text and item.text not in bases:
+                bases.append(item.text)
+    return bases
+
+
+def _compose_call(receiver: str | None, func: str) -> tuple[str, str | None, str]:
+    if receiver and func:
+        return f"{receiver}.{func}", receiver, func
+    if func and receiver is not None and "." in func:
+        head, _, _ = func.rpartition(".")
+        return func, head or None, func
+    if func and receiver is None and "." in func:
+        head, _, tail = func.rpartition(".")
+        if head and tail and "(" not in func and ")" not in func:
+            return func, head, tail
+    return func, receiver, func
+
+
+def _call_from_method_reference(
+    items: list[CapturedItem], root: Any, source: bytes
+) -> tuple[str | None, str] | None:
+    del items
+    if root.type != "method_reference":
+        return None
+    named = [child for child in root.children if child.is_named]
+    if not named:
+        return None
+    func = slice_text(named[-1], source).strip()
+    if not func:
+        return None
+    receiver = None
+    if len(named) >= 2:
+        receiver = generic_dotted(named[0], source).strip() or None
+    return receiver, func
+
+
+def _call_from_captures(
+    items: list[CapturedItem], root: Any, source: bytes
+) -> tuple[str | None, str] | None:
+    del root
+    obj_node = first_node(items, ".object", ".from")
+    func_node = first_node(items, ".function", ".name", ".to")
+    if func_node is None:
+        return None
+    receiver = None
+    if obj_node is not None:
+        receiver = generic_dotted(obj_node, source).strip() or None
+    if func_node.type == "identifier":
+        func = slice_text(func_node, source).strip()
+    else:
+        func = generic_dotted(func_node, source).strip()
+    return receiver, func
+
+
+def _call_from_root_fields(
+    items: list[CapturedItem], root: Any, source: bytes
+) -> tuple[str | None, str] | None:
+    del items
+    fn = root.child_by_field_name("function")
+    if fn is None:
+        fn = root.child_by_field_name("name")
+    if fn is None:
+        return None
+    func = generic_dotted(fn, source).strip()
+    recv_node = root.child_by_field_name("object")
+    receiver = (
+        generic_dotted(recv_node, source).strip() if recv_node is not None else None
+    )
+    return receiver or None, func
+
+
+def _call_from_identifier(
+    items: list[CapturedItem], root: Any, source: bytes
+) -> tuple[str | None, str] | None:
+    del items
+    for child in root.children:
+        if child.type == "identifier":
+            return None, slice_text(child, source).strip()
+    return None
+
+
+_CALL_RULES: tuple[
+    Callable[[list[CapturedItem], Any, bytes], tuple[str | None, str] | None], ...
+] = (
+    _call_from_method_reference,
+    _call_from_captures,
+    _call_from_root_fields,
+    _call_from_identifier,
+)
+
+
+def extract_call_parts(
+    items: list[CapturedItem], root: Any, source: bytes
+) -> tuple[str, str | None, str]:
+    for build in _CALL_RULES:
+        hit = build(items, root, source)
+        if hit is not None:
+            receiver, func = hit
+            if func:
+                return _compose_call(receiver, func)
+    return "", None, ""
 
 
 def collect_simple_var_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:

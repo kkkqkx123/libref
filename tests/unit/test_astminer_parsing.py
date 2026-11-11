@@ -298,3 +298,85 @@ def test_jsx_suffix_resolves_module(monkeypatch, tmp_path):
     assert ast_context.determine_module_path("ui/App.jsx", "javascript") == "ui.App"
     assert ast_context.determine_module_path("App.jsx", "javascript") == "App"
     assert ast_config.config_for_suffix(".jsx") is ast_config.JAVASCRIPT_CONFIG
+
+
+def test_signature_composed_from_subcaptures(monkeypatch, tmp_path):
+    data = (
+        b"import functools\n\n\n@functools.lru_cache\n"
+        b"def fetch(url: str) -> str:\n    return url\n"
+    )
+    decls, _aliases, _raw = ast_engine.extract_file(
+        "sig.py", ast_config.PYTHON_CONFIG, data
+    )
+    by_qual = {d.qualified_name: d for d in decls}
+    signature = by_qual["sig.fetch"].signature
+    assert "fetch" in signature and "url" in signature
+    assert "@" not in signature and "return url" not in signature
+
+
+def test_bodiless_fallback_signature_is_truncated(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from libref.astminer import rules as ast_rules
+
+    source = b"data = [" + b"0," * 3000 + b"]\n"
+    items = [SimpleNamespace(name="entity.variable.name", text="data", start_byte=0)]
+    signature = ast_rules.compose_signature(items, source, 0, len(source))
+    assert len(signature) <= ast_rules.MAX_SIGNATURE_LEN
+    assert signature.startswith("data = [")
+
+
+def test_phantom_nodes_are_filtered(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from libref.astminer import rules as ast_rules
+
+    phantom = SimpleNamespace(
+        start_byte=10, end_byte=5, start_point=(1, 0), end_point=(0, 0)
+    )
+    assert ast_rules.is_phantom(phantom)
+    assert not ast_rules.roots_expect_body({"entity.variable"})
+    assert ast_rules.roots_expect_body({"entity.function"})
+
+
+def test_java_method_reference_shapes(monkeypatch, tmp_path):
+    data = (
+        b"import java.util.*;\n"
+        b"class A {\n"
+        b"  void run(List<String> xs) {\n"
+        b"    xs.stream().map(String::valueOf);\n"
+        b"    Runnable r = this::helper;\n"
+        b"  }\n"
+        b"  void helper() {}\n"
+        b"}\n"
+    )
+    decls, aliases, raw = ast_engine.extract_file(
+        "A.java", ast_config.JAVA_CONFIG, data
+    )
+    by_raw = {c.raw_callee: c for c in raw}
+    assert by_raw["String.valueOf"].caller == "A.run"
+    resolved = ast_resolution.resolve_calls(
+        decls, {"A.java": aliases}, raw, "test/repo"
+    )
+    by_resolved = {(c.caller_file, c.raw_callee): c for c in resolved}
+    assert by_resolved[("A.java", "String.valueOf")].confidence == "AMBIGUOUS"
+    assert by_resolved[("A.java", "this.helper")].callee == "A.helper"
+    assert by_resolved[("A.java", "this.helper")].confidence == "EXTRACTED"
+
+
+def test_java_explicit_constructor_invocation_skipped(monkeypatch, tmp_path):
+    data = (
+        b"class B extends Base {\n"
+        b"  B() {\n"
+        b"    super(1);\n"
+        b"    this.helper();\n"
+        b"  }\n"
+        b"  void helper() {}\n"
+        b"}\n"
+    )
+    decls, _aliases, raw = ast_engine.extract_file(
+        "B.java", ast_config.JAVA_CONFIG, data
+    )
+    by_raw = {c.raw_callee: c for c in raw}
+    assert "super" not in by_raw
+    assert by_raw["this.helper"].caller == "B.B"

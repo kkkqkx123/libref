@@ -37,7 +37,7 @@ def entity_query() -> str:
 
 (decorator
   (call
-    function: (attribute) @entity.decorator.call.func
+    function: (attribute) @entity.decorator.call.name
     arguments: (argument_list) @entity.decorator.call.arguments)) @entity.decorator
 
 (expression_statement
@@ -91,7 +91,7 @@ def dependency_query() -> str:
 
 (import_statement
   name: (aliased_import
-    name: (dotted_name) @dependency.import.alias.module
+    name: (dotted_name) @dependency.import.alias.path
     alias: (identifier) @dependency.import.alias.name)) @dependency.import.alias
 
 (import_from_statement
@@ -113,5 +113,5 @@ def comment_query() -> str:
 
 (expression_statement
   (string
-    (string_content) @comment.docstring))
+    (string_content) @comment.doc))
 """
