@@ -30,8 +30,16 @@ def run(coro):
     return asyncio.run(coro)
 
 
-GO_LATEST = {"Version": "v1.2.3", "Time": "2026-01-01T00:00:00Z"}
+GO_LATEST = {
+    "Version": "v1.2.3",
+    "Time": "2026-01-01T00:00:00Z",
+    "Origin": {"VCS": "git", "URL": "https://github.com/acme/demo"},
+}
 GO_LIST = "v1.0.0\nv1.2.3\n"
+NUGET_NUSPEC_WITH_REPO = (
+    '<package><metadata><repository type="git" '
+    'url="https://github.com/acme/demo" /></metadata></package>'
+)
 
 CRATES_PAYLOAD = {
     "crate": {
@@ -113,6 +121,10 @@ def handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json=NUGET_PAGED_INDEX)
         if path == "/v3/page/demo.json":
             return httpx.Response(200, json=NUGET_PAGED_PAGE)
+        if path == "/v3-flatcontainer/demo/2.0.0/demo.nuspec":
+            return httpx.Response(200, text=NUGET_NUSPEC_WITH_REPO)
+        if path.startswith("/v3-flatcontainer/"):
+            return httpx.Response(404, text="not found")
         if path.endswith("/index.json"):
             return httpx.Response(404, json={})
     raise AssertionError(f"{host}{path}")
@@ -128,9 +140,13 @@ def test_go_resolve_docs_and_uppercase_escape(conn, monkeypatch, tmp_path) -> No
     assert res.ecosystem == "go"
     assert res.version == "v1.2.3"
     assert res.docs_url == "https://pkg.go.dev/github.com/acme/demo@v1.2.3"
+    assert res.repo_url == "https://github.com/acme/demo"
     assert res.source == "registry"
+    repo = run(resolve_repo(conn, client(), settings, "go", "github.com/acme/demo"))
+    assert repo.repo_url == "https://github.com/acme/demo"
     upper = run(resolve_package(conn, client(), settings, "go", "github.com/Acme/Demo"))
     assert upper.version == "v1.2.3"
+    assert upper.repo_url == "https://github.com/acme/demo"
 
 
 def test_go_not_found(conn, monkeypatch, tmp_path) -> None:
@@ -166,6 +182,9 @@ def test_nuget_resolve_prefers_stable_and_project_url(
     assert res.version == "2.0.0"
     assert res.docs_url == "https://demo.dev/"
     assert "https://www.nuget.org/packages/demo/2.0.0" in res.candidates
+    assert res.repo_url == "https://github.com/acme/demo"
+    repo = run(resolve_repo(conn, client(), settings, "nuget", "demo"))
+    assert repo.repo_url == "https://github.com/acme/demo"
     paged = run(resolve_package(conn, client(), settings, "nuget", "paged"))
     assert paged.version == "1.0.0"
     assert paged.docs_url == "https://demo.dev/"

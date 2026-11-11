@@ -16,6 +16,8 @@ from libref.crawler.registry import (
     sanitize_http_url,
 )
 
+NUGET_FLATCONTAINER_BASE = "https://api.nuget.org/v3-flatcontainer"
+
 NUGET_SEARCH_URL = "https://azuresearch-usnc.nuget.org/query"
 
 
@@ -99,7 +101,7 @@ def pick_nuget_stable(
 def parse_nuget_registration(
     payload: dict[str, Any], *, allow_private: bool = False
 ) -> tuple[list[str], str | None]:
-    """Registration timeline fragment: versions in order plus the first project URL seen."""
+    """Registration timeline fragment: versions in order plus the latest project URL seen."""
     versions: list[str] = []
     project_url: str | None = None
     for entry in _timeline_entries(payload):
@@ -108,11 +110,46 @@ def parse_nuget_registration(
         version = str(entry.get("version") or "").strip()
         if version and version not in versions:
             versions.append(version)
-        if project_url is None:
-            candidate = str(entry.get("projectUrl") or "").strip()
-            if candidate:
-                project_url = candidate
+        candidate = str(entry.get("projectUrl") or "").strip()
+        if candidate:
+            project_url = candidate
     return versions, sanitize_http_url(project_url, allow_private=allow_private)
+
+
+def nuget_nuspec_url(name: str, version: str) -> str:
+    lowered = name.strip().lower()
+    stripped = version.strip()
+    return f"{NUGET_FLATCONTAINER_BASE}/{lowered}/{stripped}/{lowered}.nuspec"
+
+
+def parse_nuget_nuspec(xml_text: str, *, allow_private: bool = False) -> str | None:
+    import xml.etree.ElementTree as ET
+
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return None
+    for node in root.iter():
+        tag = node.tag.rsplit("}", 1)[-1] if "}" in node.tag else node.tag
+        if tag != "repository":
+            continue
+        for attr in ("url", "projectUrl"):
+            raw = (node.get(attr) or "").strip()
+            if raw:
+                clean = sanitize_http_url(raw, allow_private=allow_private)
+                if clean:
+                    return clean
+    return None
+
+
+def nuget_repo_from_project_url(
+    url: str | None, *, allow_private: bool = False
+) -> str | None:
+    if not url:
+        return None
+    if not is_repo_host_url(url):
+        return None
+    return sanitize_http_url(url, allow_private=allow_private)
 
 
 def rank_nuget_candidates(

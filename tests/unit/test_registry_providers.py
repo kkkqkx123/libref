@@ -194,6 +194,53 @@ def test_nuget_normalize_and_registration() -> None:
     assert hits[0]["popularity"] == 7
 
 
+def test_go_repo_url_prefers_origin_then_host_path() -> None:
+    from libref.crawler.registry.go import infer_go_repo_url, parse_go_repo_url
+
+    payload = {"Origin": {"URL": "https://github.com/spf13/cobra"}}
+    assert (
+        parse_go_repo_url(payload, "github.com/spf13/cobra")
+        == "https://github.com/spf13/cobra"
+    )
+    assert (
+        parse_go_repo_url({}, "github.com/spf13/cobra")
+        == "https://github.com/spf13/cobra"
+    )
+    assert (
+        parse_go_repo_url({}, "github.com/spf13/cobra/v2")
+        == "https://github.com/spf13/cobra"
+    )
+    assert parse_go_repo_url({}, "golang.org/x/text") is None
+    assert parse_go_repo_url({}, "gopkg.in/yaml.v3") is None
+    assert infer_go_repo_url("https://github.com/a/b") is None
+    assert infer_go_repo_url("github.com/a") is None
+
+
+def test_nuget_nuspec_repo_and_project_promotion() -> None:
+    from libref.crawler.registry.nuget import (
+        nuget_nuspec_url,
+        nuget_repo_from_project_url,
+        parse_nuget_nuspec,
+    )
+
+    assert nuget_nuspec_url("Newtonsoft.Json", "13.0.3").endswith(
+        "/newtonsoft.json/13.0.3/newtonsoft.json.nuspec"
+    )
+    assert (
+        nuget_repo_from_project_url("https://github.com/acme/demo")
+        == "https://github.com/acme/demo"
+    )
+    assert nuget_repo_from_project_url("https://demo.dev/") is None
+    assert nuget_repo_from_project_url(None) is None
+    nuspec = (
+        '<package><metadata><repository type="git" '
+        'url="https://github.com/acme/demo" /></metadata></package>'
+    )
+    assert parse_nuget_nuspec(nuspec) == "https://github.com/acme/demo"
+    assert parse_nuget_nuspec("<package></package>") is None
+    assert parse_nuget_nuspec("not xml") is None
+
+
 def test_normalize_name_dispatch(monkeypatch, tmp_path) -> None:
     from libref.crawler.registry import normalize_name
 

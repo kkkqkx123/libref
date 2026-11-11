@@ -387,6 +387,7 @@ async def fetch_snapshot(
             go_list_url,
             parse_go_latest,
             parse_go_list,
+            parse_go_repo_url,
             rank_go_candidates,
         )
 
@@ -396,7 +397,8 @@ async def fetch_snapshot(
             raise RegistryError("not_found", f"package not found: go:{name}")
         if latest_resp.status_code >= 400:
             raise RegistryError("retryable", f"registry HTTP {latest_resp.status_code}")
-        stable = parse_go_latest(latest_resp.json())
+        latest_payload = latest_resp.json()
+        stable = parse_go_latest(latest_payload)
         list_resp = await _get_text(client, go_list_url(base, name))
         versions = parse_go_list(list_resp.text) if list_resp.status_code < 400 else []
         if stable is not None and stable not in versions:
@@ -408,7 +410,7 @@ async def fetch_snapshot(
         homepage, candidates, repo_url = (
             None,
             rank_go_candidates(name, stable, allow_private=allow_private),
-            None,
+            parse_go_repo_url(latest_payload, name, allow_private=allow_private),
         )
     elif eco == "crates":
         from libref.crawler.registry.crates import (
@@ -431,8 +433,11 @@ async def fetch_snapshot(
             raise RegistryError("not_found", f"package not found: crates:{name}")
     elif eco == "nuget":
         from libref.crawler.registry.nuget import (
+            nuget_nuspec_url,
             nuget_page_urls,
+            nuget_repo_from_project_url,
             nuget_snapshot_url,
+            parse_nuget_nuspec,
             parse_nuget_registration,
             pick_nuget_stable,
             rank_nuget_candidates,
@@ -466,7 +471,18 @@ async def fetch_snapshot(
         candidates = rank_nuget_candidates(
             homepage, name, stable, allow_private=allow_private
         )
-        repo_url = None
+        repo_url = nuget_repo_from_project_url(homepage, allow_private=allow_private)
+        if stable is not None and base.rstrip("/") == DEFAULT_REGISTRY_BASES["nuget"]:
+            try:
+                nuspec_resp = await _get_text(client, nuget_nuspec_url(name, stable))
+            except Exception:  # noqa: BLE001 — auxiliary repository lookup never blocks resolution
+                nuspec_resp = None
+            if nuspec_resp is not None and nuspec_resp.status_code < 400:
+                nuspec_repo = parse_nuget_nuspec(
+                    nuspec_resp.text, allow_private=allow_private
+                )
+                if nuspec_repo is not None:
+                    repo_url = nuspec_repo
     else:
         from libref.crawler.registry.maven import (
             maven_metadata_url,

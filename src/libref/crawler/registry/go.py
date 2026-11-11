@@ -50,6 +50,39 @@ def parse_go_latest(payload: dict[str, Any]) -> str | None:
     return text or None
 
 
+_GO_REPO_HOSTS = (
+    "github.com",
+    "gitlab.com",
+    "bitbucket.org",
+    "gitee.com",
+    "codeberg.org",
+)
+
+
+def infer_go_repo_url(module: str, *, allow_private: bool = False) -> str | None:
+    parts = [seg for seg in module.strip().split("/") if seg]
+    if len(parts) >= 3 and parts[0].lower() in _GO_REPO_HOSTS:
+        return sanitize_http_url(
+            f"https://{parts[0]}/{parts[1]}/{parts[2]}", allow_private=allow_private
+        )
+    return None
+
+
+def parse_go_repo_url(
+    payload: dict[str, Any], module: str, *, allow_private: bool = False
+) -> str | None:
+    origin = payload.get("Origin") if isinstance(payload, dict) else None
+    raw = origin.get("URL") if isinstance(origin, dict) else None
+    clean = (
+        sanitize_http_url(str(raw), allow_private=allow_private)
+        if raw is not None and str(raw).strip()
+        else None
+    )
+    if clean:
+        return clean
+    return infer_go_repo_url(module, allow_private=allow_private)
+
+
 def parse_go_list(text: str) -> list[str]:
     """Version list payload: one version per line; blank lines ignored."""
     out: list[str] = []
