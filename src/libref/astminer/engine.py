@@ -19,18 +19,6 @@ _parsers: dict[str, tuple[str, Parser]] = {}
 
 _compiled: dict[str, dict[str, Query]] = {}
 
-_CLASS_LIKE = frozenset(
-    {"class", "interface", "enum", "record", "annotation", "struct", "union"}
-)
-
-_NON_CALL_ROOTS = frozenset(
-    {
-        "jsx_opening_element",
-        "jsx_self_closing_element",
-        "explicit_constructor_invocation",
-    }
-)
-
 
 @dataclass
 class _Entity:
@@ -39,6 +27,8 @@ class _Entity:
     node: Any
     kind: str
     name: str
+    short: str = ""
+    structural_parent: int | None = None
     items: list[CapturedItem] = field(default_factory=list)
     owner: str = ""
     file_scoped: bool = False
@@ -167,9 +157,9 @@ def _comment_spans(
         for name, nodes in captures.items():
             for node in nodes:
                 span = (node.start_byte, node.end_byte)
-                if name.endswith(".doc"):
+                if _queries.is_comment_doc(name):
                     doc.append(span)
-                elif name.endswith(".line"):
+                elif _queries.is_comment_line(name):
                     line.append(span)
     doc.sort()
     line.sort()
@@ -231,11 +221,12 @@ def _build_decls(
     entities = _collect_entities(entity_matches, source)
     anchors = _take_impl_anchors(entities)
     dep_spans = _dependency_spans(dep_matches, source)
-    _nest_entities(source, entities, module, doc_spans, line_spans)
+    _nest_structure(entities)
+    _classify_all(entities)
+    _fill_details(source, entities, doc_spans, line_spans)
     _attach_bases_innermost(entities, dep_spans)
-    _claim_file_scoped(entities, cfg.name)
-    _reparent_by_owner(entities, anchors, module)
     _merge_partial_decls(entities)
+    _normalize_ownership(entities, anchors, module, cfg.name)
     return [_emit_record(entity, path) for entity in entities]
 
 
@@ -243,7 +234,7 @@ def _collect_entities(entity_matches, source: bytes) -> list[_Entity]:
     cands: list[_Entity] = []
     for node, items in _merge_matches(entity_matches, source):
         roots = _rules.root_names(items)
-        if "entity.impl" in roots:
+        if any(_queries.is_impl_root(root) for root in roots):
             owner_node = _rules.first_node(items, ".type.name")
             owner = (
                 normalize_owner_text(_rules.slice_text(owner_node, source))
@@ -256,27 +247,13 @@ def _collect_entities(entity_matches, source: bytes) -> list[_Entity]:
                         node=node,
                         kind="",
                         name="",
+                        short="",
+                        structural_parent=None,
                         items=[],
                         impl_anchors=[(node.start_byte, node.end_byte, owner)],
                     )
                 )
             continue
-        kinds = {
-            kind
-            for kind in (_rules.entity_kind({root}) for root in roots)
-            if kind is not None
-        }
-        kind = _rules.refine_kind(kinds)
-        if kind is None:
-            continue
-        if kind == "class":
-            for child in node.children:
-                if child.type == "interface":
-                    kind = "interface"
-                    break
-                if child.type == "enum":
-                    kind = "enum"
-                    break
         name = _rules.extract_entity_name(items, roots)
         if not name:
             continue
@@ -289,12 +266,14 @@ def _collect_entities(entity_matches, source: bytes) -> list[_Entity]:
         cands.append(
             _Entity(
                 node=node,
-                kind=kind,
-                name=name,
+                kind="",
+                name="",
+                short=name,
+                structural_parent=None,
                 items=items,
                 owner=owner,
                 file_scoped=any(
-                    item.name == "entity.package.file_scoped" for item in items
+                    _queries.is_file_scoped_capture(item.name) for item in items
                 ),
             )
         )
@@ -304,10 +283,9 @@ def _collect_entities(entity_matches, source: bytes) -> list[_Entity]:
 
 def _take_impl_anchors(entities: list[_Entity]) -> list[tuple[int, int, str]]:
     anchors: list[tuple[int, int, str]] = []
-    kept = [entity for entity in entities if entity.kind]
     for entity in entities:
         anchors.extend(entity.impl_anchors)
-    entities[:] = kept
+    entities[:] = [entity for entity in entities if entity.items]
     return anchors
 
 
@@ -315,9 +293,7 @@ def _dependency_spans(dep_matches, source: bytes) -> list[tuple[int, int, str]]:
     dep_spans: list[tuple[int, int, str]] = []
     for _, items in _merge_matches(dep_matches, source):
         for item in items:
-            if item.name.endswith((".extend.name", ".implement.name")) and (
-                item.node is not None
-            ):
+            if _queries.is_base_name_capture(item.name) and (item.node is not None):
                 text = _rules.generic_dotted(item.node, source).strip()
                 if text:
                     dep_spans.append((item.start_byte, item.end_byte, text))
@@ -325,35 +301,53 @@ def _dependency_spans(dep_matches, source: bytes) -> list[tuple[int, int, str]]:
     return dep_spans
 
 
-def _nest_entities(source, entities, module, doc_spans, line_spans) -> None:
-    stack: list[_Entity] = []
-    for entity in entities:
+def _nest_structure(entities: list[_Entity]) -> None:
+    stack: list[int] = []
+    for index, entity in enumerate(entities):
         node = entity.node
         while stack and not (
-            stack[-1].node.start_byte <= node.start_byte
-            and node.end_byte <= stack[-1].node.end_byte
+            entities[stack[-1]].node.start_byte <= node.start_byte
+            and node.end_byte <= entities[stack[-1]].node.end_byte
         ):
             stack.pop()
-        parent = stack[-1] if stack else None
-        entity.parent = parent.name if parent is not None else None
-        entity.depth = len(stack)
-        if (
-            entity.kind == "function"
-            and parent is not None
-            and parent.kind in _CLASS_LIKE
-        ):
-            entity.kind = "method"
-        if entity.kind == "package" and parent is None:
-            qual = entity.name
-        elif parent is not None:
-            qual = f"{parent.name}.{entity.name}"
-        elif module and (module == entity.name or module.endswith("." + entity.name)):
-            qual = module
-        elif module:
-            qual = f"{module}.{entity.name}"
+        entity.structural_parent = stack[-1] if stack else None
+        stack.append(index)
+
+
+def _classify_all(entities: list[_Entity]) -> None:
+    drop: set[int] = set()
+    for index, entity in enumerate(entities):
+        parent_kind: str | None = None
+        if entity.structural_parent is not None:
+            parent_kind = entities[entity.structural_parent].kind or None
+        kind = _rules.classify_entity_kind(
+            _rules.root_names(entity.items), entity.node, parent_kind
+        )
+        if kind is None:
+            drop.add(index)
         else:
-            qual = entity.name
-        entity.name = qual
+            entity.kind = kind
+    if not drop:
+        return
+    remap: dict[int, int | None] = {}
+    kept: list[_Entity] = []
+    for old, entity in enumerate(entities):
+        if old in drop:
+            remap[old] = None
+        else:
+            remap[old] = len(kept)
+            kept.append(entity)
+    for entity in kept:
+        parent = entity.structural_parent
+        while parent is not None and remap.get(parent) is None:
+            parent = entities[parent].structural_parent
+        entity.structural_parent = remap.get(parent) if parent is not None else None
+    entities[:] = kept
+
+
+def _fill_details(source, entities, doc_spans, line_spans) -> None:
+    for entity in entities:
+        node = entity.node
         body = _rules.first_node(entity.items, ".body")
         roots = _rules.root_names(entity.items)
         entity.signature = _rules.compose_signature(
@@ -381,7 +375,6 @@ def _nest_entities(source, entities, module, doc_spans, line_spans) -> None:
         entity.return_type = _rules.shaped_return(return_node, source)
         entity.bases = _rules.extract_bases(entity.items)
         entity.has_doc = _has_doc(node, body, source, doc_spans, line_spans)
-        stack.append(entity)
 
 
 def _emit_record(entity: _Entity, path: str) -> ApiDeclRecord:
@@ -434,12 +427,13 @@ _PARTIAL_MERGE_KINDS = frozenset({"class", "interface", "struct", "record", "enu
 
 
 def _merge_partial_decls(entities: list[_Entity]) -> None:
-    first_at: dict[tuple[str | None, str], int] = {}
+    first_at: dict[tuple[int | None, str], int] = {}
+    repoint: dict[int, int] = {}
     drop: set[int] = set()
     for index, entity in enumerate(entities):
         if entity.kind not in _PARTIAL_MERGE_KINDS:
             continue
-        key = (entity.parent, entity.name)
+        key = (entity.structural_parent, entity.short)
         prev = first_at.get(key)
         if prev is None:
             first_at[key] = index
@@ -466,71 +460,98 @@ def _merge_partial_decls(entities: list[_Entity]) -> None:
         anchor.has_doc = anchor.has_doc or entity.has_doc
         if not anchor.signature and entity.signature:
             anchor.signature = entity.signature
+        repoint[index] = prev
         drop.add(index)
-    for index in sorted(drop, reverse=True):
-        del entities[index]
+    if drop:
+        for entity in entities:
+            parent = entity.structural_parent
+            if parent is not None and parent in repoint:
+                entity.structural_parent = repoint[parent]
+        kept: list[_Entity] = []
+        remap: dict[int, int] = {}
+        for old, entity in enumerate(entities):
+            if old in drop:
+                continue
+            remap[old] = len(kept)
+            kept.append(entity)
+        for entity in kept:
+            if entity.structural_parent is not None:
+                entity.structural_parent = remap.get(entity.structural_parent)
+        entities[:] = kept
 
 
-def _claim_file_scoped(entities: list[_Entity], language: str | None = None) -> None:
-    owners = [
-        entity for entity in entities if entity.file_scoped and entity.parent is None
-    ]
-    if not owners and language in _PACKAGE_CLAIM_LANGUAGES:
-        packages = [
-            entity
-            for entity in entities
-            if entity.kind == "package" and entity.parent is None
-        ]
-        if len(packages) == 1:
-            owners = packages
-    if len(owners) != 1:
-        return
-    owner = owners[0]
-    renamed: dict[str, str] = {}
-    for entity in entities:
-        if entity is owner or entity.parent is not None:
-            continue
-        old = entity.name
-        short = old.rpartition(".")[2] or old
-        entity.parent = owner.name
-        entity.name = f"{owner.name}.{short}"
-        entity.depth = owner.depth + 1
-        renamed[old] = entity.name
-    for entity in entities:
-        if entity.parent in renamed:
-            entity.parent = renamed[entity.parent]
-            old = entity.name
-            short = old.rpartition(".")[2] or old
-            entity.name = f"{entity.parent}.{short}"
-            renamed[old] = entity.name
-
-
-def _reparent_by_owner(
+def _normalize_ownership(
     entities: list[_Entity],
     impl_anchors: list[tuple[int, int, str]],
     module: str | None,
+    language: str | None = None,
 ) -> None:
+    top = [i for i, e in enumerate(entities) if e.structural_parent is None]
+    scoped = [i for i in top if entities[i].file_scoped]
+    owner_idx: int | None = None
+    if len(scoped) == 1:
+        owner_idx = scoped[0]
+    elif language in _PACKAGE_CLAIM_LANGUAGES:
+        pkgs = [i for i in top if entities[i].kind == "package"]
+        if len(pkgs) == 1:
+            owner_idx = pkgs[0]
+    owner_qual = entities[owner_idx].short if owner_idx is not None else None
     depth_by_qual: dict[str, int] = {}
-    for entity in entities:
+    final_qual: dict[int, str] = {}
+    for index, entity in enumerate(entities):
+        owner_name = ""
+        if entity.kind in ("function", "method"):
+            owner_name = entity.owner or ""
+            if not owner_name and impl_anchors:
+                for start, end, anchor_owner in impl_anchors:
+                    if start <= entity.node.start_byte and entity.node.end_byte <= end:
+                        owner_name = anchor_owner
+                        break
+        if owner_name:
+            base = f"{module}.{owner_name}" if module else owner_name
+            entity.parent = base
+            entity.name = f"{base}.{entity.short}"
+            entity.depth = depth_by_qual.get(base, 0) + 1
+            if entity.kind == "function":
+                entity.kind = "method"
+            depth_by_qual.setdefault(entity.name, entity.depth)
+            final_qual[index] = entity.name
+            continue
+        parent_idx = entity.structural_parent
+        if parent_idx is None:
+            if owner_idx is not None and index != owner_idx:
+                entity.parent = owner_qual
+                entity.name = f"{owner_qual}.{entity.short}"
+                entity.depth = 1
+            elif entity.kind == "package":
+                entity.parent = None
+                entity.name = entity.short
+                entity.depth = 0
+            elif module and (
+                module == entity.short or module.endswith("." + entity.short)
+            ):
+                entity.parent = None
+                entity.name = module
+                entity.depth = 0
+            elif module:
+                entity.parent = None
+                entity.name = f"{module}.{entity.short}"
+                entity.depth = 0
+            else:
+                entity.parent = None
+                entity.name = entity.short
+                entity.depth = 0
+            depth_by_qual.setdefault(entity.name, entity.depth)
+            final_qual[index] = entity.name
+            continue
+        parent_qual = final_qual.get(parent_idx)
+        if parent_qual is None:
+            parent_qual = entities[parent_idx].name or entities[parent_idx].short
+        entity.parent = parent_qual
+        entity.name = f"{parent_qual}.{entity.short}"
+        entity.depth = depth_by_qual.get(parent_qual, 0) + 1
         depth_by_qual.setdefault(entity.name, entity.depth)
-    for entity in entities:
-        if entity.kind not in ("function", "method"):
-            continue
-        owner = entity.owner or ""
-        if not owner and impl_anchors:
-            for start, end, anchor_owner in impl_anchors:
-                if start <= entity.node.start_byte and entity.node.end_byte <= end:
-                    owner = anchor_owner
-                    break
-        if not owner:
-            continue
-        base = f"{module}.{owner}" if module else owner
-        short = entity.name.rpartition(".")[2] or entity.name
-        entity.parent = base
-        entity.name = f"{base}.{short}"
-        entity.depth = depth_by_qual.get(base, 0) + 1
-        if entity.kind == "function":
-            entity.kind = "method"
+        final_qual[index] = entity.name
 
 
 def _build_aliases(
@@ -554,8 +575,6 @@ def _build_calls(path, cfg, source, call_matches, decls) -> list[RawCall]:
     groups = _merge_matches(call_matches, source)
     calls: list[RawCall] = []
     for node, items in groups:
-        if node.type in _NON_CALL_ROOTS:
-            continue
         if node.type not in _rules.CALL_NODE_TYPES:
             continue
         if _is_module_loader(node, source):

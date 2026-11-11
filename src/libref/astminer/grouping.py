@@ -9,7 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-_CLASS_LIKE = frozenset(
+# Group anchors absorb transitive descendants; package and module join the
+# class-like set here because file-level grouping follows ownership,
+# unlike method ownership which only covers type declarations.
+_GROUP_ANCHOR_KINDS = frozenset(
     {
         "class",
         "interface",
@@ -39,7 +42,7 @@ class EntityGroup:
 
 
 def build_groups(decls, source: bytes, path: str) -> list[EntityGroup]:
-    """Fold declarations by ownership: a class anchor absorbs its direct descendants; other top-level declarations form their own groups."""
+    """Fold declarations by ownership: an anchor absorbs its transitive descendants; other top-level declarations form their own groups."""
     anchors = [d for d in decls if d.parent is None]
     anchors.sort(key=lambda d: (d.start_byte, -d.end_byte))
     children: dict[str, list] = {}
@@ -51,9 +54,20 @@ def build_groups(decls, source: bytes, path: str) -> list[EntityGroup]:
     groups: list[EntityGroup] = []
     first_start = min((d.start_byte for d in anchors), default=0)
     head_text = source[:first_start].decode("utf-8", "replace").strip()
+    covered: set[str] = set()
     for index, anchor in enumerate(anchors):
-        if anchor.kind in _CLASS_LIKE:
-            members = list(children.get(anchor.qualified_name, []))
+        if anchor.kind in _GROUP_ANCHOR_KINDS:
+            queue = list(children.get(anchor.qualified_name, []))
+            members: list = []
+            seen: set[str] = set()
+            while queue:
+                member = queue.pop(0)
+                if member.qualified_name in seen:
+                    continue
+                seen.add(member.qualified_name)
+                members.append(member)
+                queue.extend(children.get(member.qualified_name, []))
+            members.sort(key=lambda d: (d.start_byte, -d.end_byte))
             member_quals = [m.qualified_name for m in members]
             spans = {m.qualified_name: (m.start_byte, m.end_byte) for m in members}
             docs = {m.qualified_name: bool(m.has_doc) for m in members}
@@ -63,6 +77,8 @@ def build_groups(decls, source: bytes, path: str) -> list[EntityGroup]:
             spans = {anchor.qualified_name: (anchor.start_byte, anchor.end_byte)}
             docs = {anchor.qualified_name: bool(anchor.has_doc)}
             kind = anchor.kind
+        covered.add(anchor.qualified_name)
+        covered.update(member_quals)
         groups.append(
             EntityGroup(
                 group_id=f"{path}::{anchor.qualified_name}",
@@ -77,4 +93,24 @@ def build_groups(decls, source: bytes, path: str) -> list[EntityGroup]:
                 doc_members=docs,
             )
         )
+    orphans = [d for d in decls if d.qualified_name not in covered]
+    orphans.sort(key=lambda d: (d.start_byte, -d.end_byte))
+    for decl in orphans:
+        groups.append(
+            EntityGroup(
+                group_id=f"{path}::{decl.qualified_name}",
+                file=path,
+                kind=decl.kind,
+                name=decl.qualified_name,
+                header_qual=decl.qualified_name,
+                member_quals=[decl.qualified_name],
+                header_span=(decl.start_byte, decl.end_byte),
+                member_spans={decl.qualified_name: (decl.start_byte, decl.end_byte)},
+                header_context="",
+                doc_members={decl.qualified_name: bool(decl.has_doc)},
+            )
+        )
+    groups.sort(key=lambda g: (g.header_span[0], -g.header_span[1]))
+    for index, group in enumerate(groups):
+        group.header_context = head_text if index == 0 else ""
     return groups

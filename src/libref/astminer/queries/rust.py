@@ -70,8 +70,8 @@ def entity_query() -> str:
   pattern: (identifier) @entity.variable.name @entity.variable.signature.name) @entity.variable
 
 (field_declaration
-  name: (field_identifier) @entity.field.name
-  type: (_) @entity.field.type) @entity.field
+  name: (field_identifier) @entity.field.name @entity.field.signature.name
+  type: (_) @entity.field.type @entity.field.signature.type) @entity.field
 
 (impl_item
   type: (_) @entity.impl.type.name
@@ -136,7 +136,7 @@ def dependency_query() -> str:
 
 (use_declaration
   argument: (use_as_clause
-    path: (_) @dependency.use.alias.path
+    path: (_) @dependency.use.path
     alias: (identifier) @dependency.use.alias.name)) @dependency.use.alias
 
 (use_declaration

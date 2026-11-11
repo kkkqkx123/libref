@@ -30,6 +30,8 @@ def compose_signature(
     )
     composed = " ".join(item.text for item in parts if item.text)
     if composed:
+        if len(composed) > MAX_SIGNATURE_LEN:
+            return composed[:MAX_SIGNATURE_LEN]
         return composed
     if body_start is not None and main_start < body_start < main_end:
         header = source[main_start:body_start].decode("utf-8", "replace").strip()
@@ -45,6 +47,9 @@ def compose_signature(
     return fallback
 
 
+# Only genuine call nodes. Element tags describe rendering, constructor
+# delegation carries no callee, and goroutine or deferred wrappers are
+# covered by the plain call patterns on the inner expression.
 CALL_NODE_TYPES = frozenset(
     {
         "call",
@@ -55,13 +60,8 @@ CALL_NODE_TYPES = frozenset(
         "new_expression",
         "object_creation_expression",
         "method_reference",
-        "explicit_constructor_invocation",
         "macro_invocation",
         "invocation_expression",
-        "go_statement",
-        "defer_statement",
-        "jsx_opening_element",
-        "jsx_self_closing_element",
     }
 )
 

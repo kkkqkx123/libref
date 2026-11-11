@@ -64,6 +64,7 @@ ENTITY_ROLES = frozenset(
         "receiver",
         "return_type",
         "source",
+        # Struct field tag (for example Go); unrelated to any call category.
         "tag",
         "type",
         "value",
@@ -156,6 +157,45 @@ _CAPTURE_PATTERN = re.compile(r"@([A-Za-z_0-9.]+)")
 
 def capture_parts(name: str) -> tuple[str, ...]:
     return tuple(name.split("."))
+
+
+def capture_domain(name: str) -> str:
+    parts = capture_parts(name)
+    return parts[0] if parts else ""
+
+
+def has_suffix(name: str, suffix: str) -> bool:
+    want = tuple(seg for seg in suffix.split(".") if seg)
+    if not want:
+        return False
+    parts = capture_parts(name)
+    if len(parts) < len(want):
+        return False
+    return tuple(parts[-len(want) :]) == want
+
+
+def has_alias_segment(name: str) -> bool:
+    return "alias" in capture_parts(name)
+
+
+def is_comment_doc(name: str) -> bool:
+    return name == "comment.doc"
+
+
+def is_comment_line(name: str) -> bool:
+    return name == "comment.line"
+
+
+def is_impl_root(name: str) -> bool:
+    return name == "entity.impl"
+
+
+def is_file_scoped_capture(name: str) -> bool:
+    return name == "entity.package.file_scoped"
+
+
+def is_base_name_capture(name: str) -> bool:
+    return name in ("dependency.extend.name", "dependency.implement.name")
 
 
 def is_entity_root(name: str) -> bool:

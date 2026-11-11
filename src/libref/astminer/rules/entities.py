@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from libref.astminer import queries as _queries
 from libref.astminer.rules.text import generic_dotted, slice_text
 
 CALLABLE_DECL_KINDS = frozenset(
@@ -54,6 +55,10 @@ _ENTITY_KIND_BY_ROOT = {
 
 
 _KIND_PRIORITY = ("method", "function", "constructor")
+
+METHOD_OWNER_KINDS = frozenset(
+    {"class", "interface", "enum", "record", "annotation", "struct", "union"}
+)
 
 _BODY_OWNERS = frozenset(
     {
@@ -132,9 +137,11 @@ def first_node(items: list[CapturedItem], *suffixes: str) -> Any | None:
         best: CapturedItem | None = None
         best_key: tuple[int, int] | None = None
         for item in items:
-            if item.name.count(".") < 2 or not item.name.endswith(suffix):
+            if len(_queries.capture_parts(item.name)) < 3:
                 continue
-            specificity = item.name.count(".")
+            if not _queries.has_suffix(item.name, suffix):
+                continue
+            specificity = len(_queries.capture_parts(item.name))
             span = item.end_byte - item.start_byte
             key = (specificity, -span)
             if best_key is None or key > best_key:
@@ -149,9 +156,27 @@ def handled_entity_roots() -> set[str]:
     return set(_ENTITY_KIND_BY_ROOT) | {"entity.impl"}
 
 
-def root_names(items: list[CapturedItem]) -> set[str]:
-    from libref.astminer import queries as _queries
+def classify_entity_kind(
+    roots: set[str], node: Any | None = None, parent_kind: str | None = None
+) -> str | None:
+    kinds = {
+        kind for kind in (entity_kind({root}) for root in roots) if kind is not None
+    }
+    kind = refine_kind(kinds)
+    if kind is None:
+        return None
+    if kind == "class" and node is not None:
+        for child in node.children:
+            if child.type == "interface":
+                return "interface"
+            if child.type == "enum":
+                return "enum"
+    if kind == "function" and parent_kind in METHOD_OWNER_KINDS:
+        return "method"
+    return kind
 
+
+def root_names(items: list[CapturedItem]) -> set[str]:
     return {item.name for item in items if _queries.is_entity_root(item.name)}
 
 
@@ -167,7 +192,7 @@ def _name_from_root(items: list[CapturedItem], roots: set[str]) -> str:
 def _name_from_signature(items: list[CapturedItem], roots: set[str]) -> str:
     del roots
     for item in items:
-        if item.name.endswith(".signature.name") and item.text:
+        if _queries.has_suffix(item.name, ".signature.name") and item.text:
             return item.text
     return ""
 
@@ -175,7 +200,7 @@ def _name_from_signature(items: list[CapturedItem], roots: set[str]) -> str:
 def _name_from_suffix(items: list[CapturedItem], roots: set[str]) -> str:
     del roots
     for item in items:
-        if item.name.endswith(".name") and item.text:
+        if _queries.has_suffix(item.name, ".name") and item.text:
             return item.text
     return ""
 
@@ -199,7 +224,11 @@ def extract_bases(items: list[CapturedItem]) -> list[str]:
     bases: list[str] = []
     for suffix in (".signature.base", ".base"):
         for item in items:
-            if item.name.endswith(suffix) and item.text and item.text not in bases:
+            if (
+                _queries.has_suffix(item.name, suffix)
+                and item.text
+                and item.text not in bases
+            ):
                 bases.append(item.text)
     return bases
 

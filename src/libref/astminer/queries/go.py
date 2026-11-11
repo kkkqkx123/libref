@@ -2,8 +2,8 @@
 
 Subset of the validated code-context-engine scheme, renamed to the engine
 capture contract. Import specs match unanchored so grouped imports hit;
-embedding feeds extend bases; goroutine and deferred statements are call
-roots handled by the engine node-type set.
+embedding feeds extend bases; calls inside goroutine and deferred
+statements are covered by the plain call patterns.
 """
 
 from __future__ import annotations
@@ -55,18 +55,18 @@ def entity_query() -> str:
 
 (var_declaration
   (var_spec
-    name: (identifier) @entity.variable.name
+    name: (identifier) @entity.variable.name @entity.variable.signature.name
     type: (_)? @entity.variable.type @entity.variable.signature.type
     value: (_)? @entity.variable.value)) @entity.variable
 
 (short_var_declaration
   left: (expression_list
-    (identifier) @entity.variable.name)
+    (identifier) @entity.variable.name @entity.variable.signature.name)
   right: (_) @entity.variable.value) @entity.variable
 
 (const_declaration
   (const_spec
-    name: (identifier) @entity.variable.name
+    name: (identifier) @entity.variable.name @entity.variable.signature.name
     type: (_)? @entity.variable.type @entity.variable.signature.type
     value: (_)? @entity.variable.value)) @entity.variable
 
@@ -77,12 +77,12 @@ def entity_query() -> str:
     right: (_) @entity.variable.source @entity.variable.signature.source)) @entity.variable
 
 (field_declaration
-  name: (field_identifier) @entity.field.name
-  type: (_) @entity.field.type) @entity.field
+  name: (field_identifier) @entity.field.name @entity.field.signature.name
+  type: (_) @entity.field.type @entity.field.signature.type) @entity.field
 
 (field_declaration
-  name: (field_identifier) @entity.field.name
-  type: (_) @entity.field.type
+  name: (field_identifier) @entity.field.name @entity.field.signature.name
+  type: (_) @entity.field.type @entity.field.signature.type
   tag: (raw_string_literal) @entity.field.tag) @entity.field
 
 (package_clause
@@ -108,29 +108,6 @@ def call_query() -> str:
     field: (field_identifier) @call.method.chained.to)
   arguments: (argument_list)? @call.method.arguments) @call.method.chained
 
-(go_statement
-  (call_expression
-    function: (identifier) @call.function.name
-    arguments: (argument_list)? @call.function.arguments)) @call.function
-
-(go_statement
-  (call_expression
-    function: (selector_expression
-      operand: (_) @call.method.object
-      field: (field_identifier) @call.method.function)
-    arguments: (argument_list)? @call.method.arguments)) @call.method
-
-(defer_statement
-  (call_expression
-    function: (identifier) @call.function.name
-    arguments: (argument_list)? @call.function.arguments)) @call.function
-
-(defer_statement
-  (call_expression
-    function: (selector_expression
-      operand: (_) @call.method.object
-      field: (field_identifier) @call.method.function)
-    arguments: (argument_list)? @call.method.arguments)) @call.method
 """
 
 
@@ -141,7 +118,7 @@ def dependency_query() -> str:
 
 (import_spec
   name: (_) @dependency.import.alias.name
-  path: (interpreted_string_literal) @dependency.import.alias.path) @dependency.import.alias
+  path: (interpreted_string_literal) @dependency.import.path) @dependency.import.alias
 
 (field_declaration
   !name

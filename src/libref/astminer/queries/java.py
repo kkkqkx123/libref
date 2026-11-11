@@ -43,12 +43,12 @@ def entity_query() -> str:
 
 (field_declaration
   declarator: (variable_declarator
-    name: (identifier) @entity.field.name)) @entity.field
+    name: (identifier) @entity.field.name @entity.field.signature.name)) @entity.field
 
 (local_variable_declaration
   type: (_) @entity.variable.type @entity.variable.signature.type
   declarator: (variable_declarator
-    name: (identifier) @entity.variable.name)) @entity.variable
+    name: (identifier) @entity.variable.name @entity.variable.signature.name)) @entity.variable
 
 (package_declaration
   (scoped_identifier) @entity.package.name) @entity.package

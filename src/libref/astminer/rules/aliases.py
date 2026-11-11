@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from libref.astminer import queries as _queries
 from libref.astminer.rules.entities import _split_aliased, first_node
 from libref.astminer.rules.text import generic_dotted, slice_text
 
@@ -45,7 +46,7 @@ def _csharp_aliases(root: Any, items: list, source: bytes) -> list[tuple[str, st
     alias_node = first_node(items, ".using.alias.name")
     if alias_node is not None:
         alias = slice_text(alias_node, source).strip()
-        path_node = first_node(items, ".using.alias.path")
+        path_node = first_node(items, ".using.path")
         if path_node is None:
             for child in root.children:
                 if (
@@ -80,7 +81,7 @@ def _csharp_aliases(root: Any, items: list, source: bytes) -> list[tuple[str, st
 def _go_aliases(root: Any, items: list, source: bytes) -> list[tuple[str, str]]:
     if root.type != "import_spec":
         return []
-    path_node = first_node(items, ".import.alias.path", ".import.path")
+    path_node = first_node(items, ".import.path")
     if path_node is None:
         return []
     raw_path = slice_text(path_node, source).strip().strip("\"'")
@@ -183,7 +184,7 @@ def _javascript_aliases(
             return []
         reexported: list[tuple[str, str]] = []
         for item in items:
-            if not item.name.endswith(".export.spec") or item.node is None:
+            if not _queries.has_suffix(item.name, ".export.spec") or item.node is None:
                 continue
             spec = item.node
             idents = [
@@ -208,7 +209,7 @@ def _javascript_aliases(
             if name:
                 found.append((name, mod))
         for item in items:
-            if not item.name.endswith(".named.spec") or item.node is None:
+            if not _queries.has_suffix(item.name, ".named.spec") or item.node is None:
                 continue
             spec = item.node
             orig_node = spec.child_by_field_name("name")
@@ -283,7 +284,7 @@ def _python_aliases(
     if root.type == "import_statement":
         alias_node = first_node(items, ".alias.name")
         if alias_node is not None:
-            module = first_node(items, ".alias.path")
+            module = first_node(items, ".alias.module")
             full = generic_dotted(module, source).strip() if module is not None else ""
             alias = slice_text(alias_node, source).strip()
             if full and alias:
@@ -291,7 +292,9 @@ def _python_aliases(
             return []
         found: list[tuple[str, str]] = []
         for item in items:
-            if not item.name.endswith(".module") or ".alias." in item.name:
+            if not _queries.has_suffix(
+                item.name, ".module"
+            ) or _queries.has_alias_segment(item.name):
                 continue
             if item.node is None:
                 continue
@@ -384,10 +387,12 @@ def _rust_aliases(
         return []
     if first_node(items, ".use.wildcard") is not None:
         return []
-    alias_path = first_node(items, ".use.alias.path")
-    if alias_path is not None:
-        alias_node = first_node(items, ".use.alias.name")
-        alias = slice_text(alias_node, source).strip() if alias_node is not None else ""
+    alias_node = first_node(items, ".use.alias.name")
+    if alias_node is not None:
+        alias_path = first_node(items, ".use.path")
+        if alias_path is None:
+            return []
+        alias = slice_text(alias_node, source).strip()
         full = resolve_rust_use_path(
             _rust_path_segments(alias_path, source), current_module
         )

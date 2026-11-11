@@ -83,23 +83,23 @@ def entity_query() -> str:
 
 (field_declaration
   (variable_declaration
-    type: (_) @entity.field.type
+    type: (_) @entity.field.type @entity.field.signature.type
     (variable_declarator
-      (identifier) @entity.field.name
+      (identifier) @entity.field.name @entity.field.signature.name
       (_)? @entity.field.value))) @entity.field
 
 (local_declaration_statement
   (variable_declaration
     type: (_) @entity.variable.type @entity.variable.signature.type
     (variable_declarator
-      (identifier) @entity.variable.name
+      (identifier) @entity.variable.name @entity.variable.signature.name
       (_)? @entity.variable.value))) @entity.variable
 
 (local_declaration_statement
   (variable_declaration
     (variable_declarator
       (tuple_pattern
-        (identifier) @entity.variable.name)
+        (identifier) @entity.variable.name @entity.variable.signature.name)
       (tuple_expression) @entity.variable.value))) @entity.variable
 
 (foreach_statement
@@ -114,7 +114,7 @@ def entity_query() -> str:
 (argument
   (declaration_expression
     type: (_) @entity.variable.type @entity.variable.signature.type
-    name: (identifier) @entity.variable.name) @entity.variable) @entity.variable
+    name: (identifier) @entity.variable.name @entity.variable.signature.name) @entity.variable) @entity.variable
 """
 
 
@@ -178,7 +178,7 @@ def dependency_query() -> str:
   name: (identifier) @dependency.using.alias.name) @dependency.using.alias
 
 (using_directive
-  (qualified_name) @dependency.using.alias.path) @dependency.using.alias
+  (qualified_name) @dependency.using.path) @dependency.using.alias
 
 (class_declaration
   (base_list

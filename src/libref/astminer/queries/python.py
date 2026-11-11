@@ -44,7 +44,7 @@ def entity_query() -> str:
   (assignment
     left: (attribute
       object: (_) @entity.field.receiver
-      attribute: (identifier) @entity.field.name)
+      attribute: (identifier) @entity.field.name @entity.field.signature.name)
     right: (_) @entity.field.value)) @entity.field
 """
 
@@ -91,7 +91,7 @@ def dependency_query() -> str:
 
 (import_statement
   name: (aliased_import
-    name: (dotted_name) @dependency.import.alias.path
+    name: (dotted_name) @dependency.import.alias.module
     alias: (identifier) @dependency.import.alias.name)) @dependency.import.alias
 
 (import_from_statement

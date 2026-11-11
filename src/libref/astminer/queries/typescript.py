@@ -130,7 +130,7 @@ def entity_query() -> str:
     body: (_) @entity.arrow.body)) @entity.arrow
 
 (variable_declarator
-  name: (identifier) @entity.variable.name
+  name: (identifier) @entity.variable.name @entity.variable.signature.name
   value: (_)? @entity.variable.value) @entity.variable
 """
 
