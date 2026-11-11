@@ -145,6 +145,14 @@ def test_npm_exact_enriched_and_ranked_first(conn, monkeypatch, tmp_path) -> Non
     assert items[1]["docs_url"] is None
 
 
+def test_repoless_candidate_carries_note(conn, monkeypatch, tmp_path) -> None:
+    svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
+    items = run(svc.search_async("demo", "npm", 10, counting_client([])))
+    assert "note" not in items[0]
+    assert items[1]["repo_url"] is None
+    assert "note" in items[1]
+
+
 def test_maven_exact_enriched_via_metadata(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
     items = run(svc.search_async("org.demo:demo", "maven", 10, counting_client([])))

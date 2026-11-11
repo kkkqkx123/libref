@@ -83,8 +83,12 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                 print(f"invalid: {exc}", file=sys.stderr)
                 return 2
             except RegistryError as exc:
-                hint = f" hint={exc.hint}" if exc.hint else ""
-                print(f"resolve failed [{exc.kind}]: {exc}{hint}", file=sys.stderr)
+                from libref.cli.common import format_registry_error
+
+                print(
+                    format_registry_error(exc, target="repo"),
+                    file=sys.stderr,
+                )
                 return 1
             assert resolution.repo_url is not None
             library, version, source = (

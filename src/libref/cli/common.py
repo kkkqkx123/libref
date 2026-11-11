@@ -157,6 +157,31 @@ def _print_suggestions(conn, settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def format_registry_error(exc, *, target: str = "docs") -> str:
+    """Render a registry failure with context and follow-ups for humans and agents."""
+    from libref.services.registry.resolver import next_actions_for
+
+    lines = [f"resolve failed [{exc.kind}]: {exc}"]
+    hint = getattr(exc, "hint", None) or {}
+    for key in ("ecosystem", "name", "requested_version", "homepage", "repo_url"):
+        if hint.get(key) is not None:
+            lines.append(f"  {key}: {hint[key]}")
+    candidates = hint.get("candidates") or []
+    if candidates:
+        shown = ", ".join(candidates[:5])
+        if len(candidates) > 5:
+            shown += ", ..."
+        lines.append(f"  candidates: {shown}")
+    for action in next_actions_for(
+        hint.get("ecosystem"), hint.get("name") or "", target, exc.kind
+    ):
+        if action["kind"] == "tool":
+            lines.append(f"  try: {action['cli']} : {action['purpose']}")
+        else:
+            lines.append(f"  try: {action['detail']}")
+    return "\n".join(lines)
+
+
 def _print_job(job) -> None:
     print(f"job {job.id} {job.status}" + (f" error={job.error}" if job.error else ""))
     result = getattr(job, "result", None)

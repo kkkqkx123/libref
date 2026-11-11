@@ -153,6 +153,26 @@ def build_mcp_server(
             return _failed(str(exc))
 
     @mcp.tool()
+    async def web_search(
+        query: str,
+        limit: int = 10,
+    ) -> dict[str, Any]:
+        """Explicit web search for library docs or repos; results are unverified, confirm before use."""
+        if not query.strip():
+            return _invalid("query is empty")
+        bad = _check_limit(limit, low=1, high=100)
+        if bad is not None:
+            return _invalid(bad)
+        try:
+            return _items(await discovery_svc.search_web_async(query, limit))
+        except ValueError as exc:
+            return _invalid(str(exc))
+        except RegistryError as exc:
+            return {"error": exc.kind, "message": str(exc)}
+        except Exception as exc:  # noqa: BLE001
+            return _failed(str(exc))
+
+    @mcp.tool()
     async def answer(
         query: str,
         library: str | None = None,
@@ -453,7 +473,20 @@ def build_mcp_server(
         except ValueError as exc:
             return {"error": "invalid", "message": str(exc)}
         except RegistryError as exc:
-            return {"error": exc.kind, "message": str(exc), "hint": exc.hint}
+            from libref.services.registry.resolver import next_actions_for
+
+            hint = exc.hint or {}
+            return {
+                "error": exc.kind,
+                "message": str(exc),
+                "hint": hint,
+                "next_actions": next_actions_for(
+                    hint.get("ecosystem", ecosystem),
+                    hint.get("name", name),
+                    target,
+                    exc.kind,
+                ),
+            }
         except Exception as exc:  # noqa: BLE001
             return {"error": "failed", "message": str(exc)}
         return resolution.model_dump()

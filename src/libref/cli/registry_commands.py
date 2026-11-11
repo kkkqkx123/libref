@@ -1,4 +1,4 @@
-"""Registry commands: discover, catalog, resolve."""
+"""Registry commands: discover, catalog, resolve, search-web."""
 
 from __future__ import annotations
 
@@ -14,6 +14,38 @@ def cmd_discover(args: argparse.Namespace) -> int:
     conn = _connect(settings)
     try:
         return _print_suggestions(conn, settings, args)
+    finally:
+        conn.close()
+
+
+def cmd_search_web(args: argparse.Namespace) -> int:
+    import asyncio as _asyncio
+    import json as _json
+
+    from libref.services.factory import build_discovery_service
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        try:
+            candidates = _asyncio.run(
+                build_discovery_service(conn, settings).search_web_async(
+                    args.query, args.limit
+                )
+            )
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 2
+        except RegistryError as exc:
+            print(f"discovery failed [{exc.kind}]: {exc}", file=sys.stderr)
+            return 1
+        if not candidates:
+            print("(no suggestions)")
+            return 0
+        print("suggestions:")
+        for c in candidates:
+            print(_json.dumps(c, ensure_ascii=False))
+        return 0
     finally:
         conn.close()
 
@@ -66,8 +98,12 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             print(f"invalid: {exc}", file=sys.stderr)
             return 2
         except RegistryError as exc:
-            hint = f" hint={exc.hint}" if exc.hint else ""
-            print(f"resolve failed [{exc.kind}]: {exc}{hint}", file=sys.stderr)
+            from libref.cli.common import format_registry_error
+
+            print(
+                format_registry_error(exc, target=getattr(args, "target", "docs")),
+                file=sys.stderr,
+            )
             return 1
     finally:
         conn.close()

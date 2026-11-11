@@ -153,6 +153,71 @@ def _pick_version(
     raise RegistryError("no_docs", "registry lists no versions")
 
 
+def _context_hint(
+    ecosystem: str | None, name: str, requested: str | None = None
+) -> dict:
+    hint: dict = {"ecosystem": ecosystem, "name": name}
+    if requested is not None:
+        hint["requested_version"] = requested
+    return hint
+
+
+def next_actions_for(
+    ecosystem: str | None, name: str, target: str, kind: str
+) -> list[dict]:
+    """Structured follow-ups for humans and agents: fuzzy discovery first, then manual search with an explicit address."""
+    from libref.crawler.registry import SUPPORTED_ECOSYSTEMS
+
+    query = (name or "").strip()
+    scoped = ecosystem in SUPPORTED_ECOSYSTEMS
+    discover_cli = f'libref discover "{query}"'
+    arguments: dict = {"query": query}
+    if scoped:
+        discover_cli += f" --ecosystem {ecosystem}"
+        arguments["ecosystem"] = ecosystem
+    if kind == "not_found":
+        purpose = "fuzzy discovery across registries; check spelling and find the canonical package"
+    else:
+        purpose = "fuzzy discovery across registries; confirm the canonical package and its metadata"
+    actions = [
+        {
+            "kind": "tool",
+            "mcp_tool": "library_search",
+            "cli": discover_cli,
+            "arguments": arguments,
+            "purpose": purpose,
+        }
+    ]
+    if kind == "retryable":
+        actions.append(
+            {
+                "kind": "manual",
+                "detail": "the registry is unreachable; retry later or rerun with a warm cache",
+            }
+        )
+    if target == "repo":
+        actions.append(
+            {
+                "kind": "manual",
+                "detail": f"search the web for the official source repository of {query}, "
+                "then rerun with an explicit source "
+                "(libref index-repo <library> <version> <url-or-local-path>), "
+                "or add a repo_url entry to the registry overrides file",
+            }
+        )
+    else:
+        actions.append(
+            {
+                "kind": "manual",
+                "detail": f"search the web for the official documentation of {query}, "
+                "then rerun with an explicit address "
+                "(libref ingest <library> <version> <url>), "
+                "or add a docs_url entry to the registry overrides file",
+            }
+        )
+    return actions
+
+
 def _build_resolution(
     *,
     ecosystem: str,
@@ -172,12 +237,24 @@ def _build_resolution(
     docs_url = override_docs or registry_docs
     repo = override_repo or repo_url
     if docs_url is None:
+        hint = _context_hint(ecosystem, name, requested)
+        if homepage is not None:
+            hint["homepage"] = homepage
+        if repo is not None:
+            hint["repo_url"] = repo
         raise RegistryError(
             "no_docs",
             "registry has no documentation address",
-            hint={"homepage": homepage, "repo_url": repo},
+            hint=hint,
         )
-    version, confirmed = _pick_version(versions, stable, requested, include_prerelease)
+    try:
+        version, confirmed = _pick_version(
+            versions, stable, requested, include_prerelease
+        )
+    except RegistryError as exc:
+        if not exc.hint:
+            exc.hint = _context_hint(ecosystem, name, requested)
+        raise
     final_candidates = [docs_url]
     for c in candidates:
         if c != docs_url and c not in final_candidates:
@@ -263,12 +340,22 @@ def _build_repo_resolution(
     """Repo resolution assembly: override repo wins; missing repo raises no_docs directly, symmetric with the docs resolution."""
     repo = override_repo or repo_url
     if repo is None:
+        hint = _context_hint(ecosystem, name, requested)
+        if homepage is not None:
+            hint["homepage"] = homepage
         raise RegistryError(
             "no_docs",
             "registry has no repository address",
-            hint={"homepage": homepage},
+            hint=hint,
         )
-    version, confirmed = _pick_version(versions, stable, requested, include_prerelease)
+    try:
+        version, confirmed = _pick_version(
+            versions, stable, requested, include_prerelease
+        )
+    except RegistryError as exc:
+        if not exc.hint:
+            exc.hint = _context_hint(ecosystem, name, requested)
+        raise
     return Resolution(
         ecosystem=ecosystem,
         name=name,
@@ -394,7 +481,11 @@ async def _resolve_via_registry(
     builder = _builder_for(target)
     if offline:
         if cached is None:
-            raise RegistryError("retryable", "offline cache miss")
+            raise RegistryError(
+                "retryable",
+                "offline cache miss",
+                hint=_context_hint(eco, norm, requested_version),
+            )
         return builder(
             ecosystem=eco,
             name=norm,
@@ -438,12 +529,17 @@ async def _resolve_via_registry(
     try:
         snap = await fetch_snapshot(eco, norm, client, settings, include_prerelease)
     except RegistryError as exc:
+        if not exc.hint:
+            exc.hint = _context_hint(eco, norm, requested_version)
         if exc.kind == "retryable" and cached is not None:
             if target == "repo" and (override_repo or cached["repo_url"]) is None:
+                hint = _context_hint(eco, norm, requested_version)
+                if cached["homepage"] is not None:
+                    hint["homepage"] = cached["homepage"]
                 raise RegistryError(
                     "no_docs",
                     "registry has no repository address",
-                    hint={"homepage": cached["homepage"]},
+                    hint=hint,
                 ) from None
             return builder(
                 ecosystem=eco,

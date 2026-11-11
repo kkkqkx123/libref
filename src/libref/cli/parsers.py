@@ -36,7 +36,12 @@ from libref.cli.ops_commands import (
     cmd_serve_mcp,
     cmd_serve_web,
 )
-from libref.cli.registry_commands import cmd_catalog, cmd_discover, cmd_resolve
+from libref.cli.registry_commands import (
+    cmd_catalog,
+    cmd_discover,
+    cmd_resolve,
+    cmd_search_web,
+)
 from libref.crawler.registry import REGISTRY_MIRRORS
 
 
@@ -291,6 +296,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include prerelease versions when ranking candidates",
     )
     p_discover.set_defaults(func=cmd_discover)
+
+    p_search_web = sub.add_parser(
+        "search-web",
+        help="Explicit web search for library docs or repos; results are unverified",
+        parents=[_config_parent],
+    )
+    p_search_web.add_argument("query")
+    p_search_web.add_argument("--limit", type=int, default=10)
+    p_search_web.set_defaults(func=cmd_search_web)
 
     p_answer = sub.add_parser(
         "answer",

@@ -252,6 +252,85 @@ def test_normalize_name_dispatch(monkeypatch, tmp_path) -> None:
     assert normalize_name("dotnet", "Newtonsoft.Json") == "newtonsoft.json"
 
 
+def test_next_actions_for_docs_and_repo() -> None:
+    from libref.services.registry.resolver import next_actions_for
+
+    docs = next_actions_for("pypi", "requests", "docs", "no_docs")
+    assert docs[0]["kind"] == "tool"
+    assert docs[0]["mcp_tool"] == "library_search"
+    assert "discover" in docs[0]["cli"]
+    assert docs[-1]["kind"] == "manual" and "ingest" in docs[-1]["detail"]
+    repo = next_actions_for("go", "github.com/acme/demo", "repo", "no_docs")
+    assert "index-repo" in repo[-1]["detail"]
+    retry = next_actions_for(None, "demo", "docs", "retryable")
+    assert "--ecosystem" not in retry[0]["cli"]
+    assert any(a["kind"] == "manual" and "retry" in a["detail"] for a in retry)
+
+
+def test_format_registry_error_renders_guidance() -> None:
+    from libref.cli.common import format_registry_error
+    from libref.crawler.registry import RegistryError
+
+    exc = RegistryError(
+        "no_docs",
+        "registry has no repository address",
+        hint={
+            "ecosystem": "go",
+            "name": "github.com/acme/demo",
+            "homepage": "https://demo.dev/",
+        },
+    )
+    text = format_registry_error(exc, target="repo")
+    assert "no_docs" in text and "go" in text
+    assert "libref discover" in text and "index-repo" in text
+
+
+DDG_FIXTURE = (
+    '<div class="result">'
+    '<h2 class="result__title">'
+    '<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Facme%2Fdemo&amp;rut=x">acme/demo: demo tool</a>'
+    "</h2>"
+    '<a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fgithub.com%2Facme%2Fdemo&amp;rut=x">demo snippet</a>'
+    "</div>"
+    '<div class="result">'
+    '<a class="result__a" href="https://demo.readthedocs.io/">demo docs</a>'
+    "</div>"
+    '<div class="result">no anchor here</div>'
+)
+
+
+def test_websearch_url_target_name_and_classify() -> None:
+    from libref.crawler.websearch import (
+        candidate_name,
+        classify_target,
+        extract_target,
+        parse_ddg_html,
+        web_search_url,
+    )
+
+    assert "q=" in web_search_url("acme demo")
+    assert extract_target("https://demo.dev/") == "https://demo.dev/"
+    assert (
+        extract_target("//duckduckgo.com/l/?uddg=https%3A%2F%2Fdemo.dev%2F&rut=x")
+        == "https://demo.dev/"
+    )
+    assert extract_target("/relative/path") is None
+    assert extract_target(None) is None
+    assert candidate_name("https://github.com/acme/demo", "t") == "acme/demo"
+    assert candidate_name("https://demo.dev/guide/", "t") == "demo.dev"
+    assert classify_target("https://github.com/acme/demo") == "repo"
+    assert classify_target("https://demo.readthedocs.io/") == "docs"
+    assert classify_target("https://example.com/blog/") == "other"
+    hits = parse_ddg_html(DDG_FIXTURE)
+    assert [h["url"] for h in hits] == [
+        "https://github.com/acme/demo",
+        "https://demo.readthedocs.io/",
+    ]
+    assert hits[0]["title"] == "acme/demo: demo tool"
+    assert hits[0]["snippet"] == "demo snippet"
+    assert parse_ddg_html("") == []
+
+
 def test_best_effort_stable_prerelease_flag() -> None:
     from libref.crawler.registry import best_effort_stable
 

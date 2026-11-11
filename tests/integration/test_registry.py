@@ -184,6 +184,40 @@ def test_no_docs_returns_hint(conn, monkeypatch, tmp_path):
     assert "repo_url" in exc.value.hint
 
 
+def test_no_docs_hint_carries_context(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
+    payload = {
+        "info": {
+            "version": "1.0",
+            "home_page": "https://example.com/marketing",
+            "project_urls": {"Source": "https://github.com/org/repo"},
+        },
+        "releases": {"1.0": []},
+    }
+    client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler(payload)))
+    try:
+        with pytest.raises(RegistryError) as exc:
+            run(resolve_package(conn, client, settings, "pypi", "requests"))
+    finally:
+        run(client.aclose())
+    assert exc.value.hint.get("ecosystem") == "pypi"
+    assert exc.value.hint.get("name") == "requests"
+    assert exc.value.hint.get("repo_url") == "https://github.com/org/repo"
+
+
+def test_not_found_hint_carries_context(conn, monkeypatch, tmp_path):
+    settings = make_registry_settings(monkeypatch, tmp_path)
+    client = httpx.AsyncClient(transport=httpx.MockTransport(pypi_handler(status=404)))
+    try:
+        with pytest.raises(RegistryError) as exc:
+            run(resolve_package(conn, client, settings, "pypi", "requests"))
+    finally:
+        run(client.aclose())
+    assert exc.value.kind == "not_found"
+    assert exc.value.hint.get("ecosystem") == "pypi"
+    assert exc.value.hint.get("name") == "requests"
+
+
 def test_override_wins_over_registry(conn, monkeypatch, tmp_path):
     from libref.crawler.registry import overrides as ov
 
