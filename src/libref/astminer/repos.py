@@ -80,6 +80,60 @@ def iter_source_files(
     yield from found
 
 
+def describe_source_files(
+    root: Path,
+    suffixes: tuple[str, ...],
+    *,
+    max_file_bytes: int = 1_000_000,
+    subdir: str | None = None,
+) -> dict:
+    """Read-only file census for probes: effective list plus skip and shape counters."""
+    prefix = (subdir or "").strip().strip("/")
+    wanted: list[str] = []
+    suffix_counts: dict[str, int] = {}
+    top_dirs: dict[str, int] = {}
+    skipped = 0
+    oversized = 0
+    for path in root.rglob("*"):
+        try:
+            if path.is_symlink():
+                continue
+        except OSError:
+            continue
+        if not path.is_file():
+            continue
+        if path.suffix not in suffixes:
+            continue
+        try:
+            rel = path.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if prefix and rel != prefix and not rel.startswith(prefix + "/"):
+            continue
+        suffix_counts[path.suffix] = suffix_counts.get(path.suffix, 0) + 1
+        head = rel.split("/", 1)[0] if "/" in rel else "(root)"
+        top_dirs[head] = top_dirs.get(head, 0) + 1
+        if _should_skip(rel):
+            skipped += 1
+            continue
+        try:
+            if path.stat().st_size > max_file_bytes:
+                oversized += 1
+                continue
+        except OSError:
+            skipped += 1
+            continue
+        wanted.append(rel)
+    wanted.sort()
+    return {
+        "files": wanted,
+        "suffix_counts": suffix_counts,
+        "top_dirs": top_dirs,
+        "skipped": skipped,
+        "oversized": oversized,
+    }
+
+
 class RepoManager:
     def __init__(self, base_dir: Path):
         self._base = Path(base_dir)

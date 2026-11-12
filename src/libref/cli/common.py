@@ -105,6 +105,7 @@ def _scope_from_args(args: argparse.Namespace) -> dict:
         "path_suffixes": list(getattr(args, "path_suffix", None) or []),
         "include_patterns": list(getattr(args, "include_pattern", None) or []),
         "exclude_patterns": list(getattr(args, "exclude_pattern", None) or []),
+        "urls": list(getattr(args, "url", None) or []),
         "max_depth": getattr(args, "max_depth", None),
         "render_js": bool(getattr(args, "render_js", False)),
         "render_wait_for": getattr(args, "render_wait_for", None),

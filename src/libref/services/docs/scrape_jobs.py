@@ -23,6 +23,7 @@ def scrape_job_params(
     ecosystem: str = "custom",
     resolved_from: str | None = None,
     registry_confirmed: bool = True,
+    fresh: bool = False,
 ) -> dict[str, Any]:
     """Build scrape job params, including the resolution source for replayability."""
     return {
@@ -35,6 +36,7 @@ def scrape_job_params(
         "ecosystem": ecosystem,
         "resolved_from": resolved_from,
         "registry_confirmed": registry_confirmed,
+        "fresh": fresh,
     }
 
 
@@ -50,6 +52,7 @@ def start_scrape_job(
     ecosystem: str = "custom",
     resolved_from: str | None = None,
     registry_confirmed: bool = True,
+    fresh: bool = False,
 ) -> int:
     """Submit a scrape job to the queue and return its id; execution is done by the worker plus runner."""
     return mgr.submit(
@@ -64,6 +67,7 @@ def start_scrape_job(
             ecosystem=ecosystem,
             resolved_from=resolved_from,
             registry_confirmed=registry_confirmed,
+            fresh=fresh,
         ),
     )
 
@@ -78,6 +82,7 @@ def start_refresh_job(
     prefilter: bool = False,
     scope: dict[str, Any] | None = None,
     ecosystem: str = "custom",
+    fresh: bool = False,
 ) -> int:
     """Submit a refresh job to the queue, reusing the scrape job kind for incremental semantics."""
     return mgr.submit(
@@ -92,6 +97,7 @@ def start_refresh_job(
             ecosystem=ecosystem,
             resolved_from="refresh",
             registry_confirmed=True,
+            fresh=fresh,
         ),
     )
 
@@ -117,6 +123,7 @@ def build_scrape_runner(settings, conn, *, vec_store=None, embed=None, mgr=None)
             ecosystem=params.get("ecosystem", "custom"),
             resolved_from=params.get("resolved_from"),
             registry_confirmed=params.get("registry_confirmed", True),
+            fresh=bool(params.get("fresh", False)),
             heartbeat=heartbeat,
         )
 

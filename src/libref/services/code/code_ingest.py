@@ -11,13 +11,18 @@ from pathlib import Path
 import httpx
 
 from libref.services.code.repo_chunks import _store_source_chunks, _sweep_source_pages
-from libref.services.code.repo_collect import _collect_repo
+from libref.services.code.repo_collect import (
+    _collect_decl_index,
+    _collect_repo,
+    _load_raw_batch,
+)
 from libref.services.code.repo_ids import call_uid, entity_uid
 from libref.services.code.repo_persist import (
     _check_manifest_identity,
-    _persist_calls,
     _persist_entities,
     _persist_repo_deps,
+    _sweep_calls,
+    _upsert_calls,
 )
 from libref.services.code.repo_source import (
     list_repo_dependencies,
@@ -41,11 +46,14 @@ def _same_source(left: str | None, right: str | None) -> bool:
 
 __all__ = [
     "INDEX_REPO_JOB_KIND",
+    "_collect_decl_index",
     "_collect_repo",
-    "_persist_calls",
+    "_load_raw_batch",
     "_persist_entities",
     "_store_source_chunks",
+    "_sweep_calls",
     "_sweep_source_pages",
+    "_upsert_calls",
     "build_repo_runner",
     "call_uid",
     "entity_uid",
@@ -81,6 +89,10 @@ async def index_repo_async(
     settings=None,
     vec_store=None,
     embed=None,
+    fresh: bool = False,
+    subdir: str | None = None,
+    only_files: list[str] | None = None,
+    max_files: int | None = None,
 ) -> dict[str, int]:
     """Lock one version across doc and code writers, then run the ingest."""
     from libref.services.infra.version_lock import version_lock
@@ -100,6 +112,10 @@ async def index_repo_async(
             settings=settings,
             vec_store=vec_store,
             embed=embed,
+            fresh=fresh,
+            subdir=subdir,
+            only_files=only_files,
+            max_files=max_files,
         )
 
 
@@ -118,11 +134,20 @@ async def _index_repo_inner(
     settings=None,
     vec_store=None,
     embed=None,
+    fresh: bool = False,
+    subdir: str | None = None,
+    only_files: list[str] | None = None,
+    max_files: int | None = None,
 ) -> dict[str, int]:
     from libref.astminer import cache as ast_cache
     from libref.astminer import config as ast_config
     from libref.astminer import resolution as ast_resolution
     from libref.astminer.repos import RepoManager, iter_source_files
+    from libref.services.infra.progress import (
+        CODE_KIND,
+        resume_offset,
+        save_progress,
+    )
     from libref.services.registry.libraries import LibraryService
 
     settings_dir = Path(repos_dir)
@@ -167,37 +192,93 @@ async def _index_repo_inner(
     root, commit = manager.ensure(conn, repo_name, source, update=update)
     conn.commit()
     files = [r for r in iter_source_files(root, ast_config.all_suffixes())]
-    all_decls, file_aliases, all_raw, counts, live = _collect_repo(
+    prefix = (subdir or "").strip().strip("/")
+    if prefix:
+        files = [r for r in files if r == prefix or r.startswith(prefix + "/")]
+    if only_files:
+        wanted_files = set(only_files)
+        files = [r for r in files if r in wanted_files]
+    files_truncated = False
+    if max_files is not None and len(files) > max_files:
+        files = files[:max_files]
+        files_truncated = True
+    batch_size = max(1, int(getattr(settings, "index_batch_files", 200) or 200))
+    done, fingerprint = resume_offset(conn, version_id, CODE_KIND, files, fresh=fresh)
+    counts = {"resumed_skipped": done, "batches": 0}
+    counts["files_truncated"] = 1 if files_truncated else 0
+    all_decls, file_aliases, collect_counts, live = _collect_decl_index(
         conn,
         repo_name,
         root,
         files,
     )
+    counts.update(collect_counts)
     counts["evicted"] = ast_cache.sweep_repo(conn, repo_name, live)
     conn.commit()
-    resolved = ast_resolution.resolve_calls(
-        all_decls, file_aliases, all_raw, repo_name, commit
-    )
     n_entities, swept_entities = _persist_entities(
         conn, library_id, version_id, all_decls
     )
-    n_calls, swept_calls = _persist_calls(
-        conn, library_id, version_id, resolved, commit
-    )
+    counts["entities"] = n_entities
+    counts["swept_entities"] = swept_entities
+    conn.commit()
+    remaining = files[done:]
+    wanted_calls: set[str] = set()
+    n_calls = 0
+    removed_ids: list[int] = []
+    inserted_ids: list[int] = []
+    n_chunks = 0
+    chunk_dropped = 0
+    for start in range(0, len(remaining), batch_size):
+        batch_files = remaining[start : start + batch_size]
+        batch_aliases = {rel: file_aliases.get(rel, []) for rel in batch_files}
+        batch_raw = _load_raw_batch(conn, repo_name, root, batch_files)
+        resolved = ast_resolution.resolve_calls(
+            all_decls, batch_aliases, batch_raw, repo_name, commit
+        )
+        batch_count, batch_wanted = _upsert_calls(
+            conn, library_id, version_id, resolved, commit
+        )
+        n_calls += batch_count
+        wanted_calls.update(batch_wanted)
+        conn.commit()
+        batch_live = {rel: live[rel] for rel in batch_files if rel in live}
+        batch_chunks, batch_dropped, batch_removed, batch_inserted = (
+            _store_source_chunks(
+                conn,
+                repo_name,
+                root,
+                sorted(batch_live),
+                all_decls,
+                library_id,
+                version_id,
+            )
+        )
+        n_chunks += batch_chunks
+        chunk_dropped += batch_dropped
+        removed_ids.extend(batch_removed)
+        inserted_ids.extend(batch_inserted)
+        conn.commit()
+        counts["batches"] += 1
+        save_progress(
+            conn,
+            version_id,
+            CODE_KIND,
+            total=len(files),
+            done=done + start + len(batch_files),
+            fingerprint=fingerprint,
+            batch_size=batch_size,
+        )
+    swept_calls = _sweep_calls(conn, version_id, wanted_calls)
+    counts["calls"] = n_calls
+    counts["swept_calls"] = swept_calls
+    conn.commit()
     _check_manifest_identity(ecosystem, library, root)
     n_deps = _persist_repo_deps(conn, library_id, version_id, root)
     counts["manifest_deps"] = n_deps
-    n_chunks, chunk_dropped, removed_ids, inserted_ids = _store_source_chunks(
-        conn, repo_name, root, sorted(live), all_decls, library_id, version_id
-    )
     swept_pages = _sweep_source_pages(conn, repo_name, set(live))
     removed_ids.extend(swept_pages)
     counts["swept_pages"] = len(swept_pages)
     conn.commit()
-    counts["entities"] = n_entities
-    counts["calls"] = n_calls
-    counts["swept_entities"] = swept_entities
-    counts["swept_calls"] = swept_calls
     counts["source_chunks"] = n_chunks
     counts["chunk_empty_dropped"] = chunk_dropped
     counts["vector_failed"] = 0
@@ -217,6 +298,10 @@ async def _index_repo_inner(
             inserted_ids,
             version_id=version_id,
         )
+    from libref.services.infra.progress import CODE_KIND as _CODE_KIND
+    from libref.services.infra.progress import clear_progress as _clear_progress
+
+    _clear_progress(conn, version_id, _CODE_KIND)
     return counts
 
 
@@ -235,6 +320,10 @@ def index_repo(
     settings=None,
     vec_store=None,
     embed=None,
+    fresh: bool = False,
+    subdir: str | None = None,
+    only_files: list[str] | None = None,
+    max_files: int | None = None,
 ) -> dict[str, int]:
     return asyncio.run(
         index_repo_async(
@@ -251,6 +340,10 @@ def index_repo(
             settings=settings,
             vec_store=vec_store,
             embed=embed,
+            fresh=fresh,
+            subdir=subdir,
+            only_files=only_files,
+            max_files=max_files,
         )
     )
 
@@ -266,6 +359,10 @@ def index_repo_by_name(
     repos_dir=None,
     explicit_source: str | None = None,
     include_prerelease: bool = False,
+    fresh: bool = False,
+    subdir: str | None = None,
+    only_files: list[str] | None = None,
+    max_files: int | None = None,
 ) -> dict[str, int]:
     return asyncio.run(
         index_repo_by_name_async(
@@ -278,6 +375,10 @@ def index_repo_by_name(
             repos_dir=repos_dir,
             explicit_source=explicit_source,
             include_prerelease=include_prerelease,
+            fresh=fresh,
+            subdir=subdir,
+            only_files=only_files,
+            max_files=max_files,
         )
     )
 
@@ -293,6 +394,10 @@ async def index_repo_by_name_async(
     repos_dir=None,
     explicit_source: str | None = None,
     include_prerelease: bool = False,
+    fresh: bool = False,
+    subdir: str | None = None,
+    only_files: list[str] | None = None,
+    max_files: int | None = None,
 ) -> dict[str, int]:
     from libref.services.registry.resolver import resolve_repo
 
@@ -327,6 +432,10 @@ async def index_repo_by_name_async(
             settings=settings,
             vec_store=vec_store,
             embed=embed,
+            fresh=fresh,
+            subdir=subdir,
+            only_files=only_files,
+            max_files=max_files,
         )
     async with _client(settings) as client:
         resolution = await resolve_repo(
@@ -362,6 +471,10 @@ async def index_repo_by_name_async(
         settings=settings,
         vec_store=vec_store,
         embed=embed,
+        fresh=fresh,
+        subdir=subdir,
+        only_files=only_files,
+        max_files=max_files,
     )
 
 
@@ -401,6 +514,10 @@ def build_repo_runner(settings, conn, repos_dir=None, vec_store=None, embed=None
             settings=settings,
             vec_store=local_vec,
             embed=local_embed,
+            fresh=bool(p.get("fresh", False)),
+            subdir=p.get("subdir"),
+            only_files=p.get("only_files"),
+            max_files=p.get("max_files"),
         )
 
     return runner

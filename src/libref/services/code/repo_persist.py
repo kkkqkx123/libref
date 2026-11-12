@@ -66,9 +66,10 @@ def _persist_entities(
     return len(pending), swept
 
 
-def _persist_calls(
+def _upsert_calls(
     conn, library_id: int, version_id: int, resolved, commit_sha: str = ""
-) -> tuple[int, int]:
+) -> tuple[int, set[str]]:
+    """Upsert one batch of call instances without sweeping; returns count and identity set."""
     import json as _uid_json
 
     from libref.mining import scope_key as _scope_key
@@ -166,6 +167,11 @@ def _persist_calls(
                 " ON CONFLICT(entity_type, entity_id) DO NOTHING",
                 [(i,) for i in pending_ids],
             )
+    return len(resolved), set(wanted)
+
+
+def _sweep_calls(conn, version_id: int, wanted: set[str]) -> int:
+    """Delete call instances outside the surviving identity set; version-level sweep runs once."""
     keep = set(wanted)
     existing = [
         (int(r[0]), str(r[1]))
@@ -189,7 +195,15 @@ def _persist_calls(
             (version_id, *[u for _, u in swept_chunk]),
         )
         swept += int(cur.rowcount or 0)
-    return len(resolved), swept
+    return swept
+
+
+def _persist_calls(
+    conn, library_id: int, version_id: int, resolved, commit_sha: str = ""
+) -> tuple[int, int]:
+    """Upsert plus version-level sweep; batched ingest calls _upsert_calls per batch instead."""
+    count, wanted = _upsert_calls(conn, library_id, version_id, resolved, commit_sha)
+    return count, _sweep_calls(conn, version_id, wanted)
 
 
 def _check_manifest_identity(ecosystem: str, library: str, root) -> None:

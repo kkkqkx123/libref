@@ -252,6 +252,7 @@ async def sync_vectors_for_docs(
     inserted,
     *,
     version_id: int | None = None,
+    repair: bool = True,
 ) -> None:
     """Sync the scrape delta, then verify the version by set and repair drift.
 
@@ -290,7 +291,9 @@ async def sync_vectors_for_docs(
         return
     if not removed and not inserted:
         if version_id is not None:
-            await _verify_version(conn, settings, vec_store, embed, counts, version_id)
+            await _verify_version(
+                conn, settings, vec_store, embed, counts, version_id, repair=repair
+            )
         return
     try:
         vec_store.delete_docs(removed)
@@ -326,11 +329,13 @@ async def sync_vectors_for_docs(
         logger.warning("vector upsert failed: %s", exc)
         return
     if version_id is not None:
-        await _verify_version(conn, settings, vec_store, embed, counts, version_id)
+        await _verify_version(
+            conn, settings, vec_store, embed, counts, version_id, repair=repair
+        )
 
 
 async def _verify_version(
-    conn, settings, vec_store, embed, counts, version_id: int
+    conn, settings, vec_store, embed, counts, version_id: int, *, repair: bool = True
 ) -> None:
     """Verify by count then id set; mismatch falls through to set-difference repair."""
     try:
@@ -350,6 +355,13 @@ async def _verify_version(
             return
         if want_ids == have_ids:
             return
+    if not repair:
+        logger.warning(
+            "vector drift detected: want=%d have=%d (repair deferred)",
+            want_count,
+            have_count,
+        )
+        return
     try:
         stats = await reconcile_version(conn, settings, vec_store, embed, version_id)
     except Exception as exc:  # noqa: BLE001 — vector failures are recorded, not fatal

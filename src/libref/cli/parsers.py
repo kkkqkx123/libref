@@ -104,6 +104,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_ingest.add_argument("--max-pages", type=int, default=None)
     p_ingest.add_argument(
+        "--url",
+        action="append",
+        default=None,
+        help="Explicit single-page target; repeatable, still scope-filtered",
+    )
+    p_ingest.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Discard the resume cursor and run the full target list",
+    )
+    p_ingest.add_argument(
         "--prefilter",
         action="store_true",
         help="Prefilter URLs with a liveness HEAD check",
@@ -189,6 +200,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_refresh.add_argument("start_url")
     p_refresh.add_argument("--ecosystem", default=None)
     p_refresh.add_argument("--max-pages", type=int, default=None)
+    p_refresh.add_argument(
+        "--url",
+        action="append",
+        default=None,
+        help="Explicit single-page target; repeatable, still scope-filtered",
+    )
+    p_refresh.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Discard the resume cursor and run the full target list",
+    )
     p_refresh.add_argument("--prefilter", action="store_true")
     p_refresh.add_argument(
         "--allow-cross-site", action="store_true", help="Allow crawling across sites"
@@ -440,6 +462,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_repo.add_argument(
         "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
     )
+    p_repo.add_argument(
+        "--subdir",
+        default=None,
+        help="Index only files under this repository-relative directory",
+    )
+    p_repo.add_argument(
+        "--only-file",
+        action="append",
+        default=None,
+        help="Index only this repository-relative file; repeatable",
+    )
+    p_repo.add_argument("--max-files", type=int, default=None)
+    p_repo.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Discard the resume cursor and run the full file list",
+    )
     p_repo.set_defaults(func=cmd_index_repo)
 
     p_deps = sub.add_parser(
@@ -568,6 +607,64 @@ def build_parser() -> argparse.ArgumentParser:
         help="Resolve to the newest version including prereleases",
     )
     p_resolve.set_defaults(func=cmd_resolve)
+
+    p_probe_docs = sub.add_parser(
+        "probe-docs",
+        help="Probe a documentation site structure without storing",
+        parents=[_config_parent],
+    )
+    p_probe_docs.add_argument("start_url")
+    p_probe_docs.add_argument("--sample-limit", type=int, default=None)
+    p_probe_docs.add_argument(
+        "--allow-cross-site", action="store_true", help="Allow crawling across sites"
+    )
+    p_probe_docs.add_argument(
+        "--allow-subdomains", action="store_true", help="Allow same-domain subdomains"
+    )
+    p_probe_docs.add_argument(
+        "--path-prefix",
+        action="append",
+        default=None,
+        help="Accept only paths under this prefix; repeatable",
+    )
+    p_probe_docs.add_argument(
+        "--path-suffix",
+        action="append",
+        default=None,
+        help="Accept only paths with this suffix; repeatable",
+    )
+    p_probe_docs.add_argument(
+        "--include-pattern",
+        action="append",
+        default=None,
+        help="Regex allowlist; repeatable",
+    )
+    p_probe_docs.add_argument(
+        "--exclude-pattern",
+        action="append",
+        default=None,
+        help="Regex denylist; repeatable",
+    )
+    p_probe_docs.add_argument("--url", action="append", default=None)
+    p_probe_docs.add_argument("--max-depth", type=int, default=None)
+    p_probe_docs.add_argument("--crawl-query", default=None)
+    p_probe_docs.add_argument("--score-threshold", type=float, default=None)
+    from libref.cli.docs_commands import cmd_probe_docs
+
+    p_probe_docs.set_defaults(func=cmd_probe_docs)
+
+    p_probe_repo = sub.add_parser(
+        "probe-repo",
+        help="Probe a repository structure without parsing",
+        parents=[_config_parent],
+    )
+    p_probe_repo.add_argument("source", help="Remote URL or local path")
+    p_probe_repo.add_argument("--subdir", default=None)
+    p_probe_repo.add_argument("--max-files", type=int, default=None)
+    p_probe_repo.add_argument("--sample-limit", type=int, default=None)
+    from libref.cli.code_commands import cmd_probe_repo
+
+    p_probe_repo.set_defaults(func=cmd_probe_repo)
 
     p_dump = sub.add_parser(
         "dump-chunks",

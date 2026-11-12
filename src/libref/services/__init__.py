@@ -20,6 +20,7 @@ from libref.services.code.mining_refresh import (
     refresh_clusters,
     refresh_feature_tree,
 )
+from libref.services.code.probe import RepoProbe, probe_repo
 from libref.services.docs.answer import answer_query, answer_query_async
 from libref.services.docs.answer_materials import (
     SYSTEM_PROMPT,
@@ -37,6 +38,7 @@ from libref.services.docs.ingest import (
     start_scrape_job,
 )
 from libref.services.docs.pages import PageService
+from libref.services.docs.probe import DocProbe, probe_docs, probe_docs_async
 from libref.services.docs.search import SearchService
 from libref.services.factory import (
     build_ingest_service,
@@ -80,12 +82,14 @@ __all__ = [
     "SCRAPE_JOB_KIND",
     "SYSTEM_PROMPT",
     "DiscoveryService",
+    "DocProbe",
     "IngestService",
     "JobManager",
     "LibraryService",
     "MaintenanceService",
     "MiningReadService",
     "PageService",
+    "RepoProbe",
     "ReviewService",
     "SearchService",
     "answer_query",
@@ -115,6 +119,9 @@ __all__ = [
     "mine_job_params",
     "mine_patterns",
     "mining_version_ids",
+    "probe_docs",
+    "probe_docs_async",
+    "probe_repo",
     "prune_expired_logs",
     "purge_version",
     "rebuild_fts",

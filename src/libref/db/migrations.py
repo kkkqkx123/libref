@@ -17,6 +17,7 @@ from libref.db.schema import (
     MINING_REVIEW_SCHEMA_SQL,
     PAGES_CONTENT_HASH_SQL,
     PATTERN_LABEL_SQL,
+    PROGRESS_SQL,
     QUERY_SUPPORT_SQL,
     REPO_DEPS_SQL,
     REPOS_ASTCACHE_SQL,
@@ -48,6 +49,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(12, "call-scope", CALL_SCOPE_SQL),
     Migration(13, "discovery-cache", DISCOVERY_CACHE_SQL),
     Migration(14, "repo-dependencies", REPO_DEPS_SQL),
+    Migration(15, "ingest-progress", PROGRESS_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

@@ -94,6 +94,7 @@ class IngestService:
         registry_confirmed: bool = True,
         homepage: str | None = None,
         repo_url: str | None = None,
+        fresh: bool = False,
         heartbeat=None,
     ) -> dict[str, int]:
         """Sync entry: discover, fetch, clean, chunk, store; returns outcome counts by kind."""
@@ -110,6 +111,7 @@ class IngestService:
                 registry_confirmed=registry_confirmed,
                 homepage=homepage,
                 repo_url=repo_url,
+                fresh=fresh,
                 heartbeat=heartbeat,
             )
         )
@@ -128,6 +130,7 @@ class IngestService:
         registry_confirmed: bool = True,
         homepage: str | None = None,
         repo_url: str | None = None,
+        fresh: bool = False,
         heartbeat=None,
     ) -> dict[str, int]:
         """Async entry, reused by the job worker, to avoid nested loop startup inside a running event loop."""
@@ -143,6 +146,7 @@ class IngestService:
             registry_confirmed=registry_confirmed,
             homepage=homepage,
             repo_url=repo_url,
+            fresh=fresh,
             heartbeat=heartbeat,
         )
 
@@ -156,6 +160,7 @@ class IngestService:
         prefilter: bool = False,
         scope: dict[str, Any] | None = None,
         ecosystem: str = "custom",
+        fresh: bool = False,
         heartbeat=None,
     ) -> dict[str, int]:
         """Refresh-intent entry: reuses the scrape path's incremental semantics, only expressing refresh intent."""
@@ -169,6 +174,7 @@ class IngestService:
             ecosystem=ecosystem,
             resolved_from="refresh",
             registry_confirmed=True,
+            fresh=fresh,
             heartbeat=heartbeat,
         )
 
@@ -182,6 +188,7 @@ class IngestService:
         prefilter: bool = False,
         scope: dict[str, Any] | None = None,
         ecosystem: str = "custom",
+        fresh: bool = False,
         heartbeat=None,
     ) -> dict[str, int]:
         """Refresh async entry, for job reuse."""
@@ -195,6 +202,7 @@ class IngestService:
             ecosystem=ecosystem,
             resolved_from="refresh",
             registry_confirmed=True,
+            fresh=fresh,
             heartbeat=heartbeat,
         )
 
@@ -275,6 +283,7 @@ class IngestService:
         registry_confirmed: bool = True,
         homepage: str | None = None,
         repo_url: str | None = None,
+        fresh: bool = False,
         heartbeat=None,
     ) -> dict[str, int]:
         import time as _time
@@ -313,6 +322,8 @@ class IngestService:
                 "snapshot_quota_skipped",
                 "deep_discovered",
                 "deep_truncated",
+                "resumed_skipped",
+                "batches",
                 "elapsed_ms",
                 *(f"{step}_ms" for step in PIPELINE_STEPS),
             )
@@ -444,7 +455,52 @@ class IngestService:
                                 pending.append((link, depth + 1))
                         _beat()
 
-                await asyncio.gather(*(process(u, 0) for u in accepted))
+                from libref.services.infra.progress import (
+                    DOCS_KIND,
+                    clear_progress,
+                    resume_offset,
+                    save_progress,
+                )
+
+                batch_size = max(
+                    1, int(getattr(self._settings, "ingest_batch_pages", 200) or 200)
+                )
+                done, fingerprint = resume_offset(
+                    self._conn, version_id, DOCS_KIND, accepted, fresh=fresh
+                )
+                counts["resumed_skipped"] = done
+                remaining = accepted[done:]
+                for start in range(0, len(remaining), batch_size):
+                    batch_urls = remaining[start : start + batch_size]
+                    prev_removed = len(removed_all)
+                    prev_inserted = len(inserted_all)
+                    await asyncio.gather(*(process(u, 0) for u in batch_urls))
+                    counts["batches"] += 1
+                    vectors_start = _time.monotonic()
+                    await sync_vectors(
+                        self._conn,
+                        self._settings,
+                        self._vec,
+                        self._embed,
+                        store,
+                        counts,
+                        removed_all[prev_removed:],
+                        inserted_all[prev_inserted:],
+                        version_id=version_id,
+                    )
+                    counts["vectors_ms"] += int(
+                        (_time.monotonic() - vectors_start) * 1000
+                    )
+                    save_progress(
+                        self._conn,
+                        version_id,
+                        DOCS_KIND,
+                        total=len(accepted),
+                        done=done + start + len(batch_urls),
+                        fingerprint=fingerprint,
+                        batch_size=batch_size,
+                    )
+                    _beat()
                 if follow:
                     while pending:
                         if max_pages is not None and len(visited) >= max_pages:
@@ -458,10 +514,19 @@ class IngestService:
                                 counts["deep_truncated"] = 1
                                 batch = batch[:room]
                         counts["deep_discovered"] += len(batch)
-                        await asyncio.gather(*(process(u, d) for u, d in batch))
-                        _beat()
+                        for start in range(0, len(batch), batch_size):
+                            await asyncio.gather(
+                                *(
+                                    process(u, d)
+                                    for u, d in batch[start : start + batch_size]
+                                )
+                            )
+                            _beat()
                 # Absent sweeping is seed-driven; link-followed pages are outside
                 # the seed set, so the sweep is skipped in follow mode entirely.
+                # Batch syncs already pushed page deltas with the version watermark;
+                # the closing sync only carries sweep deletions plus set verification.
+                sweep_prev = len(removed_all)
                 if not follow:
                     removed_all.extend(
                         sweep_absent(
@@ -484,11 +549,13 @@ class IngestService:
                     self._embed,
                     store,
                     counts,
-                    removed_all,
-                    inserted_all,
+                    removed_all[sweep_prev:],
+                    [],
                     version_id=version_id,
+                    repair=False,
                 )
                 counts["vectors_ms"] = int((_time.monotonic() - vectors_start) * 1000)
+                clear_progress(self._conn, version_id, DOCS_KIND)
                 _beat()
             import time as _time2
 

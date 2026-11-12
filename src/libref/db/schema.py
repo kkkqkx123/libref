@@ -369,3 +369,17 @@ CREATE TABLE pattern_labels(
 );
 CREATE INDEX idx_pattern_labels_version ON pattern_labels(version_id);
 """
+
+# ── Ingest progress cursors: one row per version and kind, resume offset plus list fingerprint ──
+PROGRESS_SQL = """
+CREATE TABLE IF NOT EXISTS ingest_progress(
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,
+  total INTEGER NOT NULL DEFAULT 0,
+  done INTEGER NOT NULL DEFAULT 0,
+  fingerprint TEXT NOT NULL DEFAULT '',
+  batch_size INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(version_id, kind)
+);
+"""

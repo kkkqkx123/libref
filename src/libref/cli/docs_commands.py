@@ -48,6 +48,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
                 prefilter=args.prefilter,
                 scope=scope,
                 ecosystem=getattr(args, "ecosystem", None) or "custom",
+                fresh=bool(getattr(args, "fresh", False)),
             )
             job = run_scrape_job_sync(
                 mgr, settings, conn, job_id, vec_store=vec_store, embed=embed
@@ -65,11 +66,34 @@ def cmd_refresh(args: argparse.Namespace) -> int:
             prefilter=args.prefilter,
             scope=scope,
             ecosystem=getattr(args, "ecosystem", None) or "custom",
+            fresh=bool(getattr(args, "fresh", False)),
         )
     finally:
         conn.close()
     for outcome, n in counts.items():
         print(f"{outcome}: {n}")
+    return 0
+
+
+def cmd_probe_docs(args: argparse.Namespace) -> int:
+    """Read-only documentation probe: discovery shape without storing."""
+    import json as _json
+
+    from libref.services.docs.probe import probe_docs
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        probe = probe_docs(
+            conn,
+            settings,
+            args.start_url,
+            scope=_scope_from_args(args),
+            sample_limit=getattr(args, "sample_limit", None),
+        )
+    finally:
+        conn.close()
+    print(_json.dumps(probe.model_dump(), ensure_ascii=False))
     return 0
 
 
@@ -218,6 +242,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 ecosystem=ecosystem,
                 resolved_from=resolved_from,
                 registry_confirmed=registry_confirmed,
+                fresh=bool(getattr(args, "fresh", False)),
             )
             job = run_scrape_job_sync(
                 mgr, settings, conn, job_id, vec_store=vec_store, embed=embed
@@ -239,6 +264,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             registry_confirmed=registry_confirmed,
             homepage=homepage,
             repo_url=repo_url,
+            fresh=bool(getattr(args, "fresh", False)),
         )
     finally:
         conn.close()

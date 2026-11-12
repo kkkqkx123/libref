@@ -12,7 +12,9 @@ from libref.crawler.registry import RegistryError
 from libref.observe import setup_logging
 from libref.services.code.code_ingest import list_repo_dependencies
 from libref.services.code.mining_read import MiningReadService
+from libref.services.code.probe import probe_repo
 from libref.services.docs.pages import PageService
+from libref.services.docs.probe import probe_docs_async
 from libref.services.factory import build_discovery_service, build_search_service
 from libref.services.ops.review import ReviewService
 from libref.services.registry.libraries import LibraryService
@@ -56,6 +58,8 @@ ALL_MCP_TOOLS: frozenset[str] = frozenset(
         "answer",
         "read_doc",
         "catalog",
+        "doc_probe",
+        "repo_probe",
         "repo_dependencies",
         "api_insight",
         "pattern_insight",
@@ -315,6 +319,55 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return _failed(str(exc))
 
+    async def doc_probe(
+        start_url: str,
+        sample_limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Probe a documentation site structure without storing; confirm the range before scraping."""
+        if not start_url.strip():
+            return _invalid("start_url is empty")
+        bad = _check_limit(sample_limit, low=1, high=100)
+        if bad is not None:
+            return _invalid(bad)
+        try:
+            probe = await probe_docs_async(
+                conn, resolve_settings, start_url, sample_limit=sample_limit
+            )
+        except ValueError as exc:
+            return _invalid(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _failed(str(exc))
+        return probe.model_dump()
+
+    def repo_probe(
+        source: str,
+        subdir: str | None = None,
+        max_files: int | None = None,
+        sample_limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Probe a repository structure without parsing; confirm the range before indexing."""
+        if not source.strip():
+            return _invalid("source is empty")
+        bad = _check_limit(sample_limit, low=1, high=100)
+        if bad is not None:
+            return _invalid(bad)
+        bad = _check_limit(max_files, low=1, high=100000)
+        if bad is not None:
+            return _invalid(bad)
+        try:
+            probe = probe_repo(
+                source,
+                settings=resolve_settings,
+                subdir=subdir,
+                max_files=max_files,
+                sample_limit=sample_limit,
+            )
+        except ValueError as exc:
+            return _invalid(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _failed(str(exc))
+        return probe.model_dump()
+
     def repo_dependencies(
         library: str,
         version: str,
@@ -540,6 +593,8 @@ def build_mcp_server(
         "answer": answer,
         "read_doc": read_doc,
         "catalog": catalog,
+        "doc_probe": doc_probe,
+        "repo_probe": repo_probe,
         "repo_dependencies": repo_dependencies,
         "api_insight": api_insight,
         "pattern_insight": pattern_insight,

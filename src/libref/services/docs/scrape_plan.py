@@ -49,7 +49,10 @@ def plan_targets(
 ):
     """Scrape target planning: scope filter plus start-page fallback plus pagination truncation; pure decisions, no DB access."""
     policy = build_scope(start_url, scope)
-    candidates = seed.urls + [u for u in seed.cross_site if u not in seed.urls]
+    extra = [u for u in ((scope or {}).get("urls") or []) if isinstance(u, str) and u]
+    candidates = (
+        list(extra) + seed.urls + [u for u in seed.cross_site if u not in seed.urls]
+    )
     accepted, rejected, stats = policy.filter_with_stats(candidates)
     if not accepted and policy.accept(start_url):
         accepted = [start_url]

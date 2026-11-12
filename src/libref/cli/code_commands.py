@@ -103,6 +103,10 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                     "ecosystem": ecosystem,
                     "resolved_from": resolved_from,
                     "registry_confirmed": registry_confirmed,
+                    "fresh": bool(getattr(args, "fresh", False)),
+                    "subdir": getattr(args, "subdir", None),
+                    "only_files": list(getattr(args, "only_file", None) or []) or None,
+                    "max_files": getattr(args, "max_files", None),
                 },
             )
 
@@ -133,6 +137,10 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                 settings=settings,
                 vec_store=vec_store,
                 embed=embed,
+                fresh=bool(getattr(args, "fresh", False)),
+                subdir=getattr(args, "subdir", None),
+                only_files=list(getattr(args, "only_file", None) or []) or None,
+                max_files=getattr(args, "max_files", None),
             )
         except ValueError as exc:
             print(f"invalid: {exc}", file=sys.stderr)
@@ -336,4 +344,29 @@ def cmd_pattern_insight(args: argparse.Namespace) -> int:
         conn.close()
     for r in rows:
         print(json.dumps(r, ensure_ascii=False))
+    return 0
+
+
+def cmd_probe_repo(args: argparse.Namespace) -> int:
+    """Read-only repository probe: directory shape without parsing."""
+    import json as _json
+
+    from libref.services.code.probe import probe_repo
+
+    settings = _load_settings(args)
+    try:
+        probe = probe_repo(
+            args.source,
+            settings=settings,
+            subdir=getattr(args, "subdir", None),
+            max_files=getattr(args, "max_files", None),
+            sample_limit=getattr(args, "sample_limit", None),
+        )
+    except ValueError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:  # noqa: BLE001 — probe failures stay readable without a traceback
+        print(f"failed: {exc}", file=sys.stderr)
+        return 1
+    print(_json.dumps(probe.model_dump(), ensure_ascii=False))
     return 0

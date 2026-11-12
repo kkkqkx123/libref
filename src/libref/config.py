@@ -57,6 +57,10 @@ class LibrefSettings(BaseSettings):
     crawl_delay_default: float = Field(default=1.0, ge=0)
     robots_cache_ttl_days: float = Field(default=7.0, ge=0)
     ingest_clean_cache_cap: int = Field(default=512, ge=1)
+    ingest_batch_pages: int = Field(default=200, ge=1)
+    index_batch_files: int = Field(default=200, ge=1)
+    probe_sample_limit: int = Field(default=20, ge=1)
+    probe_cache_ttl_hours: float = Field(default=1.0, ge=0)
     user_agent: str = "libref-crawler/0.1"
     # Scrape-path proxy: explicit values beat standard env vars; httpx default env detection applies when unset.
     # Proxy bypass defaults include local loopback; explicit values beat the NO_PROXY env var.
@@ -261,6 +265,10 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "seeder_cache_ttl_hours",
             "follow_links_default",
             "ingest_clean_cache_cap",
+            "ingest_batch_pages",
+            "index_batch_files",
+            "probe_sample_limit",
+            "probe_cache_ttl_hours",
         }
     ),
     "storage": frozenset(
