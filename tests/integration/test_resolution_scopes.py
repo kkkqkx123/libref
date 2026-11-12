@@ -6,6 +6,7 @@ import pytest
 
 from libref.astminer import resolution as ast_resolution
 from libref.astminer.models import ApiDeclRecord, RawCall
+from tests.conftest import index_symbol_repo
 
 pytestmark = pytest.mark.integration
 
@@ -111,51 +112,8 @@ def test_third_party_target_is_marked_external():
     assert resolved[0].resolve_kind == "alias-external"
 
 
-def _write_symbol_repo_for_resolution(root) -> None:
-    pkg = root / "pkg"
-    pkg.mkdir(parents=True, exist_ok=True)
-    (pkg / "__init__.py").write_text("", encoding="utf-8")
-    (pkg / "core.py").write_text(
-        '"""Core service."""\n\n\n'
-        "class Service:\n"
-        '    """Service docs."""\n\n'
-        "    def create(self, name: str) -> str:\n"
-        '        """Create docs."""\n'
-        "        return name\n\n"
-        "    def run(self, name: str) -> str:\n"
-        "        return self.create(name)\n",
-        encoding="utf-8",
-    )
-    (pkg / "factory.py").write_text(
-        "from pkg.core import Service\n\n\n"
-        "def make_service() -> Service:\n"
-        '    """Make docs."""\n'
-        "    return Service()\n",
-        encoding="utf-8",
-    )
-    (pkg / "app.py").write_text(
-        "import pkg.core as core\n"
-        "from pkg.factory import make_service\n\n\n"
-        "def main() -> str:\n"
-        '    first = make_service().run("b")\n'
-        "    svc = core.Service()\n"
-        '    second = svc.create("a")\n'
-        "    return first + second\n",
-        encoding="utf-8",
-    )
-
-
-def _index_symbol_repo_for_resolution_test(conn, tmp_path):
-    from libref.services.code.code_ingest import index_repo
-
-    root = tmp_path / "symrepo_res"
-    _write_symbol_repo_for_resolution(root)
-    index_repo(conn, "demo", "0.1", str(root), repos_dir=tmp_path / "repos")
-    return root
-
-
 def test_call_resolve_and_caller_link(conn, tmp_path):
-    _index_symbol_repo_for_resolution_test(conn, tmp_path)
+    index_symbol_repo(conn, tmp_path)
     rows = conn.execute(
         "SELECT callee_name, resolve_kind, caller, caller_entity_id,"
         " receiver, func FROM call_instances"

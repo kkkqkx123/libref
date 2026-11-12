@@ -11,10 +11,6 @@ from tests.conftest import seed_library_version
 pytestmark = pytest.mark.integration
 
 
-def seed_lv(conn, library: str = "docs", version: str = "1.0") -> tuple[int, int]:
-    return seed_library_version(conn, library, version)
-
-
 def make_chunks(url: str = "https://d.example/a.html") -> list[Chunk]:
     return [
         Chunk(
@@ -35,7 +31,7 @@ def make_chunks(url: str = "https://d.example/a.html") -> list[Chunk]:
 
 
 def test_stored_creates_page_documents_and_fts(conn, monkeypatch, tmp_path):
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     result = store.store_page(
         version_id=1,
@@ -57,7 +53,7 @@ def test_stored_creates_page_documents_and_fts(conn, monkeypatch, tmp_path):
 
 
 def test_unchanged_keeps_documents(conn, monkeypatch, tmp_path):
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     store.store_page(
         1,
@@ -79,7 +75,7 @@ def test_unchanged_keeps_documents(conn, monkeypatch, tmp_path):
 
 
 def test_unchanged_updates_fetched_at_only(conn, monkeypatch, tmp_path):
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     store.store_page(
         1,
@@ -94,7 +90,7 @@ def test_unchanged_updates_fetched_at_only(conn, monkeypatch, tmp_path):
 
 
 def test_absent_deletes_page_and_documents(conn, monkeypatch, tmp_path):
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     first = store.store_page(
         1,
@@ -117,7 +113,7 @@ def test_absent_deletes_page_and_documents(conn, monkeypatch, tmp_path):
 
 
 def test_restored_reports_replaced_ids(conn, monkeypatch, tmp_path):
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     first = store.store_page(
         1,
@@ -150,7 +146,7 @@ def test_restored_reports_replaced_ids(conn, monkeypatch, tmp_path):
 
 
 def test_empty_keeps_page_without_documents(conn, monkeypatch, tmp_path):
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     first = store.store_page(
         1,
@@ -169,7 +165,7 @@ def test_empty_keeps_page_without_documents(conn, monkeypatch, tmp_path):
 
 
 def test_skipped_and_failed_are_noop_writes(conn, monkeypatch, tmp_path):
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     assert store.store_page(1, 1, "u1", "skipped").outcome == "skipped"
     assert store.store_page(1, 1, "u2", "failed").outcome == "failed"
@@ -179,14 +175,14 @@ def test_skipped_and_failed_are_noop_writes(conn, monkeypatch, tmp_path):
 def test_unknown_outcome_rejected(conn, monkeypatch, tmp_path):
     import pytest
 
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     with pytest.raises(ValueError):
         store.store_page(1, 1, "u", "exploded")
 
 
 def test_get_documents_batch_roundtrip(conn, monkeypatch, tmp_path):
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     result = store.store_page(
         1,

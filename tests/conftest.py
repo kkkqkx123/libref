@@ -163,6 +163,71 @@ def copy_mini_repo(tmp_path: Path) -> Path:
     return dst
 
 
+def copy_tri_repo(tmp_path: Path) -> Path:
+    """Copy tests/fixtures/mini_repo_tri to a temp dir."""
+    src = Path(__file__).resolve().parent / "fixtures" / "mini_repo_tri"
+    dst = tmp_path / "mini_repo_tri"
+    shutil.copytree(src, dst)
+    return dst
+
+
+def write_symbol_repo(root: Path) -> None:
+    """Write the canonical pkg/core+factory+app fixture used for symbol and call tests."""
+    pkg = root / "pkg"
+    pkg.mkdir(parents=True, exist_ok=True)
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "core.py").write_text(
+        '"""Core service."""\n\n\n'
+        "class Service:\n"
+        '    """Service docs."""\n\n'
+        "    def create(self, name: str) -> str:\n"
+        '        """Create docs."""\n'
+        "        return name\n\n"
+        "    def run(self, name: str) -> str:\n"
+        "        return self.create(name)\n",
+        encoding="utf-8",
+    )
+    (pkg / "factory.py").write_text(
+        "from pkg.core import Service\n\n\n"
+        "def make_service() -> Service:\n"
+        '    """Make docs."""\n'
+        "    return Service()\n",
+        encoding="utf-8",
+    )
+    (pkg / "app.py").write_text(
+        "import pkg.core as core\n"
+        "from pkg.factory import make_service\n\n\n"
+        "def main() -> str:\n"
+        '    first = make_service().run("b")\n'
+        "    svc = core.Service()\n"
+        '    second = svc.create("a")\n'
+        "    return first + second\n",
+        encoding="utf-8",
+    )
+
+
+def index_symbol_repo(
+    conn: sqlite3.Connection, tmp_path: Path, dirname: str = "symrepo"
+) -> Path:
+    """Write the symbol fixture and index it as demo 0.1."""
+    from libref.services.code.code_ingest import index_repo
+
+    root = tmp_path / dirname
+    write_symbol_repo(root)
+    index_repo(conn, "demo", "0.1", str(root), repos_dir=tmp_path / "repos")
+    return root
+
+
+def counting_client(handler, counter: list) -> httpx.AsyncClient:
+    """Wrap a MockTransport handler and record request URLs."""
+
+    def wrapped(request: httpx.Request) -> httpx.Response:
+        counter.append(str(request.url))
+        return handler(request)
+
+    return httpx.AsyncClient(transport=httpx.MockTransport(wrapped))
+
+
 class FakeVecStore:
     """In-memory vector backend for sync tests: tracks points plus ensured/deleted calls."""
 

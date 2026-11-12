@@ -10,7 +10,7 @@ from libref.services.code.code_ingest import index_repo
 from libref.services.code.mining_read import MiningReadService
 from libref.services.code.mining_refresh import mine_patterns
 from libref.services.registry.libraries import LibraryService
-from tests.conftest import copy_mini_repo
+from tests.conftest import copy_mini_repo, index_symbol_repo
 
 pytestmark = pytest.mark.integration
 
@@ -171,31 +171,8 @@ def test_file_scope_calls_excluded_from_sequences(conn, monkeypatch, tmp_path):
     assert mine_patterns(conn, "demo", "noscope", minsup=2) == []
 
 
-def _index_symbol_repo(conn, tmp_path):
-    root = tmp_path / "symrepo"
-    pkg = root / "pkg"
-    pkg.mkdir(parents=True, exist_ok=True)
-    (pkg / "__init__.py").write_text("", encoding="utf-8")
-    (pkg / "core.py").write_text(
-        '"""Core service."""\n\n\nclass Service:\n    """Service docs."""\n\n    def create(self, name: str) -> str:\n        """Create docs."""\n        return name\n\n    def run(self, name: str) -> str:\n        return self.create(name)\n',
-        encoding="utf-8",
-    )
-    (pkg / "factory.py").write_text(
-        'from pkg.core import Service\n\n\ndef make_service() -> Service:\n    """Make docs."""\n    return Service()\n',
-        encoding="utf-8",
-    )
-    (pkg / "app.py").write_text(
-        'import pkg.core as core\nfrom pkg.factory import make_service\n\n\ndef main() -> str:\n    first = make_service().run("b")\n    svc = core.Service()\n    second = svc.create("a")\n    return first + second\n',
-        encoding="utf-8",
-    )
-    from libref.services.code.code_ingest import index_repo
-
-    index_repo(conn, "demo", "0.1", str(root), repos_dir=tmp_path / "repos")
-    return root
-
-
 def test_import_edges_queryable(conn, tmp_path):
-    _index_symbol_repo(conn, tmp_path)
+    index_symbol_repo(conn, tmp_path)
     svc = MiningReadService(conn)
     by_file = svc.imports_of_file("pkg/app.py", "demo", "0.1")
     assert by_file
@@ -206,7 +183,7 @@ def test_import_edges_queryable(conn, tmp_path):
 
 
 def test_evidence_carries_signatures(conn, tmp_path):
-    _index_symbol_repo(conn, tmp_path)
+    index_symbol_repo(conn, tmp_path)
     mine_patterns(conn, "demo", "0.1", minsup=1, minlen=1)
     svc = MiningReadService(conn)
     patterns = svc.list_patterns("demo", "0.1", limit=10)

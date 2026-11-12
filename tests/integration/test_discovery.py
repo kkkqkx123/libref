@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import httpx
 import pytest
 
 from libref.crawler.registry import RegistryError
 from libref.services.registry.discovery import DiscoveryService
-from tests.conftest import make_discovery_settings
+from tests.conftest import counting_client, make_discovery_settings, run_coro
 
 pytestmark = pytest.mark.integration
 
@@ -124,21 +122,9 @@ def handler(request: httpx.Request) -> httpx.Response:
     raise AssertionError(f"{host}{path}")
 
 
-def counting_client(counter: list) -> httpx.AsyncClient:
-    def wrapped(request: httpx.Request) -> httpx.Response:
-        counter.append(str(request.url))
-        return handler(request)
-
-    return httpx.AsyncClient(transport=httpx.MockTransport(wrapped))
-
-
-def run(coro):
-    return asyncio.run(coro)
-
-
 def test_npm_exact_enriched_and_ranked_first(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(svc.search_async("demo", "npm", 10, counting_client([])))
+    items = run_coro(svc.search_async("demo", "npm", 10, counting_client(handler, [])))
     assert items[0]["name"] == "demo"
     assert items[0]["exact"] is True
     assert items[0]["docs_url"] == "https://demo.dev/"
@@ -149,7 +135,7 @@ def test_npm_exact_enriched_and_ranked_first(conn, monkeypatch, tmp_path) -> Non
 
 def test_repoless_candidate_carries_note(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(svc.search_async("demo", "npm", 10, counting_client([])))
+    items = run_coro(svc.search_async("demo", "npm", 10, counting_client(handler, [])))
     assert "note" not in items[0]
     assert items[1]["repo_url"] is None
     assert "note" in items[1]
@@ -157,7 +143,9 @@ def test_repoless_candidate_carries_note(conn, monkeypatch, tmp_path) -> None:
 
 def test_maven_exact_enriched_via_metadata(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(svc.search_async("org.demo:demo", "maven", 10, counting_client([])))
+    items = run_coro(
+        svc.search_async("org.demo:demo", "maven", 10, counting_client(handler, []))
+    )
     assert items[0]["name"] == "org.demo:demo"
     assert items[0]["exact"] is True
     assert items[0]["docs_url"] == "https://demo.apache.org/"
@@ -166,11 +154,13 @@ def test_maven_exact_enriched_via_metadata(conn, monkeypatch, tmp_path) -> None:
 
 def test_pypi_exact_only(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(svc.search_async("Demo", "pypi", 10, counting_client([])))
+    items = run_coro(svc.search_async("Demo", "pypi", 10, counting_client(handler, [])))
     assert len(items) == 1
     assert items[0]["name"] == "demo"
     assert items[0]["docs_url"] == "https://demo.readthedocs.io/"
-    unknown = run(svc.search_async("no-such-pkg-xyz", "pypi", 10, counting_client([])))
+    unknown = run_coro(
+        svc.search_async("no-such-pkg-xyz", "pypi", 10, counting_client(handler, []))
+    )
     assert unknown == []
 
 
@@ -179,7 +169,7 @@ def test_cross_eco_fanout_and_github_gated(conn, monkeypatch, tmp_path) -> None:
         conn,
         make_discovery_settings(monkeypatch, tmp_path, discovery_github_token="tok"),
     )
-    items = run(svc.search_async("demo", None, 10, counting_client([])))
+    items = run_coro(svc.search_async("demo", None, 10, counting_client(handler, [])))
     ecos = {c["ecosystem"] for c in items}
     assert {"npm", "maven", "pypi", "github"} <= ecos
     assert items[0]["docs_url"]
@@ -187,17 +177,21 @@ def test_cross_eco_fanout_and_github_gated(conn, monkeypatch, tmp_path) -> None:
 
 def test_github_skipped_without_token(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(svc.search_async("demo", None, 10, counting_client([])))
+    items = run_coro(svc.search_async("demo", None, 10, counting_client(handler, [])))
     assert "github" not in {c["ecosystem"] for c in items}
 
 
 def test_cache_hit_makes_no_request(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
     calls: list = []
-    first = run(svc.search_async("demo", "npm", 10, counting_client(calls)))
+    first = run_coro(
+        svc.search_async("demo", "npm", 10, counting_client(handler, calls))
+    )
     assert calls
     calls.clear()
-    second = run(svc.search_async("demo", "npm", 10, counting_client(calls)))
+    second = run_coro(
+        svc.search_async("demo", "npm", 10, counting_client(handler, calls))
+    )
     assert calls == []
     assert second == first
 
@@ -207,7 +201,7 @@ def test_offline_cache_miss_is_retryable(conn, monkeypatch, tmp_path) -> None:
         conn, make_discovery_settings(monkeypatch, tmp_path, discovery_offline=True)
     )
     with pytest.raises(RegistryError, match="offline cache miss"):
-        run(svc.search_async("demo", "npm", 10, counting_client([])))
+        run_coro(svc.search_async("demo", "npm", 10, counting_client(handler, [])))
 
 
 def test_disabled_and_invalid_inputs(conn, monkeypatch, tmp_path) -> None:
@@ -215,31 +209,35 @@ def test_disabled_and_invalid_inputs(conn, monkeypatch, tmp_path) -> None:
         conn, make_discovery_settings(monkeypatch, tmp_path, discovery_enabled=False)
     )
     with pytest.raises(ValueError, match="disabled"):
-        run(svc.search_async("demo", None, 10, counting_client([])))
+        run_coro(svc.search_async("demo", None, 10, counting_client(handler, [])))
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
     with pytest.raises(ValueError, match="empty"):
-        run(svc.search_async("  ", None, 10, counting_client([])))
+        run_coro(svc.search_async("  ", None, 10, counting_client(handler, [])))
     with pytest.raises(ValueError, match="unsupported ecosystem"):
-        run(svc.search_async("demo", "rubygems", 10, counting_client([])))
+        run_coro(svc.search_async("demo", "rubygems", 10, counting_client(handler, [])))
     with pytest.raises(ValueError, match="between 1 and 100"):
-        run(svc.search_async("demo", None, 0, counting_client([])))
+        run_coro(svc.search_async("demo", None, 0, counting_client(handler, [])))
 
 
 def test_ecosystem_aliases_share_canonical_cache(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
     calls: list = []
-    via_alias = run(svc.search_async("demo", "py", 10, counting_client(calls)))
+    via_alias = run_coro(
+        svc.search_async("demo", "py", 10, counting_client(handler, calls))
+    )
     assert calls
     assert via_alias[0]["ecosystem"] == "pypi"
     calls.clear()
-    via_canonical = run(svc.search_async("demo", "pypi", 10, counting_client(calls)))
+    via_canonical = run_coro(
+        svc.search_async("demo", "pypi", 10, counting_client(handler, calls))
+    )
     assert calls == []
     assert via_canonical == via_alias
 
 
 def test_js_alias_matches_npm(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(svc.search_async("demo", "js", 10, counting_client([])))
+    items = run_coro(svc.search_async("demo", "js", 10, counting_client(handler, [])))
     assert items[0]["ecosystem"] == "npm"
     assert items[0]["name"] == "demo"
 
@@ -264,7 +262,7 @@ def test_pypi_fuzzy_search_lists_multiple_candidates(
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(fuzzy_handler))
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(svc.search_async("demo", "pypi", 10, client))
+    items = run_coro(svc.search_async("demo", "pypi", 10, client))
     assert [c["name"] for c in items] == ["demo", "demo-helper"]
     assert items[0]["exact"] is True
     assert items[0]["docs_url"] == "https://demo.readthedocs.io/"
@@ -286,9 +284,9 @@ def test_npm_search_failure_falls_back_to_exact_snapshot(
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(failing_search))
     try:
-        items = run(svc.search_async("demo", "npm", 10, client))
+        items = run_coro(svc.search_async("demo", "npm", 10, client))
     finally:
-        run(client.aclose())
+        run_coro(client.aclose())
     assert len(items) == 1
     assert items[0]["name"] == "demo"
     assert items[0]["source"] == "registry"
@@ -322,9 +320,9 @@ def test_npm_search_level_addresses_sanitized(conn, monkeypatch, tmp_path) -> No
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(private_search))
     try:
-        items = run(svc.search_async("unrelated-query", "npm", 10, client))
+        items = run_coro(svc.search_async("unrelated-query", "npm", 10, client))
     finally:
-        run(client.aclose())
+        run_coro(client.aclose())
     assert items[0]["homepage"] is None
     assert items[0]["repo_url"] is None
     assert items[0]["docs_url"] is None
@@ -347,9 +345,9 @@ def test_go_search_enriches_missing_exact(conn, monkeypatch, tmp_path) -> None:
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(go_handler))
     try:
-        items = run(svc.search_async("github.com/acme/demo", "go", 10, client))
+        items = run_coro(svc.search_async("github.com/acme/demo", "go", 10, client))
     finally:
-        run(client.aclose())
+        run_coro(client.aclose())
     exact = [i for i in items if i["exact"]]
     assert exact and exact[0]["source"] == "registry"
     assert exact[0]["name"] == "github.com/acme/demo"
@@ -508,18 +506,12 @@ def new_eco_handler(request: httpx.Request) -> httpx.Response:
     raise AssertionError(f"{host}{path}")
 
 
-def new_eco_counting_client(counter: list) -> httpx.AsyncClient:
-    def wrapped(request: httpx.Request) -> httpx.Response:
-        counter.append(str(request.url))
-        return new_eco_handler(request)
-
-    return httpx.AsyncClient(transport=httpx.MockTransport(wrapped))
-
-
 def test_go_search_enriched_via_proxy(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(
-        svc.search_async("github.com/acme/demo", "go", 10, new_eco_counting_client([]))
+    items = run_coro(
+        svc.search_async(
+            "github.com/acme/demo", "go", 10, counting_client(new_eco_handler, [])
+        )
     )
     assert items[0]["name"] == "github.com/acme/demo"
     assert items[0]["exact"] is True
@@ -531,9 +523,9 @@ def test_go_search_enriched_via_proxy(conn, monkeypatch, tmp_path) -> None:
 
 def test_go_exact_only_fallback(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(
+    items = run_coro(
         svc.search_async(
-            "example.com/only-proxy", "go", 10, new_eco_counting_client([])
+            "example.com/only-proxy", "go", 10, counting_client(new_eco_handler, [])
         )
     )
     assert len(items) == 1
@@ -543,7 +535,9 @@ def test_go_exact_only_fallback(conn, monkeypatch, tmp_path) -> None:
 
 def test_crates_search_enriched(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(svc.search_async("demo", "crates", 10, new_eco_counting_client([])))
+    items = run_coro(
+        svc.search_async("demo", "crates", 10, counting_client(new_eco_handler, []))
+    )
     assert items[0]["name"] == "demo"
     assert items[0]["exact"] is True
     assert items[0]["docs_url"] == "https://docs.rs/demo/2.0.0"
@@ -552,7 +546,9 @@ def test_crates_search_enriched(conn, monkeypatch, tmp_path) -> None:
 
 def test_nuget_search_enriched(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(svc.search_async("Demo", "nuget", 10, new_eco_counting_client([])))
+    items = run_coro(
+        svc.search_async("Demo", "nuget", 10, counting_client(new_eco_handler, []))
+    )
     assert items[0]["name"] == "Demo"
     assert items[0]["exact"] is True
     assert items[0]["docs_url"] == "https://demo.dev/"
@@ -561,7 +557,9 @@ def test_nuget_search_enriched(conn, monkeypatch, tmp_path) -> None:
 
 def test_cross_eco_fanout_covers_six(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(svc.search_async("demo", None, 20, new_eco_counting_client([])))
+    items = run_coro(
+        svc.search_async("demo", None, 20, counting_client(new_eco_handler, []))
+    )
     assert {"npm", "maven", "pypi", "go", "crates", "nuget"} <= {
         c["ecosystem"] for c in items
     }
@@ -570,31 +568,34 @@ def test_cross_eco_fanout_covers_six(conn, monkeypatch, tmp_path) -> None:
 def test_new_eco_aliases_share_cache(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
     calls: list = []
-    via_alias = run(
+    via_alias = run_coro(
         svc.search_async(
-            "github.com/acme/demo", "golang", 10, new_eco_counting_client(calls)
+            "github.com/acme/demo",
+            "golang",
+            10,
+            counting_client(new_eco_handler, calls),
         )
     )
     assert calls
     assert via_alias[0]["ecosystem"] == "go"
     calls.clear()
-    via_canonical = run(
+    via_canonical = run_coro(
         svc.search_async(
-            "github.com/acme/demo", "go", 10, new_eco_counting_client(calls)
+            "github.com/acme/demo", "go", 10, counting_client(new_eco_handler, calls)
         )
     )
     assert calls == []
     assert via_canonical == via_alias
 
     calls.clear()
-    via_cargo = run(
-        svc.search_async("demo", "cargo", 10, new_eco_counting_client(calls))
+    via_cargo = run_coro(
+        svc.search_async("demo", "cargo", 10, counting_client(new_eco_handler, calls))
     )
     assert calls
     assert via_cargo[0]["ecosystem"] == "crates"
     calls.clear()
-    via_crates = run(
-        svc.search_async("demo", "crates", 10, new_eco_counting_client(calls))
+    via_crates = run_coro(
+        svc.search_async("demo", "crates", 10, counting_client(new_eco_handler, calls))
     )
     assert calls == []
     assert via_crates == via_cargo
@@ -608,7 +609,7 @@ def test_new_eco_search_failure_is_retryable(conn, monkeypatch, tmp_path) -> Non
 
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
     with pytest.raises(RegistryError) as excinfo:
-        run(
+        run_coro(
             svc.search_async(
                 "demo",
                 "crates",

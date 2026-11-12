@@ -25,12 +25,8 @@ from tests.conftest import make_crawler_settings, mock_ingest, seed_library_vers
 pytestmark = pytest.mark.integration
 
 
-def seed_lv(conn, library: str = "docs", version: str = "1.0") -> tuple[int, int]:
-    return seed_library_version(conn, library, version)
-
-
 def seed_docs(conn: sqlite3.Connection) -> None:
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     store.store_page(
         1,
@@ -87,7 +83,7 @@ def test_search_docs_library_version_filter(conn, monkeypatch, tmp_path):
 
 
 def test_read_page_reassembles(conn, monkeypatch, tmp_path):
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     store.store_page(
         1,
@@ -228,7 +224,7 @@ def test_scrape_docs_end_to_end_with_mock(conn, tmp_path, monkeypatch):
 
 
 def test_scrape_sweeps_pages_missing_from_seed_to_absent(conn, monkeypatch, tmp_path):
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     keep_url = "https://d.example/keep.html"
     stale_url = "https://d.example/stale.html"
@@ -270,7 +266,7 @@ def test_scrape_sweeps_pages_missing_from_seed_to_absent(conn, monkeypatch, tmp_
 
 
 def test_scrape_skips_sweep_when_seed_truncated(conn, monkeypatch, tmp_path):
-    seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     other_url = "https://d.example/other.html"
     store.store_page(

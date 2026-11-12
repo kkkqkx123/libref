@@ -2,21 +2,14 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest
 
 from libref.services.code.code_ingest import index_repo, list_repo_dependencies
+from tests.conftest import copy_tri_repo
 
 pytestmark = pytest.mark.integration
-
-
-def _copy_tri_repo(tmp_path: Path) -> Path:
-    src = Path(__file__).resolve().parent.parent / "fixtures" / "mini_repo_tri"
-    dst = tmp_path / "mini_repo_tri"
-    shutil.copytree(src, dst)
-    return dst
 
 
 def _add_manifests(repo: Path) -> None:
@@ -57,7 +50,7 @@ def _add_manifests(repo: Path) -> None:
 
 
 def test_manifest_deps_persisted_and_refreshed(conn, tmp_path) -> None:
-    repo = _copy_tri_repo(tmp_path)
+    repo = copy_tri_repo(tmp_path)
     _add_manifests(repo)
     counts = index_repo(
         conn, "tri-deps", "0.1", str(repo), repos_dir=tmp_path / "repos"
@@ -93,7 +86,7 @@ def test_manifest_deps_persisted_and_refreshed(conn, tmp_path) -> None:
 
 
 def test_repo_without_manifests_yields_no_deps(conn, tmp_path) -> None:
-    repo = _copy_tri_repo(tmp_path)
+    repo = copy_tri_repo(tmp_path)
     (repo / "go.mod").unlink()
     counts = index_repo(
         conn, "tri-nodeps", "0.1", str(repo), repos_dir=tmp_path / "repos"

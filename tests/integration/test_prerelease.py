@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import httpx
 import pytest
 
 from libref.services.registry.discovery import DiscoveryService
 from libref.services.registry.resolver import resolve_package
-from tests.conftest import make_discovery_settings, make_registry_settings
+from tests.conftest import (
+    counting_client,
+    make_discovery_settings,
+    make_registry_settings,
+    run_coro,
+)
 
 pytestmark = pytest.mark.integration
-
-
-def run(coro):
-    return asyncio.run(coro)
 
 
 NPM_SEARCH = {
@@ -70,26 +69,25 @@ def handler(request: httpx.Request) -> httpx.Response:
     raise AssertionError(f"{host}{path}")
 
 
-def counting_client(counter: list) -> httpx.AsyncClient:
-    def wrapped(request: httpx.Request) -> httpx.Response:
-        counter.append(str(request.url))
-        return handler(request)
-
-    return httpx.AsyncClient(transport=httpx.MockTransport(wrapped))
-
-
 def test_resolve_defaults_to_stable(conn, monkeypatch, tmp_path) -> None:
     settings = make_registry_settings(monkeypatch, tmp_path)
-    res = run(resolve_package(conn, counting_client([]), settings, "npm", "demo"))
+    res = run_coro(
+        resolve_package(conn, counting_client(handler, []), settings, "npm", "demo")
+    )
     assert res.version == "1.0.0"
     assert res.registry_confirmed is True
 
 
 def test_resolve_flag_picks_prerelease_max(conn, monkeypatch, tmp_path) -> None:
     settings = make_registry_settings(monkeypatch, tmp_path)
-    res = run(
+    res = run_coro(
         resolve_package(
-            conn, counting_client([]), settings, "npm", "demo", include_prerelease=True
+            conn,
+            counting_client(handler, []),
+            settings,
+            "npm",
+            "demo",
+            include_prerelease=True,
         )
     )
     assert res.version == "2.0.0-beta"
@@ -98,9 +96,9 @@ def test_resolve_flag_picks_prerelease_max(conn, monkeypatch, tmp_path) -> None:
 
 def test_resolve_explicit_prerelease_needs_no_flag(conn, monkeypatch, tmp_path) -> None:
     settings = make_registry_settings(monkeypatch, tmp_path)
-    res = run(
+    res = run_coro(
         resolve_package(
-            conn, counting_client([]), settings, "npm", "demo", "2.0.0-beta"
+            conn, counting_client(handler, []), settings, "npm", "demo", "2.0.0-beta"
         )
     )
     assert res.version == "2.0.0-beta"
@@ -109,9 +107,14 @@ def test_resolve_explicit_prerelease_needs_no_flag(conn, monkeypatch, tmp_path) 
 
 def test_flag_never_poisons_registry_cache(conn, monkeypatch, tmp_path) -> None:
     settings = make_registry_settings(monkeypatch, tmp_path)
-    flagged = run(
+    flagged = run_coro(
         resolve_package(
-            conn, counting_client([]), settings, "npm", "demo", include_prerelease=True
+            conn,
+            counting_client(handler, []),
+            settings,
+            "npm",
+            "demo",
+            include_prerelease=True,
         )
     )
     assert flagged.version == "2.0.0-beta"
@@ -119,19 +122,23 @@ def test_flag_never_poisons_registry_cache(conn, monkeypatch, tmp_path) -> None:
         "SELECT stable FROM registry_cache WHERE ecosystem='npm' AND name='demo'"
     ).fetchone()
     assert row is None or row[0] == "1.0.0"
-    plain = run(resolve_package(conn, counting_client([]), settings, "npm", "demo"))
+    plain = run_coro(
+        resolve_package(conn, counting_client(handler, []), settings, "npm", "demo")
+    )
     assert plain.version == "1.0.0"
 
 
 def test_flag_refetches_for_coherent_docs(conn, monkeypatch, tmp_path) -> None:
     settings = make_registry_settings(monkeypatch, tmp_path)
-    plain = run(resolve_package(conn, counting_client([]), settings, "npm", "demo"))
+    plain = run_coro(
+        resolve_package(conn, counting_client(handler, []), settings, "npm", "demo")
+    )
     assert plain.version == "1.0.0"
     calls: list = []
-    flagged = run(
+    flagged = run_coro(
         resolve_package(
             conn,
-            counting_client(calls),
+            counting_client(handler, calls),
             settings,
             "npm",
             "demo",
@@ -144,13 +151,15 @@ def test_flag_refetches_for_coherent_docs(conn, monkeypatch, tmp_path) -> None:
 
 def test_crates_flag_widens_stable(conn, monkeypatch, tmp_path) -> None:
     settings = make_registry_settings(monkeypatch, tmp_path)
-    plain = run(resolve_package(conn, counting_client([]), settings, "crates", "demo"))
+    plain = run_coro(
+        resolve_package(conn, counting_client(handler, []), settings, "crates", "demo")
+    )
     assert plain.version == "1.0.0"
     assert plain.docs_url == "https://docs.rs/demo/1.0.0"
-    flagged = run(
+    flagged = run_coro(
         resolve_package(
             conn,
-            counting_client([]),
+            counting_client(handler, []),
             settings,
             "crates",
             "demo",
@@ -163,11 +172,11 @@ def test_crates_flag_widens_stable(conn, monkeypatch, tmp_path) -> None:
 
 def test_discovery_flag_flips_enriched_version(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    plain = run(svc.search_async("demo", "npm", 10, counting_client([])))
+    plain = run_coro(svc.search_async("demo", "npm", 10, counting_client(handler, [])))
     assert plain[0]["version"] == "1.0.0"
-    flagged = run(
+    flagged = run_coro(
         svc.search_async(
-            "demo", "npm", 10, counting_client([]), include_prerelease=True
+            "demo", "npm", 10, counting_client(handler, []), include_prerelease=True
         )
     )
     assert flagged[0]["version"] == "2.0.0-beta"
@@ -177,18 +186,22 @@ def test_discovery_flag_flips_enriched_version(conn, monkeypatch, tmp_path) -> N
 def test_discovery_flag_cache_isolated(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
     calls: list = []
-    first = run(svc.search_async("demo", "npm", 10, counting_client(calls)))
+    first = run_coro(
+        svc.search_async("demo", "npm", 10, counting_client(handler, calls))
+    )
     assert calls
     calls.clear()
-    second = run(
+    second = run_coro(
         svc.search_async(
-            "demo", "npm", 10, counting_client(calls), include_prerelease=True
+            "demo", "npm", 10, counting_client(handler, calls), include_prerelease=True
         )
     )
     assert calls
     assert second[0]["version"] == "2.0.0-beta"
     assert first[0]["version"] == "1.0.0"
     calls.clear()
-    third = run(svc.search_async("demo", "npm", 10, counting_client(calls)))
+    third = run_coro(
+        svc.search_async("demo", "npm", 10, counting_client(handler, calls))
+    )
     assert calls == []
     assert third == first

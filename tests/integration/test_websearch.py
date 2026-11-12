@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
-
 import httpx
 import pytest
 
 from libref.crawler.registry import RegistryError
 from libref.services.registry.discovery import DiscoveryService
-from tests.conftest import make_discovery_settings
+from tests.conftest import make_discovery_settings, run_coro
 
 pytestmark = pytest.mark.integration
 
@@ -37,13 +35,9 @@ def client() -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
 
-def run(coro):
-    return asyncio.run(coro)
-
-
 def test_search_web_maps_repo_docs_and_note(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    items = run(svc.search_web_async("acme demo", 10, client()))
+    items = run_coro(svc.search_web_async("acme demo", 10, client()))
     assert len(items) == 2
     assert items[0]["repo_url"] == "https://github.com/acme/demo"
     assert items[0]["name"] == "acme/demo"
@@ -56,28 +50,28 @@ def test_search_web_maps_repo_docs_and_note(conn, monkeypatch, tmp_path) -> None
 
 def test_search_web_offline_uses_cache_or_fails(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
-    run(svc.search_web_async("acme demo", 10, client()))
+    run_coro(svc.search_web_async("acme demo", 10, client()))
     offline = DiscoveryService(
         conn, make_discovery_settings(monkeypatch, tmp_path, discovery_offline=True)
     )
-    cached = run(offline.search_web_async("acme demo", 10, client()))
+    cached = run_coro(offline.search_web_async("acme demo", 10, client()))
     assert len(cached) == 2
     with pytest.raises(RegistryError) as exc:
-        run(offline.search_web_async("missing query xyz", 10, client()))
+        run_coro(offline.search_web_async("missing query xyz", 10, client()))
     assert exc.value.kind == "retryable"
 
 
 def test_search_web_rejects_bad_input(conn, monkeypatch, tmp_path) -> None:
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
     with pytest.raises(ValueError):
-        run(svc.search_web_async("  ", 10, client()))
+        run_coro(svc.search_web_async("  ", 10, client()))
     with pytest.raises(ValueError):
-        run(svc.search_web_async("demo", 0, client()))
+        run_coro(svc.search_web_async("demo", 0, client()))
     disabled = DiscoveryService(
         conn, make_discovery_settings(monkeypatch, tmp_path, discovery_enabled=False)
     )
     with pytest.raises(ValueError):
-        run(disabled.search_web_async("demo", 10, client()))
+        run_coro(disabled.search_web_async("demo", 10, client()))
 
 
 def test_search_web_server_error_is_retryable(conn, monkeypatch, tmp_path) -> None:
@@ -90,9 +84,9 @@ def test_search_web_server_error_is_retryable(conn, monkeypatch, tmp_path) -> No
     svc = DiscoveryService(conn, make_discovery_settings(monkeypatch, tmp_path))
     bad = httpx.AsyncClient(transport=httpx.MockTransport(failing))
     with pytest.raises(RegistryError) as exc:
-        run(svc.search_web_async("demo", 10, bad))
+        run_coro(svc.search_web_async("demo", 10, bad))
     assert exc.value.kind == "retryable"
     bot = httpx.AsyncClient(transport=httpx.MockTransport(challenged))
     with pytest.raises(RegistryError) as exc:
-        run(svc.search_web_async("demo", 10, bot))
+        run_coro(svc.search_web_async("demo", 10, bot))
     assert exc.value.kind == "retryable"

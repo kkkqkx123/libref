@@ -80,10 +80,6 @@ def test_unknown_collection_shape_triggers_rebuild(conn, monkeypatch, tmp_path):
     assert len(client.created) == 1
 
 
-def _seed_lv(conn):
-    seed_library_version(conn)
-
-
 def _handler(body: str):
     def handle(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":
@@ -169,7 +165,7 @@ def test_embed_failure_counts_without_losing_truth(conn, monkeypatch, tmp_path):
 
 
 def test_search_results_carry_row_id(conn, monkeypatch, tmp_path):
-    _seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     result = store.store_page(
         1,
@@ -202,7 +198,7 @@ def test_reconcile_repairs_orphans_and_missing(conn, monkeypatch, tmp_path):
     )
     from libref.store.vec_store import write_version_meta
 
-    _seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     kept = store.store_page(
         1,
@@ -258,7 +254,7 @@ def test_model_only_drift_rebuilds_single_version(conn, monkeypatch, tmp_path):
 
     from libref.services.ops.maintenance import reconcile_version
 
-    _seed_lv(conn)
+    seed_library_version(conn)
     conn.execute("INSERT INTO versions(id, library_id, version) VALUES(2, 1, '2.0')")
     conn.commit()
     store = DocumentStore(conn)
@@ -292,7 +288,7 @@ def test_model_only_drift_rebuilds_single_version(conn, monkeypatch, tmp_path):
 def test_purge_clears_vectors_after_truth_commit(conn, monkeypatch, tmp_path):
     from libref.services.ops.retention import purge_version
 
-    _seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     store.store_page(
         1,
@@ -320,7 +316,7 @@ def test_purge_clears_vectors_after_truth_commit(conn, monkeypatch, tmp_path):
 
 
 def test_title_match_outranks_content_only(conn, monkeypatch, tmp_path):
-    _seed_lv(conn)
+    seed_library_version(conn)
     store = DocumentStore(conn)
     store.store_page(
         1,
