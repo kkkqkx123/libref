@@ -30,6 +30,7 @@ class InductionInput(BaseModel):
     arg_shapes: list[dict[str, Any]] = Field(default_factory=list)
     siblings: list[str] = Field(default_factory=list)
     scope: str = Field(default="")
+    signatures: dict[str, str] = Field(default_factory=dict)
 
 
 class PatternLabel(BaseModel):
@@ -80,12 +81,24 @@ def build_label_prompt(item: InductionInput) -> list[dict[str, str]]:
     siblings = ", ".join(item.siblings[:6])
     allowed = sorted(set(item.pattern) | {s for s in item.siblings if s})
     scope_segment = f"Scope: {item.scope.strip()}. " if item.scope.strip() else ""
+    sig_parts: list[str] = []
+    for api in item.pattern:
+        raw_sig = (item.signatures.get(api) or "").strip()
+        if not raw_sig:
+            continue
+        cleaned = raw_sig.removeprefix("def ").strip()
+        cleaned = cleaned.replace("def ", "")
+        if cleaned:
+            sig_parts.append(f"{api}: {cleaned}")
+    sigs = "; ".join(sig_parts[:6])
+    sig_segment = f"Signatures: {sigs}. " if sigs else ""
     user = (
         "Name and describe this API usage pattern. "
         f"{scope_segment}"
         f"Pattern: {' -> '.join(item.pattern)}. "
         f"Support: {item.support}. "
         f"Argument shapes: {shapes or 'unknown'}. "
+        f"{sig_segment}"
         f"Co-used APIs: {siblings or 'none'}. "
         f"Allowed related APIs: {', '.join(allowed) if allowed else 'none'}. "
         "Reply with JSON only: "

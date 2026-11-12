@@ -105,16 +105,21 @@ def synthesize_snippet(
         call = calls[idx]
         args = call.get("args") or []
         str_args = [str(a) for a in args]
-        lines.append(
-            {
-                "gap": False,
-                "callee": str(call.get("callee") or ""),
-                "text": _masked_call(str(call.get("callee") or ""), str_args),
-                "lines": f"{call.get('line_start')}-{call.get('line_end')}",
-                "confidence": str(call.get("confidence") or ""),
-                "hit": idx in hit,
-            }
-        )
+        entry: dict[str, Any] = {
+            "gap": False,
+            "callee": str(call.get("callee") or ""),
+            "text": _masked_call(str(call.get("callee") or ""), str_args),
+            "lines": f"{call.get('line_start')}-{call.get('line_end')}",
+            "confidence": str(call.get("confidence") or ""),
+            "hit": idx in hit,
+        }
+        sig = str(call.get("callee_signature") or "").strip()
+        if sig:
+            entry["signature"] = sig
+        resolve = str(call.get("resolve_kind") or "").strip()
+        if resolve:
+            entry["resolve_kind"] = resolve
+        lines.append(entry)
         prev = idx
     return {"lines": lines, "skipped": skipped, "invalid": False}
 

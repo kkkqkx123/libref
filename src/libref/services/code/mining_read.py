@@ -66,13 +66,16 @@ def _render_evidence(
         call = calls[idx]
         args = call.get("args") or []
         body = ", ".join(str(part) for part in args)
-        attrs = {
+        attrs: dict[str, str] = {
             "callee": str(call.get("callee") or ""),
             "lines": f"{call.get('line_start')}-{call.get('line_end')}",
             "confidence": str(call.get("confidence") or ""),
             "resolve": str(call.get("resolve_kind") or ""),
             "hit": "true" if idx in set(matched) else "false",
         }
+        sig = str(call.get("callee_signature") or "").strip()
+        if sig:
+            attrs["signature"] = sig
         parts.append(call_tag(attrs, body))
         prev = idx
     inner = "\n".join(parts)
@@ -420,6 +423,7 @@ class MiningReadService:
                     "resolve_kind": rk,
                 }
             )
+        self._attach_signatures(list(groups.values()), vids)
         out = []
         for key in order:
             calls = groups[key]["calls"]
@@ -430,7 +434,6 @@ class MiningReadService:
             groups[key]["matched"] = matched
             groups[key]["rendered"] = _render_evidence(groups[key], calls, matched)
             out.append(groups[key])
-        self._attach_signatures(out, vids)
         from libref.config import setting_or_default
         from libref.mining.idiom import deduplicate_evidence, synthesize_snippet
 
@@ -542,21 +545,38 @@ class MiningReadService:
         marks = ",".join("?" for _ in sorted(wanted))
         try:
             rows = self._conn.execute(
-                "SELECT qualified_name, signature FROM api_entities"
+                "SELECT qualified_name, signature, params, return_type FROM api_entities"
                 f" WHERE version_id IN ({placeholders}) AND qualified_name IN ({marks})",
                 (*vids, *sorted(wanted)),
             ).fetchall()
         except Exception:  # noqa: BLE001 -- signature join is advisory for evidence rendering
             return
-        sigs = {str(r[0]): str(r[1] or "") for r in rows}
+        info: dict[str, dict[str, Any]] = {}
+        for qual, sig, params, ret in rows:
+            try:
+                parsed = json.loads(params) if params else []
+            except ValueError:
+                parsed = []
+            info[str(qual)] = {
+                "signature": str(sig or ""),
+                "params": parsed,
+                "return_type": str(ret or ""),
+            }
         for group in groups:
             for call in group.get("calls") or []:
-                sig = sigs.get(str(call.get("callee") or ""))
-                if sig:
-                    call["callee_signature"] = sig
+                hit = info.get(str(call.get("callee") or ""))
+                if hit and hit["signature"]:
+                    call["callee_signature"] = hit["signature"]
+                if hit and hit["params"]:
+                    call["callee_params"] = hit["params"]
+                if hit and hit["return_type"]:
+                    call["callee_return_type"] = hit["return_type"]
             caller = str(group.get("caller") or "")
-            if caller and sigs.get(caller):
-                group["caller_signature"] = sigs[caller]
+            hit = info.get(caller) if caller else None
+            if hit and hit["signature"]:
+                group["caller_signature"] = hit["signature"]
+            if hit and hit["params"]:
+                group["caller_params"] = hit["params"]
 
     def importers_of(
         self,

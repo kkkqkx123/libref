@@ -475,6 +475,28 @@ async def induce_labels(
     patterns = reader.list_patterns(
         library, version, ecosystem, limit=max(1, want_topn)
     )
+    try:
+        sig_table = reader.signatures_for(
+            sorted(
+                {a for entry in patterns for a in (entry.get("pattern") or []) if a}
+            ),
+            library,
+            version,
+            ecosystem,
+        )
+    except Exception:  # noqa: BLE001 -- signatures are advisory for prompts
+        sig_table = {}
+    short_sigs: dict[str, str] = {}
+    for api_name, by_kind in sig_table.items():
+        if not by_kind:
+            continue
+        first = next(iter(by_kind.values()))
+        params = list(first.get("params") or [])
+        ret = str(first.get("return_type") or "").strip()
+        text = f"{api_name}({', '.join(str(p) for p in params)})"
+        if ret:
+            text += f" -> {ret}"
+        short_sigs[str(api_name)] = text
     # One grouped shapes query for every API in the batch instead of one per API.
     wanted_apis = sorted(
         {a for entry in patterns for a in (entry.get("pattern") or []) if a}
@@ -568,6 +590,7 @@ async def induce_labels(
             arg_shapes=shapes,
             siblings=siblings,
             scope=scope,
+            signatures={k: short_sigs[k] for k in names if k in short_sigs},
         )
         try:
             import asyncio as _asyncio
