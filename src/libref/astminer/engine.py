@@ -104,9 +104,18 @@ def _merge_matches(matches, source: bytes) -> list[tuple[Any, list[CapturedItem]
     return list(merged.values())
 
 
+ScopedAlias = tuple[str, str, str | None]
+
+_CALLABLE_SCOPE_KINDS = frozenset({"function", "method", "constructor"})
+_CLASS_SCOPE_KINDS = frozenset(
+    {"class", "interface", "enum", "record", "annotation", "struct", "union"}
+)
+_SELF_SCOPED_HEADS = frozenset({"self", "cls", "this", "Self"})
+
+
 def extract_file(
     path: str, cfg: LanguageConfig, source: bytes
-) -> tuple[list[ApiDeclRecord], list[tuple[str, str]], list[RawCall]]:
+) -> tuple[list[ApiDeclRecord], list[ScopedAlias], list[RawCall]]:
     parser = get_parser(cfg)
     tree = parser.parse(source)
     compiled = _compiled_queries(cfg)
@@ -130,20 +139,10 @@ def extract_file(
     if module is not None and path.replace("\\", "/").endswith("__init__.py"):
         alias_module = f"{module}.__init__"
     aliases = _build_aliases(cfg, source, dep_matches, alias_module, path)
-    import_map = dict(aliases)
-    for var, target in _rules.collect_simple_var_aliases(tree.root_node, source):
-        if not var or not target or var in import_map:
+    for var, target, at in _rules.collect_simple_var_aliases(tree.root_node, source):
+        if not var or not target:
             continue
-        head, _, rest = target.partition(".")
-        if rest and head in import_map:
-            expanded = import_map[head] + "." + rest
-        elif not rest and head in import_map:
-            expanded = import_map[head]
-        else:
-            expanded = target
-        if var and expanded:
-            aliases.append((var, expanded))
-            import_map[var] = expanded
+        aliases.append((var, target, _var_scope(decls, var, at)))
     calls = _build_calls(path, cfg, source, call_matches, decls)
     return decls, aliases, calls
 
@@ -560,15 +559,40 @@ def _build_aliases(
     dep_matches,
     module: str | None = None,
     importer_file: str | None = None,
-) -> list[tuple[str, str]]:
-    aliases: list[tuple[str, str]] = []
+) -> list[ScopedAlias]:
+    aliases: list[ScopedAlias] = []
     for node, items in _merge_matches(dep_matches, source):
         for alias, full in _rules.build_aliases(
             cfg.name, node, items, source, module, importer_file
         ):
             if alias and full:
-                aliases.append((alias, full))
+                aliases.append((alias, full, None))
     return aliases
+
+
+def _innermost_qual(
+    decls: list[ApiDeclRecord], at: int, kinds: frozenset
+) -> str | None:
+    best: ApiDeclRecord | None = None
+    for decl in decls:
+        if decl.kind not in kinds:
+            continue
+        if not (decl.start_byte <= at < decl.end_byte):
+            continue
+        if best is None or (
+            decl.start_byte >= best.start_byte and decl.end_byte <= best.end_byte
+        ):
+            best = decl
+    return best.qualified_name if best is not None else None
+
+
+def _var_scope(decls: list[ApiDeclRecord], var: str, at: int) -> str:
+    head = var.partition(".")[0]
+    if head in _SELF_SCOPED_HEADS:
+        enclosing = _innermost_qual(decls, at, _CLASS_SCOPE_KINDS)
+        return enclosing if enclosing is not None else ""
+    enclosing = _innermost_qual(decls, at, _CALLABLE_SCOPE_KINDS)
+    return enclosing if enclosing is not None else ""
 
 
 def _build_calls(path, cfg, source, call_matches, decls) -> list[RawCall]:

@@ -43,7 +43,7 @@ def _collect_decl_index(
 
     go_prefix = _read_go_module_prefix(root).replace("/", ".")
     all_decls: list = []
-    file_aliases: dict[str, list[tuple[str, str]]] = {}
+    file_aliases: dict[str, list[tuple[str, str, str | None]]] = {}
     counts = {"files": 0, "parsed": 0, "cached": 0}
     live: dict[str, tuple[str, int]] = {}
     for rel in files:
@@ -88,8 +88,8 @@ def _collect_decl_index(
         all_decls.extend(decls)
         if go_prefix and cfg.name == "go":
             aliases = [
-                (name, ast_rules.normalize_go_import(target, go_prefix))
-                for name, target in aliases
+                (name, ast_rules.normalize_go_import(target, go_prefix), scope)
+                for name, target, scope in aliases
             ]
         file_aliases[rel] = list(aliases)
     return all_decls, file_aliases, counts, live

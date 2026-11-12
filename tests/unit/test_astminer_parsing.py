@@ -85,7 +85,7 @@ def test_python_minimal_fixture_shapes(monkeypatch, tmp_path):
     by_qual = {d.qualified_name: d for d in decls}
     assert "python_async_decorator.fetch" in by_qual
     assert "url" in by_qual["python_async_decorator.fetch"].params
-    assert ("np", "numpy") in aliases
+    assert ("np", "numpy", None) in aliases
     by_raw = {c.raw_callee for c in raw}
     assert {"functools.lru_cache", "get", "np.array", "np.zeros", "self.step"} <= by_raw
 
@@ -95,9 +95,9 @@ def test_javascript_minimal_fixture_shapes(monkeypatch, tmp_path):
     decls, aliases, raw = ast_engine.extract_file(
         "js_chain_import.js", ast_config.JAVASCRIPT_CONFIG, data
     )
-    assert ("b", "mod/x.a") in aliases
-    assert ("ns", "lib") in aliases
-    assert ("d", "r") in aliases
+    assert ("b", "mod/x.a", None) in aliases
+    assert ("ns", "lib", None) in aliases
+    assert ("d", "r", None) in aliases
     by_qual = {d.qualified_name: d for d in decls}
     assert by_qual["js_chain_import.Command.run"].kind == "method"
     by_raw = {c.raw_callee: c for c in raw}
@@ -111,7 +111,7 @@ def test_java_minimal_fixture_shapes(monkeypatch, tmp_path):
     decls, aliases, raw = ast_engine.extract_file(
         "java_shapes.java", ast_config.JAVA_CONFIG, data
     )
-    assert ("List", "java.util.List") in aliases
+    assert ("List", "java.util.List", None) in aliases
     by_qual = {d.qualified_name: d for d in decls}
     assert "Base" in by_qual["java_shapes.Mapper"].bases
     assert "Runnable" in by_qual["java_shapes.Mapper"].bases
@@ -144,8 +144,8 @@ def test_rust_minimal_fixture_shapes(monkeypatch, tmp_path):
     assert by_qual["rust_shapes.Cache.new"].kind == "method"
     assert by_qual["rust_shapes.Cache.get"].params == []
     assert "path" in by_qual["rust_shapes.run"].params
-    assert ("load", "store.load") in aliases
-    assert ("store_save", "store.save") in aliases
+    assert ("load", "store.load", None) in aliases
+    assert ("store_save", "store.save", None) in aliases
     by_raw = {c.raw_callee: c for c in raw}
     assert by_raw["Cache.new"].caller == "rust_shapes.run"
     assert by_raw["load"].caller == "rust_shapes.run"
@@ -161,7 +161,7 @@ def test_go_minimal_fixture_shapes(monkeypatch, tmp_path):
     assert by_qual["go_shapes.Cache"].kind == "struct"
     assert by_qual["go_shapes.Cache.Get"].kind == "method"
     assert "path" in by_qual["go_shapes.Load"].params
-    assert ("alias", "example.com.x.y") in aliases
+    assert ("alias", "example.com.x.y", None) in aliases
     by_raw = {c.raw_callee: c for c in raw}
     assert by_raw["alias.Fetch"].caller == "go_shapes.Load"
     assert by_raw["fmt.Println"].caller == "go_shapes.Load"
@@ -176,7 +176,7 @@ def test_csharp_minimal_fixture_shapes(monkeypatch, tmp_path):
     assert by_qual["Store.Cache"].kind == "class"
     assert "Base" in by_qual["Store.Cache"].bases
     assert by_qual["Store.Cache.Get"].kind == "method"
-    assert ("IO", "System.IO") in aliases
+    assert ("IO", "System.IO", None) in aliases
     by_raw = {c.raw_callee: c for c in raw}
     assert by_raw["Lookup"].caller == "Store.Cache.Get"
     assert by_raw["cache.Get"].caller == "Store.Cache.Run"
@@ -193,8 +193,8 @@ def test_kotlin_minimal_fixture_shapes(monkeypatch, tmp_path):
     assert by_qual["demo.store.Cache.find"].kind == "method"
     assert by_qual["demo.store.Cache.find"].params == ["id"]
     assert by_qual["demo.store.top"].params == ["x", "y"]
-    assert ("List", "java.util.List") in aliases
-    assert ("U", "demo.Util") in aliases
+    assert ("List", "java.util.List", None) in aliases
+    assert ("U", "demo.Util", None) in aliases
     by_raw = {c.raw_callee: c for c in raw}
     assert by_raw["U.load"].caller == "demo.store.Cache.find"
     assert by_raw["items.firstOrNull"].caller == "demo.store.Cache.find"
@@ -213,8 +213,8 @@ def test_groovy_minimal_fixture_shapes(monkeypatch, tmp_path):
     assert by_qual["demo.store.Cache.run"].kind == "method"
     assert by_qual["demo.store.top"].kind == "function"
     assert by_qual["demo.store.top"].params == ["x"]
-    assert ("List", "java.util.List") in aliases
-    assert ("load", "demo.Util.load") in aliases
+    assert ("List", "java.util.List", None) in aliases
+    assert ("load", "demo.Util.load", None) in aliases
     by_raw = {c.raw_callee: c for c in raw}
     assert by_raw["this.helper"].caller == "demo.store.Cache.run"
     assert by_raw["items.first"].caller == "demo.store.Cache.run"

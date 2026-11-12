@@ -338,8 +338,8 @@ def _is_dotted_name(text: str) -> bool:
     return all(part.isidentifier() for part in parts)
 
 
-def collect_simple_var_aliases(root: Any, source: bytes) -> list[tuple[str, str]]:
-    found: list[tuple[str, str]] = []
+def collect_simple_var_aliases(root: Any, source: bytes) -> list[tuple[str, str, int]]:
+    found: list[tuple[str, str, int]] = []
     stack = [root]
     while stack:
         node = stack.pop()
@@ -351,7 +351,7 @@ def collect_simple_var_aliases(root: Any, source: bytes) -> list[tuple[str, str]
                 if var and _is_dotted_name(var):
                     target = _call_target_name(right, source)
                     if target:
-                        found.append((var, target))
+                        found.append((var, target, node.start_byte))
         elif node.type == "variable_declarator":
             name_node = node.child_by_field_name("name")
             value_node = node.child_by_field_name("value")
@@ -363,7 +363,7 @@ def collect_simple_var_aliases(root: Any, source: bytes) -> list[tuple[str, str]
                 var = slice_text(name_node, source).strip()
                 target = _call_target_name(value_node, source)
                 if var and target:
-                    found.append((var, target))
+                    found.append((var, target, node.start_byte))
         stack.extend(node.children)
     return found
 

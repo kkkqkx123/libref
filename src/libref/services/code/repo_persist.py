@@ -257,7 +257,9 @@ def _persist_import_edges(conn, library_id: int, version_id: int, file_aliases) 
     rows: list[tuple] = []
     for importer_file, items in (file_aliases or {}).items():
         seen: set[str] = set()
-        for alias, target in items:
+        for alias, target, scope in items:
+            if scope is not None:
+                continue
             if not alias or not target or alias in seen:
                 continue
             seen.add(alias)

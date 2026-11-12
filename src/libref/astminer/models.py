@@ -10,9 +10,12 @@ Confidence = Literal["EXTRACTED", "INFERRED", "AMBIGUOUS"]
 
 ResolveKind = Literal[
     "alias-direct",
+    "alias-external",
     "alias-suffix",
     "stdlib",
     "factory",
+    "import-preferred",
+    "inherited",
     "self-direct",
     "self-inherited",
     "receiver-type",

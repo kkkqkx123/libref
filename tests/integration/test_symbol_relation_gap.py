@@ -82,9 +82,12 @@ def test_call_resolve_and_caller_link(conn, tmp_path):
     assert rows
     allowed = {
         "alias-direct",
+        "alias-external",
         "alias-suffix",
         "stdlib",
         "factory",
+        "inherited",
+        "import-preferred",
         "self-direct",
         "self-inherited",
         "receiver-type",

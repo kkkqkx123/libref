@@ -33,10 +33,10 @@ def test_js_dynamic_import_aliases() -> None:
         ast_config.JAVASCRIPT_CONFIG,
         b'const p2 = import("dyn");\nconst q = await import("./lib/dyn2");\n',
     )
-    assert ("p2", "dyn") in aliases
-    assert ("q", "lib.dyn2") in aliases
+    assert ("p2", "dyn", None) in aliases
+    assert ("q", "lib.dyn2", None) in aliases
     assert "import" not in {c.raw_callee for c in raw}
-    assert not [alias for alias, full in aliases if full in ("import", "require")]
+    assert not [alias for alias, full, _ in aliases if full in ("import", "require")]
 
 
 def test_js_reexport_aliases() -> None:
@@ -45,9 +45,9 @@ def test_js_reexport_aliases() -> None:
         ast_config.JAVASCRIPT_CONFIG,
         b'export {a} from "m2";\nexport {b as c} from "m4";\nexport * from "m3";\n',
     )
-    assert ("a", "m2.a") in aliases
-    assert ("c", "m4.b") in aliases
-    assert not [alias for alias, _ in aliases if alias == "*"]
+    assert ("a", "m2.a", None) in aliases
+    assert ("c", "m4.b", None) in aliases
+    assert not [alias for alias, _, _ in aliases if alias == "*"]
 
 
 def test_js_doc_comment_marks_function() -> None:
@@ -166,7 +166,7 @@ def test_java_static_import_alias() -> None:
         ast_config.JAVA_CONFIG,
         b"import static foo.Bar.baz;\nclass A { void m(){ baz(); } }\n",
     )
-    assert ("baz", "foo.Bar.baz") in aliases
+    assert ("baz", "foo.Bar.baz", None) in aliases
     assert {c.raw_callee for c in raw} == {"baz"}
 
 
@@ -221,9 +221,9 @@ def test_require_destructuring_leaves_no_junk_alias() -> None:
         ast_config.JAVASCRIPT_CONFIG,
         b'const {e, f: g} = require("r2");\n',
     )
-    assert ("e", "r2.e") in aliases
-    assert ("g", "r2.f") in aliases
-    assert all("{" not in alias and "}" not in alias for alias, _ in aliases)
+    assert ("e", "r2.e", None) in aliases
+    assert ("g", "r2.f", None) in aliases
+    assert all("{" not in alias and "}" not in alias for alias, _, _ in aliases)
 
 
 def test_kotlin_secondary_constructor_entity() -> None:
@@ -260,7 +260,7 @@ def test_typescript_shapes_extract() -> None:
     assert by_qual["m.C"].bases == ["Base", "I"]
     assert by_qual["m.C.m"].kind == "method"
     assert by_qual["m.greet"].params == ["name"]
-    assert ("a", "m.a") in aliases
+    assert ("a", "m.a", None) in aliases
     by_raw = {c.raw_callee: c for c in raw}
     assert by_raw["this.f"].caller == "m.C.m"
 
@@ -310,7 +310,7 @@ def test_typescript_namespace_claim_and_returns() -> None:
     assert by_qual["Demo.top"].params == ["x", "y"]
     assert by_qual["Demo.top"].param_types == ["number", "string"]
     assert by_qual["Demo.top"].return_type == "string"
-    assert ("F", "r") in aliases
+    assert ("F", "r", None) in aliases
     assert by_qual["Demo.x"].kind == "variable"
     by_raw = {c.raw_callee: c for c in raw}
     assert by_raw["this.n"].receiver == "this"

@@ -52,7 +52,7 @@ def store(
 
 def encode_records(
     decls: list[ApiDeclRecord],
-    aliases: list[tuple[str, str]],
+    aliases: list[tuple[str, str, str | None]],
     calls: list[RawCall],
 ) -> list[dict]:
     records: list[dict] = []
@@ -77,8 +77,8 @@ def encode_records(
                 "span_kind": decl.span_kind,
             }
         )
-    for alias, full in aliases:
-        records.append({"type": "alias", "alias": alias, "full": full})
+    for alias, full, scope in aliases:
+        records.append({"type": "alias", "alias": alias, "full": full, "scope": scope})
     for call in calls:
         records.append(
             {
@@ -100,9 +100,9 @@ def encode_records(
 
 def decode_records(
     records: list[dict], path: str
-) -> tuple[list[ApiDeclRecord], list[tuple[str, str]], list[RawCall]]:
+) -> tuple[list[ApiDeclRecord], list[tuple[str, str, str | None]], list[RawCall]]:
     decls: list[ApiDeclRecord] = []
-    aliases: list[tuple[str, str]] = []
+    aliases: list[tuple[str, str, str | None]] = []
     calls: list[RawCall] = []
     for item in records:
         kind = item.get("type")
@@ -135,7 +135,9 @@ def decode_records(
         elif kind == "alias":
             if not item.get("alias") or not item.get("full"):
                 raise ValueError("cached alias is missing required fields")
-            aliases.append((item["alias"], item["full"]))
+            if "scope" not in item:
+                raise ValueError("cached alias is missing required scope")
+            aliases.append((item["alias"], item["full"], item["scope"]))
         elif kind == "raw_call":
             if not item.get("raw") or "line_start" not in item or "line_end" not in item:
                 raise ValueError("cached call is missing required fields")

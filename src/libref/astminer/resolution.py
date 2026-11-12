@@ -124,7 +124,7 @@ def _build_suffix_index(declared: set[str]) -> dict[str, list[str]]:
 
 def resolve_calls(
     decls: list[ApiDeclRecord],
-    file_aliases: dict[str, list[tuple[str, str]]],
+    file_aliases: dict[str, list[tuple[str, str, str | None]]],
     calls: list[RawCall],
     repo: str,
     commit_sha: str = "",
@@ -163,18 +163,65 @@ def resolve_calls(
             return_by_qual[decl.qualified_name] = owner
     declared = set(parent_by_qual)
     suffix_index = _build_suffix_index(declared)
-    alias_per_file = {path: dict(items) for path, items in file_aliases.items()}
-    for _ in range(len(alias_per_file) + 2):
-        snapshot = {path: dict(mapping) for path, mapping in alias_per_file.items()}
-        _close_reexports(alias_per_file)
-        _close_alias_chains(alias_per_file)
-        if alias_per_file == snapshot:
+    import_per_file: dict[str, dict[str, str]] = {}
+    vars_per_file: dict[str, list[tuple[str, str, str]]] = {}
+    for path, items in file_aliases.items():
+        imports: dict[str, str] = {}
+        scoped: list[tuple[str, str, str]] = []
+        for alias, full, scope in items:
+            if not alias or not full:
+                continue
+            if scope is None:
+                imports[alias] = full
+            else:
+                scoped.append((alias, full, scope))
+        import_per_file[path] = imports
+        vars_per_file[path] = scoped
+    for _ in range(len(import_per_file) + 2):
+        snapshot = {path: dict(mapping) for path, mapping in import_per_file.items()}
+        _close_reexports(import_per_file)
+        _close_alias_chains(import_per_file)
+        if import_per_file == snapshot:
             break
+    effective_cache: dict[tuple[str, str], dict[str, str]] = {}
+
+    def effective_for(path: str, caller: str | None) -> dict[str, str]:
+        key = (path, caller or "")
+        hit = effective_cache.get(key)
+        if hit is not None:
+            return hit
+        merged = dict(import_per_file.get(path, {}))
+        varlist = vars_per_file.get(path, [])
+        if varlist:
+            ancestors = _ancestor_list(caller, parent_by_qual) if caller else []
+            chain_set = set(ancestors)
+            if caller and "." in caller:
+                chain_set.add(caller.rpartition(".")[0])
+            module_vars: dict[str, str] = {}
+            ranked: list[tuple[int, str, str]] = []
+            for var, full, scope in varlist:
+                if scope == "":
+                    module_vars[var] = full
+                elif scope in chain_set:
+                    try:
+                        rank = ancestors.index(scope)
+                    except ValueError:
+                        rank = len(ancestors)
+                    ranked.append((rank, var, full))
+            merged.update(module_vars)
+            for _rank, var, full in sorted(ranked, reverse=True):
+                merged[var] = full
+            closed = {path: merged}
+            _close_alias_chains(closed)
+            merged = closed[path]
+        effective_cache[key] = merged
+        return merged
+
     out: list[CallInstanceRecord] = []
     order_counter: dict[str, int] = {}
     ordered = sorted(calls, key=lambda c: (c.caller_file, c.caller or "", c.start_byte))
     for call in ordered:
-        alias_map = alias_per_file.get(call.caller_file, {})
+        alias_map = effective_for(call.caller_file, call.caller)
         same_file = by_file.get(call.caller_file, set())
         resolved, confidence, resolve_kind = resolve_one(
             call.raw_callee,
@@ -256,7 +303,7 @@ def resolve_one(
             return suffixed[0], "EXTRACTED", "alias-suffix"
         if _is_stdlib_target(resolved):
             return resolved, "AMBIGUOUS", "stdlib"
-        rewritten = _rewrite_factory_head(
+        rewritten = _rewrite_factory_chain(
             resolved, declared, index, same_file, return_by_qual or {}
         )
         if rewritten is not None and rewritten != resolved:
@@ -268,11 +315,18 @@ def resolve_one(
                 if suffixed[0] in same_file:
                     return suffixed[0], "EXTRACTED", "factory"
                 return suffixed[0], "INFERRED", "factory"
+        inherited = _resolve_owner_via_bases(
+            resolved, declared, bases_by_qual or {}, index, same_file
+        )
+        if inherited is not None:
+            return inherited, "EXTRACTED", "inherited"
         raw_hits = index.get(raw, [])
         if len(raw_hits) == 1:
             if raw_hits[0] in same_file:
                 return raw_hits[0], "EXTRACTED", "suffix"
             return raw_hits[0], "INFERRED", "suffix"
+        if not index.get(expanded):
+            return resolved, "INFERRED", "alias-external"
         return resolved, "INFERRED", "alias-direct"
     if head in _SELF_HEADS and caller:
         base = caller.rpartition(".")[0] if "." in caller else caller
@@ -299,6 +353,7 @@ def resolve_one(
             declared,
             same_file,
             index,
+            bases_by_qual,
         )
         if typed is not None:
             return typed[0], typed[1], "receiver-type"
@@ -314,6 +369,9 @@ def resolve_one(
         return raw, "EXTRACTED", "same-file"
     picked = _disambiguate(candidates, caller, parent_by_qual)
     if picked is None:
+        preferred = _prefer_imported(candidates, alias_map)
+        if preferred is not None:
+            return preferred, "INFERRED", "import-preferred"
         return raw, "AMBIGUOUS", "unresolved"
     if len(candidates) == 1:
         if picked == raw or picked in same_file:
@@ -410,6 +468,81 @@ def _owner_options(
     if len(same) == 1:
         return same
     return []
+
+
+def _rewrite_factory_chain(
+    resolved: str,
+    declared: set[str],
+    suffix_index: dict[str, list[str]],
+    same_file: set[str],
+    return_by_qual: dict[str, str],
+) -> str | None:
+    current = resolved
+    for _ in range(8):
+        stepped = _rewrite_factory_head(
+            current, declared, suffix_index, same_file, return_by_qual
+        )
+        if stepped is None or stepped == current:
+            break
+        current = stepped
+    if current == resolved:
+        return None
+    return current
+
+
+def _resolve_owner_via_bases(
+    resolved: str,
+    declared: set[str],
+    bases_by_qual: dict[str, list[str]],
+    suffix_index: dict[str, list[str]],
+    same_file: set[str],
+) -> str | None:
+    if not resolved or "." not in resolved:
+        return None
+    parts = resolved.split(".")
+    for length in range(len(parts) - 1, 0, -1):
+        owner_name = ".".join(parts[:length])
+        suffix = "." + ".".join(parts[length:])
+        owners = _owner_options(owner_name, declared, suffix_index, same_file)
+        if len(owners) != 1:
+            continue
+        owner = owners[0]
+        if owner + suffix in declared:
+            return owner + suffix
+        hit = _resolve_self_via_bases(
+            owner, suffix, declared, bases_by_qual, suffix_index, same_file
+        )
+        if hit is not None:
+            return hit
+    return None
+
+
+def _prefer_imported(candidates: list[str], alias_map: dict[str, str]) -> str | None:
+    targets = [target for target in alias_map.values() if target]
+    if not targets:
+        return None
+    matched = [
+        cand
+        for cand in candidates
+        if any(cand == target or cand.startswith(target + ".") for target in targets)
+    ]
+    if len(matched) == 1:
+        return matched[0]
+    return None
+
+
+def _ancestor_list(
+    caller: str | None,
+    parent_by_qual: dict[str, str | None] | None,
+) -> list[str]:
+    out: list[str] = []
+    current = caller
+    seen: set[str] = set()
+    while current is not None and current not in seen:
+        seen.add(current)
+        out.append(current)
+        current = parent_by_qual.get(current) if parent_by_qual else None
+    return out
 
 
 def _rewrite_factory_head(
@@ -573,6 +706,7 @@ def _resolve_via_receiver_type(
     declared: set[str],
     same_file: set[str],
     suffix_index: dict[str, list[str]] | None = None,
+    bases_by_qual: dict[str, list[str]] | None = None,
 ) -> tuple[str, Confidence] | None:
     head, _, rest = raw.partition(".")
     if not head or not rest:
@@ -590,6 +724,12 @@ def _resolve_via_receiver_type(
         if suffixed[0] in same_file:
             return suffixed[0], "EXTRACTED"
         return suffixed[0], "INFERRED"
+    if bases_by_qual:
+        inherited = _resolve_owner_via_bases(
+            resolved, declared, bases_by_qual, index, same_file
+        )
+        if inherited is not None:
+            return inherited, "EXTRACTED"
     return None
 
 

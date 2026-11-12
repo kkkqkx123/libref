@@ -112,13 +112,13 @@ def test_javascript_import_require_aliases(monkeypatch, tmp_path):
         b'export {a} from "m2";\n'
         b'const p2 = import("dyn");\n',
     )
-    assert ("def", "mod/x") in aliases
-    assert ("b", "mod/x.a") in aliases
-    assert ("c", "mod/x.c") in aliases
-    assert ("ns", "lib") in aliases
-    assert ("d", "r") in aliases
-    assert ("e", "r2.e") in aliases
-    assert ("g", "r2.f") in aliases
+    assert ("def", "mod/x", None) in aliases
+    assert ("b", "mod/x.a", None) in aliases
+    assert ("c", "mod/x.c", None) in aliases
+    assert ("ns", "lib", None) in aliases
+    assert ("d", "r", None) in aliases
+    assert ("e", "r2.e", None) in aliases
+    assert ("g", "r2.f", None) in aliases
     assert "require" not in {c.raw_callee for c in raw}
     assert "import" not in {c.raw_callee for c in raw}
 
@@ -147,7 +147,7 @@ def test_java_extends_implements_and_calls(monkeypatch, tmp_path):
         b"    void foo(){ obj.bar(1); this.baz(); bar(2); new Foo(1); }\n"
         b"}\n",
     )
-    assert ("List", "java.util.List") in aliases
+    assert ("List", "java.util.List", None) in aliases
     assert not [a for a in aliases if a[0] == "*"]
     by_qual = {d.qualified_name: d for d in decls}
     assert "Base" in by_qual["A"].bases
@@ -176,8 +176,8 @@ def test_rust_impl_methods_and_use_aliases(monkeypatch, tmp_path):
     assert by_qual["Cache"].kind == "struct"
     assert by_qual["Cache.new"].kind == "method"
     assert by_qual["Cache.get"].kind == "method"
-    assert ("load", "store.load") in aliases
-    assert ("store_save", "store.save") in aliases
+    assert ("load", "store.load", None) in aliases
+    assert ("store_save", "store.save", None) in aliases
     assert not [a for a in aliases if a[0] == "HashMap"]
     by_raw = {c.raw_callee: c for c in raw}
     assert by_raw["Cache.new"].caller == "main"
@@ -206,7 +206,7 @@ def test_go_receiver_and_grouped_imports(monkeypatch, tmp_path):
     assert by_qual["store.cache.Cache"].kind == "struct"
     assert by_qual["store.cache.Cache.Get"].kind == "method"
     assert by_qual["store.cache.Load"].params == ["path"]
-    assert ("alias", "example.com.x.y") in aliases
+    assert ("alias", "example.com.x.y", None) in aliases
     assert not [a for a in aliases if a[0] == "fmt"]
     by_raw = {c.raw_callee: c for c in raw}
     assert by_raw["alias.Fetch"].caller == "store.cache.Load"
@@ -236,8 +236,8 @@ def test_csharp_namespace_using_and_calls(monkeypatch, tmp_path):
     assert by_qual["Store.Cache"].bases == ["Base"]
     assert by_qual["Store.Cache.Get"].kind == "method"
     assert by_qual["Store.Cache.Get"].params == ["key"]
-    assert ("IO", "System.IO") in aliases
-    assert ("System", "System") in aliases
+    assert ("IO", "System.IO", None) in aliases
+    assert ("System", "System", None) in aliases
     by_raw = {c.raw_callee: c for c in raw}
     assert by_raw["Lookup"].caller == "Store.Cache.Get"
     assert by_raw["cache.Get"].caller == "Store.Cache.Run"
@@ -282,10 +282,10 @@ def test_rust_use_path_keywords_resolve_against_module(monkeypatch, tmp_path):
         b"use crate::top::Top;\n"
         b"use plain::P;\n",
     )
-    assert ("Thing", "a.sibling.Thing") in aliases
-    assert ("Item", "a.b.inner.Item") in aliases
-    assert ("Top", "top.Top") in aliases
-    assert ("P", "plain.P") in aliases
+    assert ("Thing", "a.sibling.Thing", None) in aliases
+    assert ("Item", "a.b.inner.Item", None) in aliases
+    assert ("Top", "top.Top", None) in aliases
+    assert ("P", "plain.P", None) in aliases
 
 
 def test_csharp_generic_calls_use_base_name(monkeypatch, tmp_path):

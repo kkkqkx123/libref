@@ -31,7 +31,7 @@ def _resolve(decls, aliases_by_file: dict | list, raw, repo="test/repo"):
 def test_extract_call_shape(monkeypatch, tmp_path):
     source = b"import numpy as np\n\n\ndef load():\n    np.array([1])\n    np.zeros(3, dtype=int)\n"
     _decls, aliases, raw = _parse("a.py", source)
-    assert ("np", "numpy") in aliases
+    assert ("np", "numpy", None) in aliases
     by_raw = {c.raw_callee: c for c in raw}
     assert "np.array" in by_raw and "np.zeros" in by_raw
     array_call = by_raw["np.array"]
@@ -117,14 +117,14 @@ def test_grammar_fingerprint_stable(monkeypatch, tmp_path):
 
 def test_multi_import_all_bindings(monkeypatch, tmp_path):
     _decls, aliases, _raw = _parse("m.py", b"import os, sys\nimport numpy as np\n")
-    assert ("os", "os") in aliases
-    assert ("sys", "sys") in aliases
-    assert ("np", "numpy") in aliases
+    assert ("os", "os", None) in aliases
+    assert ("sys", "sys", None) in aliases
+    assert ("np", "numpy", None) in aliases
 
 
 def test_from_import_list_and_alias(monkeypatch, tmp_path):
     _decls, aliases, _raw = _parse("m.py", b"from m import a, b as c\n")
-    by_alias = dict(aliases)
+    by_alias = {alias: full for alias, full, _ in aliases}
     assert by_alias.get("a") == "m.a"
     assert by_alias.get("c") == "m.b"
 
@@ -133,11 +133,11 @@ def test_relative_import_resolves_against_module_path(monkeypatch, tmp_path):
     _decls, aliases, _raw = _parse("m.py", b"from . import x\n")
     assert aliases == []
     _decls, aliases, _raw = _parse("m.py", b"from .pkg import mod\n")
-    assert aliases == [("mod", "pkg.mod")]
+    assert aliases == [("mod", "pkg.mod", None)]
     _decls, aliases, _raw = _parse("pkg/mod.py", b"from .utils import helper\n")
-    assert aliases == [("helper", "pkg.utils.helper")]
+    assert aliases == [("helper", "pkg.utils.helper", None)]
     _decls, aliases, _raw = _parse("pkg/__init__.py", b"from .core import start\n")
-    assert aliases == [("start", "pkg.core.start")]
+    assert aliases == [("start", "pkg.core.start", None)]
 
 
 def test_arg_shapes_preserved(monkeypatch, tmp_path):
@@ -174,7 +174,7 @@ def test_java_receiver_and_import(monkeypatch, tmp_path):
         b"import java.util.List;\nimport java.util.*;\n"
         b"class A { void foo(){ obj.bar(1); this.baz(); bar(2);} }\n",
     )
-    assert ("List", "java.util.List") in aliases
+    assert ("List", "java.util.List", None) in aliases
     assert not [a for a in aliases if a[0] == "*"]
     by_raw = {c.raw_callee: c for c in raw}
     assert by_raw["obj.bar"].caller == "A.foo"
@@ -213,7 +213,7 @@ def test_var_alias_resolves_to_declared(monkeypatch, tmp_path):
         "m.py",
         b"class Foo:\n    def bar(self):\n        pass\nobj = Foo()\nobj.bar()\n",
     )
-    assert ("obj", "Foo") in aliases
+    assert ("obj", "Foo", "") in aliases
     resolved = _resolve(
         decls,
         {"m.py": aliases},
@@ -321,7 +321,9 @@ def test_stdlib_alias_target_is_ambiguous(monkeypatch, tmp_path):
             line_end=1,
         )
     ]
-    resolved = ast_resolution.resolve_calls(decls, {"m.py": [("os", "os")]}, raw, "r")
+    resolved = ast_resolution.resolve_calls(
+        decls, {"m.py": [("os", "os", None)]}, raw, "r"
+    )
     assert resolved[0].callee == "os.path.join"
     assert resolved[0].confidence == "AMBIGUOUS"
     third = [
@@ -333,7 +335,9 @@ def test_stdlib_alias_target_is_ambiguous(monkeypatch, tmp_path):
             line_end=2,
         )
     ]
-    kept = ast_resolution.resolve_calls(decls, {"m.py": [("np", "numpy")]}, third, "r")
+    kept = ast_resolution.resolve_calls(
+        decls, {"m.py": [("np", "numpy", None)]}, third, "r"
+    )
     assert kept[0].callee == "numpy.array"
     assert kept[0].confidence == "INFERRED"
 
@@ -494,8 +498,8 @@ def test_joint_reexport_and_chain_closure(monkeypatch, tmp_path):
         )
     ]
     aliases = {
-        "pkg/__init__.py": [("start", "pkg.core.start")],
-        "a.py": [("start", "pkg.start"), ("x", "start")],
+        "pkg/__init__.py": [("start", "pkg.core.start", None)],
+        "a.py": [("start", "pkg.start", None), ("x", "start", "")],
     }
     resolved = ast_resolution.resolve_calls(decls, aliases, raw, "r")
     assert resolved[0].callee == "pkg.core.start"
@@ -537,7 +541,7 @@ def test_attribute_receiver_alias_resolves(monkeypatch, tmp_path):
         )
     ]
     resolved = ast_resolution.resolve_calls(
-        decls, {"m.py": [("self.x", "m.Foo")]}, raw, "r"
+        decls, {"m.py": [("self.x", "m.Foo", "m.C")]}, raw, "r"
     )
     assert resolved[0].callee == "m.Foo.bar"
     assert resolved[0].confidence == "EXTRACTED"
@@ -586,6 +590,8 @@ def test_factory_return_type_one_hop(monkeypatch, tmp_path):
             line_end=10,
         )
     ]
-    resolved = ast_resolution.resolve_calls(decls, {"m.py": [("x", "make")]}, raw, "r")
+    resolved = ast_resolution.resolve_calls(
+        decls, {"m.py": [("x", "make", "")]}, raw, "r"
+    )
     assert resolved[0].callee == "m.Foo.bar"
     assert resolved[0].confidence == "EXTRACTED"
