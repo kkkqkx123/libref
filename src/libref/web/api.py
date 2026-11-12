@@ -13,9 +13,7 @@ class SearchQuery(BaseModel):
     version: str | None = None
     ecosystem: str | None = None
     limit: int = Field(default=8, ge=1, le=100)
-    mode: Literal["hybrid", "precise"] = "hybrid"
-    expand_window: bool = False
-    window_radius: int | None = None
+    preset: Literal["precise", "balanced", "thorough"] = "balanced"
     suggest: bool = False
     include_prerelease: bool = False
 
@@ -33,9 +31,7 @@ class AnswerQuery(BaseModel):
     version: str | None = None
     ecosystem: str | None = None
     limit: int = Field(default=5, ge=1, le=50)
-    expand_window: bool = False
-    window_radius: int | None = None
-    material_limit: int | None = None
+    preset: Literal["precise", "balanced", "thorough"] = "balanced"
 
 
 class ReadQuery(BaseModel):

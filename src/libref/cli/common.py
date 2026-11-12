@@ -75,6 +75,8 @@ def _window_overrides(args: argparse.Namespace) -> dict:
         overrides["retriever_expand_window"] = True
     if getattr(args, "window_radius", None) is not None:
         overrides["retriever_window_radius"] = int(args.window_radius)
+    if getattr(args, "material_limit", None) is not None:
+        overrides["material_limit"] = int(args.material_limit)
     return overrides
 
 

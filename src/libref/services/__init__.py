@@ -24,9 +24,12 @@ from libref.services.code.probe import RepoProbe, probe_repo
 from libref.services.docs.answer import answer_query, answer_query_async
 from libref.services.docs.answer_materials import (
     SYSTEM_PROMPT,
+    apply_total_budget,
     build_citations,
     build_messages,
+    filter_citations_by_answer,
     material_block,
+    parse_cited_indices,
 )
 from libref.services.docs.ingest import (
     SCRAPE_JOB_KIND,
@@ -39,7 +42,7 @@ from libref.services.docs.ingest import (
 )
 from libref.services.docs.pages import PageService
 from libref.services.docs.probe import DocProbe, probe_docs, probe_docs_async
-from libref.services.docs.search import SearchService
+from libref.services.docs.search import PRESETS, SearchService, normalize_preset
 from libref.services.factory import (
     build_ingest_service,
     build_maintenance_service,
@@ -77,6 +80,7 @@ from libref.services.registry.resolver import (
 __all__ = [
     "INDEX_REPO_JOB_KIND",
     "MINE_PATTERNS_JOB_KIND",
+    "PRESETS",
     "REASON_ABSENT_SWEEP",
     "REASON_PURGE",
     "SCRAPE_JOB_KIND",
@@ -94,6 +98,7 @@ __all__ = [
     "SearchService",
     "answer_query",
     "answer_query_async",
+    "apply_total_budget",
     "build_citations",
     "build_ingest_service",
     "build_maintenance_service",
@@ -107,6 +112,7 @@ __all__ = [
     "check_quota",
     "embeddable_doc_ids",
     "entity_uid",
+    "filter_citations_by_answer",
     "index_repo",
     "index_repo_by_name",
     "index_repo_by_name_async",
@@ -119,6 +125,8 @@ __all__ = [
     "mine_job_params",
     "mine_patterns",
     "mining_version_ids",
+    "normalize_preset",
+    "parse_cited_indices",
     "probe_docs",
     "probe_docs_async",
     "probe_repo",

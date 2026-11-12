@@ -282,21 +282,22 @@ def cmd_search(args: argparse.Namespace) -> int:
     conn = _connect(settings)
     try:
         service, _gw = build_search_service(conn, settings)
-        mode = getattr(args, "mode", "hybrid")
-        results, degraded = _asyncio.run(
+        preset = getattr(args, "preset", "balanced")
+        results, status = _asyncio.run(
             service.search_with_mode(
                 args.query,
-                mode,
+                preset,
                 library=args.library,
                 version=args.version,
                 ecosystem=getattr(args, "ecosystem", None),
                 limit=args.limit,
-                expand_window=True if getattr(args, "expand_window", False) else None,
-                window_radius=getattr(args, "window_radius", None),
             )
         )
+        degraded = bool(status.get("degraded", False))
+        reasons = list(status.get("reasons", []) or [])
         if degraded:
-            print("(degraded: partial retrieval)", file=sys.stderr)
+            suffix = f": {','.join(reasons)}" if reasons else ""
+            print(f"(degraded: partial retrieval{suffix})", file=sys.stderr)
         if not results:
             print("(no results)")
             if getattr(args, "suggest", False):
@@ -332,9 +333,7 @@ def cmd_answer(args: argparse.Namespace) -> int:
             embed=embed,
             rerank=gateway.rerank_fn(),
             chat=gateway.chat_fn(),
-            expand_window=True if getattr(args, "expand_window", False) else None,
-            window_radius=getattr(args, "window_radius", None),
-            material_limit=args.material_limit,
+            preset=getattr(args, "preset", "balanced"),
         )
     finally:
         conn.close()
@@ -344,8 +343,12 @@ def cmd_answer(args: argparse.Namespace) -> int:
     print(out["answer"])
     for c in out["citations"]:
         print(f"- {c['title'] or '(untitled)'} — {c['url']}")
-    if out["degraded"]:
-        print("(degraded: partial retrieval)", file=sys.stderr)
+    if out.get("degraded"):
+        reasons = list(out.get("reasons", []) or [])
+        suffix = f": {','.join(reasons)}" if reasons else ""
+        print(f"(degraded: partial retrieval{suffix})", file=sys.stderr)
+    if out.get("confidence") == "low":
+        print("(low confidence: answer cites no material)", file=sys.stderr)
     return 0
 
 

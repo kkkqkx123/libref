@@ -16,9 +16,13 @@ from libref.mining.scoring import (
     capped_alpha,
     cluster_hit,
     cluster_hit_exact,
+    cluster_hit_weak,
+    cluster_hit_weak_exact,
     support_for_content,
     support_for_entities,
 )
+
+VALID_PRESETS = ("precise", "balanced", "thorough")
 from libref.text.embedding import strip_markdown_for_embedding
 from libref.text.query import safe_fts_query
 from libref.text.snippet import make_snippet, truncate_material
@@ -204,7 +208,7 @@ def alignment_key(meta: dict[str, Any] | None, url: str | None, doc_id: int) -> 
 
 
 def _collapse_by_group(conn: sqlite3.Connection, fused: list[int]) -> list[int]:
-    """Keep only the highest-ranked chunk per source group, merging twin chunks from both paths into one hit."""
+    """Keep the top two chunks per source group so rerank still sees intra-group competition."""
     if len(fused) < 2:
         return fused
     marks = ",".join("?" for _ in fused)
@@ -218,19 +222,22 @@ def _collapse_by_group(conn: sqlite3.Connection, fused: list[int]) -> list[int]:
         except ValueError:
             meta = {}
         groups[int(doc_id)] = alignment_key(meta, url, int(doc_id))
-    seen: set[str] = set()
+    counts: dict[str, int] = {}
     out: list[int] = []
     for doc_id in fused:
         key = groups.get(doc_id, f"c:{doc_id}")
-        if key in seen:
+        seen = counts.get(key, 0)
+        if seen >= 2:
             continue
-        seen.add(key)
+        counts[key] = seen + 1
         out.append(doc_id)
     return out
 
 
 def _pattern_supports(
-    conn: sqlite3.Connection, version_ids: list[int]
+    conn: sqlite3.Connection,
+    version_ids: list[int],
+    wanted: set[str] | None = None,
 ) -> dict[int, list[tuple[list[str], int]]]:
     if not version_ids:
         return {}
@@ -245,6 +252,8 @@ def _pattern_supports(
         try:
             names = json.loads(raw)
         except ValueError:
+            continue
+        if wanted and not set(names).intersection(wanted):
             continue
         out.setdefault(int(vid), []).append((names, int(support)))
     for vid in list(out):
@@ -323,22 +332,29 @@ class HybridRetriever:
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 8,
-        expand_window: bool | None = None,
-        window_radius: int | None = None,
-    ) -> tuple[list[dict[str, Any]], bool]:
-        """Hybrid retrieval, returning the result list and a degraded flag."""
+        preset: str = "balanced",
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Hybrid retrieval, returning results plus a status map with degraded reasons and road counts."""
         from libref.config import setting_or_default
 
         if not query.strip():
             raise ValueError("query is empty")
         if limit <= 0:
             raise ValueError("limit must be positive")
+        if preset not in VALID_PRESETS:
+            raise ValueError(f"unsupported search preset: {preset}")
         degraded = False
+        reasons: list[str] = []
+        precise_only = preset == "precise"
         candidate_floor = int(
             setting_or_default(self._settings, "rerank_candidate_limit")
         )
         candidate_mult = int(setting_or_default(self._settings, "candidate_multiplier"))
-        need = max(candidate_mult * limit, candidate_floor)
+        recall_budget = max(candidate_mult * limit, candidate_floor)
+        assemble_mult = int(setting_or_default(self._settings, "assemble_multiplier"))
+        assemble_min = int(setting_or_default(self._settings, "assemble_min"))
+        assemble_window = max(assemble_mult * limit, assemble_min)
+        need = recall_budget
         weights = (
             float(setting_or_default(self._settings, "fts_w_content")),
             float(setting_or_default(self._settings, "fts_w_title")),
@@ -351,14 +367,23 @@ class HybridRetriever:
         vec_ids: list[int] = []
         vids = _version_ids(self._conn, library, version, ecosystem)
         max_versions = int(setting_or_default(self._settings, "retrieval_max_versions"))
-        if self._vec is not None and self._embed is not None and vids:
+        use_vectors = (
+            not precise_only
+            and self._vec is not None
+            and self._embed is not None
+            and bool(vids)
+        )
+        if use_vectors and self._vec is not None and self._embed is not None:
             vids, drift_skipped = _current_vids(self._conn, self._settings, vids)
-            degraded = degraded or drift_skipped
+            if drift_skipped:
+                degraded = True
+                reasons.append("version_drift")
             if vids:
                 try:
                     [query_vec] = await self._embed([query])
                 except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
                     degraded = True
+                    reasons.append("vector_error")
                     query_vec = []
                 if query_vec is not None and len(query_vec):
                     if len(vids) == 1:
@@ -371,12 +396,14 @@ class HybridRetriever:
                             ]
                         except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
                             degraded = True
+                            reasons.append("vector_error")
                             vec_ids = []
                     else:
                         scoped = vids
                         if len(scoped) > max_versions:
                             scoped = scoped[:max_versions]
                             degraded = True
+                            reasons.append("version_capped")
                         try:
                             grouped = await asyncio.gather(
                                 *(
@@ -391,6 +418,7 @@ class HybridRetriever:
                             )
                         except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only
                             degraded = True
+                            reasons.append("vector_error")
                             vec_ids = []
                         else:
                             pooled: list[tuple[float, int]] = [
@@ -410,41 +438,50 @@ class HybridRetriever:
                                     break
                             vec_ids = merged
         fused = self._rrf(fts_ids, vec_ids)
+        fused_order = list(fused)
         fused = _collapse_by_group(self._conn, fused)
         if not fused:
-            return [], degraded
-        assemble_mult = int(setting_or_default(self._settings, "assemble_multiplier"))
-        assemble_min = int(setting_or_default(self._settings, "assemble_min"))
-        fused_reranked, degraded, rerank_scores = await self._apply_rerank(
+            return [], self._status(
+                degraded, reasons, fts_ids, vec_ids, fused_order, False
+            )
+        rerank_applied = False
+        rerank_scores: dict[int, float] = {}
+        if not precise_only:
+            rerank_before = degraded
+            fused, degraded, rerank_scores = await self._apply_rerank(
+                query,
+                fused,
+                limit,
+                degraded,
+                window=assemble_window,
+                top_n=int(setting_or_default(self._settings, "rerank_top_n")),
+            )
+            rerank_applied = bool(self._rerank is not None)
+            if degraded and not rerank_before:
+                reasons.append("rerank_error")
+        if preset == "thorough":
+            expand = True
+        else:
+            expand = bool(setting_or_default(self._settings, "retriever_expand_window"))
+            if precise_only:
+                expand = False
+        radius = int(setting_or_default(self._settings, "retriever_window_radius"))
+        results, window_ok = self._postprocess(
             query,
-            fused,
-            limit,
-            degraded,
-            window=max(assemble_mult * limit, assemble_min),
-            top_n=int(setting_or_default(self._settings, "rerank_top_n")),
-        )
-        fused = fused_reranked
-        window_f = max(assemble_mult * limit, assemble_min)
-        expand = (
-            setting_or_default(self._settings, "retriever_expand_window")
-            if expand_window is None
-            else expand_window
-        )
-        radius = (
-            setting_or_default(self._settings, "retriever_window_radius")
-            if window_radius is None
-            else window_radius
-        )
-        results = self._postprocess(
-            query,
-            fused[:window_f],
+            fused[:assemble_window],
             fts_ids,
             vec_ids,
             expand_window=bool(expand),
             window_radius=int(radius),
             rerank_scores=rerank_scores,
+            precise_only=precise_only,
         )
-        return results[:limit], degraded
+        if not window_ok:
+            degraded = True
+            reasons.append("window_error")
+        return results[:limit], self._status(
+            degraded, reasons, fts_ids, vec_ids, fused_order, rerank_applied
+        )
 
     def _rrf_scores(self, fts_ids: list[int], vec_ids: list[int]) -> dict[int, float]:
         from libref.config import setting_or_default
@@ -467,6 +504,24 @@ class HybridRetriever:
     def _rrf(self, fts_ids: list[int], vec_ids: list[int]) -> list[int]:
         scored = self._rrf_scores(fts_ids, vec_ids)
         return sorted(scored, key=lambda d: scored[d], reverse=True)
+
+    def _status(
+        self,
+        degraded: bool,
+        reasons: list[str],
+        fts_ids: list[int],
+        vec_ids: list[int],
+        fused_order: list[int],
+        rerank_applied: bool,
+    ) -> dict[str, Any]:
+        return {
+            "degraded": bool(degraded),
+            "reasons": list(dict.fromkeys(reasons)),
+            "fts_count": len(fts_ids),
+            "vec_count": len(vec_ids),
+            "fused_order": list(fused_order),
+            "rerank_applied": bool(rerank_applied),
+        }
 
     async def _apply_rerank(
         self,
@@ -499,7 +554,10 @@ class HybridRetriever:
             tail = [d for d in tail if d not in vanished]
         if not head:
             return head + tail, degraded, {}
-        texts = [details[d]["content"] for d in head]
+        link_cap = int(setting_or_default(self._settings, "rerank_truncate"))
+        total_cap = int(setting_or_default(self._settings, "material_limit"))
+        link_cap = min(link_cap, total_cap)
+        texts = [truncate_material(details[d]["content"], link_cap) for d in head]
         try:
             scored = await self._rerank(query, texts, len(head))
         except Exception:  # noqa: BLE001 -- rerank failure marks degraded, keep fused order
@@ -520,6 +578,7 @@ class HybridRetriever:
         vec_ids: list[int],
         *,
         rerank_scores: dict[int, float] | None = None,
+        precise_only: bool = False,
     ) -> list[dict[str, Any]]:
         from libref.config import setting_or_default
 
@@ -534,8 +593,28 @@ class HybridRetriever:
         rrf = self._rrf_scores(fts_ids, vec_ids)
         vids = sorted({details[d]["version_id"] for d in fused if d in details})
         # Skip the mining side tables entirely when both bonuses are disabled.
-        patterns = _pattern_supports(self._conn, vids) if raw_alpha > 0 else {}
-        clusters = _cluster_sets(self._conn, vids) if cluster_alpha > 0 else {}
+        if precise_only:
+            raw_alpha = 0.0
+            cluster_alpha = 0.0
+        wanted: set[str] = set()
+        if raw_alpha > 0 and not precise_only:
+            for doc in fused:
+                info = details.get(doc)
+                if info is None:
+                    continue
+                for entity in info.get("entities", []) or []:
+                    if entity:
+                        wanted.add(str(entity))
+        patterns = (
+            _pattern_supports(self._conn, vids, wanted)
+            if raw_alpha > 0 and not precise_only
+            else {}
+        )
+        clusters = (
+            _cluster_sets(self._conn, vids)
+            if cluster_alpha > 0 and not precise_only
+            else {}
+        )
         health_rows = [{"support": s} for plist in patterns.values() for _, s in plist]
         health = reuse_diversity(
             health_rows,
@@ -567,12 +646,22 @@ class HybridRetriever:
                         if cluster_hit_exact(have_entities, members):
                             cluster_bonus = 1.0
                             break
+                    if cluster_bonus == 0.0:
+                        for members in clist:
+                            if cluster_hit_weak_exact(have_entities, members):
+                                cluster_bonus = 0.3
+                                break
                 else:
                     content = info["content"] or ""
                     for members in clist:
                         if cluster_hit(content, members):
                             cluster_bonus = 1.0
                             break
+                    if cluster_bonus == 0.0:
+                        for members in clist:
+                            if cluster_hit_weak(content, members):
+                                cluster_bonus = 0.3
+                                break
             final = base * (1.0 + alpha * bonus + cluster_alpha * cluster_bonus)
             scored.append((final, doc))
         scored.sort(key=lambda kv: kv[0], reverse=True)
@@ -623,10 +712,16 @@ class HybridRetriever:
         expand_window: bool,
         window_radius: int,
         rerank_scores: dict[int, float] | None = None,
-    ) -> list[dict[str, Any]]:
+        precise_only: bool = False,
+    ) -> tuple[list[dict[str, Any]], bool]:
         """Post-processing chain: assembly runs in order; on window-expansion failure the assembled order is kept."""
         results = self._assemble(
-            query, fused, fts_ids, vec_ids, rerank_scores=rerank_scores
+            query,
+            fused,
+            fts_ids,
+            vec_ids,
+            rerank_scores=rerank_scores,
+            precise_only=precise_only,
         )
         return self._expand_windows(
             results, enabled=expand_window, radius=window_radius
@@ -634,15 +729,15 @@ class HybridRetriever:
 
     def _expand_windows(
         self, results: list[dict[str, Any]], *, enabled: bool, radius: int
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], bool]:
         """Window-expansion post-processing: prepend/append neighboring chunks by the configured radius; on failure keep the original order."""
         from libref.config import setting_or_default
 
         if not enabled or not results:
-            return results
+            return results, True
         radius = max(0, int(radius))
         if radius <= 0:
-            return results
+            return results, True
         preview_cap = int(setting_or_default(self._settings, "window_preview_cap"))
         try:
             locs = {
@@ -702,9 +797,28 @@ class HybridRetriever:
                     ]
                     windows[doc_id] = picked
             expanded: list[dict[str, Any]] = []
+            covered: set[int] = set()
             for item in results:
+                doc_id = int(item["id"])
+                loc = locs.get(doc_id)
+                if loc is not None:
+                    page_id, order, lane = loc
+                    for other in results:
+                        other_id = int(other["id"])
+                        if other_id == doc_id:
+                            continue
+                        other_loc = locs.get(other_id)
+                        if other_loc is None:
+                            continue
+                        if (
+                            other_loc[0] == page_id
+                            and other_loc[2] == lane
+                            and abs(other_loc[1] - order) <= radius
+                        ):
+                            covered.add(doc_id)
+                            break
                 window = windows.get(int(item["id"]), [])
-                if len(window) > 1:
+                if len(window) > 1 and int(item["id"]) not in covered:
                     item = dict(item)
                     item["window"] = [
                         {
@@ -722,9 +836,9 @@ class HybridRetriever:
                         for w in window
                     ]
                 expanded.append(item)
-            return expanded
+            return expanded, True
         except Exception:  # noqa: BLE001 -- expansion failure keeps the original results
-            return results
+            return results, False
 
 
 def build_retriever(settings, conn, *, vec_store=None, embed=None, rerank=None):

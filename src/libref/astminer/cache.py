@@ -139,7 +139,11 @@ def decode_records(
                 raise ValueError("cached alias is missing required scope")
             aliases.append((item["alias"], item["full"], item["scope"]))
         elif kind == "raw_call":
-            if not item.get("raw") or "line_start" not in item or "line_end" not in item:
+            if (
+                not item.get("raw")
+                or "line_start" not in item
+                or "line_end" not in item
+            ):
                 raise ValueError("cached call is missing required fields")
             calls.append(
                 RawCall(

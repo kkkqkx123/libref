@@ -155,6 +155,7 @@ class LibrefSettings(BaseSettings):
     chat_timeout: float = Field(default=60.0, gt=0)
     chat_enable_thinking: bool = False
     material_limit: int = Field(default=1500, ge=1)
+    answer_total_budget: int = Field(default=6000, ge=1)
     # MCP Streamable HTTP transport: loopback-only by default; exposing externally requires a token.
     mcp_host: str = "127.0.0.1"
     mcp_port: int = Field(default=8000, ge=1, le=65535)
@@ -376,6 +377,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "chat_timeout",
             "chat_enable_thinking",
             "material_limit",
+            "answer_total_budget",
         }
     ),
     "mcp": frozenset(

@@ -119,11 +119,17 @@ def _parse_json_list(raw: Any) -> list:
     return list(parsed) if isinstance(parsed, list) else []
 
 
-def _choose_canonical(rows: list[tuple[str, str, list, str]]) -> tuple[str, str, list, str]:
+def _choose_canonical(
+    rows: list[tuple[str, str, list, str]],
+) -> tuple[str, str, list, str]:
     """Pick one representative across kinds, preferring real signatures."""
     ordered = sorted(
         rows,
-        key=lambda r: (0 if str(r[1] or "").strip() else 1, _kind_rank(r[0]), str(r[0] or "")),
+        key=lambda r: (
+            0 if str(r[1] or "").strip() else 1,
+            _kind_rank(r[0]),
+            str(r[0] or ""),
+        ),
     )
     return ordered[0]
 
@@ -693,7 +699,12 @@ class MiningReadService:
         if not by_kind:
             return {"api": api, "kind": "", "signature": "", "short": api + "()"}
         rows = [
-            (kind, str(info.get("signature") or ""), list(info.get("params") or []), str(info.get("return_type") or ""))
+            (
+                kind,
+                str(info.get("signature") or ""),
+                list(info.get("params") or []),
+                str(info.get("return_type") or ""),
+            )
             for kind, info in by_kind.items()
         ]
         kind, sig, params, ret = _choose_canonical(rows)
@@ -732,7 +743,12 @@ class MiningReadService:
         bucket: dict[str, list[tuple[str, str, list, str]]] = {}
         for qual, kind, sig, params, ret in rows:
             bucket.setdefault(str(qual), []).append(
-                (str(kind or ""), str(sig or ""), _parse_json_list(params), str(ret or ""))
+                (
+                    str(kind or ""),
+                    str(sig or ""),
+                    _parse_json_list(params),
+                    str(ret or ""),
+                )
             )
         info: dict[str, dict[str, Any]] = {}
         for qual, items in bucket.items():
@@ -1337,21 +1353,33 @@ class MiningReadService:
             if not wanted:
                 raise ValueError("detail view requires api or apis")
             return self.symbol_details(
-                wanted, library, version, ecosystem, limit=limit if limit is not None else 100
+                wanted,
+                library,
+                version,
+                ecosystem,
+                limit=limit if limit is not None else 100,
             )
         if view == "file":
             if not api:
                 raise ValueError("file view requires api as file path")
             return self.symbols_in_file(
-                api, library, version, ecosystem,
-                limit=limit if limit is not None else 200, offset=offset,
+                api,
+                library,
+                version,
+                ecosystem,
+                limit=limit if limit is not None else 200,
+                offset=offset,
             )
         if view == "children":
             if not api:
                 raise ValueError("children view requires api as parent name")
             return self.child_symbols(
-                api, library, version, ecosystem,
-                limit=limit if limit is not None else 200, offset=offset,
+                api,
+                library,
+                version,
+                ecosystem,
+                limit=limit if limit is not None else 200,
+                offset=offset,
             )
         if view == "signature":
             if not api:
@@ -1380,25 +1408,46 @@ class MiningReadService:
             if not api:
                 raise ValueError("callee view requires api as callee name")
             return self.calls_by_callee(
-                api, library, version, ecosystem, limit=capped, offset=offset,
-                include_ambiguous=include_ambiguous, resolve_kinds=resolve_kinds,
-                min_args=min_args, max_args=max_args,
+                api,
+                library,
+                version,
+                ecosystem,
+                limit=capped,
+                offset=offset,
+                include_ambiguous=include_ambiguous,
+                resolve_kinds=resolve_kinds,
+                min_args=min_args,
+                max_args=max_args,
             )
         if view == "caller":
             if not api:
                 raise ValueError("caller view requires api as caller name")
             return self.calls_by_caller(
-                api, library, version, ecosystem, limit=capped, offset=offset,
-                include_ambiguous=include_ambiguous, resolve_kinds=resolve_kinds,
-                min_args=min_args, max_args=max_args,
+                api,
+                library,
+                version,
+                ecosystem,
+                limit=capped,
+                offset=offset,
+                include_ambiguous=include_ambiguous,
+                resolve_kinds=resolve_kinds,
+                min_args=min_args,
+                max_args=max_args,
             )
         if view == "file":
             if not api:
                 raise ValueError("file view requires api as file path")
             return self.calls_in_file(
-                api, library, version, ecosystem, limit=capped, offset=offset,
-                include_ambiguous=include_ambiguous, resolve_kinds=resolve_kinds,
-                min_args=min_args, max_args=max_args,
+                api,
+                library,
+                version,
+                ecosystem,
+                limit=capped,
+                offset=offset,
+                include_ambiguous=include_ambiguous,
+                resolve_kinds=resolve_kinds,
+                min_args=min_args,
+                max_args=max_args,
             )
         raise ValueError(f"unsupported call view: {view}")
 
@@ -1418,14 +1467,22 @@ class MiningReadService:
             if not api:
                 raise ValueError("importers view requires api as target")
             return self.importers_of(
-                api, library, version, ecosystem,
-                limit=limit if limit is not None else 50, offset=offset,
+                api,
+                library,
+                version,
+                ecosystem,
+                limit=limit if limit is not None else 50,
+                offset=offset,
             )
         if view == "imports":
             if not api:
                 raise ValueError("imports view requires api as file path")
             return self.imports_of_file(
-                api, library, version, ecosystem,
-                limit=limit if limit is not None else 100, offset=offset,
+                api,
+                library,
+                version,
+                ecosystem,
+                limit=limit if limit is not None else 100,
+                offset=offset,
             )
         raise ValueError(f"unsupported import view: {view}")

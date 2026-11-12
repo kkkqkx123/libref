@@ -1,4 +1,4 @@
-"""Search orchestration: FTS-only and hybrid retrieval over storage primitives."""
+"""Search orchestration: precise full-text and preset hybrid retrieval over storage primitives."""
 
 from __future__ import annotations
 
@@ -7,6 +7,14 @@ from typing import Any
 
 from libref.text.embedding import strip_markdown_for_embedding
 from libref.text.snippet import make_snippet
+
+PRESETS = ("precise", "balanced", "thorough")
+
+
+def normalize_preset(preset: str) -> str:
+    if preset not in PRESETS:
+        raise ValueError(f"unsupported search preset: {preset}")
+    return preset
 
 
 class SearchService:
@@ -127,12 +135,28 @@ class SearchService:
         vec_store=None,
         embed=None,
         rerank=None,
-        expand_window: bool | None = None,
-        window_radius: int | None = None,
-    ) -> tuple[list[dict[str, Any]], bool]:
-        """Hybrid default query: fused two-path recall; on failure fall back to full-text and flag degraded."""
+        preset: str = "balanced",
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Hybrid recall for balanced and thorough presets; precise callers use the sync full-text path."""
         from libref.store.retriever import HybridRetriever
 
+        use_preset = normalize_preset(preset)
+        if use_preset == "precise":
+            results = self.search_docs(
+                query,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                limit=limit,
+            )
+            return results, {
+                "degraded": False,
+                "reasons": [],
+                "fts_count": len(results),
+                "vec_count": 0,
+                "fused_order": [int(r["id"]) for r in results],
+                "rerank_applied": False,
+            }
         retriever = HybridRetriever(
             self._conn,
             self._settings,
@@ -146,42 +170,42 @@ class SearchService:
             version=version,
             ecosystem=ecosystem,
             limit=limit,
-            expand_window=expand_window,
-            window_radius=window_radius,
+            preset=use_preset,
         )
 
     async def search_with_mode(
         self,
         query: str,
-        mode: str = "hybrid",
+        preset: str = "balanced",
         *,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 8,
-        expand_window: bool | None = None,
-        window_radius: int | None = None,
-    ) -> tuple[list[dict[str, Any]], bool]:
-        """Unified retrieval: hybrid fused recall by default, exact full-text when precise."""
-        if mode == "precise":
-            return (
-                self.search_docs(
-                    query,
-                    library=library,
-                    version=version,
-                    ecosystem=ecosystem,
-                    limit=limit,
-                ),
-                False,
-            )
-        if mode == "hybrid":
-            return await self.search_hybrid_async(
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Unified retrieval: precise uses exact full-text, balanced and thorough use fused recall."""
+        use_preset = normalize_preset(preset)
+        if use_preset == "precise":
+            results = self.search_docs(
                 query,
                 library=library,
                 version=version,
                 ecosystem=ecosystem,
                 limit=limit,
-                expand_window=expand_window,
-                window_radius=window_radius,
             )
-        raise ValueError(f"unsupported search mode: {mode}")
+            return results, {
+                "degraded": False,
+                "reasons": [],
+                "fts_count": len(results),
+                "vec_count": 0,
+                "fused_order": [int(r["id"]) for r in results],
+                "rerank_applied": False,
+            }
+        return await self.search_hybrid_async(
+            query,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            limit=limit,
+            preset=use_preset,
+        )

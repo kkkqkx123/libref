@@ -51,7 +51,9 @@ async def _handshake(db_path: Path, workdir: Path) -> None:
             "resolve",
         } <= names
 
-        res = await session.call_tool("search", {"query": _MARKER, "mode": "hybrid"})
+        res = await session.call_tool(
+            "search", {"query": _MARKER, "preset": "balanced"}
+        )
         assert not getattr(res, "isError", False)
         assert _MARKER in res.model_dump_json().lower()
 

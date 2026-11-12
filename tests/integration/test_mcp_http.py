@@ -61,7 +61,7 @@ async def _handshake(port: int, proc: subprocess.Popen[bytes]) -> None:
                 } <= names
 
                 res = await session.call_tool(
-                    "search", {"query": _MARKER, "mode": "hybrid"}
+                    "search", {"query": _MARKER, "preset": "balanced"}
                 )
                 assert not getattr(res, "isError", False)
                 assert _MARKER in res.model_dump_json().lower()

@@ -90,9 +90,7 @@ def build_web_app(
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 8,
-        mode: Literal["hybrid", "precise"] = "hybrid",
-        expand_window: bool = False,
-        window_radius: int | None = None,
+        preset: Literal["precise", "balanced", "thorough"] = "balanced",
         suggest: bool = False,
         include_prerelease: bool = False,
         _: None = Depends(_guard),
@@ -103,26 +101,23 @@ def build_web_app(
             version=version,
             ecosystem=ecosystem,
             limit=limit,
-            mode=mode,
-            expand_window=expand_window,
-            window_radius=window_radius,
+            preset=preset,
             suggest=suggest,
             include_prerelease=include_prerelease,
         )
         try:
-            results, degraded = await svc.search_with_mode(
+            results, status = await svc.search_with_mode(
                 params.query,
-                params.mode,
+                params.preset,
                 library=params.library,
                 version=params.version,
                 ecosystem=params.ecosystem,
                 limit=params.limit,
-                expand_window=params.expand_window or None,
-                window_radius=params.window_radius,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        out = envelope(results, degraded=degraded)
+        out = envelope(results, degraded=bool(status.get("degraded", False)))
+        out["reasons"] = list(status.get("reasons", []) or [])
         if params.suggest and not results:
             try:
                 out["suggestions"] = await discovery.search_async(
@@ -174,9 +169,7 @@ def build_web_app(
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 5,
-        expand_window: bool = False,
-        window_radius: int | None = None,
-        material_limit: int | None = None,
+        preset: Literal["precise", "balanced", "thorough"] = "balanced",
         _: None = Depends(_guard),
     ) -> dict[str, Any]:
         from libref.services.docs.answer import answer_query_async
@@ -187,9 +180,7 @@ def build_web_app(
             version=version,
             ecosystem=ecosystem,
             limit=limit,
-            expand_window=expand_window,
-            window_radius=window_radius,
-            material_limit=material_limit,
+            preset=preset,
         )
         try:
             return await answer_query_async(
@@ -204,9 +195,7 @@ def build_web_app(
                 embed=embed,
                 rerank=rerank,
                 chat=chat,
-                expand_window=params.expand_window or None,
-                window_radius=params.window_radius,
-                material_limit=params.material_limit,
+                preset=params.preset,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

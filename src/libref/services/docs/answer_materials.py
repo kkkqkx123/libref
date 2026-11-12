@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from libref.text.snippet import omitted_tag, truncate_material, unit_tag
@@ -9,8 +10,13 @@ from libref.text.snippet import omitted_tag, truncate_material, unit_tag
 SYSTEM_PROMPT = (
     "Answer only using the provided materials. "
     "If the materials are insufficient, say you do not know. "
-    "Cite sources using material numbers like [1], [2]."
+    "Cite sources using material numbers like [1], [2]. "
+    "Reply in the same language as the user query. "
+    "When you refuse for lack of evidence, say what is missing "
+    "and suggest which library or version to index next."
 )
+
+_CITE_RE = re.compile(r"\[(\d+)\]")
 
 
 def material_block(
@@ -52,6 +58,62 @@ def build_label_blocks(labels: list[dict[str, Any]], limit: int) -> str:
         }
         units.append(unit_tag(attrs, truncate_material(body, limit)))
     return "\n".join(units)
+
+
+def apply_total_budget(
+    results: list[dict[str, Any]],
+    full_by_id: dict[int, str],
+    per_limit: int,
+    total_limit: int,
+) -> dict[int, str]:
+    """Fit materials into a total character budget in rank order; overflow tail is dropped."""
+    capped: dict[int, str] = {}
+    used = 0
+    for item in results:
+        doc_id = int(item["id"])
+        body = full_by_id.get(doc_id) or ""
+        if not body:
+            continue
+        piece = truncate_material(body, per_limit)
+        if not piece:
+            continue
+        if used + len(piece) > total_limit:
+            remaining = total_limit - used
+            if remaining <= 0:
+                break
+            cut = truncate_material(piece, remaining)
+            if cut:
+                capped[doc_id] = cut
+            break
+        capped[doc_id] = piece
+        used += len(piece)
+    return capped
+
+
+def parse_cited_indices(answer: str, count: int) -> list[int]:
+    """Collect valid material numbers cited in the answer, preserving first-seen order."""
+    seen: list[int] = []
+    for raw in _CITE_RE.findall(answer or ""):
+        try:
+            index = int(raw)
+        except ValueError:
+            continue
+        if 1 <= index <= count and index not in seen:
+            seen.append(index)
+    return seen
+
+
+def filter_citations_by_answer(
+    results: list[dict[str, Any]], answer: str
+) -> tuple[list[dict[str, Any]], list[int]]:
+    """Keep only citations the answer actually cites; empty answer keeps everything for inspection."""
+    if not (answer or "").strip():
+        return list(results), []
+    cited = parse_cited_indices(answer, len(results))
+    if not cited:
+        return [], []
+    kept = [results[index - 1] for index in cited]
+    return kept, cited
 
 
 def build_messages(

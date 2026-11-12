@@ -79,7 +79,7 @@ def _load_kept_calls(
             continue
         try:
             argc = int(r[9] or 0)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             argc = 0
         if min_args is not None and argc < int(min_args):
             continue
@@ -580,7 +580,9 @@ async def induce_labels(
     short_sigs: dict[str, str] = {}
     for api_name in sorted(sig_table):
         try:
-            canonical = reader.canonical_signature(api_name, library, version, ecosystem)
+            canonical = reader.canonical_signature(
+                api_name, library, version, ecosystem
+            )
         except Exception:  # noqa: BLE001, S112 -- signatures are advisory for prompts
             continue
         text = str(canonical.get("short") or "").strip()

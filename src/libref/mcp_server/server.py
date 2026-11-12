@@ -125,37 +125,26 @@ def build_mcp_server(
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 8,
-        mode: Literal["hybrid", "precise"] = "hybrid",
-        window_radius: int | None = None,
-        expand_window: bool = False,
+        preset: Literal["precise", "balanced", "thorough"] = "balanced",
         suggest: bool = False,
         include_prerelease: bool = False,
     ) -> dict[str, Any]:
-        """Hybrid fused recall with degraded flag; precise uses exact full-text only."""
+        """Preset retrieval: precise uses exact full-text, balanced and thorough use fused recall."""
         if not query.strip():
             return _invalid("query is empty")
         bad = _check_limit(limit, low=1, high=100)
         if bad is not None:
             return _invalid(bad)
-        if mode not in ("hybrid", "precise"):
-            return _invalid(f"unsupported search mode: {mode}")
-        if window_radius is not None and (
-            not isinstance(window_radius, int)
-            or isinstance(window_radius, bool)
-            or window_radius < 0
-            or window_radius > 20
-        ):
-            return _invalid("window_radius must be between 0 and 20")
+        if preset not in ("precise", "balanced", "thorough"):
+            return _invalid(f"unsupported search preset: {preset}")
         try:
-            results, degraded = await search_svc.search_with_mode(
+            results, status = await search_svc.search_with_mode(
                 query,
-                mode,
+                preset,
                 library=library,
                 version=version,
                 ecosystem=ecosystem,
                 limit=limit,
-                expand_window=expand_window or None,
-                window_radius=window_radius,
             )
         except ValueError as exc:
             return _invalid(str(exc))
@@ -164,7 +153,8 @@ def build_mcp_server(
         out: dict[str, Any] = {
             "items": results,
             "count": len(results),
-            "degraded": degraded,
+            "degraded": bool(status.get("degraded", False)),
+            "reasons": list(status.get("reasons", []) or []),
         }
         if suggest and not results:
             try:
@@ -252,11 +242,9 @@ def build_mcp_server(
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 5,
-        window_radius: int | None = None,
-        expand_window: bool = False,
-        material_limit: int | None = None,
+        preset: Literal["precise", "balanced", "thorough"] = "balanced",
     ) -> dict[str, Any]:
-        """Hybrid retrieval plus grounded generation, with clear failure reasons."""
+        """Preset retrieval plus grounded generation, with clear failure reasons."""
         from libref.services.docs.answer import answer_query_async
 
         if not query.strip():
@@ -264,6 +252,8 @@ def build_mcp_server(
         bad = _check_limit(limit, low=1, high=50)
         if bad is not None:
             return _invalid(bad)
+        if preset not in ("precise", "balanced", "thorough"):
+            return _invalid(f"unsupported search preset: {preset}")
         try:
             return await answer_query_async(
                 conn,
@@ -277,9 +267,7 @@ def build_mcp_server(
                 embed=embed_fn,
                 rerank=rerank_fn,
                 chat=chat_fn,
-                expand_window=expand_window or None,
-                window_radius=window_radius,
-                material_limit=material_limit,
+                preset=preset,
             )
         except ValueError as exc:
             return {"error": "unavailable", "message": str(exc)}
@@ -541,8 +529,14 @@ def build_mcp_server(
         try:
             return _items(
                 mining.symbol_insight(
-                    view, api, apis=apis, library=library, version=version,
-                    ecosystem=ecosystem, limit=limit, offset=offset,
+                    view,
+                    api,
+                    apis=apis,
+                    library=library,
+                    version=version,
+                    ecosystem=ecosystem,
+                    limit=limit,
+                    offset=offset,
                 )
             )
         except ValueError as exc:
@@ -574,10 +568,17 @@ def build_mcp_server(
         try:
             return _items(
                 mining.call_insight(
-                    view, api, library=library, version=version,
-                    ecosystem=ecosystem, limit=limit, offset=offset,
-                    include_ambiguous=include_ambiguous, resolve_kinds=resolve_kinds,
-                    min_args=min_args, max_args=max_args,
+                    view,
+                    api,
+                    library=library,
+                    version=version,
+                    ecosystem=ecosystem,
+                    limit=limit,
+                    offset=offset,
+                    include_ambiguous=include_ambiguous,
+                    resolve_kinds=resolve_kinds,
+                    min_args=min_args,
+                    max_args=max_args,
                 )
             )
         except ValueError as exc:
@@ -605,8 +606,13 @@ def build_mcp_server(
         try:
             return _items(
                 mining.import_insight(
-                    view, api, library=library, version=version,
-                    ecosystem=ecosystem, limit=limit, offset=offset,
+                    view,
+                    api,
+                    library=library,
+                    version=version,
+                    ecosystem=ecosystem,
+                    limit=limit,
+                    offset=offset,
                 )
             )
         except ValueError as exc:

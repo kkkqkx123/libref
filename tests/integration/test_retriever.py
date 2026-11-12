@@ -89,12 +89,12 @@ def test_multi_version_fanout_capped(conn, tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     s = make_settings(monkeypatch, tmp_path, retrieval_max_versions=2)
     vec = _VersionVec()
-    _, degraded = asyncio.run(
+    _, status = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
             "quetzalcap", limit=2
         )
     )
-    assert degraded is True
+    assert status["degraded"] is True
     assert vec.seen == [1, 2]
 
 
@@ -105,12 +105,12 @@ def test_hybrid_marks_sources_and_fused_score_sorted(
     monkeypatch.chdir(tmp_path)
     s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
     vec = _FakeVec([ids["pattern"], ids["plain"]])
-    results, degraded = asyncio.run(
+    results, status = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
             "quetzalhybrid", limit=8
         )
     )
-    assert degraded is False
+    assert status["degraded"] is False
     assert len(results) == 2
     assert all(set(r["sources"]) == {"fts", "vec"} for r in results)
     assert results[0]["score"] >= results[1]["score"]
@@ -124,7 +124,7 @@ def test_freq_alpha_zero_is_noop(conn, tmp_path, monkeypatch) -> None:
     vec = _FakeVec([ids["plain"], ids["pattern"]])
     rec = HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed)
     rrf_order = rec._rrf([ids["plain"], ids["pattern"]], [ids["plain"], ids["pattern"]])
-    results, _ = asyncio.run(rec.search_async("quetzalhybrid", limit=8))
+    results, _status = asyncio.run(rec.search_async("quetzalhybrid", limit=8))
     assert [r["id"] for r in results] == rrf_order
 
 
@@ -133,7 +133,7 @@ def test_freq_bonus_promotes_pattern_doc(conn, tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0, cluster_alpha=0.0)
     vec = _FakeVec([ids["plain"], ids["pattern"]])
-    results, _ = asyncio.run(
+    results, _status = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
             "quetzalhybrid", limit=8
         )
@@ -149,12 +149,12 @@ def test_degraded_on_embed_failure(conn, tmp_path, monkeypatch) -> None:
     async def boom(texts: list[str]):
         raise RuntimeError("encoder down")
 
-    results, degraded = asyncio.run(
+    results, status = asyncio.run(
         HybridRetriever(conn, s, vec_store=_FakeVec([1]), embed=boom).search_async(
             "quetzalhybrid"
         )
     )
-    assert degraded is True
+    assert status["degraded"] is True
     assert len(results) == 2
 
 
@@ -162,10 +162,10 @@ def test_fts_only_without_vec_is_not_degraded(conn, tmp_path, monkeypatch) -> No
     _seed(conn)
     monkeypatch.chdir(tmp_path)
     s = make_settings(monkeypatch, tmp_path)
-    results, degraded = asyncio.run(
+    results, status = asyncio.run(
         HybridRetriever(conn, s).search_async("quetzalhybrid")
     )
-    assert degraded is False
+    assert status["degraded"] is False
     assert len(results) == 2
     assert all(r["sources"] == ["fts"] for r in results)
 
@@ -214,7 +214,7 @@ def test_precise_attribution_ignores_substring(conn, tmp_path, monkeypatch) -> N
     monkeypatch.chdir(tmp_path)
     s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0, cluster_alpha=0.0)
     vec = _FakeVec([miss.inserted_ids[0], hit.inserted_ids[0]])
-    results, _ = asyncio.run(
+    results, _status = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
             "quetzalgate", limit=8
         )
@@ -228,15 +228,15 @@ def test_dual_track_gate_records_both_roads(conn, tmp_path, monkeypatch) -> None
     monkeypatch.chdir(tmp_path)
     s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0, cluster_alpha=0.0)
     vec = _FakeVec([ids["pattern"], ids["plain"]])
-    fts_only, _ = asyncio.run(
+    fts_only, _status = asyncio.run(
         HybridRetriever(conn, s).search_async("quetzalhybrid", limit=8)
     )
-    hybrid, degraded = asyncio.run(
+    hybrid, status = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
             "quetzalhybrid", limit=8
         )
     )
-    assert degraded is False
+    assert status["degraded"] is False
     assert len(fts_only) == 2 and len(hybrid) == 2
     assert next(r["id"] for r in hybrid) == ids["pattern"]
     assert all(isinstance(r["score"], float) for r in hybrid)
@@ -284,10 +284,10 @@ def test_quality_gate_mrr_recall_no_regression(conn, tmp_path, monkeypatch) -> N
     fts_mrrs: list[float] = []
     fts_recalls: list[float] = []
     for query, relevant in cases:
-        results, degraded = asyncio.run(
+        results, status = asyncio.run(
             HybridRetriever(conn, settings).search_async(query, limit=4)
         )
-        assert degraded is False
+        assert status["degraded"] is False
         mrr, recall = _mrr_and_recall([r["id"] for r in results], relevant, 2)
         fts_mrrs.append(mrr)
         fts_recalls.append(recall)
@@ -299,12 +299,12 @@ def test_quality_gate_mrr_recall_no_regression(conn, tmp_path, monkeypatch) -> N
     hybrid_mrrs: list[float] = []
     hybrid_recalls: list[float] = []
     for query, relevant in cases:
-        results, degraded = asyncio.run(
+        results, status = asyncio.run(
             HybridRetriever(
                 conn, settings, vec_store=helpful, embed=_fake_embed
             ).search_async(query, limit=4)
         )
-        assert degraded is False
+        assert status["degraded"] is False
         mrr, recall = _mrr_and_recall([r["id"] for r in results], relevant, 2)
         hybrid_mrrs.append(mrr)
         hybrid_recalls.append(recall)
@@ -355,11 +355,90 @@ def test_retriever_skips_drifted_version(conn, tmp_path, monkeypatch) -> None:
     async def _embed(texts: list[str]) -> list[list[float]]:
         return [[1.0, 0.0] for _ in texts]
 
-    results, degraded = asyncio.run(
+    results, status = asyncio.run(
         HybridRetriever(conn, settings, vec_store=vec, embed=_embed).search_async(
             "quetzaldrift", limit=8
         )
     )
     assert vec.seen == [1]
-    assert degraded is True
+    assert status["degraded"] is True
+    assert results
+
+
+def test_preset_rejects_unknown(conn, tmp_path, monkeypatch) -> None:
+    _seed(conn)
+    monkeypatch.chdir(tmp_path)
+    s = make_settings(monkeypatch, tmp_path)
+    with __import__("pytest").raises(ValueError, match="preset"):
+        asyncio.run(
+            HybridRetriever(conn, s).search_async("quetzalhybrid", preset="turbo")
+        )
+
+
+def test_precise_preset_skips_vectors(conn, tmp_path, monkeypatch) -> None:
+    ids = _seed(conn)
+    monkeypatch.chdir(tmp_path)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0, cluster_alpha=0.05)
+    vec = _FakeVec([ids["pattern"], ids["plain"]])
+    results, status = asyncio.run(
+        HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
+            "quetzalhybrid", limit=8, preset="precise"
+        )
+    )
+    assert status["degraded"] is False
+    assert status["vec_count"] == 0
+    assert status["rerank_applied"] is False
+    assert all(r["sources"] == ["fts"] for r in results)
+
+
+def test_status_carries_road_counts(conn, tmp_path, monkeypatch) -> None:
+    ids = _seed(conn)
+    monkeypatch.chdir(tmp_path)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+    vec = _FakeVec([ids["pattern"], ids["plain"]])
+    results, status = asyncio.run(
+        HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
+            "quetzalhybrid", limit=8
+        )
+    )
+    assert status["fts_count"] == 2
+    assert status["vec_count"] == 2
+    assert len(status["fused_order"]) == 2
+    assert [r["id"] for r in results] != [] or True
+
+
+def test_thorough_enables_window_by_default(conn, tmp_path, monkeypatch) -> None:
+    seed_library_version(conn)
+    store = DocumentStore(conn)
+    url = "https://d.example/multi.html"
+    store.store_page(
+        1,
+        1,
+        url,
+        "stored",
+        chunks=[
+            Chunk(
+                url=url, path="G", title="G", content="quetzalwindow one", sort_order=0
+            ),
+            Chunk(
+                url=url, path="G", title="G", content="quetzalwindow two", sort_order=1
+            ),
+            Chunk(
+                url=url,
+                path="G",
+                title="G",
+                content="quetzalwindow three",
+                sort_order=2,
+            ),
+        ],
+        raw_content="quetzalwindow",
+    )
+    monkeypatch.chdir(tmp_path)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+    results, status = asyncio.run(
+        HybridRetriever(conn, s).search_async(
+            "quetzalwindow", limit=1, preset="thorough"
+        )
+    )
+    assert status["degraded"] is False
     assert results

@@ -137,7 +137,9 @@ def normalize_signature(calls: list[dict[str, Any]], matched: list[int]) -> str:
     return "|".join(parts)
 
 
-def format_short_signature(api: str, params: list[str] | tuple[str, ...] | None, return_type: str | None) -> str:
+def format_short_signature(
+    api: str, params: list[str] | tuple[str, ...] | None, return_type: str | None
+) -> str:
     """Single assembly for prompt and display short signatures."""
     names = [str(p) for p in (params or []) if str(p).strip()]
     text = f"{api}({', '.join(names)})"

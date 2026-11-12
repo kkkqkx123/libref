@@ -277,7 +277,7 @@ def build_parser() -> argparse.ArgumentParser:
     ).set_defaults(func=cmd_smoke)
 
     p_search = sub.add_parser(
-        "search", help="Default hybrid retrieval", parents=[_config_parent]
+        "search", help="Preset retrieval", parents=[_config_parent]
     )
     p_search.add_argument("query")
     p_search.add_argument("--library", default=None)
@@ -285,17 +285,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_search.add_argument("--ecosystem", default=None)
     p_search.add_argument("--limit", type=int, default=8)
     p_search.add_argument(
-        "--mode",
-        default="hybrid",
-        choices=["hybrid", "precise"],
-        help="hybrid fused recall by default, precise for exact full-text",
+        "--preset",
+        default="balanced",
+        choices=["precise", "balanced", "thorough"],
+        help="precise for exact full-text, balanced fused recall, thorough with window",
     )
     p_search.add_argument(
         "--expand-window",
         action="store_true",
-        help="Expand the surrounding window on hits",
+        help="Local debug override for the configured window switch",
     )
-    p_search.add_argument("--window-radius", type=int, default=None)
+    p_search.add_argument(
+        "--window-radius",
+        type=int,
+        default=None,
+        help="Local debug override for the configured window radius",
+    )
     p_search.add_argument(
         "--suggest",
         action="store_true",
@@ -343,7 +348,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_answer = sub.add_parser(
         "answer",
-        help="Hybrid retrieval plus grounded answer generation",
+        help="Preset retrieval plus grounded answer generation",
         parents=[_config_parent],
     )
     p_answer.add_argument("query")
@@ -352,16 +357,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_answer.add_argument("--ecosystem", default=None)
     p_answer.add_argument("--limit", type=int, default=5)
     p_answer.add_argument(
+        "--preset",
+        default="balanced",
+        choices=["precise", "balanced", "thorough"],
+        help="precise for exact full-text, balanced fused recall, thorough with window",
+    )
+    p_answer.add_argument(
         "--expand-window",
         action="store_true",
-        help="Expand the surrounding window on hits",
+        help="Local debug override for the configured window switch",
     )
-    p_answer.add_argument("--window-radius", type=int, default=None)
+    p_answer.add_argument(
+        "--window-radius",
+        type=int,
+        default=None,
+        help="Local debug override for the configured window radius",
+    )
     p_answer.add_argument(
         "--material-limit",
         type=int,
         default=None,
-        help="Answer material truncation length; defaults to the config value",
+        help="Local debug override for the configured material limit",
     )
     p_answer.set_defaults(func=cmd_answer)
 

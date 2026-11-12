@@ -46,6 +46,13 @@ def cluster_hit_exact(entities: list[str], members: set[str]) -> bool:
     return len(have.intersection(members)) >= 2
 
 
+def cluster_hit_weak_exact(entities: list[str], members: set[str]) -> bool:
+    if not entities:
+        return False
+    have = set(entities)
+    return len(have.intersection(members)) == 1
+
+
 def support_for_content(content: str, plist: list[tuple[list[str], int]]) -> float:
     """Max matched pattern support normalized by the version ceiling."""
     if not plist:
@@ -65,6 +72,11 @@ def cluster_hit(content: str, members: set[str]) -> bool:
     """Check whether a block covers at least two members of one cluster."""
     full, toks = content_idents(content)
     return sum(1 for n in members if name_hit(n, full, toks)) >= 2
+
+
+def cluster_hit_weak(content: str, members: set[str]) -> bool:
+    full, toks = content_idents(content)
+    return sum(1 for n in members if name_hit(n, full, toks)) == 1
 
 
 def pattern_contains_all(names: list[str], wanted: list[str]) -> bool:
