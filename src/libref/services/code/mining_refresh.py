@@ -581,7 +581,7 @@ async def induce_labels(
     for api_name in sorted(sig_table):
         try:
             canonical = reader.canonical_signature(api_name, library, version, ecosystem)
-        except Exception:  # noqa: BLE001 -- signatures are advisory for prompts
+        except Exception:  # noqa: BLE001, S112 -- signatures are advisory for prompts
             continue
         text = str(canonical.get("short") or "").strip()
         if text:

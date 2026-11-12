@@ -335,6 +335,18 @@ def cmd_pattern_insight(args: argparse.Namespace) -> int:
             args.containing.split(",") if getattr(args, "containing", None) else None
         )
         pattern = args.pattern.split(",") if getattr(args, "pattern", None) else None
+        if getattr(args, "dedup", False) and getattr(args, "no_dedup", False):
+            print(
+                "invalid: --dedup and --no-dedup are mutually exclusive",
+                file=sys.stderr,
+            )
+            return 2
+        if getattr(args, "dedup", False):
+            dedup_value = True
+        elif getattr(args, "no_dedup", False):
+            dedup_value = False
+        else:
+            dedup_value = None
         try:
             rows = MiningReadService(conn).pattern_insight(
                 args.view,
@@ -346,7 +358,7 @@ def cmd_pattern_insight(args: argparse.Namespace) -> int:
                 ecosystem=getattr(args, "ecosystem", None),
                 limit=args.limit,
                 per_file_limit=getattr(args, "per_file_limit", None),
-                dedup=None if getattr(args, "no_dedup", False) is False else False,
+                dedup=dedup_value,
             )
         except ValueError as exc:
             print(f"invalid: {exc}", file=sys.stderr)
@@ -441,6 +453,26 @@ def cmd_import_insight(args: argparse.Namespace) -> int:
         conn.close()
     for r in rows:
         print(json.dumps(r, ensure_ascii=False))
+    return 0
+
+
+def cmd_mining_health(args: argparse.Namespace) -> int:
+    import json
+
+    conn = _connect(_load_settings(args))
+    try:
+        try:
+            health = MiningReadService(conn).mining_health(
+                library=getattr(args, "library", None),
+                version=getattr(args, "version", None),
+                ecosystem=getattr(args, "ecosystem", None),
+            )
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 2
+    finally:
+        conn.close()
+    print(json.dumps(health, ensure_ascii=False))
     return 0
 
 

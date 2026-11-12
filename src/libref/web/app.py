@@ -475,7 +475,10 @@ def build_web_app(
         try:
             result = review.apply(body.action, body.entity_id, body.limit)
         except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            text = str(exc)
+            if "cannot transition" in text or "cannot reopen" in text:
+                raise HTTPException(status_code=409, detail=text) from exc
+            raise HTTPException(status_code=400, detail=text) from exc
         if isinstance(result, list):
             return envelope(result)
         return result
@@ -551,5 +554,81 @@ def build_web_app(
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return resolution.model_dump()
+
+    @app.get("/web-search")
+    async def web_search(
+        query: str,
+        limit: int = 10,
+        _: None = Depends(_guard),
+    ) -> dict[str, Any]:
+        if not query.strip():
+            raise HTTPException(status_code=400, detail="query is empty")
+        if limit < 1 or limit > 100:
+            raise HTTPException(
+                status_code=400, detail="limit must be between 1 and 100"
+            )
+        try:
+            items = await discovery.search_web_async(query, limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RegistryError as exc:
+            raise HTTPException(status_code=502, detail=f"{exc.kind}: {exc}") from exc
+        return envelope(items)
+
+    @app.get("/github-search")
+    async def github_search(
+        query: str,
+        limit: int = 10,
+        _: None = Depends(_guard),
+    ) -> dict[str, Any]:
+        if not query.strip():
+            raise HTTPException(status_code=400, detail="query is empty")
+        if limit < 1 or limit > 100:
+            raise HTTPException(
+                status_code=400, detail="limit must be between 1 and 100"
+            )
+        try:
+            items = await discovery.search_github_async(query, limit)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RegistryError as exc:
+            raise HTTPException(status_code=502, detail=f"{exc.kind}: {exc}") from exc
+        return envelope(items)
+
+    @app.get("/repo-deps")
+    def repo_deps(
+        library: str,
+        version: str,
+        ecosystem: str | None = None,
+        dep_ecosystem: str | None = None,
+        _: None = Depends(_guard),
+    ) -> dict[str, Any]:
+        from libref.services.code.code_ingest import list_repo_dependencies
+
+        if not library.strip():
+            raise HTTPException(status_code=400, detail="library is empty")
+        if not version.strip():
+            raise HTTPException(status_code=400, detail="version is empty")
+        try:
+            rows = list_repo_dependencies(
+                conn, library, version, dep_ecosystem, ecosystem=ecosystem
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return envelope(rows)
+
+    @app.get("/mining-health")
+    def mining_health(
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        _: None = Depends(_guard),
+    ) -> dict[str, Any]:
+        try:
+            return mining.mining_health(
+                library=library, version=version, ecosystem=ecosystem
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return app

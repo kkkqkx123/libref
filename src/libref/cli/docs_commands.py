@@ -291,6 +291,8 @@ def cmd_search(args: argparse.Namespace) -> int:
                 version=args.version,
                 ecosystem=getattr(args, "ecosystem", None),
                 limit=args.limit,
+                expand_window=True if getattr(args, "expand_window", False) else None,
+                window_radius=getattr(args, "window_radius", None),
             )
         )
         if degraded:
@@ -328,7 +330,10 @@ def cmd_answer(args: argparse.Namespace) -> int:
             limit=args.limit,
             vec_store=vec_store,
             embed=embed,
+            rerank=gateway.rerank_fn(),
             chat=gateway.chat_fn(),
+            expand_window=True if getattr(args, "expand_window", False) else None,
+            window_radius=getattr(args, "window_radius", None),
             material_limit=args.material_limit,
         )
     finally:

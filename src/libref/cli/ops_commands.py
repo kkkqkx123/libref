@@ -124,7 +124,11 @@ def cmd_review(args: argparse.Namespace) -> int:
             else:
                 result = svc.apply(action, args.entity_id)
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
+            text = str(exc)
+            if "cannot transition" in text or "cannot reopen" in text:
+                print(f"conflict: {text}", file=sys.stderr)
+            else:
+                print(f"invalid: {text}", file=sys.stderr)
             return 1
         if action == "list":
             for r in result:

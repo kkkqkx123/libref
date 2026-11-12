@@ -15,7 +15,12 @@ from libref.services.code.mining_read import MiningReadService
 from libref.services.code.probe import probe_repo
 from libref.services.docs.pages import PageService
 from libref.services.docs.probe import probe_docs_async
-from libref.services.factory import build_discovery_service, build_search_service
+from libref.services.factory import (
+    build_discovery_service,
+    build_gateway,
+    build_search_service,
+    build_vector,
+)
 from libref.services.ops.review import ReviewService
 from libref.services.registry.libraries import LibraryService
 from libref.services.registry.resolver import resolve as _resolve
@@ -96,7 +101,18 @@ def build_mcp_server(
     enabled = _effective_tools(resolve_settings)
     setup_logging(resolve_settings)
     mcp = MCPServer("libref")
-    search_svc, _gateway = build_search_service(conn, resolve_settings)
+    gateway = build_gateway(resolve_settings)
+    vec_store, embed_fn, gateway = build_vector(resolve_settings, gateway)
+    rerank_fn = gateway.rerank_fn()
+    chat_fn = gateway.chat_fn()
+    search_svc, _gateway = build_search_service(
+        conn,
+        resolve_settings,
+        gateway=gateway,
+        vec_store=vec_store,
+        embed=embed_fn,
+        rerank=rerank_fn,
+    )
     discovery_svc = build_discovery_service(conn, resolve_settings)
     pages = PageService(conn)
     catalog_svc = LibraryService(conn)
@@ -257,6 +273,10 @@ def build_mcp_server(
                 version=version,
                 ecosystem=ecosystem,
                 limit=limit,
+                vec_store=vec_store,
+                embed=embed_fn,
+                rerank=rerank_fn,
+                chat=chat_fn,
                 expand_window=expand_window or None,
                 window_radius=window_radius,
                 material_limit=material_limit,

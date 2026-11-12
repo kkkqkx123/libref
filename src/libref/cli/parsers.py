@@ -11,6 +11,7 @@ from libref.cli.code_commands import (
     cmd_index_repo,
     cmd_induce_labels,
     cmd_mine,
+    cmd_mining_health,
     cmd_pattern_insight,
     cmd_repo_deps,
     cmd_symbol_insight,
@@ -313,7 +314,6 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[_config_parent],
     )
     p_discover.add_argument("query")
-    p_discover.add_argument("--library", default=None)
     p_discover.add_argument("--ecosystem", default=None)
     p_discover.add_argument("--limit", type=int, default=10)
     p_discover.add_argument(
@@ -593,7 +593,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_pattern.add_argument("--ecosystem", default=None)
     p_pattern.add_argument("--limit", type=int, default=None)
     p_pattern.add_argument("--per-file-limit", type=int, default=None)
-    p_pattern.add_argument("--no-dedup", action="store_true")
+    p_pattern.add_argument("--dedup", action="store_true", help="Enable evidence dedup")
+    p_pattern.add_argument(
+        "--no-dedup", action="store_true", help="Disable evidence dedup"
+    )
     p_pattern.set_defaults(func=cmd_pattern_insight)
 
     p_symbol = sub.add_parser(
@@ -636,6 +639,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_import.add_argument("--limit", type=int, default=None)
     p_import.add_argument("--offset", type=int, default=0)
     p_import.set_defaults(func=cmd_import_insight)
+
+    p_health = sub.add_parser(
+        "mining-health",
+        help="Reuse and diversity health signals",
+        parents=[_config_parent],
+    )
+    p_health.add_argument("--library", default=None)
+    p_health.add_argument("--version", default=None)
+    p_health.add_argument("--ecosystem", default=None)
+    p_health.set_defaults(func=cmd_mining_health)
 
     p_resolve = sub.add_parser(
         "resolve", help="Resolve a package address", parents=[_config_parent]
