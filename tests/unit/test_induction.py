@@ -74,3 +74,19 @@ def test_parse_label_payload_rejects_boundary_markers(monkeypatch, tmp_path):
     )
     with pytest.raises(ValueError):
         parse_label_payload(raw, set())
+
+
+def test_induction_prompt_carries_signatures():
+    item = InductionInput(
+        pattern=["pkg.core.Service.run"],
+        support=2,
+        arg_shapes=[{"api": "pkg.core.Service.run", "args": ["x"], "count": 2}],
+        siblings=[],
+        scope="demo@0.1",
+        signatures={"pkg.core.Service.run": "pkg.core.Service.run(name: str) -> str"},
+    )
+    content = build_label_prompt(item)[1]["content"]
+    assert "pkg.core.Service.run(name: str) -> str" in content
+    assert "def " not in content
+    plain = InductionInput(pattern=["pkg.core.Service.run"], support=1)
+    assert "Signatures:" not in build_label_prompt(plain)[1]["content"]

@@ -107,3 +107,16 @@ def test_mine_clears_derived_when_calls_gone(conn, monkeypatch, tmp_path):
     assert conn.execute("SELECT count(*) FROM feature_nodes").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM api_clusters").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM seq_patterns").fetchone()[0] == 0
+
+
+def test_feature_tree_prefers_true_ownership():
+    calls = [("a.b.c", "s1")]
+    nodes = {
+        n["path"]: n
+        for n in build_feature_tree(
+            calls, {"a.b.c": "function", "a": "package"}, {"a.b.c": "a"}
+        )
+    }
+    assert "a.b" not in nodes
+    assert nodes["a.b.c"]["parent"] == "a"
+    assert nodes["a"]["calls"] == 1

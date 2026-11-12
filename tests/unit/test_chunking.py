@@ -151,3 +151,19 @@ def test_chunks_respect_body_limit(monkeypatch, tmp_path):
         assert estimate_tokens(chunk.content) <= budgets[ChunkPath.EMBEDDING].body_limit
     for chunk in dual.bm25:
         assert count_terms(chunk.content) <= budgets[ChunkPath.BM25].body_limit
+
+
+def test_chunk_relations_keywords_offsets(monkeypatch, tmp_path) -> None:
+    from libref.chunking import split_markdown_dual
+
+    dual = split_markdown_dual(
+        "# A\n\nfirst body here\n\n# B\n\nsecond body here\n", "u"
+    )
+    assert dual.embedding, "embedding stream is empty"
+    first = dual.embedding[0]
+    assert first.content_hash, "chunk hash is empty"
+    assert first.keywords, "keywords are empty"
+    assert first.start_char >= 0 and first.end_char > first.start_char
+    if len(dual.embedding) > 1:
+        assert dual.embedding[0].next_chunk_id == dual.embedding[1].chunk_id
+        assert dual.embedding[1].prev_chunk_id == dual.embedding[0].chunk_id

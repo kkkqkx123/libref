@@ -11,7 +11,17 @@ from libref.services.docs.search import SearchService
 from libref.store.document_store import DocumentStore
 from libref.store.vec_store import QdrantVecStore, collection_for
 from libref.text.embedding import build_embed_text
-from tests.conftest import make_crawler_settings, mock_ingest, seed_library_version
+from tests.conftest import (
+    FakeVecStore as _FakeVec,
+)
+from tests.conftest import (
+    fake_embed_vectors as _fake_embed,
+)
+from tests.conftest import (
+    make_crawler_settings,
+    mock_ingest,
+    seed_library_version,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -45,51 +55,6 @@ class _ShapeClient:
 
     def create_payload_index(self, **kwargs) -> None:
         pass
-
-
-class _FakeVec:
-    def __init__(self) -> None:
-        self.ensured: list[tuple] = []
-        self.deleted: list[int] = []
-        self.upserted: list[tuple] = []
-        self.delete_version_calls: list[int] = []
-        self.points: dict[int, tuple] = {}
-
-    def ensure_collection(self, conn, model: str, dim: int) -> None:
-        self.ensured.append((model, dim))
-
-    def delete_docs(self, doc_ids: list[int]) -> None:
-        self.deleted.extend(doc_ids)
-        for doc_id in doc_ids:
-            self.points.pop(int(doc_id), None)
-
-    def delete_version(self, version_id: int) -> None:
-        self.delete_version_calls.append(int(version_id))
-        for pid in [pid for pid, pt in self.points.items() if pt[2] == int(version_id)]:
-            del self.points[pid]
-
-    def upsert_batch(self, points, *, wait: bool = True) -> None:
-        self.upserted.extend(points)
-        for doc_id, library_id, version_id, embedding in points:
-            self.points[int(doc_id)] = (
-                int(doc_id),
-                library_id,
-                version_id,
-                embedding,
-            )
-
-    def count(self, version_id: int) -> int:
-        return sum(1 for pt in self.points.values() if pt[2] == int(version_id))
-
-    def list_ids(self, version_id: int, *, batch: int = 512) -> list[int]:
-        return sorted(
-            pid for pid, pt in self.points.items() if pt[2] == int(version_id)
-        )
-
-
-async def _fake_embed(texts: list[str]) -> list[list[float]]:
-    assert texts and all(t.strip() for t in texts)
-    return [[1.0, 0.0] for _ in texts]
 
 
 def test_collection_for_isolates_db_files(tmp_path, monkeypatch):
@@ -391,3 +356,86 @@ def test_title_match_outranks_content_only(conn, monkeypatch, tmp_path):
     )
     hits = SearchService(conn).search_docs("install")
     assert [h["title"] for h in hits] == ["Install Guide", "Other"]
+
+
+def test_verify_catches_same_count_divergence(conn, monkeypatch, tmp_path) -> None:
+    from libref.services.ops.maintenance import sync_vectors_for_docs
+    from libref.store.vec_store import write_version_meta
+
+    seed_library_version(conn)
+    store = DocumentStore(conn)
+    kept = store.store_page(
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/a.html",
+                path="G",
+                title="G",
+                content="quetzalverify alpha",
+                sort_order=0,
+            )
+        ],
+        raw_content="a",
+    )
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    write_version_meta(conn, 1, settings.embedding_model, settings.embedding_dim)
+    vec = _FakeVec()
+    vec.points[9999] = (9999, 1, 1, [1.0, 0.0])
+    assert vec.count(1) == 1
+    counts: dict[str, int] = {}
+    import asyncio
+
+    asyncio.run(
+        sync_vectors_for_docs(
+            conn, settings, vec, _fake_embed, store, counts, [], [], version_id=1
+        )
+    )
+    assert vec.list_ids(1) == kept.inserted_ids
+    assert counts.get("vector_reconciled", 0) >= 1
+
+
+def test_purge_deletes_truth_when_vectors_fail(conn, monkeypatch, tmp_path) -> None:
+    from libref.services.ops.retention import purge_version
+
+    seed_library_version(conn)
+    store = DocumentStore(conn)
+    store.store_page(
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/a.html",
+                path="G",
+                title="G",
+                content="quetzalpurge fail body",
+                sort_order=0,
+            )
+        ],
+        raw_content="a",
+    )
+
+    class _Boom:
+        def delete_version(self, version_id: int) -> None:
+            raise RuntimeError("vector down")
+
+    out = purge_version(conn, "docs", "1.0", vec_store=_Boom())
+    assert out["removed_docs"] == 1
+    assert conn.execute("SELECT count(*) FROM documents").fetchone()[0] == 0
+
+
+def test_version_drifted_never_embedded_is_current(conn, monkeypatch, tmp_path) -> None:
+    from libref.services.ops.maintenance import version_drifted
+    from libref.store.vec_store import write_version_meta
+
+    seed_library_version(conn)
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    assert version_drifted(conn, settings, 1) is False
+    write_version_meta(conn, 1, settings.embedding_model, settings.embedding_dim)
+    assert version_drifted(conn, settings, 1) is False
+    write_version_meta(conn, 1, "other-model", settings.embedding_dim)
+    assert version_drifted(conn, settings, 1) is True

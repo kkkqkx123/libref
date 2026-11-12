@@ -10,6 +10,17 @@ from libref.services.code.code_ingest import index_repo
 from libref.services.code.mining_refresh import mine_patterns
 from tests.conftest import copy_mini_repo
 
+
+def _copy_tri_repo(tmp_path):
+    import shutil
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parent.parent / "fixtures" / "mini_repo_tri"
+    dst = tmp_path / "mini_repo_tri"
+    shutil.copytree(src, dst)
+    return dst
+
+
 pytestmark = pytest.mark.integration
 
 
@@ -163,3 +174,97 @@ def test_ensure_local_git_records_head(conn, tmp_path):
     local, commit = mgr.ensure(conn, "demo", str(src))
     assert local == src.resolve()
     assert commit == expected
+
+
+def test_trilingual_ingest_end_to_end(conn, tmp_path, monkeypatch):
+    repo = _copy_tri_repo(tmp_path)
+    repos_dir = tmp_path / "repos"
+    counts = index_repo(conn, "tri", "0.1", str(repo), repos_dir=repos_dir)
+    assert counts["files"] == 5
+    assert counts["parsed"] == 5
+    decls = {
+        row[0]
+        for row in conn.execute("SELECT qualified_name FROM api_entities").fetchall()
+    }
+    assert "util.Fetch" in decls
+    assert "call.Run" in decls
+    assert "cache.Cache.new" in decls
+    assert "cache.Cache.get" in decls
+    assert "Demo.Greeter.Say" in decls
+    calls = {
+        (row[0], row[1], row[3])
+        for row in conn.execute(
+            "SELECT callee_name, confidence, caller_file, caller FROM call_instances"
+        ).fetchall()
+    }
+    assert ("util.Fetch", "EXTRACTED", "call.Run") in calls
+    assert ("cache.Cache.new", "EXTRACTED", "main") in calls
+    assert ("Demo.Greeter.Helper", "EXTRACTED", "Demo.Greeter.Say") in calls
+    assert any(
+        callee == "System.Console.WriteLine" and confidence == "AMBIGUOUS"
+        for callee, confidence, _caller in calls
+    )
+    second = index_repo(conn, "tri", "0.1", str(repo), repos_dir=repos_dir)
+    assert second["cached"] == 5 and second["parsed"] == 0
+
+
+def _write_symbol_repo(root) -> None:
+    pkg = root / "pkg"
+    pkg.mkdir(parents=True, exist_ok=True)
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "core.py").write_text(
+        '"""Core service."""\n\n\n'
+        "class Service:\n"
+        '    """Service docs."""\n\n'
+        "    def create(self, name: str) -> str:\n"
+        '        """Create docs."""\n'
+        "        return name\n\n"
+        "    def run(self, name: str) -> str:\n"
+        "        return self.create(name)\n",
+        encoding="utf-8",
+    )
+    (pkg / "factory.py").write_text(
+        "from pkg.core import Service\n\n\n"
+        "def make_service() -> Service:\n"
+        '    """Make docs."""\n'
+        "    return Service()\n",
+        encoding="utf-8",
+    )
+    (pkg / "app.py").write_text(
+        "import pkg.core as core\n"
+        "from pkg.factory import make_service\n\n\n"
+        "def main() -> str:\n"
+        '    first = make_service().run("b")\n'
+        "    svc = core.Service()\n"
+        '    second = svc.create("a")\n'
+        "    return first + second\n",
+        encoding="utf-8",
+    )
+
+
+def _index_symbol_repo(conn, tmp_path):
+    root = tmp_path / "symrepo"
+    _write_symbol_repo(root)
+    from libref.services.code.code_ingest import index_repo
+
+    index_repo(conn, "demo", "0.1", str(root), repos_dir=tmp_path / "repos")
+    return root
+
+
+def test_symbol_detail_persisted(conn, tmp_path):
+    _index_symbol_repo(conn, tmp_path)
+    row = conn.execute(
+        "SELECT file, line_start, line_end, params, param_types,"
+        " return_type, has_doc, parent FROM api_entities"
+        " WHERE qualified_name=?",
+        ("pkg.core.Service.create",),
+    ).fetchone()
+    assert row is not None
+    file, ls, le, params, ptypes, ret, has_doc, parent = row
+    assert str(file).endswith("pkg/core.py")
+    assert int(ls) >= 1 and int(le) >= int(ls)
+    assert "name" in str(params)
+    assert "str" in str(ptypes)
+    assert str(ret) == "str"
+    assert int(has_doc) == 1
+    assert parent == "pkg.core.Service"

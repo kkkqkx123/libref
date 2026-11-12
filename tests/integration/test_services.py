@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from libref.chunking import Chunk
+from libref.crawler.url_seeder import _SEED_CACHE
 from libref.services import (
     IngestService,
     JobManager,
@@ -18,6 +19,7 @@ from libref.services import (
     start_scrape_job,
 )
 from libref.store.document_store import DocumentStore
+from libref.text.normalize import classify_content
 from tests.conftest import make_crawler_settings, mock_ingest, seed_library_version
 
 pytestmark = pytest.mark.integration
@@ -373,3 +375,250 @@ def test_scrape_runner_rejects_unknown_kind(conn, monkeypatch, tmp_path):
     job = asyncio.run(scenario())
     assert job.status == "failed"
     assert "unsupported job kind" in (job.error or "")
+
+
+def _follow_handler(request: httpx.Request) -> httpx.Response:
+    path = request.url.path
+    host = request.url.host
+    if path.endswith(("llms.txt", "llms-full.txt")):
+        return httpx.Response(404)
+    if path == "/robots.txt":
+        return httpx.Response(200, text="")
+    if path == "/sitemap.xml":
+        return httpx.Response(
+            200,
+            text=(
+                '<?xml version="1.0"?><urlset>'
+                f"<url><loc>https://{host}/index.html</loc></url></urlset>"
+            ),
+        )
+    if path == "/index.html":
+        return httpx.Response(
+            200,
+            text=(
+                "<html><body><main><h1>Index</h1>"
+                "<p>Index body with enough words to survive pruning easily.</p>"
+                f'<p>Next <a href="https://{host}/deep.html">deep page</a></p>'
+                "</main></body></html>"
+            ),
+        )
+    if path == "/deep.html":
+        return httpx.Response(
+            200,
+            text=(
+                "<html><body><main><h1>Deep</h1>"
+                "<p>Deep body with enough words to survive pruning easily here.</p>"
+                "</main></body></html>"
+            ),
+        )
+    if "sitemap" in path:
+        return httpx.Response(404)
+    raise AssertionError(path)
+
+
+def test_follow_off_by_default(conn, monkeypatch, tmp_path) -> None:
+    _SEED_CACHE.clear()
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    with mock_ingest(_follow_handler):
+        counts = IngestService(settings, conn).scrape_docs(
+            "docs", "1.0", "https://d.example/"
+        )
+    assert counts["stored"] == 1
+    assert counts["deep_discovered"] == 0
+    urls = [hit["url"] for hit in SearchService(conn).search_docs("Deep body")]
+    assert "https://d.example/deep.html" not in urls
+
+
+def test_follow_discovers_deep_page(conn, monkeypatch, tmp_path) -> None:
+    _SEED_CACHE.clear()
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    with mock_ingest(_follow_handler):
+        counts = IngestService(settings, conn).scrape_docs(
+            "docs",
+            "1.0",
+            "https://d.example/",
+            scope={"follow_links": True},
+        )
+    assert counts["stored"] == 2
+    assert counts["deep_discovered"] == 1
+    hits = SearchService(conn).search_docs("Deep body")
+    assert hits and hits[0]["url"].endswith("/deep.html")
+
+
+def test_follow_respects_max_pages(conn, monkeypatch, tmp_path) -> None:
+    _SEED_CACHE.clear()
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    with mock_ingest(_follow_handler):
+        counts = IngestService(settings, conn).scrape_docs(
+            "docs",
+            "1.0",
+            "https://d.example/",
+            max_pages=1,
+            scope={"follow_links": True},
+        )
+    assert counts["stored"] == 1
+    assert counts["deep_truncated"] == 1
+
+
+def test_classify_content_dispatch(monkeypatch, tmp_path) -> None:
+    assert classify_content("text/html", "https://h/a") == "html"
+    assert classify_content("text/markdown", "https://h/a") == "markdown"
+    assert classify_content("text/plain", "https://h/a") == "text"
+    assert classify_content(None, "https://h/a.md") == "markdown"
+    assert classify_content(None, "https://h/a.py") == "source"
+    assert classify_content("application/javascript", "https://h/a") == "source"
+
+
+def test_scrape_mime_markdown_and_observability(conn, monkeypatch, tmp_path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith(("llms.txt", "llms-full.txt")):
+            return httpx.Response(404)
+        if path == "/robots.txt":
+            return httpx.Response(200, text="")
+        if path == "/sitemap.xml":
+            host = request.url.host
+            return httpx.Response(
+                200,
+                text=(
+                    '<?xml version="1.0"?><urlset>'
+                    f"<url><loc>https://{host}/b.md</loc></url></urlset>"
+                ),
+            )
+        if path == "/b.md":
+            return httpx.Response(
+                200,
+                text="# G\n\nsmoke markdown body\n",
+                headers={"Content-Type": "text/markdown"},
+            )
+        if "sitemap" in path:
+            return httpx.Response(404)
+        raise AssertionError(path)
+
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    with mock_ingest(handler):
+        counts = IngestService(settings, conn).scrape_docs(
+            "docs", "1.0", "https://d.example/sitemap.xml"
+        )
+    assert counts["stored"] == 1
+    for key in (
+        "seed_discovered",
+        "scope_rejected",
+        "seed_truncated",
+        "elapsed_ms",
+        "chunk_reused",
+        "render_skipped",
+    ):
+        assert key in counts, key
+    hits = SearchService(conn).search_docs("smoke")
+    assert hits and hits[0]["url"].endswith("/b.md")
+
+
+def test_refresh_alias_and_window(conn, monkeypatch, tmp_path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith(("llms.txt", "llms-full.txt")):
+            return httpx.Response(404)
+        if path == "/robots.txt":
+            return httpx.Response(200, text="")
+        if path in ("/", "/sitemap.xml"):
+            host = request.url.host
+            return httpx.Response(
+                200,
+                text=(
+                    '<?xml version="1.0"?><urlset>'
+                    f"<url><loc>https://{host}/a.html</loc></url></urlset>"
+                ),
+            )
+        if path == "/a.html":
+            return httpx.Response(
+                200,
+                text=(
+                    "<html><body><main><h1>T</h1><p>refresh body one</p>"
+                    "<p>refresh body two</p></main></body></html>"
+                ),
+            )
+        if "sitemap" in path:
+            return httpx.Response(404)
+        raise AssertionError(path)
+
+    settings = make_crawler_settings(monkeypatch, tmp_path, fetch_concurrency=1)
+    from libref.services.docs.pages import PageService
+
+    with mock_ingest(handler):
+        service = IngestService(settings, conn)
+        counts = service.refresh_version("docs", "1.0", "https://d.example/")
+    assert counts["stored"] == 1
+    window = PageService(conn).read_window("https://d.example/a.html", 0, radius=1)
+    assert window is not None and window["docs"]
+    section = PageService(conn).read_section(
+        "https://d.example/a.html",
+        window["docs"][0].get("source_group_id", ""),
+    )
+    assert section is None or section["chunks"] >= 1
+
+
+def test_job_heartbeat_ticks(conn, monkeypatch, tmp_path) -> None:
+    seen: list[float] = []
+
+    async def runner(job):
+        import time as _time
+
+        for _ in range(5):
+            await asyncio.sleep(0.05)
+            seen.append(_time.time())
+
+    async def scenario():
+        mgr = JobManager(conn, stale_after=600.0)
+        job_id = mgr.submit("k", {})
+        mgr.start_worker(runner)
+        for _ in range(100):
+            job = mgr.get(job_id)
+            if job.status in ("done", "failed"):
+                break
+            await asyncio.sleep(0.02)
+        mgr.stop_worker()
+        return mgr.get(job_id)
+
+    job = asyncio.run(scenario())
+    assert job.status == "done"
+    assert len(seen) == 5
+    row = conn.execute("SELECT heartbeat_at FROM jobs WHERE id=?", (job.id,)).fetchone()
+    assert row[0] is not None
+
+
+def test_render_skipped_counted(conn, monkeypatch, tmp_path) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith(("llms.txt", "llms-full.txt")):
+            return httpx.Response(404)
+        if path == "/robots.txt":
+            return httpx.Response(200, text="")
+        if path in ("/", "/sitemap.xml"):
+            host = request.url.host
+            return httpx.Response(
+                200,
+                text=(
+                    '<?xml version="1.0"?><urlset>'
+                    f"<url><loc>https://{host}/app.html</loc></url></urlset>"
+                ),
+            )
+        if path == "/app.html":
+            return httpx.Response(
+                200,
+                text=(
+                    '<html><body><div id="root"></div>'
+                    "<script>var x=1;</script></body></html>"
+                ),
+            )
+        if "sitemap" in path:
+            return httpx.Response(404)
+        raise AssertionError(path)
+
+    settings = make_crawler_settings(monkeypatch, tmp_path, fetch_concurrency=1)
+    with mock_ingest(handler):
+        counts = IngestService(settings, conn).scrape_docs(
+            "docs", "1.0", "https://d.example/"
+        )
+    assert counts["skipped"] >= 1
+    assert counts["render_skipped"] >= 1

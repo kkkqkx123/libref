@@ -163,6 +163,57 @@ def copy_mini_repo(tmp_path: Path) -> Path:
     return dst
 
 
+class FakeVecStore:
+    """In-memory vector backend for sync tests: tracks points plus ensured/deleted calls."""
+
+    def __init__(self) -> None:
+        self.points: dict[int, tuple] = {}
+        self.seen: list[int] = []
+        self.ensured: list[tuple] = []
+        self.deleted: list[int] = []
+        self.upserted: list[tuple] = []
+        self.delete_version_calls: list[int] = []
+
+    def ensure_collection(self, conn, model: str, dim: int) -> None:
+        self.ensured.append((model, dim))
+
+    def delete_docs(self, doc_ids: list[int]) -> None:
+        self.deleted.extend(int(d) for d in doc_ids)
+        for doc_id in doc_ids:
+            self.points.pop(int(doc_id), None)
+
+    def delete_version(self, version_id: int) -> None:
+        self.delete_version_calls.append(int(version_id))
+        for pid in [p for p, t in self.points.items() if t[2] == int(version_id)]:
+            del self.points[pid]
+
+    def upsert_batch(self, points, *, wait: bool = True) -> None:
+        self.upserted.extend(points)
+        for doc_id, library_id, version_id, embedding in points:
+            self.points[int(doc_id)] = (int(doc_id), library_id, version_id, embedding)
+
+    def count(self, version_id: int) -> int:
+        return sum(1 for t in self.points.values() if t[2] == int(version_id))
+
+    def list_ids(self, version_id: int, *, batch: int = 512) -> list[int]:
+        return sorted(p for p, t in self.points.items() if t[2] == int(version_id))
+
+    def search(self, query_vec, *, k: int, version_id: int):
+        self.seen.append(int(version_id))
+        return [(d, 1.0) for d in self.list_ids(version_id)[:k]]
+
+
+async def fake_embed_vectors(texts: list[str]) -> list[list[float]]:
+    """Deterministic stub embedding for sync tests: every non-empty text maps to one vector."""
+    assert texts and all(t.strip() for t in texts)
+    return [[1.0, 0.0] for _ in texts]
+
+
+def run_coro(coro):
+    """Bridge sync tests to async service entry points."""
+    return asyncio.run(coro)
+
+
 @contextlib.contextmanager
 def mock_ingest(handler) -> Iterator[httpx.AsyncClient]:
     """Swap ingest._client for a MockTransport client; no network; restored and closed on exit."""

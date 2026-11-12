@@ -314,3 +314,52 @@ def test_quality_gate_mrr_recall_no_regression(conn, tmp_path, monkeypatch) -> N
     assert hybrid_recall >= 0.66
     assert hybrid_mrr >= fts_mrr
     assert hybrid_recall >= fts_recall
+
+
+def test_retriever_skips_drifted_version(conn, tmp_path, monkeypatch) -> None:
+    from libref.store.vec_store import write_version_meta
+    from tests.conftest import FakeVecStore, make_crawler_settings
+
+    monkeypatch.chdir(tmp_path)
+    seed_library_version(conn)
+    conn.execute("INSERT INTO versions(id, library_id, version) VALUES(2, 1, '2.0')")
+    conn.commit()
+    store = DocumentStore(conn)
+    for version_id, url in (
+        (1, "https://d.example/a.html"),
+        (2, "https://d.example/b.html"),
+    ):
+        store.store_page(
+            version_id,
+            1,
+            url,
+            "stored",
+            chunks=[
+                Chunk(
+                    url=url,
+                    path="G",
+                    title="G",
+                    content="quetzaldrift shared body",
+                    sort_order=0,
+                )
+            ],
+            raw_content=url,
+        )
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    write_version_meta(conn, 1, settings.embedding_model, settings.embedding_dim)
+    write_version_meta(conn, 2, "other-model", settings.embedding_dim)
+    vec = FakeVecStore()
+    vec.points[1] = (1, 1, 1, [1.0, 0.0])
+    vec.points[2] = (2, 1, 2, [1.0, 0.0])
+
+    async def _embed(texts: list[str]) -> list[list[float]]:
+        return [[1.0, 0.0] for _ in texts]
+
+    results, degraded = asyncio.run(
+        HybridRetriever(conn, settings, vec_store=vec, embed=_embed).search_async(
+            "quetzaldrift", limit=8
+        )
+    )
+    assert vec.seen == [1]
+    assert degraded is True
+    assert results

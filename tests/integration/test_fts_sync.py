@@ -102,3 +102,49 @@ def test_fts_vocab_consistency(conn: sqlite3.Connection, monkeypatch, tmp_path) 
     }
     conn.execute("DROP TABLE temp_fts_v")
     assert vocab == {"alpha", "beta"}
+
+
+def test_fts_rebuild_repairs_direct_delete(conn, monkeypatch, tmp_path) -> None:
+    from libref.chunking import Chunk
+    from libref.services.docs.search import SearchService
+    from libref.services.ops.maintenance import check_fts, rebuild_fts
+    from libref.store.document_store import DocumentStore
+    from tests.conftest import seed_library_version
+
+    seed_library_version(conn)
+    store = DocumentStore(conn)
+    result = store.store_page(
+        1,
+        1,
+        "https://d.example/a.html",
+        "stored",
+        chunks=[
+            Chunk(
+                url="https://d.example/a.html",
+                path="G",
+                title="G",
+                content="quetzalfts rebuild body",
+                sort_order=0,
+            )
+        ],
+        raw_content="a",
+    )
+    assert check_fts(conn)["in_sync"] == 1
+    row = conn.execute(
+        "SELECT title, path FROM documents WHERE id=?", (result.inserted_ids[0],)
+    ).fetchone()
+    assert (row[0], row[1]) == ("G", "G")
+    with pytest.raises(sqlite3.OperationalError):
+        conn.execute("UPDATE documents SET title='hack' WHERE id=1")
+    conn.rollback()
+    conn.execute("INSERT INTO documents_fts(documents_fts) VALUES('delete-all')")
+    conn.commit()
+    drifted = check_fts(conn)
+    assert drifted["in_sync"] == 0
+    assert drifted["sampled"] >= 1
+    assert drifted["missing"] >= 1
+    assert SearchService(conn).search_docs("quetzalfts") == []
+    out = rebuild_fts(conn)
+    assert out["in_sync"] == 1
+    assert check_fts(conn)["in_sync"] == 1
+    assert len(SearchService(conn).search_docs("quetzalfts")) == 1

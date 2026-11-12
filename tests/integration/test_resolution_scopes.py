@@ -109,3 +109,85 @@ def test_third_party_target_is_marked_external():
     assert resolved[0].callee == "numpy.array"
     assert resolved[0].confidence == "INFERRED"
     assert resolved[0].resolve_kind == "alias-external"
+
+
+def _write_symbol_repo_for_resolution(root) -> None:
+    pkg = root / "pkg"
+    pkg.mkdir(parents=True, exist_ok=True)
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "core.py").write_text(
+        '"""Core service."""\n\n\n'
+        "class Service:\n"
+        '    """Service docs."""\n\n'
+        "    def create(self, name: str) -> str:\n"
+        '        """Create docs."""\n'
+        "        return name\n\n"
+        "    def run(self, name: str) -> str:\n"
+        "        return self.create(name)\n",
+        encoding="utf-8",
+    )
+    (pkg / "factory.py").write_text(
+        "from pkg.core import Service\n\n\n"
+        "def make_service() -> Service:\n"
+        '    """Make docs."""\n'
+        "    return Service()\n",
+        encoding="utf-8",
+    )
+    (pkg / "app.py").write_text(
+        "import pkg.core as core\n"
+        "from pkg.factory import make_service\n\n\n"
+        "def main() -> str:\n"
+        '    first = make_service().run("b")\n'
+        "    svc = core.Service()\n"
+        '    second = svc.create("a")\n'
+        "    return first + second\n",
+        encoding="utf-8",
+    )
+
+
+def _index_symbol_repo_for_resolution_test(conn, tmp_path):
+    from libref.services.code.code_ingest import index_repo
+
+    root = tmp_path / "symrepo_res"
+    _write_symbol_repo_for_resolution(root)
+    index_repo(conn, "demo", "0.1", str(root), repos_dir=tmp_path / "repos")
+    return root
+
+
+def test_call_resolve_and_caller_link(conn, tmp_path):
+    _index_symbol_repo_for_resolution_test(conn, tmp_path)
+    rows = conn.execute(
+        "SELECT callee_name, resolve_kind, caller, caller_entity_id,"
+        " receiver, func FROM call_instances"
+    ).fetchall()
+    assert rows
+    allowed = {
+        "alias-direct",
+        "alias-external",
+        "alias-suffix",
+        "stdlib",
+        "factory",
+        "inherited",
+        "import-preferred",
+        "self-direct",
+        "self-inherited",
+        "receiver-type",
+        "same-file",
+        "suffix",
+        "scope",
+        "builtin",
+        "param-shadowed",
+        "unresolved",
+    }
+    for callee, kind, _caller, _link, _recv, _func in rows:
+        assert str(kind) in allowed
+    in_main = [r for r in rows if r[2] == "pkg.app.main"]
+    assert in_main
+    linked = [r for r in in_main if r[3] is not None]
+    assert linked
+    target = conn.execute(
+        "SELECT id FROM api_entities WHERE qualified_name=?",
+        ("pkg.app.main",),
+    ).fetchone()
+    assert target is not None
+    assert any(int(r[3]) == int(target[0]) for r in linked)
