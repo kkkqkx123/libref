@@ -226,6 +226,33 @@ def _persist_calls(
     return count, _sweep_calls(conn, version_id, wanted)
 
 
+def _import_kind(importer_file: str, alias: str, target: str) -> str:
+    """Import edge shape by file language plus alias and target relation."""
+    from pathlib import Path as _Path
+
+    from libref.astminer import config as _ast_config
+
+    cfg = _ast_config.config_for_suffix(_Path(importer_file).suffix)
+    lang = cfg.name if cfg is not None else ""
+    if lang == "python":
+        if alias == target:
+            return "python:import"
+        if target.endswith("." + alias):
+            return "python:from"
+        return "python:import-as"
+    if lang == "rust":
+        return "rust:use"
+    if lang == "csharp":
+        return "csharp:using"
+    if lang == "go":
+        return "go:import"
+    if lang in ("java", "kotlin", "groovy"):
+        return f"{lang}:import"
+    if lang in ("javascript", "typescript"):
+        return f"{lang}:import"
+    return "import"
+
+
 def _persist_import_edges(conn, library_id: int, version_id: int, file_aliases) -> int:
     rows: list[tuple] = []
     for importer_file, items in (file_aliases or {}).items():
@@ -235,14 +262,22 @@ def _persist_import_edges(conn, library_id: int, version_id: int, file_aliases) 
                 continue
             seen.add(alias)
             rows.append(
-                (library_id, version_id, importer_file, alias, target, "import")
+                (
+                    library_id,
+                    version_id,
+                    importer_file,
+                    alias,
+                    target,
+                    _import_kind(importer_file, alias, target),
+                )
             )
     conn.execute("DELETE FROM import_edges WHERE version_id=?", (version_id,))
     if rows:
         conn.executemany(
             "INSERT INTO import_edges(library_id, version_id, importer_file, alias, target, kind)"
             " VALUES(?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(version_id, importer_file, alias) DO UPDATE SET target=excluded.target",
+            " ON CONFLICT(version_id, importer_file, alias)"
+            " DO UPDATE SET target=excluded.target, kind=excluded.kind",
             rows,
         )
     return len(rows)

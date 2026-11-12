@@ -53,20 +53,40 @@ def _keep_call(confidence: str, status: str | None, include_ambiguous: bool) -> 
     return bool(include_ambiguous)
 
 
-def _load_kept_calls(conn, version_id: int, *, include_ambiguous: bool = False):
-    """Single shared scan of one version's calls with review filtering applied."""
+def _load_kept_calls(
+    conn,
+    version_id: int,
+    *,
+    include_ambiguous: bool = False,
+    resolve_kinds: list[str] | tuple[str, ...] | None = None,
+    min_args: int | None = None,
+    max_args: int | None = None,
+):
+    """Single shared scan with review plus optional mining filters."""
+    wanted = sorted({str(k) for k in (resolve_kinds or []) if str(k).strip()})
     rows = conn.execute(
         "SELECT callee_name, caller_file, caller, confidence, id,"
-        " line_start, call_order, start_byte, resolve_kind FROM call_instances"
-        " WHERE version_id=?",
+        " line_start, call_order, start_byte, resolve_kind, argument_count"
+        " FROM call_instances WHERE version_id=?",
         (version_id,),
     ).fetchall()
     review = _review_map(conn, version_id)
-    return [
-        r
-        for r in rows
-        if _keep_call(str(r[3]), review.get(int(r[4])), include_ambiguous)
-    ]
+    out = []
+    for r in rows:
+        if not _keep_call(str(r[3]), review.get(int(r[4])), include_ambiguous):
+            continue
+        if wanted and str(r[8] or "") not in wanted:
+            continue
+        try:
+            argc = int(r[9] or 0)
+        except (TypeError, ValueError):
+            argc = 0
+        if min_args is not None and argc < int(min_args):
+            continue
+        if max_args is not None and argc > int(max_args):
+            continue
+        out.append(r)
+    return out
 
 
 def _delete_not_in(conn, table: str, version_id: int, column: str, wanted: list) -> int:
@@ -99,13 +119,27 @@ def _delete_not_in(conn, table: str, version_id: int, column: str, wanted: list)
 
 
 def refresh_feature_tree(
-    conn, library_id: int, version_id: int, *, include_ambiguous: bool = False
+    conn,
+    library_id: int,
+    version_id: int,
+    *,
+    include_ambiguous: bool = False,
+    resolve_kinds: list[str] | tuple[str, ...] | None = None,
+    min_args: int | None = None,
+    max_args: int | None = None,
 ) -> int:
     """Rebuild hierarchical feature nodes in bulk; returns the node count."""
     from libref.mining import feature_tree as _tree
     from libref.mining import scope_key as _scope_key
 
-    rows = _load_kept_calls(conn, version_id, include_ambiguous=include_ambiguous)
+    rows = _load_kept_calls(
+        conn,
+        version_id,
+        include_ambiguous=include_ambiguous,
+        resolve_kinds=resolve_kinds,
+        min_args=min_args,
+        max_args=max_args,
+    )
     calls = [(str(r[0]), _scope_key(str(r[1]), r[2])) for r in rows if r[0]]
     if not calls:
         conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
@@ -150,6 +184,9 @@ def refresh_clusters(
     include_ambiguous: bool = False,
     threshold: float | None = None,
     min_size: int | None = None,
+    resolve_kinds: list[str] | tuple[str, ...] | None = None,
+    min_args: int | None = None,
+    max_args: int | None = None,
 ) -> int:
     """Rebuild API clusters in bulk; returns the cluster count."""
     from libref.mining import build_scope_sets as _scope_sets
@@ -157,7 +194,14 @@ def refresh_clusters(
 
     threshold, min_size = _cluster_defaults(threshold, min_size)
 
-    rows = _load_kept_calls(conn, version_id, include_ambiguous=include_ambiguous)
+    rows = _load_kept_calls(
+        conn,
+        version_id,
+        include_ambiguous=include_ambiguous,
+        resolve_kinds=resolve_kinds,
+        min_args=min_args,
+        max_args=max_args,
+    )
     triplets = [(str(r[0]), str(r[1]), r[2]) for r in rows if r[0]]
     sets = _scope_sets(triplets)
     groups = _cluster_fn(sets, threshold=threshold, min_size=min_size)
@@ -200,6 +244,9 @@ def mine_patterns(
     include_ambiguous: bool = False,
     cluster_threshold: float | None = None,
     cluster_min_size: int | None = None,
+    resolve_kinds: list[str] | tuple[str, ...] | None = None,
+    min_args: int | None = None,
+    max_args: int | None = None,
 ) -> list[dict]:
     import json as _json
 
@@ -216,7 +263,14 @@ def mine_patterns(
         )
     else:
         library_id, version_id = catalog.ensure_library_version(library, version)
-    rows = _load_kept_calls(conn, version_id, include_ambiguous=include_ambiguous)
+    rows = _load_kept_calls(
+        conn,
+        version_id,
+        include_ambiguous=include_ambiguous,
+        resolve_kinds=resolve_kinds,
+        min_args=min_args,
+        max_args=max_args,
+    )
     if not rows:
         _clear_derived(conn, version_id)
         conn.commit()
@@ -232,6 +286,7 @@ def mine_patterns(
         order,
         start,
         _rk,
+        _argc,
     ) in rows:
         if caller is None or not str(caller).strip():
             continue
@@ -252,7 +307,13 @@ def mine_patterns(
     if not str_seqs:
         _clear_derived(conn, version_id)
         refresh_feature_tree(
-            conn, library_id, version_id, include_ambiguous=include_ambiguous
+            conn,
+            library_id,
+            version_id,
+            include_ambiguous=include_ambiguous,
+            resolve_kinds=resolve_kinds,
+            min_args=min_args,
+            max_args=max_args,
         )
         refresh_clusters(
             conn,
@@ -261,6 +322,9 @@ def mine_patterns(
             include_ambiguous=include_ambiguous,
             threshold=cluster_threshold,
             min_size=cluster_min_size,
+            resolve_kinds=resolve_kinds,
+            min_args=min_args,
+            max_args=max_args,
         )
         conn.commit()
         return []
@@ -272,7 +336,13 @@ def mine_patterns(
         if not str_seqs:
             _clear_derived(conn, version_id)
             refresh_feature_tree(
-                conn, library_id, version_id, include_ambiguous=include_ambiguous
+                conn,
+                library_id,
+                version_id,
+                include_ambiguous=include_ambiguous,
+                resolve_kinds=resolve_kinds,
+                min_args=min_args,
+                max_args=max_args,
             )
             refresh_clusters(
                 conn,
@@ -281,6 +351,9 @@ def mine_patterns(
                 include_ambiguous=include_ambiguous,
                 threshold=cluster_threshold,
                 min_size=cluster_min_size,
+                resolve_kinds=resolve_kinds,
+                min_args=min_args,
+                max_args=max_args,
             )
             conn.commit()
             return []
@@ -312,7 +385,13 @@ def mine_patterns(
     if _label_table_ready(conn):
         _delete_not_in(conn, "pattern_labels", version_id, "pattern", wanted)
     refresh_feature_tree(
-        conn, library_id, version_id, include_ambiguous=include_ambiguous
+        conn,
+        library_id,
+        version_id,
+        include_ambiguous=include_ambiguous,
+        resolve_kinds=resolve_kinds,
+        min_args=min_args,
+        max_args=max_args,
     )
     refresh_clusters(
         conn,
@@ -321,6 +400,9 @@ def mine_patterns(
         include_ambiguous=include_ambiguous,
         threshold=cluster_threshold,
         min_size=cluster_min_size,
+        resolve_kinds=resolve_kinds,
+        min_args=min_args,
+        max_args=max_args,
     )
     conn.commit()
     results.sort(key=lambda r: (-r["support"], r["pattern"]))
@@ -339,6 +421,9 @@ def mine_job_params(
     include_ambiguous: bool = False,
     cluster_threshold: float | None = None,
     cluster_min_size: int | None = None,
+    resolve_kinds: list[str] | tuple[str, ...] | None = None,
+    min_args: int | None = None,
+    max_args: int | None = None,
 ) -> dict[str, Any]:
     """Build mining job params, symmetric with scrape job params, ensuring replayability."""
     return {
@@ -352,6 +437,9 @@ def mine_job_params(
         "include_ambiguous": include_ambiguous,
         "cluster_threshold": cluster_threshold,
         "cluster_min_size": cluster_min_size,
+        "resolve_kinds": list(resolve_kinds) if resolve_kinds else None,
+        "min_args": min_args,
+        "max_args": max_args,
     }
 
 
@@ -387,6 +475,9 @@ def build_mine_runner(settings, conn):
                     _cluster_fields["cluster_min_size"].default,
                 )
             ),
+            resolve_kinds=p.get("resolve_kinds"),
+            min_args=p.get("min_args"),
+            max_args=p.get("max_args"),
         )
 
     return runner
@@ -487,16 +578,14 @@ async def induce_labels(
     except Exception:  # noqa: BLE001 -- signatures are advisory for prompts
         sig_table = {}
     short_sigs: dict[str, str] = {}
-    for api_name, by_kind in sig_table.items():
-        if not by_kind:
+    for api_name in sorted(sig_table):
+        try:
+            canonical = reader.canonical_signature(api_name, library, version, ecosystem)
+        except Exception:  # noqa: BLE001 -- signatures are advisory for prompts
             continue
-        first = next(iter(by_kind.values()))
-        params = list(first.get("params") or [])
-        ret = str(first.get("return_type") or "").strip()
-        text = f"{api_name}({', '.join(str(p) for p in params)})"
-        if ret:
-            text += f" -> {ret}"
-        short_sigs[str(api_name)] = text
+        text = str(canonical.get("short") or "").strip()
+        if text:
+            short_sigs[str(api_name)] = text
     # One grouped shapes query for every API in the batch instead of one per API.
     wanted_apis = sorted(
         {a for entry in patterns for a in (entry.get("pattern") or []) if a}

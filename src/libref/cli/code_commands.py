@@ -162,6 +162,11 @@ def cmd_mine(args: argparse.Namespace) -> int:
     settings = _load_settings(args)
     conn = _connect(settings)
     try:
+        kinds = (
+            args.resolve_kinds.split(",")
+            if getattr(args, "resolve_kinds", None)
+            else None
+        )
         if args.run_async:
             mgr = JobManager(conn)
             mgr.recover()
@@ -178,6 +183,9 @@ def cmd_mine(args: argparse.Namespace) -> int:
                     include_ambiguous=bool(args.include_ambiguous),
                     cluster_threshold=args.cluster_threshold,
                     cluster_min_size=args.cluster_min_size,
+                    resolve_kinds=kinds,
+                    min_args=getattr(args, "min_args", None),
+                    max_args=getattr(args, "max_args", None),
                 ),
             )
 
@@ -203,6 +211,9 @@ def cmd_mine(args: argparse.Namespace) -> int:
             include_ambiguous=bool(args.include_ambiguous),
             cluster_threshold=args.cluster_threshold,
             cluster_min_size=args.cluster_min_size,
+            resolve_kinds=kinds,
+            min_args=getattr(args, "min_args", None),
+            max_args=getattr(args, "max_args", None),
         )
     finally:
         conn.close()
@@ -336,6 +347,92 @@ def cmd_pattern_insight(args: argparse.Namespace) -> int:
                 limit=args.limit,
                 per_file_limit=getattr(args, "per_file_limit", None),
                 dedup=None if getattr(args, "no_dedup", False) is False else False,
+            )
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 2
+    finally:
+        conn.close()
+    for r in rows:
+        print(json.dumps(r, ensure_ascii=False))
+    return 0
+
+
+def cmd_symbol_insight(args: argparse.Namespace) -> int:
+    import json
+
+    conn = _connect(_load_settings(args))
+    try:
+        try:
+            apis = args.apis.split(",") if getattr(args, "apis", None) else None
+            rows = MiningReadService(conn).symbol_insight(
+                args.view,
+                getattr(args, "api", None),
+                apis=apis,
+                library=args.library,
+                version=args.version,
+                ecosystem=getattr(args, "ecosystem", None),
+                limit=args.limit,
+                offset=int(getattr(args, "offset", 0) or 0),
+            )
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 2
+    finally:
+        conn.close()
+    for r in rows:
+        print(json.dumps(r, ensure_ascii=False))
+    return 0
+
+
+def cmd_call_insight(args: argparse.Namespace) -> int:
+    import json
+
+    conn = _connect(_load_settings(args))
+    try:
+        try:
+            kinds = (
+                args.resolve_kinds.split(",")
+                if getattr(args, "resolve_kinds", None)
+                else None
+            )
+            rows = MiningReadService(conn).call_insight(
+                args.view,
+                getattr(args, "api", None),
+                library=args.library,
+                version=args.version,
+                ecosystem=getattr(args, "ecosystem", None),
+                limit=args.limit,
+                offset=int(getattr(args, "offset", 0) or 0),
+                include_ambiguous=bool(getattr(args, "include_ambiguous", False)),
+                resolve_kinds=kinds,
+                min_args=getattr(args, "min_args", None),
+                max_args=getattr(args, "max_args", None),
+            )
+        except ValueError as exc:
+            print(f"invalid: {exc}", file=sys.stderr)
+            return 2
+    finally:
+        conn.close()
+    for r in rows:
+        print(json.dumps(r, ensure_ascii=False))
+    return 0
+
+
+def cmd_import_insight(args: argparse.Namespace) -> int:
+    import json
+
+    conn = _connect(_load_settings(args))
+    try:
+        try:
+            rows = MiningReadService(conn).import_insight(
+                args.view,
+                getattr(args, "api", None),
+                library=args.library,
+                version=args.version,
+                ecosystem=getattr(args, "ecosystem", None),
+                limit=args.limit,
+                offset=int(getattr(args, "offset", 0) or 0),
             )
         except ValueError as exc:
             print(f"invalid: {exc}", file=sys.stderr)

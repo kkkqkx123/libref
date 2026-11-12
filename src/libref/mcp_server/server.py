@@ -63,6 +63,9 @@ ALL_MCP_TOOLS: frozenset[str] = frozenset(
         "repo_dependencies",
         "api_insight",
         "pattern_insight",
+        "symbol_insight",
+        "call_insight",
+        "import_insight",
         "mining_health",
         "review",
         "job_show",
@@ -495,6 +498,102 @@ def build_mcp_server(
         except Exception as exc:  # noqa: BLE001
             return _failed(str(exc))
 
+    def symbol_insight(
+        view: Literal["detail", "file", "children", "signature"],
+        api: str | None = None,
+        apis: list[str] | None = None,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Symbol detail views over version-scoped entities."""
+        if view not in ("detail", "file", "children", "signature"):
+            return _invalid(f"unsupported symbol view: {view}")
+        if view == "detail" and not api and not apis:
+            return _invalid("detail view requires api or apis")
+        if view in ("file", "children", "signature") and not api:
+            return _invalid(f"{view} view requires api")
+        bad = _check_limit(limit, low=1, high=500)
+        if bad is not None:
+            return _invalid(bad)
+        try:
+            return _items(
+                mining.symbol_insight(
+                    view, api, apis=apis, library=library, version=version,
+                    ecosystem=ecosystem, limit=limit, offset=offset,
+                )
+            )
+        except ValueError as exc:
+            return _invalid(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _failed(str(exc))
+
+    def call_insight(
+        view: Literal["callee", "caller", "file"],
+        api: str | None = None,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        include_ambiguous: bool = False,
+        resolve_kinds: list[str] | None = None,
+        min_args: int | None = None,
+        max_args: int | None = None,
+    ) -> dict[str, Any]:
+        """Bidirectional call views with shared mining filters."""
+        if view not in ("callee", "caller", "file"):
+            return _invalid(f"unsupported call view: {view}")
+        if not api:
+            return _invalid(f"{view} view requires api")
+        bad = _check_limit(limit, low=1, high=500)
+        if bad is not None:
+            return _invalid(bad)
+        try:
+            return _items(
+                mining.call_insight(
+                    view, api, library=library, version=version,
+                    ecosystem=ecosystem, limit=limit, offset=offset,
+                    include_ambiguous=include_ambiguous, resolve_kinds=resolve_kinds,
+                    min_args=min_args, max_args=max_args,
+                )
+            )
+        except ValueError as exc:
+            return _invalid(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _failed(str(exc))
+
+    def import_insight(
+        view: Literal["importers", "imports"],
+        api: str | None = None,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Import edge views for fan-in and fan-out."""
+        if view not in ("importers", "imports"):
+            return _invalid(f"unsupported import view: {view}")
+        if not api:
+            return _invalid(f"{view} view requires api")
+        bad = _check_limit(limit, low=1, high=500)
+        if bad is not None:
+            return _invalid(bad)
+        try:
+            return _items(
+                mining.import_insight(
+                    view, api, library=library, version=version,
+                    ecosystem=ecosystem, limit=limit, offset=offset,
+                )
+            )
+        except ValueError as exc:
+            return _invalid(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _failed(str(exc))
+
     def mining_health(
         library: str | None = None,
         version: str | None = None,
@@ -610,6 +709,9 @@ def build_mcp_server(
         "repo_dependencies": repo_dependencies,
         "api_insight": api_insight,
         "pattern_insight": pattern_insight,
+        "symbol_insight": symbol_insight,
+        "call_insight": call_insight,
+        "import_insight": import_insight,
         "mining_health": mining_health,
         "review": review,
         "job_show": job_show,

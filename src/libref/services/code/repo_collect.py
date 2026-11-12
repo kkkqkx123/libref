@@ -57,8 +57,22 @@ def _collect_decl_index(
         sha = hashlib.sha1(data).hexdigest()
         hit = ast_cache.lookup(conn, repo_name, rel, fp, cfg.config_version)
         if hit is not None and hit[0] == sha:
-            counts["cached"] += 1
-            decls, aliases, _raw = ast_cache.decode_records(hit[1], rel)
+            try:
+                decls, aliases, _raw = ast_cache.decode_records(hit[1], rel)
+            except ValueError:
+                counts["parsed"] += 1
+                decls, aliases, raw_calls = ast_engine.extract_file(rel, cfg, data)
+                ast_cache.store(
+                    conn,
+                    repo_name,
+                    rel,
+                    sha,
+                    fp,
+                    cfg.config_version,
+                    ast_cache.encode_records(decls, aliases, raw_calls),
+                )
+            else:
+                counts["cached"] += 1
         else:
             counts["parsed"] += 1
             decls, aliases, raw_calls = ast_engine.extract_file(rel, cfg, data)
@@ -105,9 +119,13 @@ def _load_raw_batch(
         sha = hashlib.sha1(data).hexdigest()
         hit = ast_cache.lookup(conn, repo_name, rel, fp, cfg.config_version)
         if hit is not None and hit[0] == sha:
-            _decls, _aliases, raw = ast_cache.decode_records(hit[1], rel)
-            raw_calls.extend(raw)
-            continue
+            try:
+                _decls, _aliases, raw = ast_cache.decode_records(hit[1], rel)
+            except ValueError:
+                pass
+            else:
+                raw_calls.extend(raw)
+                continue
         _decls, _aliases, raw = ast_engine.extract_file(rel, cfg, data)
         raw_calls.extend(raw)
         ast_cache.store(

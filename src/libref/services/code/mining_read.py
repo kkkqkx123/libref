@@ -88,6 +88,75 @@ def _render_evidence(
     return unit_tag(head, inner)
 
 
+_KIND_PRIORITY = {
+    "class": 0,
+    "interface": 1,
+    "enum": 2,
+    "struct": 3,
+    "record": 4,
+    "constructor": 5,
+    "method": 6,
+    "function": 7,
+    "package": 8,
+    "module": 9,
+}
+
+
+def _kind_rank(kind: str | None) -> int:
+    """Deterministic order across overloaded qualified names."""
+    return _KIND_PRIORITY.get(str(kind or ""), 99)
+
+
+def _parse_json_list(raw: Any) -> list:
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return list(raw)
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return []
+    return list(parsed) if isinstance(parsed, list) else []
+
+
+def _choose_canonical(rows: list[tuple[str, str, list, str]]) -> tuple[str, str, list, str]:
+    """Pick one representative across kinds, preferring real signatures."""
+    ordered = sorted(
+        rows,
+        key=lambda r: (0 if str(r[1] or "").strip() else 1, _kind_rank(r[0]), str(r[0] or "")),
+    )
+    return ordered[0]
+
+
+def _call_filter_sql(
+    alias: str,
+    include_ambiguous: bool,
+    resolve_kinds: list[str] | tuple[str, ...] | None,
+    min_args: int | None,
+    max_args: int | None,
+) -> tuple[str, list[Any]]:
+    """Shared call filter with review semantics; empty inputs keep history."""
+    parts: list[str] = ["(rs.status IS NULL OR rs.status != 'conflict')"]
+    params: list[Any] = []
+    if not include_ambiguous:
+        parts.append(f"({alias}.confidence != 'AMBIGUOUS' OR rs.status='approved')")
+    if resolve_kinds:
+        wanted = sorted({str(k) for k in resolve_kinds if str(k).strip()})
+        if wanted:
+            marks = ",".join("?" for _ in wanted)
+            parts.append(f"({alias}.resolve_kind IN ({marks}))")
+            params.extend(wanted)
+    if min_args is not None:
+        parts.append(f"({alias}.argument_count >= ?)")
+        params.append(int(min_args))
+    if max_args is not None:
+        parts.append(f"({alias}.argument_count <= ?)")
+        params.append(int(max_args))
+    if not parts:
+        return "", []
+    return " AND " + " AND ".join(parts), params
+
+
 class MiningReadService:
     """Read-only queries over call_instances, seq_patterns, and derived tables."""
 
@@ -476,6 +545,8 @@ class MiningReadService:
         )
         health = reuse_diversity(patterns, clusters)
         health["resolve_kinds"] = self.resolve_distribution(library, version, ecosystem)
+        health["confidence"] = self.confidence_distribution(library, version, ecosystem)
+        health.update(self.quality_rates(library, version, ecosystem))
         return health
 
     def resolve_distribution(
@@ -491,12 +562,93 @@ class MiningReadService:
         try:
             rows = self._conn.execute(
                 "SELECT resolve_kind, count(*) FROM call_instances"
-                f" WHERE version_id IN ({placeholders}) GROUP BY resolve_kind",
+                f" WHERE version_id IN ({placeholders}) GROUP BY resolve_kind"
+                " ORDER BY resolve_kind",
                 tuple(vids),
             ).fetchall()
         except Exception:  # noqa: BLE001
             return {}
         return {str(k or ""): int(c) for k, c in rows}
+
+    def confidence_distribution(
+        self,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+    ) -> dict[str, int]:
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids:
+            return {}
+        placeholders = ",".join("?" for _ in vids)
+        try:
+            rows = self._conn.execute(
+                "SELECT confidence, count(*) FROM call_instances"
+                f" WHERE version_id IN ({placeholders}) GROUP BY confidence"
+                " ORDER BY confidence",
+                tuple(vids),
+            ).fetchall()
+        except Exception:  # noqa: BLE001
+            return {}
+        return {str(k or ""): int(c) for k, c in rows}
+
+    def quality_rates(
+        self,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+    ) -> dict[str, Any]:
+        """Quality face: unresolved share, caller linkage, missing signatures."""
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids:
+            return {
+                "unresolved_rate": 0.0,
+                "caller_link_rate": 0.0,
+                "signature_missing_rate": 0.0,
+            }
+        placeholders = ",".join("?" for _ in vids)
+        try:
+            total = self._conn.execute(
+                "SELECT count(*) FROM call_instances"
+                f" WHERE version_id IN ({placeholders})",
+                tuple(vids),
+            ).fetchone()
+            total_n = int(total[0]) if total else 0
+            unresolved = self._conn.execute(
+                "SELECT count(*) FROM call_instances"
+                f" WHERE version_id IN ({placeholders}) AND resolve_kind='unresolved'",
+                tuple(vids),
+            ).fetchone()
+            unresolved_n = int(unresolved[0]) if unresolved else 0
+            linked = self._conn.execute(
+                "SELECT count(*) FROM call_instances"
+                f" WHERE version_id IN ({placeholders}) AND caller_entity_id IS NOT NULL",
+                tuple(vids),
+            ).fetchone()
+            linked_n = int(linked[0]) if linked else 0
+            sym_total = self._conn.execute(
+                "SELECT count(*) FROM api_entities"
+                f" WHERE version_id IN ({placeholders})",
+                tuple(vids),
+            ).fetchone()
+            sym_n = int(sym_total[0]) if sym_total else 0
+            sym_missing = self._conn.execute(
+                "SELECT count(*) FROM api_entities"
+                f" WHERE version_id IN ({placeholders})"
+                " AND (signature IS NULL OR signature='')",
+                tuple(vids),
+            ).fetchone()
+            missing_n = int(sym_missing[0]) if sym_missing else 0
+        except Exception:  # noqa: BLE001
+            return {
+                "unresolved_rate": 0.0,
+                "caller_link_rate": 0.0,
+                "signature_missing_rate": 0.0,
+            }
+        return {
+            "unresolved_rate": (unresolved_n / total_n) if total_n else 0.0,
+            "caller_link_rate": (linked_n / total_n) if total_n else 0.0,
+            "signature_missing_rate": (missing_n / sym_n) if sym_n else 0.0,
+        }
 
     def signatures_for(
         self,
@@ -513,21 +665,46 @@ class MiningReadService:
         rows = self._conn.execute(
             "SELECT qualified_name, kind, signature, params, return_type"
             " FROM api_entities"
-            f" WHERE version_id IN ({placeholders}) AND qualified_name IN ({marks})",
+            f" WHERE version_id IN ({placeholders}) AND qualified_name IN ({marks})"
+            " ORDER BY qualified_name, kind",
             (*vids, *apis),
         ).fetchall()
         out: dict[str, dict[str, Any]] = {}
         for qual, kind, sig, params, ret in rows:
-            try:
-                parsed = json.loads(params) if params else []
-            except ValueError:
-                parsed = []
             out.setdefault(str(qual), {})[str(kind)] = {
                 "signature": sig or "",
-                "params": parsed,
+                "params": _parse_json_list(params),
                 "return_type": ret or "",
             }
         return out
+
+    def canonical_signature(
+        self,
+        api: str,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+    ) -> dict[str, Any]:
+        """Single deterministic assembly shared by evidence and induction."""
+        from libref.mining.idiom import format_short_signature
+
+        table = self.signatures_for([api], library, version, ecosystem)
+        by_kind = table.get(str(api)) or {}
+        if not by_kind:
+            return {"api": api, "kind": "", "signature": "", "short": api + "()"}
+        rows = [
+            (kind, str(info.get("signature") or ""), list(info.get("params") or []), str(info.get("return_type") or ""))
+            for kind, info in by_kind.items()
+        ]
+        kind, sig, params, ret = _choose_canonical(rows)
+        return {
+            "api": api,
+            "kind": kind,
+            "signature": sig,
+            "params": params,
+            "return_type": ret,
+            "short": format_short_signature(api, params, ret),
+        }
 
     def _attach_signatures(self, groups: list[dict[str, Any]], vids: list[int]) -> None:
         wanted: set[str] = set()
@@ -545,22 +722,26 @@ class MiningReadService:
         marks = ",".join("?" for _ in sorted(wanted))
         try:
             rows = self._conn.execute(
-                "SELECT qualified_name, signature, params, return_type FROM api_entities"
-                f" WHERE version_id IN ({placeholders}) AND qualified_name IN ({marks})",
+                "SELECT qualified_name, kind, signature, params, return_type FROM api_entities"
+                f" WHERE version_id IN ({placeholders}) AND qualified_name IN ({marks})"
+                " ORDER BY qualified_name, kind",
                 (*vids, *sorted(wanted)),
             ).fetchall()
         except Exception:  # noqa: BLE001 -- signature join is advisory for evidence rendering
             return
+        bucket: dict[str, list[tuple[str, str, list, str]]] = {}
+        for qual, kind, sig, params, ret in rows:
+            bucket.setdefault(str(qual), []).append(
+                (str(kind or ""), str(sig or ""), _parse_json_list(params), str(ret or ""))
+            )
         info: dict[str, dict[str, Any]] = {}
-        for qual, sig, params, ret in rows:
-            try:
-                parsed = json.loads(params) if params else []
-            except ValueError:
-                parsed = []
-            info[str(qual)] = {
-                "signature": str(sig or ""),
-                "params": parsed,
-                "return_type": str(ret or ""),
+        for qual, items in bucket.items():
+            kind, sig, params, ret = _choose_canonical(items)
+            info[qual] = {
+                "kind": kind,
+                "signature": sig,
+                "params": params,
+                "return_type": ret,
             }
         for group in groups:
             for call in group.get("calls") or []:
@@ -585,17 +766,22 @@ class MiningReadService:
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 50,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         vids = mining_version_ids(self._conn, library, version, ecosystem)
         if not vids or not target:
             return []
         placeholders = ",".join("?" for _ in vids)
         rows = self._conn.execute(
-            "SELECT importer_file, alias, target FROM import_edges"
-            f" WHERE version_id IN ({placeholders}) AND target = ? LIMIT ?",
-            (*vids, target, limit),
+            "SELECT importer_file, alias, target, kind FROM import_edges"
+            f" WHERE version_id IN ({placeholders}) AND target = ?"
+            " ORDER BY importer_file, alias LIMIT ? OFFSET ?",
+            (*vids, target, max(1, int(limit)), max(0, int(offset))),
         ).fetchall()
-        return [{"importer_file": r[0], "alias": r[1], "target": r[2]} for r in rows]
+        return [
+            {"importer_file": r[0], "alias": r[1], "target": r[2], "kind": r[3]}
+            for r in rows
+        ]
 
     def imports_of_file(
         self,
@@ -604,17 +790,240 @@ class MiningReadService:
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 100,
+        offset: int = 0,
     ) -> list[dict[str, Any]]:
         vids = mining_version_ids(self._conn, library, version, ecosystem)
         if not vids or not importer_file:
             return []
         placeholders = ",".join("?" for _ in vids)
         rows = self._conn.execute(
-            "SELECT importer_file, alias, target FROM import_edges"
-            f" WHERE version_id IN ({placeholders}) AND importer_file = ? LIMIT ?",
-            (*vids, importer_file, limit),
+            "SELECT importer_file, alias, target, kind FROM import_edges"
+            f" WHERE version_id IN ({placeholders}) AND importer_file = ?"
+            " ORDER BY alias LIMIT ? OFFSET ?",
+            (*vids, importer_file, max(1, int(limit)), max(0, int(offset))),
         ).fetchall()
-        return [{"importer_file": r[0], "alias": r[1], "target": r[2]} for r in rows]
+        return [
+            {"importer_file": r[0], "alias": r[1], "target": r[2], "kind": r[3]}
+            for r in rows
+        ]
+
+    def _symbol_dict(self, row: Any) -> dict[str, Any]:
+        return {
+            "qualified_name": str(row[0] or ""),
+            "kind": str(row[1] or ""),
+            "parent": row[2],
+            "signature": str(row[3] or ""),
+            "params": _parse_json_list(row[4]),
+            "bases": _parse_json_list(row[5]),
+            "depth": int(row[6] or 0),
+            "file": str(row[7] or ""),
+            "line_start": int(row[8] or 1),
+            "line_end": int(row[9] or 1),
+            "param_types": _parse_json_list(row[10]),
+            "return_type": str(row[11] or ""),
+            "has_doc": bool(int(row[12] or 0)),
+        }
+
+    def symbol_details(
+        self,
+        apis: list[str],
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Batch symbol lookup with deterministic kind ordering."""
+        wanted = sorted({str(a) for a in (apis or []) if str(a).strip()})
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids or not wanted:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        marks = ",".join("?" for _ in wanted)
+        rows = self._conn.execute(
+            "SELECT qualified_name, kind, parent, signature, params, bases, depth,"
+            " file, line_start, line_end, param_types, return_type, has_doc"
+            " FROM api_entities"
+            f" WHERE version_id IN ({placeholders}) AND qualified_name IN ({marks})"
+            " ORDER BY qualified_name, kind",
+            (*vids, *wanted),
+        ).fetchall()
+        out = [self._symbol_dict(r) for r in rows]
+        out.sort(
+            key=lambda d: (
+                str(d.get("qualified_name") or ""),
+                0 if str(d.get("signature") or "").strip() else 1,
+                _kind_rank(d.get("kind")),
+                str(d.get("kind") or ""),
+            )
+        )
+        return out[: max(1, int(limit))]
+
+    def symbols_in_file(
+        self,
+        importer_file: str,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids or not importer_file:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        rows = self._conn.execute(
+            "SELECT qualified_name, kind, parent, signature, params, bases, depth,"
+            " file, line_start, line_end, param_types, return_type, has_doc"
+            " FROM api_entities"
+            f" WHERE version_id IN ({placeholders}) AND file = ?"
+            " ORDER BY line_start, start_byte, qualified_name, kind LIMIT ? OFFSET ?",
+            (*vids, importer_file, max(1, int(limit)), max(0, int(offset))),
+        ).fetchall()
+        return [self._symbol_dict(r) for r in rows]
+
+    def child_symbols(
+        self,
+        parent: str,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids or not parent:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        rows = self._conn.execute(
+            "SELECT qualified_name, kind, parent, signature, params, bases, depth,"
+            " file, line_start, line_end, param_types, return_type, has_doc"
+            " FROM api_entities"
+            f" WHERE version_id IN ({placeholders}) AND parent = ?"
+            " ORDER BY qualified_name, kind LIMIT ? OFFSET ?",
+            (*vids, parent, max(1, int(limit)), max(0, int(offset))),
+        ).fetchall()
+        return [self._symbol_dict(r) for r in rows]
+
+    def _call_dict(self, row: Any) -> dict[str, Any]:
+        return {
+            "callee": str(row[0] or ""),
+            "caller": row[1],
+            "caller_file": str(row[2] or ""),
+            "line_start": int(row[3] or 1),
+            "line_end": int(row[4] or 1),
+            "start_byte": int(row[5] or 0),
+            "end_byte": int(row[6] or 0),
+            "confidence": str(row[7] or ""),
+            "resolve_kind": str(row[8] or ""),
+            "receiver": row[9],
+            "func": str(row[10] or ""),
+            "args": _parse_json_list(row[11]),
+            "argument_count": int(row[12] or 0),
+            "call_order": int(row[13] or 0),
+            "callee_entity_id": row[14],
+            "caller_entity_id": row[15],
+        }
+
+    def calls_by_callee(
+        self,
+        callee: str,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        include_ambiguous: bool = False,
+        resolve_kinds: list[str] | None = None,
+        min_args: int | None = None,
+        max_args: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Who calls me: deterministic caller listing for one callee."""
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids or not callee:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        extra, params = _call_filter_sql(
+            "call_instances", include_ambiguous, resolve_kinds, min_args, max_args
+        )
+        rows = self._conn.execute(
+            "SELECT callee_name, caller, caller_file, line_start, line_end,"
+            " start_byte, end_byte, confidence, resolve_kind, receiver, func, args,"
+            " argument_count, call_order, callee_entity_id, caller_entity_id"
+            " FROM call_instances LEFT JOIN review_status rs"
+            " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
+            f" WHERE version_id IN ({placeholders}) AND callee_name = ?{extra}"
+            " ORDER BY caller_file, line_start, start_byte, call_order, id"
+            " LIMIT ? OFFSET ?",
+            (*vids, callee, *params, max(1, int(limit)), max(0, int(offset))),
+        ).fetchall()
+        return [self._call_dict(r) for r in rows]
+
+    def calls_by_caller(
+        self,
+        caller: str,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        include_ambiguous: bool = False,
+        resolve_kinds: list[str] | None = None,
+        min_args: int | None = None,
+        max_args: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Who I call: deterministic callee listing for one caller."""
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids or not caller:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        extra, params = _call_filter_sql(
+            "call_instances", include_ambiguous, resolve_kinds, min_args, max_args
+        )
+        rows = self._conn.execute(
+            "SELECT callee_name, caller, caller_file, line_start, line_end,"
+            " start_byte, end_byte, confidence, resolve_kind, receiver, func, args,"
+            " argument_count, call_order, callee_entity_id, caller_entity_id"
+            " FROM call_instances LEFT JOIN review_status rs"
+            " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
+            f" WHERE version_id IN ({placeholders}) AND caller = ?{extra}"
+            " ORDER BY caller_file, line_start, start_byte, call_order, id"
+            " LIMIT ? OFFSET ?",
+            (*vids, caller, *params, max(1, int(limit)), max(0, int(offset))),
+        ).fetchall()
+        return [self._call_dict(r) for r in rows]
+
+    def calls_in_file(
+        self,
+        importer_file: str,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+        include_ambiguous: bool = False,
+        resolve_kinds: list[str] | None = None,
+        min_args: int | None = None,
+        max_args: int | None = None,
+    ) -> list[dict[str, Any]]:
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids or not importer_file:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        extra, params = _call_filter_sql(
+            "call_instances", include_ambiguous, resolve_kinds, min_args, max_args
+        )
+        rows = self._conn.execute(
+            "SELECT callee_name, caller, caller_file, line_start, line_end,"
+            " start_byte, end_byte, confidence, resolve_kind, receiver, func, args,"
+            " argument_count, call_order, callee_entity_id, caller_entity_id"
+            " FROM call_instances LEFT JOIN review_status rs"
+            " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
+            f" WHERE version_id IN ({placeholders}) AND caller_file = ?{extra}"
+            " ORDER BY line_start, start_byte, call_order, id"
+            " LIMIT ? OFFSET ?",
+            (*vids, importer_file, *params, max(1, int(limit)), max(0, int(offset))),
+        ).fetchall()
+        return [self._call_dict(r) for r in rows]
 
     def list_labels(
         self,
@@ -909,3 +1318,114 @@ class MiningReadService:
                 limit=limit if limit is not None else 50,
             )
         raise ValueError(f"unsupported pattern view: {view}")
+
+    def symbol_insight(
+        self,
+        view: str,
+        api: str | None = None,
+        apis: list[str] | None = None,
+        *,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Thin symbol views over version-scoped entities."""
+        if view == "detail":
+            wanted = list(apis or []) + ([api] if api else [])
+            if not wanted:
+                raise ValueError("detail view requires api or apis")
+            return self.symbol_details(
+                wanted, library, version, ecosystem, limit=limit if limit is not None else 100
+            )
+        if view == "file":
+            if not api:
+                raise ValueError("file view requires api as file path")
+            return self.symbols_in_file(
+                api, library, version, ecosystem,
+                limit=limit if limit is not None else 200, offset=offset,
+            )
+        if view == "children":
+            if not api:
+                raise ValueError("children view requires api as parent name")
+            return self.child_symbols(
+                api, library, version, ecosystem,
+                limit=limit if limit is not None else 200, offset=offset,
+            )
+        if view == "signature":
+            if not api:
+                raise ValueError("signature view requires api")
+            return [self.canonical_signature(api, library, version, ecosystem)]
+        raise ValueError(f"unsupported symbol view: {view}")
+
+    def call_insight(
+        self,
+        view: str,
+        api: str | None = None,
+        *,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        include_ambiguous: bool = False,
+        resolve_kinds: list[str] | None = None,
+        min_args: int | None = None,
+        max_args: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Thin bidirectional call views with shared filters."""
+        capped = limit if limit is not None else 100
+        if view == "callee":
+            if not api:
+                raise ValueError("callee view requires api as callee name")
+            return self.calls_by_callee(
+                api, library, version, ecosystem, limit=capped, offset=offset,
+                include_ambiguous=include_ambiguous, resolve_kinds=resolve_kinds,
+                min_args=min_args, max_args=max_args,
+            )
+        if view == "caller":
+            if not api:
+                raise ValueError("caller view requires api as caller name")
+            return self.calls_by_caller(
+                api, library, version, ecosystem, limit=capped, offset=offset,
+                include_ambiguous=include_ambiguous, resolve_kinds=resolve_kinds,
+                min_args=min_args, max_args=max_args,
+            )
+        if view == "file":
+            if not api:
+                raise ValueError("file view requires api as file path")
+            return self.calls_in_file(
+                api, library, version, ecosystem, limit=capped, offset=offset,
+                include_ambiguous=include_ambiguous, resolve_kinds=resolve_kinds,
+                min_args=min_args, max_args=max_args,
+            )
+        raise ValueError(f"unsupported call view: {view}")
+
+    def import_insight(
+        self,
+        view: str,
+        api: str | None = None,
+        *,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Thin import edge views for fan-in and fan-out."""
+        if view == "importers":
+            if not api:
+                raise ValueError("importers view requires api as target")
+            return self.importers_of(
+                api, library, version, ecosystem,
+                limit=limit if limit is not None else 50, offset=offset,
+            )
+        if view == "imports":
+            if not api:
+                raise ValueError("imports view requires api as file path")
+            return self.imports_of_file(
+                api, library, version, ecosystem,
+                limit=limit if limit is not None else 100, offset=offset,
+            )
+        raise ValueError(f"unsupported import view: {view}")

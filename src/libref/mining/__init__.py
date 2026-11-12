@@ -6,6 +6,7 @@ from .feature_tree import build_feature_tree
 from .frequency import exact_counts, level_counts, prune_to_top_n, top_exact_names
 from .idiom import (
     deduplicate_evidence,
+    format_short_signature,
     mask_arg,
     neighbour_keep,
     normalize_signature,
@@ -47,6 +48,7 @@ __all__ = [
     "deduplicate_evidence",
     "encode_sequences",
     "exact_counts",
+    "format_short_signature",
     "level_counts",
     "mask_arg",
     "name_hit",

@@ -20,6 +20,8 @@ from libref.services.registry.libraries import LibraryService
 from libref.web.api import (
     AnswerQuery,
     ApiInsightQuery,
+    CallInsightQuery,
+    ImportInsightQuery,
     JobQuery,
     PatternInsightQuery,
     ReadQuery,
@@ -28,6 +30,7 @@ from libref.web.api import (
     ReviewQuery,
     ScrapeRequest,
     SearchQuery,
+    SymbolInsightQuery,
     envelope,
 )
 
@@ -329,6 +332,126 @@ def build_web_app(
                     limit=params.limit,
                     per_file_limit=params.per_file_limit,
                     dedup=params.dedup,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/symbol-insight")
+    def symbol_insight(
+        view: Literal["detail", "file", "children", "signature"],
+        api: str | None = None,
+        apis: str | None = None,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        _: None = Depends(_guard),
+    ) -> dict[str, Any]:
+        params = SymbolInsightQuery(
+            view=view,
+            api=api,
+            apis=apis,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            limit=limit,
+            offset=offset,
+        )
+        try:
+            return envelope(
+                mining.symbol_insight(
+                    params.view,
+                    params.api,
+                    apis=_split_list(params.apis),
+                    library=params.library,
+                    version=params.version,
+                    ecosystem=params.ecosystem,
+                    limit=params.limit,
+                    offset=params.offset,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/call-insight")
+    def call_insight(
+        view: Literal["callee", "caller", "file"],
+        api: str | None = None,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        include_ambiguous: bool = False,
+        resolve_kinds: str | None = None,
+        min_args: int | None = None,
+        max_args: int | None = None,
+        _: None = Depends(_guard),
+    ) -> dict[str, Any]:
+        params = CallInsightQuery(
+            view=view,
+            api=api,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            limit=limit,
+            offset=offset,
+            include_ambiguous=include_ambiguous,
+            resolve_kinds=resolve_kinds,
+            min_args=min_args,
+            max_args=max_args,
+        )
+        try:
+            return envelope(
+                mining.call_insight(
+                    params.view,
+                    params.api,
+                    library=params.library,
+                    version=params.version,
+                    ecosystem=params.ecosystem,
+                    limit=params.limit,
+                    offset=params.offset,
+                    include_ambiguous=params.include_ambiguous,
+                    resolve_kinds=_split_list(params.resolve_kinds),
+                    min_args=params.min_args,
+                    max_args=params.max_args,
+                )
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/import-insight")
+    def import_insight(
+        view: Literal["importers", "imports"],
+        api: str | None = None,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+        _: None = Depends(_guard),
+    ) -> dict[str, Any]:
+        params = ImportInsightQuery(
+            view=view,
+            api=api,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            limit=limit,
+            offset=offset,
+        )
+        try:
+            return envelope(
+                mining.import_insight(
+                    params.view,
+                    params.api,
+                    library=params.library,
+                    version=params.version,
+                    ecosystem=params.ecosystem,
+                    limit=params.limit,
+                    offset=params.offset,
                 )
             )
         except ValueError as exc:

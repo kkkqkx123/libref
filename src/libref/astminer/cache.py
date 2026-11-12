@@ -107,6 +107,10 @@ def decode_records(
     for item in records:
         kind = item.get("type")
         if kind == "decl":
+            if not item.get("qualified_name") or not item.get("kind"):
+                raise ValueError("cached decl is missing required identity")
+            if "line_start" not in item or "line_end" not in item:
+                raise ValueError("cached decl is missing required lines")
             decls.append(
                 ApiDeclRecord(
                     qualified_name=item["qualified_name"],
@@ -129,8 +133,12 @@ def decode_records(
                 )
             )
         elif kind == "alias":
+            if not item.get("alias") or not item.get("full"):
+                raise ValueError("cached alias is missing required fields")
             aliases.append((item["alias"], item["full"]))
         elif kind == "raw_call":
+            if not item.get("raw") or "line_start" not in item or "line_end" not in item:
+                raise ValueError("cached call is missing required fields")
             calls.append(
                 RawCall(
                     raw_callee=item["raw"],
@@ -148,6 +156,8 @@ def decode_records(
                     ),
                 )
             )
+        else:
+            raise ValueError(f"unknown cached record type: {kind!r}")
     return decls, aliases, calls
 
 

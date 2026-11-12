@@ -15,7 +15,7 @@ class LanguageConfig:
     name: str
     grammar: str
     file_suffixes: tuple[str, ...]
-    config_version: int = 1
+    config_version: int = 2
     language_fn: str = "language"
 
 
@@ -23,63 +23,63 @@ PYTHON_CONFIG = LanguageConfig(
     name="python",
     grammar="tree_sitter_python",
     file_suffixes=(".py", ".pyi"),
-    config_version=1,
+    config_version=2,
 )
 
 JAVA_CONFIG = LanguageConfig(
     name="java",
     grammar="tree_sitter_java",
     file_suffixes=(".java",),
-    config_version=1,
+    config_version=2,
 )
 
 JAVASCRIPT_CONFIG = LanguageConfig(
     name="javascript",
     grammar="tree_sitter_javascript",
     file_suffixes=(".js", ".mjs", ".cjs", ".jsx"),
-    config_version=1,
+    config_version=2,
 )
 
 RUST_CONFIG = LanguageConfig(
     name="rust",
     grammar="tree_sitter_rust",
     file_suffixes=(".rs",),
-    config_version=1,
+    config_version=2,
 )
 
 GO_CONFIG = LanguageConfig(
     name="go",
     grammar="tree_sitter_go",
     file_suffixes=(".go",),
-    config_version=1,
+    config_version=2,
 )
 
 CSHARP_CONFIG = LanguageConfig(
     name="csharp",
     grammar="tree_sitter_c_sharp",
     file_suffixes=(".cs",),
-    config_version=1,
+    config_version=2,
 )
 
 KOTLIN_CONFIG = LanguageConfig(
     name="kotlin",
     grammar="tree_sitter_kotlin",
     file_suffixes=(".kt", ".kts"),
-    config_version=1,
+    config_version=2,
 )
 
 GROOVY_CONFIG = LanguageConfig(
     name="groovy",
     grammar="tree_sitter_groovy",
     file_suffixes=(".groovy",),
-    config_version=1,
+    config_version=2,
 )
 
 TYPESCRIPT_CONFIG = LanguageConfig(
     name="typescript",
     grammar="tree_sitter_typescript",
     file_suffixes=(".ts", ".mts", ".cts", ".tsx"),
-    config_version=1,
+    config_version=2,
     language_fn="language_tsx",
 )
 
@@ -130,9 +130,37 @@ def grammar_fingerprint(cfg: LanguageConfig) -> str:
             str(cfg.config_version),
             _queries.fingerprint_fragment(cfg.name),
             ",".join(cfg.file_suffixes),
+            _rules_fingerprint(),
         ]
     )
     return hashlib.sha1(blob.encode()).hexdigest()
+
+
+_rules_digest: str | None = None
+
+
+def _rules_fingerprint() -> str:
+    """Digest of extraction rule text; logic edits invalidate cached parses."""
+    global _rules_digest
+    if _rules_digest is not None:
+        return _rules_digest
+    from pathlib import Path
+
+    base = Path(__file__).resolve().parent
+    parts: list[str] = []
+    for rel in (
+        "engine.py",
+        "context.py",
+        "rules/entities.py",
+        "rules/aliases.py",
+        "rules/text.py",
+    ):
+        try:
+            parts.append((base / rel).read_text(encoding="utf-8"))
+        except OSError:
+            parts.append("")
+    _rules_digest = hashlib.sha1("\x00".join(parts).encode()).hexdigest()
+    return _rules_digest
 
 
 def load_language(cfg: LanguageConfig):

@@ -6,11 +6,14 @@ import argparse
 
 from libref.cli.code_commands import (
     cmd_api_insight,
+    cmd_call_insight,
+    cmd_import_insight,
     cmd_index_repo,
     cmd_induce_labels,
     cmd_mine,
     cmd_pattern_insight,
     cmd_repo_deps,
+    cmd_symbol_insight,
 )
 from libref.cli.common import _config_parent
 from libref.cli.docs_commands import (
@@ -518,6 +521,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_mine.add_argument("--minlen", type=int, default=2)
     p_mine.add_argument("--cluster-threshold", type=float, default=0.15)
     p_mine.add_argument("--cluster-min-size", type=int, default=2)
+    p_mine.add_argument("--resolve-kinds", default=None)
+    p_mine.add_argument("--min-args", type=int, default=None)
+    p_mine.add_argument("--max-args", type=int, default=None)
     p_mine.add_argument(
         "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
     )
@@ -589,6 +595,47 @@ def build_parser() -> argparse.ArgumentParser:
     p_pattern.add_argument("--per-file-limit", type=int, default=None)
     p_pattern.add_argument("--no-dedup", action="store_true")
     p_pattern.set_defaults(func=cmd_pattern_insight)
+
+    p_symbol = sub.add_parser(
+        "symbol-insight", help="Symbol detail views", parents=[_config_parent]
+    )
+    p_symbol.add_argument("view", choices=["detail", "file", "children", "signature"])
+    p_symbol.add_argument("--api", default=None)
+    p_symbol.add_argument("--apis", default=None)
+    p_symbol.add_argument("--library", default=None)
+    p_symbol.add_argument("--version", default=None)
+    p_symbol.add_argument("--ecosystem", default=None)
+    p_symbol.add_argument("--limit", type=int, default=None)
+    p_symbol.add_argument("--offset", type=int, default=0)
+    p_symbol.set_defaults(func=cmd_symbol_insight)
+
+    p_call = sub.add_parser(
+        "call-insight", help="Bidirectional call views", parents=[_config_parent]
+    )
+    p_call.add_argument("view", choices=["callee", "caller", "file"])
+    p_call.add_argument("--api", default=None)
+    p_call.add_argument("--library", default=None)
+    p_call.add_argument("--version", default=None)
+    p_call.add_argument("--ecosystem", default=None)
+    p_call.add_argument("--limit", type=int, default=None)
+    p_call.add_argument("--offset", type=int, default=0)
+    p_call.add_argument("--include-ambiguous", action="store_true")
+    p_call.add_argument("--resolve-kinds", default=None)
+    p_call.add_argument("--min-args", type=int, default=None)
+    p_call.add_argument("--max-args", type=int, default=None)
+    p_call.set_defaults(func=cmd_call_insight)
+
+    p_import = sub.add_parser(
+        "import-insight", help="Import edge views", parents=[_config_parent]
+    )
+    p_import.add_argument("view", choices=["importers", "imports"])
+    p_import.add_argument("--api", default=None)
+    p_import.add_argument("--library", default=None)
+    p_import.add_argument("--version", default=None)
+    p_import.add_argument("--ecosystem", default=None)
+    p_import.add_argument("--limit", type=int, default=None)
+    p_import.add_argument("--offset", type=int, default=0)
+    p_import.set_defaults(func=cmd_import_insight)
 
     p_resolve = sub.add_parser(
         "resolve", help="Resolve a package address", parents=[_config_parent]

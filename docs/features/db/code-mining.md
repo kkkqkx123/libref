@@ -80,6 +80,7 @@
 | importer_file | TEXT NOT NULL | 导入文件 |
 | alias | TEXT NOT NULL | 本地别名 |
 | target | TEXT NOT NULL | 解析后目标 |
+| kind | TEXT NOT NULL DEFAULT 'import' | 导入形态，如 python:from、rust:use、csharp:using 等；按文件语言与别名目标关系划分 |
 | UNIQUE(version_id, importer_file, alias) | 唯一键 | 同版本同文件同别名唯一 |
 
 另有 `idx_import_edges_target(version_id, target)`、`idx_import_edges_file(version_id, importer_file)`。导入边随版本全量刷新，重建索引即重建。

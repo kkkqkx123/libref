@@ -80,6 +80,41 @@ class PatternInsightQuery(BaseModel):
     dedup: bool | None = None
 
 
+class SymbolInsightQuery(BaseModel):
+    view: Literal["detail", "file", "children", "signature"]
+    api: str | None = None
+    apis: str | None = None
+    library: str | None = None
+    version: str | None = None
+    ecosystem: str | None = None
+    limit: int | None = Field(default=None, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
+
+
+class CallInsightQuery(BaseModel):
+    view: Literal["callee", "caller", "file"]
+    api: str | None = None
+    library: str | None = None
+    version: str | None = None
+    ecosystem: str | None = None
+    limit: int | None = Field(default=None, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
+    include_ambiguous: bool = False
+    resolve_kinds: str | None = None
+    min_args: int | None = Field(default=None, ge=0)
+    max_args: int | None = Field(default=None, ge=0)
+
+
+class ImportInsightQuery(BaseModel):
+    view: Literal["importers", "imports"]
+    api: str | None = None
+    library: str | None = None
+    version: str | None = None
+    ecosystem: str | None = None
+    limit: int | None = Field(default=None, ge=1, le=500)
+    offset: int = Field(default=0, ge=0)
+
+
 class ReviewQuery(BaseModel):
     action: Literal["list", "approve", "conflict", "reopen"] = "list"
     entity_id: int | None = None
