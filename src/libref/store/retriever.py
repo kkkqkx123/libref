@@ -7,7 +7,6 @@ weighting lives in libref.mining.scoring.
 from __future__ import annotations
 
 import asyncio
-import heapq
 import json
 import sqlite3
 from typing import Any
@@ -92,13 +91,11 @@ def fts_search(
     rows = conn.execute(
         f"SELECT documents_fts.rowid, {_bm25_expr(weights)} FROM documents_fts "
         "WHERE documents_fts MATCH ? "
-        f"AND rowid IN (SELECT id FROM documents WHERE version_id IN ({marks}))",
-        [safe, *vids],
+        f"AND rowid IN (SELECT id FROM documents WHERE version_id IN ({marks})) "
+        f"ORDER BY {_bm25_expr(weights)} LIMIT ?",
+        [safe, *vids, budget],
     ).fetchall()
-    picks = heapq.nsmallest(
-        budget, ((float(s), int(i)) for i, s in rows), key=lambda kv: (kv[0], kv[1])
-    )
-    return [(doc_id, score) for score, doc_id in picks]
+    return [(int(r[0]), float(r[1])) for r in rows]
 
 
 def _fts_candidates(

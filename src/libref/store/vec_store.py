@@ -28,6 +28,10 @@ def collection_for(base: str, db_path: str | os.PathLike[str]) -> str:
     return f"{base}_{digest}"
 
 
+_WRITE_BATCH = 512
+"""Single backend call carries at most this many points; callers keep one-call semantics."""
+
+
 @runtime_checkable
 class VectorStore(Protocol):
     """Six-method surface every vector backend implements; callers stay duck-typed."""
@@ -212,18 +216,20 @@ class QdrantVecStore(VectorStore):
 
         if not points:
             return
-        self.client.upsert(
-            collection_name=self.collection,
-            points=[
-                models.PointStruct(
-                    id=doc_id,
-                    vector=embedding,
-                    payload={"library_id": library_id, "version_id": version_id},
-                )
-                for doc_id, library_id, version_id, embedding in points
-            ],
-            wait=wait,
-        )
+        for start in range(0, len(points), _WRITE_BATCH):
+            chunk = points[start : start + _WRITE_BATCH]
+            self.client.upsert(
+                collection_name=self.collection,
+                points=[
+                    models.PointStruct(
+                        id=doc_id,
+                        vector=embedding,
+                        payload={"library_id": library_id, "version_id": version_id},
+                    )
+                    for doc_id, library_id, version_id, embedding in chunk
+                ],
+                wait=wait,
+            )
 
     def delete_docs(self, doc_ids: list[int]) -> None:
         """Delete vector points for the given documents, cleaning up old points on single-page re-chunking."""
@@ -231,10 +237,13 @@ class QdrantVecStore(VectorStore):
 
         if not doc_ids:
             return
-        self.client.delete(
-            collection_name=self.collection,
-            points_selector=models.PointIdsList(points=cast(Any, doc_ids)),
-        )
+        for start in range(0, len(doc_ids), _WRITE_BATCH):
+            self.client.delete(
+                collection_name=self.collection,
+                points_selector=models.PointIdsList(
+                    points=cast(Any, doc_ids[start : start + _WRITE_BATCH])
+                ),
+            )
 
     def delete_version(self, version_id: int) -> None:
         """Delete all vector points of a version, on re-crawl of that version."""
@@ -453,23 +462,29 @@ class SimvecVecStore(VectorStore):
         """Batch-write document, library and version ids with vectors, idempotent overwrite; local writes are visible on return."""
         if not points:
             return
-        self._engine.upsert_batch(
-            self.collection,
-            [
-                {
-                    "id": _simvec_id(doc_id),
-                    "vector": list(embedding),
-                    "payload": {"library_id": library_id, "version_id": version_id},
-                }
-                for doc_id, library_id, version_id, embedding in points
-            ],
-        )
+        for start in range(0, len(points), _WRITE_BATCH):
+            chunk = points[start : start + _WRITE_BATCH]
+            self._engine.upsert_batch(
+                self.collection,
+                [
+                    {
+                        "id": _simvec_id(doc_id),
+                        "vector": list(embedding),
+                        "payload": {"library_id": library_id, "version_id": version_id},
+                    }
+                    for doc_id, library_id, version_id, embedding in chunk
+                ],
+            )
 
     def delete_docs(self, doc_ids: list[int]) -> None:
         """Delete vector points for the given documents, cleaning up old points on single-page re-chunking."""
         if not doc_ids:
             return
-        self._engine.delete_batch(self.collection, [_simvec_id(i) for i in doc_ids])
+        for start in range(0, len(doc_ids), _WRITE_BATCH):
+            self._engine.delete_batch(
+                self.collection,
+                [_simvec_id(i) for i in doc_ids[start : start + _WRITE_BATCH]],
+            )
 
     def delete_version(self, version_id: int) -> None:
         """Delete all vector points of a version, on re-crawl of that version."""

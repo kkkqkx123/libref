@@ -16,6 +16,9 @@ from typing import Any
 
 OUTCOMES = ("stored", "unchanged", "absent", "empty", "skipped", "failed")
 
+_DOC_FETCH_BATCH = 500
+"""Single query carries at most this many ids; larger sets are fetched in segments."""
+
 
 def content_hash(text: str | None) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
@@ -184,12 +187,17 @@ class DocumentStore:
         """Batch-fetch documents by id, for derived-index encoding and orphan filtering."""
         if not doc_ids:
             return []
-        marks = ",".join("?" for _ in doc_ids)
-        rows = self._conn.execute(
-            "SELECT id, library_id, version_id, url, content, metadata, sort_order "
-            f"FROM documents WHERE id IN ({marks}) ORDER BY id",
-            doc_ids,
-        ).fetchall()
+        rows = []
+        for start in range(0, len(doc_ids), _DOC_FETCH_BATCH):
+            chunk = doc_ids[start : start + _DOC_FETCH_BATCH]
+            marks = ",".join("?" for _ in chunk)
+            rows.extend(
+                self._conn.execute(
+                    "SELECT id, library_id, version_id, url, content, metadata, sort_order "
+                    f"FROM documents WHERE id IN ({marks}) ORDER BY id",
+                    chunk,
+                ).fetchall()
+            )
         found = [
             {
                 "id": r[0],
