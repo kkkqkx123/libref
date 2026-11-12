@@ -303,6 +303,7 @@ async def _index_repo_inner(
                 batch_removed,
                 batch_inserted,
                 version_id=version_id,
+                verify=False,
             )
         _beat()
     swept_calls = _sweep_calls(conn, version_id, wanted_calls)

@@ -18,6 +18,7 @@ from libref.db.schema import (
     PAGES_CONTENT_HASH_SQL,
     PATTERN_LABEL_SQL,
     PROGRESS_SQL,
+    PROGRESS_VECTOR_WATERMARK_SQL,
     QUERY_SUPPORT_SQL,
     REPO_DEPS_SQL,
     REPOS_ASTCACHE_SQL,
@@ -50,6 +51,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(13, "discovery-cache", DISCOVERY_CACHE_SQL),
     Migration(14, "repo-dependencies", REPO_DEPS_SQL),
     Migration(15, "ingest-progress", PROGRESS_SQL),
+    Migration(16, "ingest-progress-vector-watermark", PROGRESS_VECTOR_WATERMARK_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

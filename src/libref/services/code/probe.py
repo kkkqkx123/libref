@@ -1,15 +1,14 @@
 """Read-only repository probe: directory shape without parsing any file.
 
-Local paths are walked directly. Remote addresses are shallow-cloned into a
-temporary directory that is removed afterwards; no rows are written to the
-repos table and no file is ever parsed. Used by agents and humans to confirm
-the range before submitting an index job.
+Local paths are walked directly. Remote addresses resolve through
+cheapest-first tiers (reused clone, hosting API, blobless git tree, then a
+shallow clone kept in the reuse slot); no rows are written to the repos table
+and no file is ever parsed. Used by agents and humans to confirm the range
+before submitting an index job.
 """
 
 from __future__ import annotations
 
-import shutil
-import tempfile
 import time
 from pathlib import Path
 
@@ -37,6 +36,8 @@ class RepoProbe(BaseModel):
     skipped: int
     oversized: int
     truncated: bool
+    source_note: str = ""
+    sizes_known: bool = True
     subdir: str | None = None
     suffix_groups: list[SuffixGroup] = []
     top_dirs: list[DirGroup] = []
@@ -91,11 +92,10 @@ def probe_repo(
     maybe_local = Path(source)
     if maybe_local.is_dir():
         root = maybe_local.resolve()
-        kind = "local"
         census = describe_source_files(root, ast_config.all_suffixes(), subdir=subdir)
         probe = _assemble(
             source,
-            kind,
+            "local",
             census,
             max_files,
             limit,
@@ -103,45 +103,74 @@ def probe_repo(
             root,
             ast_manifests,
             ast_gradle,
+            source_note="local",
+            sizes_known=True,
         )
         _cache_put(cache_key, probe)
         return probe
-    tmp = Path(tempfile.mkdtemp(prefix="libref-probe-"))
-    try:
-        from dulwich import porcelain
+    from libref.services.code.probe_remote import acquire_remote
 
-        try:
-            porcelain.clone(source, str(tmp / "repo"), depth=1)
-        except Exception as exc:
-            raise RuntimeError(f"probe clone failed for {source}: {exc}") from exc
-        root = tmp / "repo"
-        kind = "remote"
-        census = describe_source_files(root, ast_config.all_suffixes(), subdir=subdir)
-        probe = _assemble(
+    try:
+        acquired = acquire_remote(
             source,
-            kind,
-            census,
-            max_files,
-            limit,
-            subdir,
-            root,
-            ast_manifests,
-            ast_gradle,
+            settings=settings,
+            suffixes=ast_config.all_suffixes(),
+            subdir=subdir,
         )
-        _cache_put(cache_key, probe)
-        return probe
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"probe failed for {source}: {exc}") from exc
+    if acquired.kind == "root":
+        if acquired.root is None:
+            raise RuntimeError(f"probe tier returned no data for {source}")
+        census = describe_source_files(
+            acquired.root, ast_config.all_suffixes(), subdir=subdir
+        )
+        deps_root = acquired.root
+    else:
+        if acquired.census is None:
+            raise RuntimeError(f"probe tier returned no data for {source}")
+        census = acquired.census
+        deps_root = None
+    probe = _assemble(
+        source,
+        "remote",
+        census,
+        max_files,
+        limit,
+        subdir,
+        deps_root,
+        ast_manifests,
+        ast_gradle,
+        source_note=acquired.source_note,
+        sizes_known=acquired.sizes_known,
+        truncated_extra=acquired.truncated,
+    )
+    _cache_put(cache_key, probe)
+    return probe
 
 
 def _assemble(
-    source, kind, census, max_files, limit, subdir, root, manifests, gradle
+    source,
+    kind,
+    census,
+    max_files,
+    limit,
+    subdir,
+    root,
+    manifests,
+    gradle,
+    source_note="",
+    sizes_known=True,
+    truncated_extra=False,
 ) -> RepoProbe:
     files: list[str] = list(census["files"])
     truncated = False
     if max_files is not None and len(files) > max_files:
         files = files[:max_files]
         truncated = True
+    truncated = truncated or truncated_extra
     dir_counts = dict(census["top_dirs"])
     suffix_counts = dict(census["suffix_counts"])
     top_dirs = [
@@ -152,17 +181,20 @@ def _assemble(
         SuffixGroup(suffix=k, count=v)
         for k, v in sorted(suffix_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:20]
     ]
-    try:
-        deps = [
-            {"ecosystem": d.ecosystem, "name": d.name, "req": d.req}
-            for d in manifests.manifest_dependencies(root)
-        ]
-        deps.extend(
-            {"ecosystem": d.ecosystem, "name": d.name, "req": d.req}
-            for d in gradle.gradle_dependencies(root)
-        )
-    except OSError:
+    if root is None:
         deps = []
+    else:
+        try:
+            deps = [
+                {"ecosystem": d.ecosystem, "name": d.name, "req": d.req}
+                for d in manifests.manifest_dependencies(root)
+            ]
+            deps.extend(
+                {"ecosystem": d.ecosystem, "name": d.name, "req": d.req}
+                for d in gradle.gradle_dependencies(root)
+            )
+        except OSError:
+            deps = []
     return RepoProbe(
         source=source,
         root_kind=kind,
@@ -178,4 +210,6 @@ def _assemble(
         top_dirs=top_dirs,
         samples=files[: max(0, limit)],
         manifest_deps=deps[:50],
+        source_note=source_note,
+        sizes_known=sizes_known,
     )

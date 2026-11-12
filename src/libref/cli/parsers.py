@@ -616,6 +616,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_probe_docs.add_argument("start_url")
     p_probe_docs.add_argument("--sample-limit", type=int, default=None)
     p_probe_docs.add_argument(
+        "--fetch-sample-limit",
+        type=int,
+        default=None,
+        help="Sample pages to fetch for title and content type; 0 disables",
+    )
+    p_probe_docs.add_argument(
         "--allow-cross-site", action="store_true", help="Allow crawling across sites"
     )
     p_probe_docs.add_argument(

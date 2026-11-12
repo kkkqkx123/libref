@@ -81,6 +81,7 @@ async def sync_vectors(
     *,
     version_id: int | None = None,
     repair: bool = True,
+    verify: bool = True,
 ) -> None:
     from libref.services.ops.maintenance import sync_vectors_for_docs
 
@@ -95,4 +96,5 @@ async def sync_vectors(
         inserted,
         version_id=version_id,
         repair=repair,
+        verify=verify,
     )

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 _SKIP_DIRS = frozenset(
     {
@@ -80,6 +80,52 @@ def iter_source_files(
     yield from found
 
 
+def census_of_relpaths(
+    items: list[tuple[str, int | None]],
+    *,
+    suffixes: tuple[str, ...],
+    max_file_bytes: int = 1_000_000,
+    subdir: str | None = None,
+) -> dict:
+    """File census over (relative path, size) pairs; unknown size skips the oversize check."""
+    prefix = (subdir or "").strip().strip("/")
+    wanted: list[str] = []
+    suffix_counts: dict[str, int] = {}
+    top_dirs: dict[str, int] = {}
+    skipped = 0
+    oversized = 0
+    for rel, size in items:
+        suffix = PurePosixPath(rel).suffix
+        if suffix not in suffixes:
+            continue
+        if prefix and rel != prefix and not rel.startswith(prefix + "/"):
+            continue
+        suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1
+        head = rel.split("/", 1)[0] if "/" in rel else "(root)"
+        top_dirs[head] = top_dirs.get(head, 0) + 1
+        if _should_skip(rel):
+            skipped += 1
+            continue
+        if size is None:
+            wanted.append(rel)
+            continue
+        if size < 0:
+            skipped += 1
+            continue
+        if size > max_file_bytes:
+            oversized += 1
+            continue
+        wanted.append(rel)
+    wanted.sort()
+    return {
+        "files": wanted,
+        "suffix_counts": suffix_counts,
+        "top_dirs": top_dirs,
+        "skipped": skipped,
+        "oversized": oversized,
+    }
+
+
 def describe_source_files(
     root: Path,
     suffixes: tuple[str, ...],
@@ -88,12 +134,7 @@ def describe_source_files(
     subdir: str | None = None,
 ) -> dict:
     """Read-only file census for probes: effective list plus skip and shape counters."""
-    prefix = (subdir or "").strip().strip("/")
-    wanted: list[str] = []
-    suffix_counts: dict[str, int] = {}
-    top_dirs: dict[str, int] = {}
-    skipped = 0
-    oversized = 0
+    items: list[tuple[str, int]] = []
     for path in root.rglob("*"):
         try:
             if path.is_symlink():
@@ -108,30 +149,14 @@ def describe_source_files(
             rel = path.relative_to(root).as_posix()
         except ValueError:
             continue
-        if prefix and rel != prefix and not rel.startswith(prefix + "/"):
-            continue
-        suffix_counts[path.suffix] = suffix_counts.get(path.suffix, 0) + 1
-        head = rel.split("/", 1)[0] if "/" in rel else "(root)"
-        top_dirs[head] = top_dirs.get(head, 0) + 1
-        if _should_skip(rel):
-            skipped += 1
-            continue
         try:
-            if path.stat().st_size > max_file_bytes:
-                oversized += 1
-                continue
+            size = path.stat().st_size
         except OSError:
-            skipped += 1
-            continue
-        wanted.append(rel)
-    wanted.sort()
-    return {
-        "files": wanted,
-        "suffix_counts": suffix_counts,
-        "top_dirs": top_dirs,
-        "skipped": skipped,
-        "oversized": oversized,
-    }
+            size = -1
+        items.append((rel, size))
+    return census_of_relpaths(
+        items, suffixes=suffixes, max_file_bytes=max_file_bytes, subdir=subdir
+    )
 
 
 class RepoManager:

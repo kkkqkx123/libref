@@ -463,8 +463,10 @@ class IngestService:
                 from libref.services.infra.progress import (
                     DOCS_KIND,
                     clear_progress,
+                    load_progress,
                     resume_offset,
                     save_progress,
+                    save_vector_watermark,
                 )
 
                 batch_size = max(
@@ -474,6 +476,10 @@ class IngestService:
                     self._conn, version_id, DOCS_KIND, accepted, fresh=fresh
                 )
                 counts["resumed_skipped"] = done
+                saved = load_progress(self._conn, version_id, DOCS_KIND)
+                counts["vector_done"] = (
+                    int(saved["vector_done"]) if saved is not None else 0
+                )
                 remaining = accepted[done:]
                 for start in range(0, len(remaining), batch_size):
                     batch_urls = remaining[start : start + batch_size]
@@ -492,19 +498,24 @@ class IngestService:
                         removed_all[prev_removed:],
                         inserted_all[prev_inserted:],
                         version_id=version_id,
+                        verify=False,
                     )
                     counts["vectors_ms"] += int(
                         (_time.monotonic() - vectors_start) * 1000
                     )
+                    new_done = done + start + len(batch_urls)
+                    save_vector_watermark(self._conn, version_id, DOCS_KIND, new_done)
                     save_progress(
                         self._conn,
                         version_id,
                         DOCS_KIND,
                         total=len(accepted),
-                        done=done + start + len(batch_urls),
+                        done=new_done,
                         fingerprint=fingerprint,
                         batch_size=batch_size,
+                        vector_done=new_done,
                     )
+                    counts["vector_done"] = new_done
                     _beat()
                 if follow:
                     while pending:

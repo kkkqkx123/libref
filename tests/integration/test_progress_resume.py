@@ -17,6 +17,7 @@ from libref.services.infra.progress import (
     load_progress,
     resume_offset,
     save_progress,
+    save_vector_watermark,
 )
 from tests.conftest import (
     copy_mini_repo,
@@ -140,6 +141,18 @@ def test_doc_probe_without_storing(conn, monkeypatch, tmp_path) -> None:
                     f"<url><loc>https://{host}/b</loc></url></urlset>"
                 ),
             )
+        if path == "/a":
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/html; charset=utf-8"},
+                text="<html><head><title>Alpha Guide</title></head><body>hi</body></html>",
+            )
+        if path == "/b":
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/markdown"},
+                text="# Beta\n\nbody\n",
+            )
         raise AssertionError(path)
 
     settings = make_crawler_settings(monkeypatch, tmp_path)
@@ -160,5 +173,38 @@ def test_doc_probe_without_storing(conn, monkeypatch, tmp_path) -> None:
     assert probe.accepted == 2
     assert len(probe.samples) == 2
     assert probe.source == "sitemap"
+    assert len(probe.sample_details) == 2
+    assert probe.sample_details[0].title == "Alpha Guide"
+    assert probe.sample_details[0].content_type == "text/html"
+    assert probe.sample_details[1].title == ""
+    assert all(d.error == "" for d in probe.sample_details)
     rows = conn.execute("SELECT count(*) FROM pages").fetchone()
     assert rows[0] == 0
+
+
+def test_vector_watermark_roundtrip(conn) -> None:
+    _library_id, version_id = seed_library_version(conn)
+    save_progress(
+        conn,
+        version_id,
+        DOCS_KIND,
+        total=4,
+        done=2,
+        fingerprint="fp",
+        batch_size=2,
+    )
+    saved = load_progress(conn, version_id, DOCS_KIND)
+    assert saved is not None and saved["vector_done"] == 2
+    save_vector_watermark(conn, version_id, DOCS_KIND, 3)
+    assert load_progress(conn, version_id, DOCS_KIND)["vector_done"] == 3
+    save_progress(
+        conn,
+        version_id,
+        DOCS_KIND,
+        total=4,
+        done=3,
+        fingerprint="fp",
+        batch_size=2,
+        vector_done=1,
+    )
+    assert load_progress(conn, version_id, DOCS_KIND)["vector_done"] == 1

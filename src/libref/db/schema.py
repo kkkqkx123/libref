@@ -383,3 +383,9 @@ CREATE TABLE IF NOT EXISTS ingest_progress(
   PRIMARY KEY(version_id, kind)
 );
 """
+
+# ── Vector sync watermark: records how far vector sync progressed per version ──
+PROGRESS_VECTOR_WATERMARK_SQL = """
+ALTER TABLE ingest_progress ADD COLUMN vector_done INTEGER NOT NULL DEFAULT 0;
+UPDATE ingest_progress SET vector_done = done WHERE vector_done = 0;
+"""

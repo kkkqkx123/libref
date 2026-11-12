@@ -8,10 +8,12 @@ range before submitting a scrape job.
 from __future__ import annotations
 
 import json as _json
+import re
 import time as _time
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx
 from pydantic import BaseModel
 
 from libref.crawler import RobotsChecker, UrlSeeder
@@ -21,6 +23,14 @@ from libref.services.docs.scrape_plan import plan_targets
 class PrefixGroup(BaseModel):
     prefix: str
     count: int
+
+
+class SampleFetch(BaseModel):
+    url: str
+    status: int | None = None
+    content_type: str = ""
+    title: str = ""
+    error: str = ""
 
 
 class DocProbe(BaseModel):
@@ -34,6 +44,7 @@ class DocProbe(BaseModel):
     cross_site: int
     prefix_groups: list[PrefixGroup] = []
     samples: list[str] = []
+    sample_details: list[SampleFetch] = []
     errors: dict[str, str] = {}
 
 
@@ -41,14 +52,16 @@ _DOC_PROBE_CACHE: dict[str, tuple[float, DocProbe]] = {}
 _DOC_PROBE_CACHE_CAP = 64
 
 
-def _doc_cache_key(start_url: str, scope: dict[str, Any] | None, limit: int) -> str:
+def _doc_cache_key(
+    start_url: str, scope: dict[str, Any] | None, limit: int, fetch_limit: int
+) -> str:
     try:
         scope_text = _json.dumps(
             scope or {}, sort_keys=True, ensure_ascii=False, default=str
         )
     except TypeError, ValueError:
         scope_text = str(scope)
-    return "\0".join((start_url, scope_text, str(limit)))
+    return "\0".join((start_url, scope_text, str(limit), str(fetch_limit)))
 
 
 def _doc_cache_get(key: str, ttl_hours: float) -> DocProbe | None:
@@ -67,6 +80,54 @@ def _doc_cache_put(key: str, probe: DocProbe) -> None:
         oldest = next(iter(_DOC_PROBE_CACHE))
         del _DOC_PROBE_CACHE[oldest]
     _DOC_PROBE_CACHE[key] = (_time.time(), probe)
+
+
+_TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_HEAD_READ_LIMIT = 65536
+
+
+def _title_of(head: bytes) -> str:
+    text = head.decode("utf-8", "ignore")
+    match = _TITLE_RE.search(text)
+    if match is None:
+        return ""
+    return " ".join(match.group(1).split())
+
+
+async def _fetch_sample_heads(
+    client: httpx.AsyncClient, urls: list[str], *, timeout_s: float
+) -> list[SampleFetch]:
+    """Bounded head read per URL; per-URL failures are recorded, never raised."""
+    out: list[SampleFetch] = []
+    for url in urls:
+        try:
+            async with client.stream(
+                "GET",
+                url,
+                headers={"Range": "bytes=0-65535"},
+                timeout=timeout_s,
+                follow_redirects=True,
+            ) as response:
+                content_type = (
+                    response.headers.get("content-type", "").split(";")[0].strip()
+                )
+                head = b""
+                async for chunk in response.aiter_bytes(8192):
+                    head += chunk
+                    if len(head) >= _HEAD_READ_LIMIT:
+                        break
+            title = _title_of(head) if "html" in content_type else ""
+            out.append(
+                SampleFetch(
+                    url=url,
+                    status=response.status_code,
+                    content_type=content_type,
+                    title=title,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — per-URL failures are recorded, never raised
+            out.append(SampleFetch(url=url, error=f"{type(exc).__name__}: {exc}"))
+    return out
 
 
 def _prefix_groups(urls: list[str], limit: int = 20) -> list[PrefixGroup]:
@@ -90,14 +151,25 @@ async def probe_docs_async(
     *,
     scope: dict[str, Any] | None = None,
     sample_limit: int | None = None,
+    fetch_sample_limit: int | None = None,
 ) -> DocProbe:
+    """Discover and filter only, plus an optional bounded head fetch per sample.
+
+    Never writes domain tables; the head fetch exists only to confirm titles
+    and content types before submitting a scrape job.
+    """
     """Discover and filter only; never fetches page bodies or writes domain tables."""
     from libref.crawler.http import build_async_client
 
     if not start_url.strip():
         raise ValueError("start_url is empty")
     limit = sample_limit if sample_limit is not None else settings.probe_sample_limit
-    cache_key = _doc_cache_key(start_url, scope, int(limit))
+    fetch_total = (
+        fetch_sample_limit
+        if fetch_sample_limit is not None
+        else settings.probe_fetch_sample_limit
+    )
+    cache_key = _doc_cache_key(start_url, scope, int(limit), int(fetch_total))
     cached = _doc_cache_get(
         cache_key, float(getattr(settings, "probe_cache_ttl_hours", 1.0) or 0.0)
     )
@@ -116,7 +188,18 @@ async def probe_docs_async(
             cache_ttl_hours=settings.probe_cache_ttl_hours,
         )
         seed = await seeder.discover(start_url)
-    accepted, rejected, truncated, _stats = plan_targets(seed, start_url, scope, None)
+        accepted, rejected, truncated, _stats = plan_targets(
+            seed, start_url, scope, None
+        )
+        fetch_urls = list(accepted[: max(0, int(limit))])[: max(0, int(fetch_total))]
+        if fetch_urls:
+            details = await _fetch_sample_heads(
+                client,
+                fetch_urls,
+                timeout_s=float(getattr(settings, "probe_fetch_timeout", 10.0) or 10.0),
+            )
+        else:
+            details = []
     probe = DocProbe(
         start_url=start_url,
         source=seed.source,
@@ -128,6 +211,7 @@ async def probe_docs_async(
         cross_site=len(seed.cross_site),
         prefix_groups=_prefix_groups(accepted),
         samples=list(accepted[: max(0, int(limit))]),
+        sample_details=details,
         errors=dict(seed.errors),
     )
     _doc_cache_put(cache_key, probe)
@@ -141,11 +225,17 @@ def probe_docs(
     *,
     scope: dict[str, Any] | None = None,
     sample_limit: int | None = None,
+    fetch_sample_limit: int | None = None,
 ) -> DocProbe:
     import asyncio
 
     return asyncio.run(
         probe_docs_async(
-            conn, settings, start_url, scope=scope, sample_limit=sample_limit
+            conn,
+            settings,
+            start_url,
+            scope=scope,
+            sample_limit=sample_limit,
+            fetch_sample_limit=fetch_sample_limit,
         )
     )

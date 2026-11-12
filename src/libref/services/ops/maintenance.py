@@ -253,11 +253,14 @@ async def sync_vectors_for_docs(
     *,
     version_id: int | None = None,
     repair: bool = True,
+    verify: bool = True,
 ) -> None:
     """Sync the scrape delta, then verify the version by set and repair drift.
 
     Crash leftovers surface as set mismatches and are repaired here or at the
     next run of the same version; vector failures are recorded, never fatal.
+    With verify disabled only the delta is pushed plus a cheap count read-back;
+    set verification and drift rebuild are deferred to the closing call.
     """
     if vec_store is None or embed is None:
         return
@@ -273,7 +276,11 @@ async def sync_vectors_for_docs(
         )
         logger.warning("vector ensure collection failed: %s", exc)
         return
-    if version_id is not None and _version_drifted(conn, version_id, model, dim):
+    if (
+        verify
+        and version_id is not None
+        and _version_drifted(conn, version_id, model, dim)
+    ):
         try:
             stats = await reconcile_version(
                 conn, settings, vec_store, embed, version_id
@@ -290,7 +297,7 @@ async def sync_vectors_for_docs(
         )
         return
     if not removed and not inserted:
-        if version_id is not None:
+        if version_id is not None and verify:
             await _verify_version(
                 conn, settings, vec_store, embed, counts, version_id, repair=repair
             )
@@ -322,16 +329,23 @@ async def sync_vectors_for_docs(
         points = await _embed_rows(rows, settings, embed)
         if points:
             vec_store.upsert_batch(points)
-        if version_id is not None:
+        if version_id is not None and verify:
             _record_version(conn, version_id, model, dim)
     except Exception as exc:  # noqa: BLE001 — vector failures are recorded, not fatal
         counts["vector_failed"] = counts.get("vector_failed", 0) + len(inserted)
         logger.warning("vector upsert failed: %s", exc)
         return
     if version_id is not None:
-        await _verify_version(
-            conn, settings, vec_store, embed, counts, version_id, repair=repair
-        )
+        if verify:
+            await _verify_version(
+                conn, settings, vec_store, embed, counts, version_id, repair=repair
+            )
+        else:
+            try:
+                counts["vector_count"] = int(vec_store.count(version_id))
+            except Exception as exc:  # noqa: BLE001 — read-back failure counts, repair is deferred
+                counts["vector_failed"] = counts.get("vector_failed", 0) + 1
+                logger.warning("vector count read-back failed: %s", exc)
 
 
 async def _verify_version(

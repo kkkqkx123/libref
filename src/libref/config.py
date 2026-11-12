@@ -63,6 +63,10 @@ class LibrefSettings(BaseSettings):
     index_batch_files: int = Field(default=200, ge=1)
     probe_sample_limit: int = Field(default=20, ge=1)
     probe_cache_ttl_hours: float = Field(default=1.0, ge=0)
+    # Probe sampling: how many discovered pages get a bounded head fetch for
+    # title and content type (0 disables), plus the per-fetch timeout.
+    probe_fetch_sample_limit: int = Field(default=5, ge=0)
+    probe_fetch_timeout: float = Field(default=10.0, gt=0)
     user_agent: str = "libref-crawler/0.1"
     # Scrape-path proxy: explicit values beat standard env vars; httpx default env detection applies when unset.
     # Proxy bypass defaults include local loopback; explicit values beat the NO_PROXY env var.
@@ -271,6 +275,8 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "index_batch_files",
             "probe_sample_limit",
             "probe_cache_ttl_hours",
+            "probe_fetch_sample_limit",
+            "probe_fetch_timeout",
         }
     ),
     "storage": frozenset(

@@ -18,6 +18,13 @@ CODE_KIND = "code"
 
 def ensure_progress_table(conn: sqlite3.Connection) -> None:
     conn.executescript(PROGRESS_SQL)
+    cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(ingest_progress)").fetchall()
+    }
+    if "vector_done" not in cols:
+        conn.execute(
+            "ALTER TABLE ingest_progress ADD COLUMN vector_done INTEGER NOT NULL DEFAULT 0"
+        )
     conn.commit()
 
 
@@ -34,7 +41,7 @@ def load_progress(
 ) -> dict[str, int | str] | None:
     ensure_progress_table(conn)
     row = conn.execute(
-        "SELECT total, done, fingerprint, batch_size FROM ingest_progress"
+        "SELECT total, done, fingerprint, batch_size, vector_done FROM ingest_progress"
         " WHERE version_id=? AND kind=?",
         (version_id, kind),
     ).fetchone()
@@ -45,6 +52,7 @@ def load_progress(
         "done": int(row[1]),
         "fingerprint": str(row[2]),
         "batch_size": int(row[3]),
+        "vector_done": int(row[4]),
     }
 
 
@@ -57,19 +65,40 @@ def save_progress(
     done: int,
     fingerprint: str,
     batch_size: int,
+    vector_done: int | None = None,
 ) -> None:
+    """Persist the resume cursor; an absent watermark implies the cursor."""
+    from libref.db.conn import write_lock
+
+    watermark = done if vector_done is None else vector_done
+    ensure_progress_table(conn)
+    with write_lock(conn):
+        conn.execute(
+            "INSERT INTO ingest_progress(version_id, kind, total, done,"
+            " fingerprint, batch_size, vector_done) VALUES(?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(version_id, kind) DO UPDATE SET total=excluded.total,"
+            " done=excluded.done, fingerprint=excluded.fingerprint,"
+            " batch_size=excluded.batch_size, vector_done=excluded.vector_done,"
+            " updated_at=datetime('now')",
+            (version_id, kind, total, done, fingerprint, batch_size, watermark),
+        )
+        conn.commit()
+
+
+def save_vector_watermark(
+    conn: sqlite3.Connection, version_id: int, kind: str, vector_done: int
+) -> None:
+    """Record vector progress ahead of the cursor; the cursor follows afterwards."""
     from libref.db.conn import write_lock
 
     ensure_progress_table(conn)
     with write_lock(conn):
         conn.execute(
-            "INSERT INTO ingest_progress(version_id, kind, total, done,"
-            " fingerprint, batch_size) VALUES(?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(version_id, kind) DO UPDATE SET total=excluded.total,"
-            " done=excluded.done, fingerprint=excluded.fingerprint,"
-            " batch_size=excluded.batch_size,"
-            " updated_at=datetime('now')",
-            (version_id, kind, total, done, fingerprint, batch_size),
+            "INSERT INTO ingest_progress(version_id, kind, vector_done)"
+            " VALUES(?, ?, ?)"
+            " ON CONFLICT(version_id, kind) DO UPDATE"
+            " SET vector_done=excluded.vector_done, updated_at=datetime('now')",
+            (version_id, kind, vector_done),
         )
         conn.commit()
 

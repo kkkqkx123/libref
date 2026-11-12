@@ -323,11 +323,15 @@ def build_mcp_server(
         start_url: str,
         sample_limit: int | None = None,
         scope: dict[str, Any] | None = None,
+        fetch_sample_limit: int | None = None,
     ) -> dict[str, Any]:
         """Probe a documentation site structure without storing; confirm the range before scraping."""
         if not start_url.strip():
             return _invalid("start_url is empty")
         bad = _check_limit(sample_limit, low=1, high=100)
+        if bad is not None:
+            return _invalid(bad)
+        bad = _check_limit(fetch_sample_limit, low=0, high=100)
         if bad is not None:
             return _invalid(bad)
         if scope is not None and not isinstance(scope, dict):
@@ -339,6 +343,7 @@ def build_mcp_server(
                 start_url,
                 scope=scope,
                 sample_limit=sample_limit,
+                fetch_sample_limit=fetch_sample_limit,
             )
         except ValueError as exc:
             return _invalid(str(exc))
