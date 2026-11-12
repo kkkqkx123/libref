@@ -176,7 +176,7 @@ def resolve_calls(
     for call in ordered:
         alias_map = alias_per_file.get(call.caller_file, {})
         same_file = by_file.get(call.caller_file, set())
-        resolved, confidence = resolve_one(
+        resolved, confidence, resolve_kind = resolve_one(
             call.raw_callee,
             call.caller,
             declared,
@@ -210,6 +210,7 @@ def resolve_calls(
                 argument_count=call.argument_count,
                 call_order=order_counter[scope],
                 confidence=confidence,
+                resolve_kind=resolve_kind,
                 repo=repo,
                 commit_sha=commit_sha,
             )
@@ -231,59 +232,59 @@ def resolve_one(
     suffix_index: dict[str, list[str]] | None = None,
     bases_by_qual: dict[str, list[str]] | None = None,
     return_by_qual: dict[str, str] | None = None,
-) -> tuple[str, Confidence]:
+) -> tuple[str, Confidence, str]:
     if not raw:
-        return raw, "AMBIGUOUS"
+        return raw, "AMBIGUOUS", "unresolved"
     index = suffix_index if suffix_index is not None else _build_suffix_index(declared)
     head, _, _rest = raw.partition(".")
     if is_builtin_bare(raw, alias_map, language) and raw not in same_file:
-        return raw, "AMBIGUOUS"
+        return raw, "AMBIGUOUS", "builtin"
     if (
         "." not in raw
         and caller
         and params_by_qual is not None
         and _shadowed_by_param(raw, caller, parent_by_qual, params_by_qual)
     ):
-        return raw, "AMBIGUOUS"
+        return raw, "AMBIGUOUS", "param-shadowed"
     expanded = _expand_alias(raw, alias_map)
     if expanded is not None:
         resolved = expanded
         if resolved in declared:
-            return resolved, "EXTRACTED"
+            return resolved, "EXTRACTED", "alias-direct"
         suffixed = index.get(resolved, [])
         if len(suffixed) == 1 and suffixed[0] in same_file:
-            return suffixed[0], "EXTRACTED"
+            return suffixed[0], "EXTRACTED", "alias-suffix"
         if _is_stdlib_target(resolved):
-            return resolved, "AMBIGUOUS"
+            return resolved, "AMBIGUOUS", "stdlib"
         rewritten = _rewrite_factory_head(
             resolved, declared, index, same_file, return_by_qual or {}
         )
         if rewritten is not None and rewritten != resolved:
             resolved = rewritten
             if resolved in declared:
-                return resolved, "EXTRACTED"
+                return resolved, "EXTRACTED", "factory"
             suffixed = index.get(resolved, [])
             if len(suffixed) == 1:
                 if suffixed[0] in same_file:
-                    return suffixed[0], "EXTRACTED"
-                return suffixed[0], "INFERRED"
+                    return suffixed[0], "EXTRACTED", "factory"
+                return suffixed[0], "INFERRED", "factory"
         raw_hits = index.get(raw, [])
         if len(raw_hits) == 1:
             if raw_hits[0] in same_file:
-                return raw_hits[0], "EXTRACTED"
-            return raw_hits[0], "INFERRED"
-        return resolved, "INFERRED"
+                return raw_hits[0], "EXTRACTED", "suffix"
+            return raw_hits[0], "INFERRED", "suffix"
+        return resolved, "INFERRED", "alias-direct"
     if head in _SELF_HEADS and caller:
         base = caller.rpartition(".")[0] if "." in caller else caller
         resolved = (base + raw[len(head) :]) if base else raw
         if resolved in declared:
-            return resolved, "EXTRACTED"
+            return resolved, "EXTRACTED", "self-direct"
         inherited = _resolve_self_via_bases(
             base, raw[len(head) :], declared, bases_by_qual or {}, index, same_file
         )
         if inherited is not None:
-            return inherited, "EXTRACTED"
-        return resolved, "AMBIGUOUS"
+            return inherited, "EXTRACTED", "self-inherited"
+        return resolved, "AMBIGUOUS", "unresolved"
     if (
         "." in raw
         and head not in alias_map
@@ -300,23 +301,27 @@ def resolve_one(
             index,
         )
         if typed is not None:
-            return typed
+            return typed[0], typed[1], "receiver-type"
     candidates = list(index.get(raw, []))
     if not candidates:
-        return raw, "AMBIGUOUS"
+        return raw, "AMBIGUOUS", "unresolved"
     same_hits = [q for q in candidates if q in same_file]
     if len(same_hits) == 1:
-        return same_hits[0], "EXTRACTED"
+        return same_hits[0], "EXTRACTED", "same-file"
     if len(same_hits) > 1:
         candidates = same_hits
     elif raw in same_file:
-        return raw, "EXTRACTED"
+        return raw, "EXTRACTED", "same-file"
     picked = _disambiguate(candidates, caller, parent_by_qual)
     if picked is None:
-        return raw, "AMBIGUOUS"
+        return raw, "AMBIGUOUS", "unresolved"
+    if len(candidates) == 1:
+        if picked == raw or picked in same_file:
+            return picked, "EXTRACTED", "suffix"
+        return picked, "INFERRED", "suffix"
     if picked == raw or picked in same_file:
-        return picked, "EXTRACTED"
-    return picked, "INFERRED"
+        return picked, "EXTRACTED", "scope"
+    return picked, "INFERRED", "scope"
 
 
 def _close_reexports(alias_per_file: dict[str, dict[str, str]]) -> None:

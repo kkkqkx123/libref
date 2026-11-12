@@ -57,7 +57,7 @@ def _load_kept_calls(conn, version_id: int, *, include_ambiguous: bool = False):
     """Single shared scan of one version's calls with review filtering applied."""
     rows = conn.execute(
         "SELECT callee_name, caller_file, caller, confidence, id,"
-        " line_start, call_order, start_byte FROM call_instances"
+        " line_start, call_order, start_byte, resolve_kind FROM call_instances"
         " WHERE version_id=?",
         (version_id,),
     ).fetchall()
@@ -110,14 +110,13 @@ def refresh_feature_tree(
     if not calls:
         conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
         return 0
-    kinds = {
-        str(r[0]): str(r[1])
-        for r in conn.execute(
-            "SELECT qualified_name, kind FROM api_entities WHERE version_id=?",
-            (version_id,),
-        ).fetchall()
-    }
-    nodes = _tree.build_feature_tree(calls, kinds)
+    entity_rows = conn.execute(
+        "SELECT qualified_name, kind, parent FROM api_entities WHERE version_id=?",
+        (version_id,),
+    ).fetchall()
+    kinds = {str(r[0]): str(r[1]) for r in entity_rows}
+    parents = {str(r[0]): (str(r[2]) if r[2] else None) for r in entity_rows}
+    nodes = _tree.build_feature_tree(calls, kinds, parents)
     wanted = [n["path"] for n in nodes]
     conn.executemany(
         "INSERT INTO feature_nodes(library_id, version_id, path, parent, depth, kind, calls, scopes)"
@@ -223,7 +222,17 @@ def mine_patterns(
         conn.commit()
         return []
     groups: dict[str, list[tuple[int, int, int, int, str]]] = {}
-    for callee, caller_file, caller, _conf, row_id, line_start, order, start in rows:
+    for (
+        callee,
+        caller_file,
+        caller,
+        _conf,
+        row_id,
+        line_start,
+        order,
+        start,
+        _rk,
+    ) in rows:
         if caller is None or not str(caller).strip():
             continue
         key = _scope_key(str(caller_file), caller)

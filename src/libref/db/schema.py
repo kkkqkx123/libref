@@ -384,6 +384,41 @@ CREATE TABLE IF NOT EXISTS ingest_progress(
 );
 """
 
+# ── Symbol detail: file location plus semantic columns already extracted upstream ──
+SYMBOL_DETAIL_SQL = """
+ALTER TABLE api_entities ADD COLUMN file TEXT NOT NULL DEFAULT '';
+ALTER TABLE api_entities ADD COLUMN line_start INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE api_entities ADD COLUMN line_end INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE api_entities ADD COLUMN param_types JSON NOT NULL DEFAULT '[]';
+ALTER TABLE api_entities ADD COLUMN return_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE api_entities ADD COLUMN has_doc INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_api_entities_file ON api_entities(version_id, file);
+"""
+
+# ── Call resolution provenance: how each call was resolved plus caller linkage ──
+CALL_RESOLVE_SQL = """
+ALTER TABLE call_instances ADD COLUMN resolve_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE call_instances ADD COLUMN caller_entity_id INTEGER REFERENCES api_entities(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_call_instances_caller ON call_instances(caller_entity_id);
+CREATE INDEX IF NOT EXISTS idx_call_instances_resolve ON call_instances(version_id, resolve_kind);
+"""
+
+# ── File import edges: alias targets observed by the parser, rebuilt on every index ──
+IMPORT_EDGES_SQL = """
+CREATE TABLE import_edges(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  importer_file TEXT NOT NULL,
+  alias TEXT NOT NULL,
+  target TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'import',
+  UNIQUE(version_id, importer_file, alias)
+);
+CREATE INDEX IF NOT EXISTS idx_import_edges_target ON import_edges(version_id, target);
+CREATE INDEX IF NOT EXISTS idx_import_edges_file ON import_edges(version_id, importer_file);
+"""
+
 # ── Vector sync watermark: records how far vector sync progressed per version ──
 PROGRESS_VECTOR_WATERMARK_SQL = """
 ALTER TABLE ingest_progress ADD COLUMN vector_done INTEGER NOT NULL DEFAULT 0;

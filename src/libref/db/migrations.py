@@ -8,10 +8,12 @@ from dataclasses import dataclass
 
 from libref.db.schema import (
     AST_CHUNK_RELATION_SQL,
+    CALL_RESOLVE_SQL,
     CALL_SCOPE_SQL,
     DISCOVERY_CACHE_SQL,
     FEATURE_TREE_CLUSTER_SQL,
     GOVERNANCE_SQL,
+    IMPORT_EDGES_SQL,
     INITIAL_SCHEMA_SQL,
     MINING_PROVENANCE_INDEX_SQL,
     MINING_REVIEW_SCHEMA_SQL,
@@ -22,6 +24,7 @@ from libref.db.schema import (
     QUERY_SUPPORT_SQL,
     REPO_DEPS_SQL,
     REPOS_ASTCACHE_SQL,
+    SYMBOL_DETAIL_SQL,
     VEC_VERSION_META_SQL,
     VECTOR_META_SQL,
 )
@@ -52,6 +55,9 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(14, "repo-dependencies", REPO_DEPS_SQL),
     Migration(15, "ingest-progress", PROGRESS_SQL),
     Migration(16, "ingest-progress-vector-watermark", PROGRESS_VECTOR_WATERMARK_SQL),
+    Migration(17, "symbol-detail", SYMBOL_DETAIL_SQL),
+    Migration(18, "call-resolve", CALL_RESOLVE_SQL),
+    Migration(19, "import-edges", IMPORT_EDGES_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

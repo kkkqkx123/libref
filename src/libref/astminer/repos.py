@@ -134,7 +134,7 @@ def describe_source_files(
     subdir: str | None = None,
 ) -> dict:
     """Read-only file census for probes: effective list plus skip and shape counters."""
-    items: list[tuple[str, int]] = []
+    items: list[tuple[str, int | None]] = []
     for path in root.rglob("*"):
         try:
             if path.is_symlink():

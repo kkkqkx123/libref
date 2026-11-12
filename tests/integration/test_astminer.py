@@ -231,7 +231,7 @@ def test_tie_without_signal_is_ambiguous(monkeypatch, tmp_path):
     decls = decls_a + decls_b
     declared = {d.qualified_name for d in decls}
     parent_map = {d.qualified_name: d.parent for d in decls}
-    callee, conf = ast_resolution.resolve_one(
+    callee, conf, _kind = ast_resolution.resolve_one(
         "foo",
         "c.call",
         declared,

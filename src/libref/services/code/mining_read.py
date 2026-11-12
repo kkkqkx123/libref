@@ -70,6 +70,7 @@ def _render_evidence(
             "callee": str(call.get("callee") or ""),
             "lines": f"{call.get('line_start')}-{call.get('line_end')}",
             "confidence": str(call.get("confidence") or ""),
+            "resolve": str(call.get("resolve_kind") or ""),
             "hit": "true" if idx in set(matched) else "false",
         }
         parts.append(call_tag(attrs, body))
@@ -364,7 +365,7 @@ class MiningReadService:
         rows = self._conn.execute(
             "SELECT ci.version_id, l.name, v.version, ci.caller_file, ci.caller,"
             " ci.callee_name, ci.args, ci.line_start, ci.line_end, ci.confidence,"
-            " ci.call_order, ci.start_byte, ci.id"
+            " ci.call_order, ci.start_byte, ci.id, ci.resolve_kind"
             " FROM call_instances ci LEFT JOIN review_status rs "
             "ON rs.entity_type='call_instance' AND rs.entity_id=ci.id"
             " JOIN versions v ON v.id = ci.version_id"
@@ -377,7 +378,22 @@ class MiningReadService:
         ).fetchall()
         groups: dict[tuple, dict[str, Any]] = {}
         order: list[tuple] = []
-        for vid, lib, ver, path, caller, callee, args, ls, le, cf, _o, _s, _i in rows:
+        for (
+            vid,
+            lib,
+            ver,
+            path,
+            caller,
+            callee,
+            args,
+            ls,
+            le,
+            cf,
+            _o,
+            _s,
+            _i,
+            rk,
+        ) in rows:
             key = (vid, path, caller or "")
             slot = groups.get(key)
             if slot is None:
@@ -401,6 +417,7 @@ class MiningReadService:
                     "line_start": ls,
                     "line_end": le,
                     "confidence": cf,
+                    "resolve_kind": rk,
                 }
             )
         out = []
@@ -413,6 +430,7 @@ class MiningReadService:
             groups[key]["matched"] = matched
             groups[key]["rendered"] = _render_evidence(groups[key], calls, matched)
             out.append(groups[key])
+        self._attach_signatures(out, vids)
         from libref.config import setting_or_default
         from libref.mining.idiom import deduplicate_evidence, synthesize_snippet
 
@@ -453,7 +471,130 @@ class MiningReadService:
         clusters = self.api_clusters(
             library=library, version=version, ecosystem=ecosystem, limit=100000
         )
-        return reuse_diversity(patterns, clusters)
+        health = reuse_diversity(patterns, clusters)
+        health["resolve_kinds"] = self.resolve_distribution(library, version, ecosystem)
+        return health
+
+    def resolve_distribution(
+        self,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+    ) -> dict[str, int]:
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids:
+            return {}
+        placeholders = ",".join("?" for _ in vids)
+        try:
+            rows = self._conn.execute(
+                "SELECT resolve_kind, count(*) FROM call_instances"
+                f" WHERE version_id IN ({placeholders}) GROUP BY resolve_kind",
+                tuple(vids),
+            ).fetchall()
+        except Exception:  # noqa: BLE001
+            return {}
+        return {str(k or ""): int(c) for k, c in rows}
+
+    def signatures_for(
+        self,
+        apis: list[str],
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids or not apis:
+            return {}
+        placeholders = ",".join("?" for _ in vids)
+        marks = ",".join("?" for _ in apis)
+        rows = self._conn.execute(
+            "SELECT qualified_name, kind, signature, params, return_type"
+            " FROM api_entities"
+            f" WHERE version_id IN ({placeholders}) AND qualified_name IN ({marks})",
+            (*vids, *apis),
+        ).fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for qual, kind, sig, params, ret in rows:
+            try:
+                parsed = json.loads(params) if params else []
+            except ValueError:
+                parsed = []
+            out.setdefault(str(qual), {})[str(kind)] = {
+                "signature": sig or "",
+                "params": parsed,
+                "return_type": ret or "",
+            }
+        return out
+
+    def _attach_signatures(self, groups: list[dict[str, Any]], vids: list[int]) -> None:
+        wanted: set[str] = set()
+        for group in groups:
+            for call in group.get("calls") or []:
+                name = str(call.get("callee") or "")
+                if name:
+                    wanted.add(name)
+            caller = str(group.get("caller") or "")
+            if caller:
+                wanted.add(caller)
+        if not wanted:
+            return
+        placeholders = ",".join("?" for _ in vids)
+        marks = ",".join("?" for _ in sorted(wanted))
+        try:
+            rows = self._conn.execute(
+                "SELECT qualified_name, signature FROM api_entities"
+                f" WHERE version_id IN ({placeholders}) AND qualified_name IN ({marks})",
+                (*vids, *sorted(wanted)),
+            ).fetchall()
+        except Exception:  # noqa: BLE001 -- signature join is advisory for evidence rendering
+            return
+        sigs = {str(r[0]): str(r[1] or "") for r in rows}
+        for group in groups:
+            for call in group.get("calls") or []:
+                sig = sigs.get(str(call.get("callee") or ""))
+                if sig:
+                    call["callee_signature"] = sig
+            caller = str(group.get("caller") or "")
+            if caller and sigs.get(caller):
+                group["caller_signature"] = sigs[caller]
+
+    def importers_of(
+        self,
+        target: str,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids or not target:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        rows = self._conn.execute(
+            "SELECT importer_file, alias, target FROM import_edges"
+            f" WHERE version_id IN ({placeholders}) AND target = ? LIMIT ?",
+            (*vids, target, limit),
+        ).fetchall()
+        return [{"importer_file": r[0], "alias": r[1], "target": r[2]} for r in rows]
+
+    def imports_of_file(
+        self,
+        importer_file: str,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        if not vids or not importer_file:
+            return []
+        placeholders = ",".join("?" for _ in vids)
+        rows = self._conn.execute(
+            "SELECT importer_file, alias, target FROM import_edges"
+            f" WHERE version_id IN ({placeholders}) AND importer_file = ? LIMIT ?",
+            (*vids, importer_file, limit),
+        ).fetchall()
+        return [{"importer_file": r[0], "alias": r[1], "target": r[2]} for r in rows]
 
     def list_labels(
         self,

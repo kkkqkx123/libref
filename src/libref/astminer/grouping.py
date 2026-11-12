@@ -49,8 +49,8 @@ def build_groups(decls, source: bytes, path: str) -> list[EntityGroup]:
     for decl in decls:
         if decl.parent is not None:
             children.setdefault(decl.parent, []).append(decl)
-    for members in children.values():
-        members.sort(key=lambda d: (d.start_byte, -d.end_byte))
+    for existing in children.values():
+        existing.sort(key=lambda d: (d.start_byte, -d.end_byte))
     groups: list[EntityGroup] = []
     first_start = min((d.start_byte for d in anchors), default=0)
     head_text = source[:first_start].decode("utf-8", "replace").strip()

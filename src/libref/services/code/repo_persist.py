@@ -21,11 +21,14 @@ def _persist_entities(
     conn.executemany(
         "INSERT INTO api_entities(entity_uid, library_id, version_id,"
         " qualified_name, kind, parent, signature, params, bases,"
-        " start_byte, end_byte, depth) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        " start_byte, end_byte, depth, file, line_start, line_end,"
+        " param_types, return_type, has_doc) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         " ON CONFLICT(entity_uid) DO UPDATE SET parent=excluded.parent,"
         " signature=excluded.signature, params=excluded.params, bases=excluded.bases,"
         " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
-        " depth=excluded.depth",
+        " depth=excluded.depth, file=excluded.file, line_start=excluded.line_start,"
+        " line_end=excluded.line_end, param_types=excluded.param_types,"
+        " return_type=excluded.return_type, has_doc=excluded.has_doc",
         [
             (
                 entity_uid(version_id, qualified_name, kind),
@@ -40,6 +43,12 @@ def _persist_entities(
                 decl.start_byte,
                 decl.end_byte,
                 decl.depth,
+                decl.file,
+                decl.line_start,
+                decl.line_end,
+                _decl_json.dumps(list(decl.param_types), ensure_ascii=False),
+                decl.return_type,
+                1 if decl.has_doc else 0,
             )
             for (qualified_name, kind), decl in pending.items()
         ],
@@ -91,8 +100,9 @@ def _upsert_calls(
         uid = call_uid(
             call.repo,
             call.caller_file,
-            call.line_start,
-            call.line_end,
+            call.caller,
+            call.start_byte,
+            call.end_byte,
             call.callee,
             list(call.args),
         )
@@ -102,6 +112,12 @@ def _upsert_calls(
             ent_id = entity_ids.get(f"{call.callee}|{kind}")
             if ent_id is not None:
                 break
+        caller_ent_id = None
+        if call.caller:
+            for kind in kinds:
+                caller_ent_id = entity_ids.get(f"{call.caller}|{kind}")
+                if caller_ent_id is not None:
+                    break
         batch.append(
             (
                 uid,
@@ -124,6 +140,8 @@ def _upsert_calls(
                 call.end_byte,
                 commit_sha or call.commit_sha,
                 _scope_key(str(call.caller_file), call.caller),
+                call.resolve_kind,
+                caller_ent_id,
             )
         )
         needs_review = call.confidence == "AMBIGUOUS" or (
@@ -136,8 +154,9 @@ def _upsert_calls(
             "INSERT INTO call_instances(call_uid, callee_entity_id, callee_name, args,"
             " repo, caller_file, line_start, line_end, confidence,"
             " library_id, version_id, caller, receiver, func, argument_count,"
-            " call_order, start_byte, end_byte, commit_sha, scope)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " call_order, start_byte, end_byte, commit_sha, scope,"
+            " resolve_kind, caller_entity_id)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(call_uid) DO UPDATE SET callee_entity_id=excluded.callee_entity_id,"
             " callee_name=excluded.callee_name, args=excluded.args,"
             " confidence=excluded.confidence, library_id=excluded.library_id,"
@@ -145,7 +164,8 @@ def _upsert_calls(
             " receiver=excluded.receiver, func=excluded.func,"
             " argument_count=excluded.argument_count, call_order=excluded.call_order,"
             " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
-            " commit_sha=excluded.commit_sha, scope=excluded.scope",
+            " commit_sha=excluded.commit_sha, scope=excluded.scope,"
+            " resolve_kind=excluded.resolve_kind, caller_entity_id=excluded.caller_entity_id",
             batch,
         )
     if review_uids:
@@ -204,6 +224,28 @@ def _persist_calls(
     """Upsert plus version-level sweep; batched ingest calls _upsert_calls per batch instead."""
     count, wanted = _upsert_calls(conn, library_id, version_id, resolved, commit_sha)
     return count, _sweep_calls(conn, version_id, wanted)
+
+
+def _persist_import_edges(conn, library_id: int, version_id: int, file_aliases) -> int:
+    rows: list[tuple] = []
+    for importer_file, items in (file_aliases or {}).items():
+        seen: set[str] = set()
+        for alias, target in items:
+            if not alias or not target or alias in seen:
+                continue
+            seen.add(alias)
+            rows.append(
+                (library_id, version_id, importer_file, alias, target, "import")
+            )
+    conn.execute("DELETE FROM import_edges WHERE version_id=?", (version_id,))
+    if rows:
+        conn.executemany(
+            "INSERT INTO import_edges(library_id, version_id, importer_file, alias, target, kind)"
+            " VALUES(?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(version_id, importer_file, alias) DO UPDATE SET target=excluded.target",
+            rows,
+        )
+    return len(rows)
 
 
 def _check_manifest_identity(ecosystem: str, library: str, root) -> None:

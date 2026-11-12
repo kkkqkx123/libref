@@ -17,6 +17,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -115,14 +116,15 @@ async def _github_census(
         body = tree.json()
     except ValueError:
         return None
-    items = []
+    items: list[tuple[str, int | None]] = []
     for entry in body.get("tree") or []:
         if not isinstance(entry, dict) or entry.get("type") != "blob":
             continue
         path = entry.get("path")
         if not isinstance(path, str) or not path:
             continue
-        items.append((path, entry.get("size")))
+        size = entry.get("size")
+        items.append((path, size if isinstance(size, int) else None))
     census = census_of_relpaths(items, suffixes=suffixes, subdir=subdir)
     return census, bool(body.get("truncated")), True
 
@@ -133,7 +135,7 @@ async def _gitlab_census(
     from libref.astminer.repos import census_of_relpaths
 
     headers = {"Accept": "application/json", "User-Agent": "libref-probe/0.1"}
-    items = []
+    items: list[tuple[str, int | None]] = []
     truncated = False
     async with httpx.AsyncClient(
         base_url=f"https://{host}", timeout=timeout, headers=headers
@@ -203,7 +205,9 @@ async def _hosting_census(
         return None
 
 
-def _collect_tree(repo, tree_sha, prefix: str, out: list) -> None:
+def _collect_tree(
+    repo, tree_sha, prefix: str, out: list[tuple[str, int | None]]
+) -> None:
     tree = repo[tree_sha]
     for entry in tree.items():
         name = entry.path.decode("utf-8", "replace")
@@ -232,9 +236,9 @@ def git_tree_census(source: str, *, suffixes, subdir) -> dict | None:
             from dulwich.repo import Repo
 
             repo = Repo(str(tmp / "repo"))
-            commit = repo[repo.head()]
-            out: list[tuple[str, None]] = []
-            _collect_tree(repo, commit.tree, "", out)
+            head_commit: Any = repo[repo.head()]
+            out: list[tuple[str, int | None]] = []
+            _collect_tree(repo, head_commit.tree, "", out)
         except Exception:  # noqa: BLE001 — unreadable trees degrade to the next tier
             return None
         from libref.astminer.repos import census_of_relpaths

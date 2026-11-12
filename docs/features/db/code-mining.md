@@ -19,16 +19,22 @@
 | start_byte | INTEGER NOT NULL DEFAULT 0 | 起始字节（版本 5 列） |
 | end_byte | INTEGER NOT NULL DEFAULT 0 | 结束字节（版本 5 列） |
 | depth | INTEGER NOT NULL DEFAULT 0 | 深度（版本 5 列） |
+| file | TEXT NOT NULL DEFAULT \'\' | 定义文件（版本 17 列） |
+| line_start | INTEGER NOT NULL DEFAULT 1 | 起始行（版本 17 列） |
+| line_end | INTEGER NOT NULL DEFAULT 1 | 结束行（版本 17 列） |
+| param_types | JSON NOT NULL DEFAULT \'[]\' | 参数类型（版本 17 列） |
+| return_type | TEXT NOT NULL DEFAULT \'\' | 返回类型（版本 17 列） |
+| has_doc | INTEGER NOT NULL DEFAULT 0 | 有无文档说明（版本 17 列） |
 | UNIQUE(version_id, qualified_name, kind) | 唯一键 | 同版本同名同类唯一 |
 
-另有 `idx_api_entities_name(qualified_name)`。
+另有 `idx_api_entities_name(qualified_name)`、`idx_api_entities_file(version_id, file)`。
 
 ### call_instances
 
 | 列 | 类型与约束 | 说明 |
 |---|---|---|
 | id | INTEGER PRIMARY KEY AUTOINCREMENT | 行号 |
-| call_uid | TEXT NOT NULL UNIQUE | 调用哈希，仓库加文件加行范围加被调加实参 |
+| call_uid | TEXT NOT NULL UNIQUE | 调用哈希，仓库加文件加调用者加字节区间加被调加实参 |
 | callee_entity_id | INTEGER REFERENCES api_entities(id) ON DELETE SET NULL | 被调实体引用 |
 | callee_name | TEXT NOT NULL | 解析后限定名 |
 | args | JSON NOT NULL DEFAULT '[]' | 实参摘要 |
@@ -48,6 +54,8 @@
 | start_byte | INTEGER NOT NULL DEFAULT 0 | 起始字节（版本 5 列） |
 | end_byte | INTEGER NOT NULL DEFAULT 0 | 结束字节（版本 5 列） |
 | scope | TEXT | 作用域键，文件加调用者（版本 12 列，已回填） |
+| resolve_kind | TEXT NOT NULL DEFAULT \'\' | 解析来源（版本 18 列） |
+| caller_entity_id | INTEGER REFERENCES api_entities(id) ON DELETE SET NULL | 调用者实体引用（版本 18 列） |
 
 索引清单如下：
 
@@ -59,6 +67,22 @@
 | idx_call_instances_version_callee | (version_id, callee_name) |
 | idx_call_instances_scope | (version_id, caller_file, call_order, start_byte) |
 | idx_call_instances_scope_key | (version_id, scope) |
+| idx_call_instances_caller | caller_entity_id |
+| idx_call_instances_resolve | (version_id, resolve_kind) |
+
+### import_edges
+
+| 列 | 类型与约束 | 说明 |
+|---|---|---|
+| id | INTEGER PRIMARY KEY AUTOINCREMENT | 行号 |
+| library_id | INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE | 所属库 |
+| version_id | INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE | 所属版本 |
+| importer_file | TEXT NOT NULL | 导入文件 |
+| alias | TEXT NOT NULL | 本地别名 |
+| target | TEXT NOT NULL | 解析后目标 |
+| UNIQUE(version_id, importer_file, alias) | 唯一键 | 同版本同文件同别名唯一 |
+
+另有 `idx_import_edges_target(version_id, target)`、`idx_import_edges_file(version_id, importer_file)`。导入边随版本全量刷新，重建索引即重建。
 
 作用域表达式为 `COALESCE(scope, caller_file \|\| char(0) \|\| COALESCE(caller, ''))`，
 读路径统一经此表达式，不再逐行拼接。
@@ -91,17 +115,21 @@
 ```sql
 INSERT INTO api_entities(entity_uid, library_id, version_id,
 qualified_name, kind, parent, signature, params, bases,
-start_byte, end_byte, depth) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+start_byte, end_byte, depth, file, line_start, line_end,
+param_types, return_type, has_doc) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(entity_uid) DO UPDATE SET parent=excluded.parent,
 signature=excluded.signature, params=excluded.params, bases=excluded.bases,
 start_byte=excluded.start_byte, end_byte=excluded.end_byte,
-depth=excluded.depth;
+depth=excluded.depth, file=excluded.file, line_start=excluded.line_start,
+line_end=excluded.line_end, param_types=excluded.param_types,
+return_type=excluded.return_type, has_doc=excluded.has_doc;
 
 INSERT INTO call_instances(call_uid, callee_entity_id, callee_name, args,
 repo, caller_file, line_start, line_end, confidence,
 library_id, version_id, caller, receiver, func, argument_count,
-call_order, start_byte, end_byte, commit_sha, scope)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+call_order, start_byte, end_byte, commit_sha, scope,
+resolve_kind, caller_entity_id)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(call_uid) DO UPDATE SET callee_entity_id=excluded.callee_entity_id,
 callee_name=excluded.callee_name, args=excluded.args,
 confidence=excluded.confidence, library_id=excluded.library_id,
@@ -109,7 +137,8 @@ version_id=excluded.version_id, caller=excluded.caller,
 receiver=excluded.receiver, func=excluded.func,
 argument_count=excluded.argument_count, call_order=excluded.call_order,
 start_byte=excluded.start_byte, end_byte=excluded.end_byte,
-commit_sha=excluded.commit_sha, scope=excluded.scope;
+commit_sha=excluded.commit_sha, scope=excluded.scope,
+resolve_kind=excluded.resolve_kind, caller_entity_id=excluded.caller_entity_id;
 ```
 
 实体失效按版本读存活集合，差集分批删除并计数：

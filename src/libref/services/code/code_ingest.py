@@ -19,6 +19,7 @@ from libref.services.code.repo_ids import call_uid, entity_uid
 from libref.services.code.repo_persist import (
     _check_manifest_identity,
     _persist_entities,
+    _persist_import_edges,
     _persist_repo_deps,
     _sweep_calls,
     _upsert_calls,
@@ -48,6 +49,7 @@ __all__ = [
     "_collect_decl_index",
     "_load_raw_batch",
     "_persist_entities",
+    "_persist_import_edges",
     "_store_source_chunks",
     "_sweep_calls",
     "_sweep_source_pages",
@@ -244,6 +246,9 @@ async def _index_repo_inner(
     )
     counts["entities"] = n_entities
     counts["swept_entities"] = swept_entities
+    counts["import_edges"] = _persist_import_edges(
+        conn, library_id, version_id, file_aliases
+    )
     conn.commit()
     remaining = files[done:]
     wanted_calls: set[str] = set()

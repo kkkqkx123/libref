@@ -8,6 +8,22 @@ from pydantic import BaseModel, Field
 
 Confidence = Literal["EXTRACTED", "INFERRED", "AMBIGUOUS"]
 
+ResolveKind = Literal[
+    "alias-direct",
+    "alias-suffix",
+    "stdlib",
+    "factory",
+    "self-direct",
+    "self-inherited",
+    "receiver-type",
+    "same-file",
+    "suffix",
+    "scope",
+    "builtin",
+    "param-shadowed",
+    "unresolved",
+]
+
 
 class ApiDeclRecord(BaseModel):
     qualified_name: str
@@ -57,5 +73,6 @@ class CallInstanceRecord(BaseModel):
     argument_count: int = 0
     call_order: int = 0
     confidence: Confidence
+    resolve_kind: str = ""
     repo: str = ""
     commit_sha: str = ""

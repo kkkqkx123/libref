@@ -128,7 +128,7 @@ def test_pattern_evidence_marks_gaps_and_hits(monkeypatch, tmp_path):
         "CREATE TABLE call_instances(id INTEGER PRIMARY KEY, version_id INTEGER,"
         " callee_name TEXT, args TEXT, caller_file TEXT, caller TEXT,"
         " confidence TEXT, line_start INTEGER, line_end INTEGER,"
-        " call_order INTEGER, start_byte INTEGER, scope TEXT)"
+        " call_order INTEGER, start_byte INTEGER, scope TEXT, resolve_kind TEXT)"
     )
     conn.execute(
         "CREATE TABLE review_status(entity_type TEXT, entity_id INTEGER, status TEXT)"
