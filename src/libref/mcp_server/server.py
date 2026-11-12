@@ -322,6 +322,7 @@ def build_mcp_server(
     async def doc_probe(
         start_url: str,
         sample_limit: int | None = None,
+        scope: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Probe a documentation site structure without storing; confirm the range before scraping."""
         if not start_url.strip():
@@ -329,9 +330,15 @@ def build_mcp_server(
         bad = _check_limit(sample_limit, low=1, high=100)
         if bad is not None:
             return _invalid(bad)
+        if scope is not None and not isinstance(scope, dict):
+            return _invalid("scope must be an object")
         try:
             probe = await probe_docs_async(
-                conn, resolve_settings, start_url, sample_limit=sample_limit
+                conn,
+                resolve_settings,
+                start_url,
+                scope=scope,
+                sample_limit=sample_limit,
             )
         except ValueError as exc:
             return _invalid(str(exc))

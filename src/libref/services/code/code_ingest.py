@@ -13,7 +13,6 @@ import httpx
 from libref.services.code.repo_chunks import _store_source_chunks, _sweep_source_pages
 from libref.services.code.repo_collect import (
     _collect_decl_index,
-    _collect_repo,
     _load_raw_batch,
 )
 from libref.services.code.repo_ids import call_uid, entity_uid
@@ -47,7 +46,6 @@ def _same_source(left: str | None, right: str | None) -> bool:
 __all__ = [
     "INDEX_REPO_JOB_KIND",
     "_collect_decl_index",
-    "_collect_repo",
     "_load_raw_batch",
     "_persist_entities",
     "_store_source_chunks",
@@ -93,11 +91,15 @@ async def index_repo_async(
     subdir: str | None = None,
     only_files: list[str] | None = None,
     max_files: int | None = None,
+    heartbeat=None,
 ) -> dict[str, int]:
     """Lock one version across doc and code writers, then run the ingest."""
     from libref.services.infra.version_lock import version_lock
 
-    async with version_lock(conn, ecosystem, library, version):
+    _stale_after = float(getattr(settings, "heartbeat_timeout", 600.0) or 600.0)
+    async with version_lock(
+        conn, ecosystem, library, version, stale_after=_stale_after
+    ):
         return await _index_repo_inner(
             conn,
             library,
@@ -116,6 +118,7 @@ async def index_repo_async(
             subdir=subdir,
             only_files=only_files,
             max_files=max_files,
+            heartbeat=heartbeat,
         )
 
 
@@ -138,6 +141,7 @@ async def _index_repo_inner(
     subdir: str | None = None,
     only_files: list[str] | None = None,
     max_files: int | None = None,
+    heartbeat=None,
 ) -> dict[str, int]:
     from libref.astminer import cache as ast_cache
     from libref.astminer import config as ast_config
@@ -204,8 +208,28 @@ async def _index_repo_inner(
         files_truncated = True
     batch_size = max(1, int(getattr(settings, "index_batch_files", 200) or 200))
     done, fingerprint = resume_offset(conn, version_id, CODE_KIND, files, fresh=fresh)
-    counts = {"resumed_skipped": done, "batches": 0}
+    counts = {"resumed_skipped": done, "batches": 0, "vector_failed": 0}
     counts["files_truncated"] = 1 if files_truncated else 0
+    _vectors_live = settings is not None and vec_store is not None and embed is not None
+    _doc_store = None
+    if _vectors_live:
+        from libref.services.ops.maintenance import (
+            sync_vectors_for_docs as _sync_docs,
+        )
+        from libref.store.document_store import DocumentStore as _DocumentStore
+
+        _doc_store = _DocumentStore(conn)
+
+    def _beat() -> None:
+        if heartbeat is None:
+            return
+        try:
+            maybe = heartbeat()
+            if asyncio.iscoroutine(maybe):
+                asyncio.get_running_loop().create_task(maybe)
+        except Exception:  # noqa: BLE001, S110 — heartbeat only aims to renew
+            pass
+
     all_decls, file_aliases, collect_counts, live = _collect_decl_index(
         conn,
         repo_name,
@@ -268,6 +292,19 @@ async def _index_repo_inner(
             fingerprint=fingerprint,
             batch_size=batch_size,
         )
+        if _vectors_live:
+            await _sync_docs(
+                conn,
+                settings,
+                vec_store,
+                embed,
+                _doc_store,
+                counts,
+                batch_removed,
+                batch_inserted,
+                version_id=version_id,
+            )
+        _beat()
     swept_calls = _sweep_calls(conn, version_id, wanted_calls)
     counts["calls"] = n_calls
     counts["swept_calls"] = swept_calls
@@ -281,21 +318,17 @@ async def _index_repo_inner(
     conn.commit()
     counts["source_chunks"] = n_chunks
     counts["chunk_empty_dropped"] = chunk_dropped
-    counts["vector_failed"] = 0
     counts["chunk_truncated"] = 0
-    if settings is not None and vec_store is not None and embed is not None:
-        from libref.services.ops.maintenance import sync_vectors_for_docs
-        from libref.store.document_store import DocumentStore
-
-        await sync_vectors_for_docs(
+    if _vectors_live:
+        await _sync_docs(
             conn,
             settings,
             vec_store,
             embed,
-            DocumentStore(conn),
+            _doc_store,
             counts,
-            removed_ids,
-            inserted_ids,
+            swept_pages,
+            [],
             version_id=version_id,
         )
     from libref.services.infra.progress import CODE_KIND as _CODE_KIND
@@ -324,6 +357,7 @@ def index_repo(
     subdir: str | None = None,
     only_files: list[str] | None = None,
     max_files: int | None = None,
+    heartbeat=None,
 ) -> dict[str, int]:
     return asyncio.run(
         index_repo_async(
@@ -344,6 +378,7 @@ def index_repo(
             subdir=subdir,
             only_files=only_files,
             max_files=max_files,
+            heartbeat=heartbeat,
         )
     )
 
@@ -363,6 +398,7 @@ def index_repo_by_name(
     subdir: str | None = None,
     only_files: list[str] | None = None,
     max_files: int | None = None,
+    heartbeat=None,
 ) -> dict[str, int]:
     return asyncio.run(
         index_repo_by_name_async(
@@ -379,6 +415,7 @@ def index_repo_by_name(
             subdir=subdir,
             only_files=only_files,
             max_files=max_files,
+            heartbeat=heartbeat,
         )
     )
 
@@ -398,6 +435,7 @@ async def index_repo_by_name_async(
     subdir: str | None = None,
     only_files: list[str] | None = None,
     max_files: int | None = None,
+    heartbeat=None,
 ) -> dict[str, int]:
     from libref.services.registry.resolver import resolve_repo
 
@@ -436,6 +474,7 @@ async def index_repo_by_name_async(
             subdir=subdir,
             only_files=only_files,
             max_files=max_files,
+            heartbeat=heartbeat,
         )
     async with _client(settings) as client:
         resolution = await resolve_repo(
@@ -475,10 +514,13 @@ async def index_repo_by_name_async(
         subdir=subdir,
         only_files=only_files,
         max_files=max_files,
+        heartbeat=heartbeat,
     )
 
 
-def build_repo_runner(settings, conn, repos_dir=None, vec_store=None, embed=None):
+def build_repo_runner(
+    settings, conn, repos_dir=None, vec_store=None, embed=None, mgr=None
+):
     """Build a job runner handling repo indexing only; mining lives in mining_refresh."""
     resolved_dir = (
         Path(repos_dir) if repos_dir is not None else Path(settings.repos_dir)
@@ -488,6 +530,7 @@ def build_repo_runner(settings, conn, repos_dir=None, vec_store=None, embed=None
         if job.kind != INDEX_REPO_JOB_KIND:
             raise ValueError(f"unsupported job kind: {job.kind}")
         p = job.params
+        heartbeat = (lambda: mgr.heartbeat(job.id)) if mgr is not None else None
         local_vec, local_embed = vec_store, embed
         if local_vec is None or local_embed is None:
             try:
@@ -518,6 +561,7 @@ def build_repo_runner(settings, conn, repos_dir=None, vec_store=None, embed=None
             subdir=p.get("subdir"),
             only_files=p.get("only_files"),
             max_files=p.get("max_files"),
+            heartbeat=heartbeat,
         )
 
     return runner

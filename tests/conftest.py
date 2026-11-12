@@ -97,12 +97,18 @@ def _isolated_libref_env(request, tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _clear_seed_cache():
-    """Isolate the process-local seeder cache between tests sharing mock hosts."""
+    """Isolate process-local discovery caches between tests sharing mock hosts."""
     from libref.crawler.url_seeder import _SEED_CACHE
+    from libref.services.code.probe import _PROBE_CACHE
+    from libref.services.docs.probe import _DOC_PROBE_CACHE
 
     _SEED_CACHE.clear()
+    _PROBE_CACHE.clear()
+    _DOC_PROBE_CACHE.clear()
     yield
     _SEED_CACHE.clear()
+    _PROBE_CACHE.clear()
+    _DOC_PROBE_CACHE.clear()
 
 
 def seed_library_version(

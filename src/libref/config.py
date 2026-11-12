@@ -51,6 +51,8 @@ class LibrefSettings(BaseSettings):
     db_path: Path = Field(
         default_factory=lambda: Path.home() / ".local/share/libref/libref.db"
     )
+    # Heartbeat and staleness horizon shared by job recovery and version locks.
+    heartbeat_timeout: float = Field(default=600.0, gt=0)
     fetch_concurrency: int = Field(default=4, ge=1)
     request_timeout: float = Field(default=30.0, gt=0)
     fetch_max_retries: int = Field(default=3, ge=0)
@@ -248,7 +250,7 @@ def setting_or_default(settings: LibrefSettings | None, name: str):
 CONFIG_FILE_NAME = "libref.toml"
 
 SECTION_FIELDS: dict[str, frozenset[str]] = {
-    "server": frozenset({"db_path"}),
+    "server": frozenset({"db_path", "heartbeat_timeout"}),
     "crawler": frozenset(
         {
             "fetch_concurrency",

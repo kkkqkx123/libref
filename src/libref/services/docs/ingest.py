@@ -328,7 +328,12 @@ class IngestService:
                 *(f"{step}_ms" for step in PIPELINE_STEPS),
             )
         }
-        async with _version_lock(self._conn, ecosystem, library, version):
+        _stale_after = float(
+            getattr(self._settings, "heartbeat_timeout", 600.0) or 600.0
+        )
+        async with _version_lock(
+            self._conn, ecosystem, library, version, stale_after=_stale_after
+        ):
             removed_all: list[int] = []
             inserted_all: list[int] = []
             async with _client(self._settings) as client:
@@ -524,6 +529,8 @@ class IngestService:
                             _beat()
                 # Absent sweeping is seed-driven; link-followed pages are outside
                 # the seed set, so the sweep is skipped in follow mode entirely.
+                # Follow-discovered pages also sit outside the resume cursor and
+                # are re-walked on retry.
                 # Batch syncs already pushed page deltas with the version watermark;
                 # the closing sync only carries sweep deletions plus set verification.
                 sweep_prev = len(removed_all)
@@ -554,7 +561,7 @@ class IngestService:
                     version_id=version_id,
                     repair=False,
                 )
-                counts["vectors_ms"] = int((_time.monotonic() - vectors_start) * 1000)
+                counts["vectors_ms"] += int((_time.monotonic() - vectors_start) * 1000)
                 clear_progress(self._conn, version_id, DOCS_KIND)
                 _beat()
             import time as _time2

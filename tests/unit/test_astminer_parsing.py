@@ -374,7 +374,7 @@ def test_java_explicit_constructor_invocation_skipped(monkeypatch, tmp_path):
         b"  void helper() {}\n"
         b"}\n"
     )
-    decls, _aliases, raw = ast_engine.extract_file(
+    _decls, _aliases, raw = ast_engine.extract_file(
         "B.java", ast_config.JAVA_CONFIG, data
     )
     by_raw = {c.raw_callee: c for c in raw}

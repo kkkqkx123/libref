@@ -7,6 +7,8 @@ range before submitting a scrape job.
 
 from __future__ import annotations
 
+import json as _json
+import time as _time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -33,6 +35,38 @@ class DocProbe(BaseModel):
     prefix_groups: list[PrefixGroup] = []
     samples: list[str] = []
     errors: dict[str, str] = {}
+
+
+_DOC_PROBE_CACHE: dict[str, tuple[float, DocProbe]] = {}
+_DOC_PROBE_CACHE_CAP = 64
+
+
+def _doc_cache_key(start_url: str, scope: dict[str, Any] | None, limit: int) -> str:
+    try:
+        scope_text = _json.dumps(
+            scope or {}, sort_keys=True, ensure_ascii=False, default=str
+        )
+    except TypeError, ValueError:
+        scope_text = str(scope)
+    return "\0".join((start_url, scope_text, str(limit)))
+
+
+def _doc_cache_get(key: str, ttl_hours: float) -> DocProbe | None:
+    hit = _DOC_PROBE_CACHE.get(key)
+    if hit is None:
+        return None
+    stored_at, probe = hit
+    if ttl_hours <= 0 or _time.time() - stored_at > ttl_hours * 3600:
+        _DOC_PROBE_CACHE.pop(key, None)
+        return None
+    return probe
+
+
+def _doc_cache_put(key: str, probe: DocProbe) -> None:
+    while len(_DOC_PROBE_CACHE) >= _DOC_PROBE_CACHE_CAP:
+        oldest = next(iter(_DOC_PROBE_CACHE))
+        del _DOC_PROBE_CACHE[oldest]
+    _DOC_PROBE_CACHE[key] = (_time.time(), probe)
 
 
 def _prefix_groups(urls: list[str], limit: int = 20) -> list[PrefixGroup]:
@@ -63,6 +97,12 @@ async def probe_docs_async(
     if not start_url.strip():
         raise ValueError("start_url is empty")
     limit = sample_limit if sample_limit is not None else settings.probe_sample_limit
+    cache_key = _doc_cache_key(start_url, scope, int(limit))
+    cached = _doc_cache_get(
+        cache_key, float(getattr(settings, "probe_cache_ttl_hours", 1.0) or 0.0)
+    )
+    if cached is not None:
+        return cached
     async with build_async_client(settings) as client:
         robots = RobotsChecker(
             conn,
@@ -77,7 +117,7 @@ async def probe_docs_async(
         )
         seed = await seeder.discover(start_url)
     accepted, rejected, truncated, _stats = plan_targets(seed, start_url, scope, None)
-    return DocProbe(
+    probe = DocProbe(
         start_url=start_url,
         source=seed.source,
         total_discovered=len(seed.urls),
@@ -90,6 +130,8 @@ async def probe_docs_async(
         samples=list(accepted[: max(0, int(limit))]),
         errors=dict(seed.errors),
     )
+    _doc_cache_put(cache_key, probe)
+    return probe
 
 
 def probe_docs(

@@ -37,7 +37,7 @@ def cmd_refresh(args: argparse.Namespace) -> int:
     scope = _scope_from_args(args)
     try:
         if getattr(args, "run_async", False):
-            mgr = JobManager(conn)
+            mgr = JobManager(conn, stale_after=float(settings.heartbeat_timeout))
             mgr.recover()
             job_id = start_refresh_job(
                 mgr,
@@ -229,7 +229,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             ecosystem, resolved_from = "custom", "explicit"
             registry_confirmed, homepage, repo_url = True, None, None
         if args.run_async:
-            mgr = JobManager(conn)
+            mgr = JobManager(conn, stale_after=float(settings.heartbeat_timeout))
             mgr.recover()
             job_id = start_scrape_job(
                 mgr,

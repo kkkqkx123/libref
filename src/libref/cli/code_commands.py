@@ -91,7 +91,7 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                 f"resolved {ecosystem}:{library} {version} -> {source} [{resolved_from}]"
             )
         if args.run_async:
-            mgr = JobManager(conn)
+            mgr = JobManager(conn, stale_after=float(settings.heartbeat_timeout))
             mgr.recover()
             job_id = mgr.submit(
                 INDEX_REPO_JOB_KIND,
@@ -112,7 +112,7 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
 
             async def _drive():
                 mgr.start_worker(
-                    build_repo_runner(settings, conn, repos_dir, vec_store, embed)
+                    build_repo_runner(settings, conn, repos_dir, vec_store, embed, mgr)
                 )
                 try:
                     return await mgr.wait_for(job_id)

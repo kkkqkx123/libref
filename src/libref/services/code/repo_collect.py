@@ -120,22 +120,3 @@ def _load_raw_batch(
             ast_cache.encode_records(_decls, _aliases, raw),
         )
     return raw_calls
-
-
-def _collect_repo(
-    conn,
-    repo_name: str,
-    root,
-    files: list[str],
-) -> tuple[
-    list,
-    dict[str, list[tuple[str, str]]],
-    list,
-    dict[str, int],
-    dict[str, tuple[str, int]],
-]:
-    all_decls, file_aliases, counts, live = _collect_decl_index(
-        conn, repo_name, root, files
-    )
-    all_raw = _load_raw_batch(conn, repo_name, root, files)
-    return all_decls, file_aliases, all_raw, counts, live

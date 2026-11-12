@@ -228,11 +228,19 @@ class VersionGuardSync:
             time.sleep(0.2)
 
 
-def version_lock(conn, ecosystem: str, library: str, version: str):
+def version_lock(
+    conn, ecosystem: str, library: str, version: str, *, stale_after: float = 600.0
+):
     """Async guard for one version."""
-    return VersionGuard(conn, version_key(ecosystem, library, version))
+    return VersionGuard(
+        conn, version_key(ecosystem, library, version), stale_after=stale_after
+    )
 
 
-def version_lock_sync(conn, ecosystem: str, library: str, version: str):
+def version_lock_sync(
+    conn, ecosystem: str, library: str, version: str, *, stale_after: float = 600.0
+):
     """Synchronous guard for one version."""
-    return VersionGuardSync(conn, version_key(ecosystem, library, version))
+    return VersionGuardSync(
+        conn, version_key(ecosystem, library, version), stale_after=stale_after
+    )
