@@ -15,7 +15,7 @@ class LanguageConfig:
     name: str
     grammar: str
     file_suffixes: tuple[str, ...]
-    config_version: int = 2
+    config_version: int = 1
     language_fn: str = "language"
 
 
@@ -23,63 +23,63 @@ PYTHON_CONFIG = LanguageConfig(
     name="python",
     grammar="tree_sitter_python",
     file_suffixes=(".py", ".pyi"),
-    config_version=2,
+    config_version=1,
 )
 
 JAVA_CONFIG = LanguageConfig(
     name="java",
     grammar="tree_sitter_java",
     file_suffixes=(".java",),
-    config_version=2,
+    config_version=1,
 )
 
 JAVASCRIPT_CONFIG = LanguageConfig(
     name="javascript",
     grammar="tree_sitter_javascript",
     file_suffixes=(".js", ".mjs", ".cjs", ".jsx"),
-    config_version=2,
+    config_version=1,
 )
 
 RUST_CONFIG = LanguageConfig(
     name="rust",
     grammar="tree_sitter_rust",
     file_suffixes=(".rs",),
-    config_version=2,
+    config_version=1,
 )
 
 GO_CONFIG = LanguageConfig(
     name="go",
     grammar="tree_sitter_go",
     file_suffixes=(".go",),
-    config_version=2,
+    config_version=1,
 )
 
 CSHARP_CONFIG = LanguageConfig(
     name="csharp",
     grammar="tree_sitter_c_sharp",
     file_suffixes=(".cs",),
-    config_version=2,
+    config_version=1,
 )
 
 KOTLIN_CONFIG = LanguageConfig(
     name="kotlin",
     grammar="tree_sitter_kotlin",
     file_suffixes=(".kt", ".kts"),
-    config_version=2,
+    config_version=1,
 )
 
 GROOVY_CONFIG = LanguageConfig(
     name="groovy",
     grammar="tree_sitter_groovy",
     file_suffixes=(".groovy",),
-    config_version=2,
+    config_version=1,
 )
 
 TYPESCRIPT_CONFIG = LanguageConfig(
     name="typescript",
     grammar="tree_sitter_typescript",
     file_suffixes=(".ts", ".mts", ".cts", ".tsx"),
-    config_version=2,
+    config_version=1,
     language_fn="language_tsx",
 )
 
