@@ -75,6 +75,8 @@ _REPORT_IDENTITY_KEYS = frozenset(
         "library_id",
         "version_id",
         "subdir",
+        "doc_version",
+        "doc_version_signal",
     }
 )
 
@@ -97,6 +99,47 @@ def _url_for(info: dict[str, Any]):
         return lambda url: url
     prefix = f"repo://{info['ecosystem']}/{info['library']}/{info['version']}/"
     return lambda rel: prefix + rel
+
+
+def _corpus_urls(conn, scope: dict[str, Any]) -> set[str]:
+    """Every page identity the dataset holds for one fixture, documents and sources alike."""
+    rows = conn.execute(
+        "SELECT DISTINCT pages.url FROM pages"
+        " JOIN versions ON versions.id = pages.version_id"
+        " JOIN libraries ON libraries.id = versions.library_id"
+        " WHERE libraries.ecosystem = ? AND libraries.name = ?"
+        " AND versions.version = ?",
+        (scope["ecosystem"], scope["library"], scope["version"]),
+    ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
+def _validate_targets(
+    name: str,
+    conn,
+    scope: dict[str, Any],
+    judgments: list[dict[str, Any]],
+    url_of,
+) -> None:
+    """Reject judgments anchored outside the corpus before they are scored.
+
+    A target that the dataset never received is an authoring error, not a
+    retrieval miss: it would quietly read as a failure of every method.
+    """
+    valid = _corpus_urls(conn, scope)
+    broken = {
+        judgment["id"]: [
+            target
+            for target in judgment.get("targets", [])
+            if url_of(target) not in valid
+        ]
+        for judgment in judgments
+    }
+    broken = {key: value for key, value in broken.items() if value}
+    if broken:
+        raise SystemExit(
+            f"fixture {name}: judgment targets outside the corpus: {broken}"
+        )
 
 
 def _load(judgments: Path = JUDGMENTS) -> dict:
@@ -675,16 +718,23 @@ def _report(
         lines.append(f"- {models}")
     lines.append(f"- 归档修订：{_revision_line(manifest)}")
     for name, info in manifest.get("fixtures", {}).items():
-        identity = " / ".join(
+        parts = [
             f"{key}={info.get(key)}"
             for key in ("library", "ecosystem", "version", "revision", "source")
-        )
+        ]
+        if info.get("doc_version"):
+            parts.append(
+                f"文档版本={info['doc_version']}（{info.get('doc_version_signal')}）"
+            )
+        if info.get("commit"):
+            parts.append(f"提交={info['commit']}")
+        identity = " / ".join(parts)
         counts = ", ".join(
             f"{key}={value}"
             for key, value in info.items()
             if key not in _REPORT_IDENTITY_KEYS
         )
-        lines.append(f"- {name}: {identity} {counts}")
+        lines.append(f"- {name}: {identity}；{counts}")
     lines += ["", f"## 方法矩阵（Recall/MRR/nDCG @{k}）", ""]
     for corpus, methods in summary.items():
         if not isinstance(methods, dict):
@@ -887,6 +937,8 @@ def run(
         for name, info in fixtures.items()
     }
     urls = {name: _url_for(info) for name, info in fixtures.items()}
+    for name in fixtures:
+        _validate_targets(name, conn, scopes[name], judgments[name], urls[name])
     try:
         evaluations = {
             name: asyncio.run(

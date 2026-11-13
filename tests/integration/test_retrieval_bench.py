@@ -36,9 +36,11 @@ def test_retrieval_benchmark_gates(tmp_path) -> None:
 
     data_dir = tmp_path / "data"
     manifest = build(data_dir)
-    names = list(manifest["fixtures"])
-    assert manifest["fixtures"]["httpx/docs"]["pages"] > 0
-    assert manifest["fixtures"]["httpx/code"]["patterns"] > 0
+    fixtures = manifest["fixtures"]
+    names = list(fixtures)
+    by_kind = {info["kind"]: name for name, info in fixtures.items()}
+    assert fixtures[by_kind["docs"]]["pages"] > 0
+    assert fixtures[by_kind["code"]]["patterns"] > 0
     result = run(data_dir, tmp_path / "report", probes_enabled=False)
     assert result["failures"] == []
     summary = result["summary"]

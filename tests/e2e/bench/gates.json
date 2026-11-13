@@ -2,14 +2,14 @@
   "top_k": 5,
   "revisions": {
     "httpx/docs": "6ca0d3d66d43",
-    "httpx/code": "c5e82c0ae4ce"
+    "httpx/code-head": "62ab685d5170"
   },
   "precise_floors": {
     "httpx/docs": {
       "recall_at_k": 0.8,
       "mrr_at_k": 0.58
     },
-    "httpx/code": {
+    "httpx/code-head": {
       "recall_at_k": 0.72,
       "mrr_at_k": 0.72
     }
@@ -28,7 +28,7 @@
         "mrr_at_k": 0.7
       }
     },
-    "httpx/code": {
+    "httpx/code-head": {
       "fused": {
         "recall_at_k": 0.82,
         "mrr_at_k": 0.82

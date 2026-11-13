@@ -131,21 +131,67 @@ def _index_docs(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
         for item in inputs:
             lanes[item.chunk_path] = lanes.get(item.chunk_path, 0) + 1
     conn.commit()
+    evidence = meta["content"]["doc_version"]
     return {
         "pages": pages,
         "empty": empty,
         "chunks": chunks,
         "lanes": lanes,
         "urls_sha256": meta["content"]["urls_sha256"],
+        "doc_version": evidence["value"],
+        "doc_version_signal": evidence["signal"],
     }
 
 
-def _index_code(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> dict:
-    """Index the frozen checkout through the production parse, chunk and mine path.
+def _check_docs(name: str, info: dict) -> None:
+    """Fail on a corpus that produced no page or no chunk at all."""
+    if not info["pages"] or not info["chunks"]:
+        raise bench_archive.ArchiveError(
+            f"fixture {name}: pages={info['pages']} chunks={info['chunks']}"
+        )
 
-    The tree is unpacked into a temporary directory: third-party sources never
-    land inside the repository, where they would be collected by tooling and
-    would add a second copy of the archive on disk.
+
+def _languages(root: Path) -> set[str]:
+    """Languages present in an archived tree, from the suffixes the extractor accepts."""
+    from libref.astminer.config import config_for_suffix
+
+    found: set[str] = set()
+    for path in root.rglob("*"):
+        if path.is_symlink() or not path.is_file():
+            continue
+        config = config_for_suffix(path.suffix)
+        if config is not None:
+            found.add(config.name)
+    return found
+
+
+def _check_code(name: str, entry: dict[str, Any], info: dict, root: Path) -> None:
+    """Fail on a silently empty extraction instead of reporting a green corpus."""
+    expected = set(entry.get("languages") or ())
+    if not expected:
+        raise bench_archive.ArchiveError(f"fixture {name}: spec has no languages")
+    found = _languages(root)
+    if found != expected:
+        raise bench_archive.ArchiveError(
+            f"fixture {name}: sources are {sorted(found)} but the spec says "
+            f"{sorted(expected)}"
+        )
+    if not info["files"] or info["parsed"] != info["files"]:
+        raise bench_archive.ArchiveError(
+            f"fixture {name}: parsed {info['parsed']} of {info['files']} files"
+        )
+    for key in ("entities", "calls", "source_chunks"):
+        if not info[key]:
+            raise bench_archive.ArchiveError(f"fixture {name}: {key} is zero")
+
+
+def _index_code(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> dict:
+    """Index the frozen source archive through the production parse, chunk and mine path.
+
+    The archive already holds only the indexed subtree, so the unpacked tree is
+    the index root. It is unpacked into a temporary directory: third-party
+    sources never land inside the repository, where they would be collected by
+    tooling and would add a second copy of the archive on disk.
     """
     from libref.services.code.code_ingest import index_repo
     from libref.services.code.mining_refresh import mine_patterns
@@ -153,11 +199,6 @@ def _index_code(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
 
     with tempfile.TemporaryDirectory(prefix="libref-bench-src-") as tmp:
         source = _source(entry, meta, Path(tmp))
-        subdir = str(meta["content"].get("subdir") or "")
-        if subdir and not (source / subdir).is_dir():
-            raise bench_archive.ArchiveError(
-                f"fixture {bench_archive.fixture_id(entry)}: archived tree lacks {subdir}"
-            )
         counts = index_repo(
             conn,
             str(entry["library"]),
@@ -166,7 +207,18 @@ def _index_code(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
             repos_dir=Path(tmp),
             ecosystem=str(entry["ecosystem"]),
             settings=settings,
-            subdir=subdir or None,
+        )
+        _check_code(
+            bench_archive.fixture_id(entry),
+            entry,
+            {
+                "files": int(counts.get("files", 0)),
+                "parsed": int(counts.get("parsed", 0)),
+                "entities": int(counts.get("entities", 0)),
+                "calls": int(counts.get("calls", 0)),
+                "source_chunks": int(counts.get("source_chunks", 0)),
+            },
+            source,
         )
     library = str(entry["library"])
     version = str(entry["version"])
@@ -226,6 +278,7 @@ def build(
             started = time.monotonic()
             if entry["kind"] == "docs":
                 info = _index_docs(conn, settings, entry, meta)
+                _check_docs(name, info)
             else:
                 info = _index_code(conn, settings, entry, meta)
             info.update(

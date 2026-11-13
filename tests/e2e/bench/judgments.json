@@ -134,7 +134,7 @@
       "targets": []
     }
   ],
-  "httpx/code": [
+  "httpx/code-head": [
     {
       "id": "C1",
       "type": "qualified",

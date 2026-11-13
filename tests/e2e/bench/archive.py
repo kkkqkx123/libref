@@ -9,7 +9,9 @@ and the digest verification both sides rely on.
 Layout: one directory per project branch, ``fixtures/{project}/{kind}``,
 holding the canonical payload plus ``meta.json``. Identity (library, ecosystem,
 version) lives in the metadata, not in the path, so moving the archive never
-changes what it describes.
+changes what it describes. A source payload holds only the subtree the build
+indexes, at its repository-relative location, so the payload digest covers
+exactly the corpus.
 """
 
 from __future__ import annotations
@@ -19,10 +21,12 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import tarfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent
 SPEC = HERE / "bench.json"
@@ -37,9 +41,29 @@ _IDENTITY_KEYS = ("project", "kind", "library", "ecosystem", "version")
 # Acquisition inputs per kind: the fields that shape the corpus. They are stored
 # with the archive so a spec edit without re-acquisition is a hard failure.
 _RECIPE_KEYS = {
-    "docs": ("start_url", "max_pages", "crawl_delay"),
-    "code": ("repo_url", "subdir"),
+    "docs": (
+        "start_url",
+        "max_pages",
+        "crawl_delay",
+        "path_prefixes",
+        "doc_version",
+    ),
+    "code": ("repo_url", "subdir", "ref"),
 }
+
+# Label of a source fixture that follows the default branch: the payload is the
+# repository head, not a fixed release, and the label says so.
+HEAD_REF = "head"
+
+# Documentation version marker for a site that states no version at all. It is a
+# recorded fact, not a guess: the corpus then says "these docs are unversioned".
+UNVERSIONED = "unversioned"
+
+# Path segments that name a documentation stream rather than a release.
+_VERSION_STREAMS = frozenset(
+    {"latest", "stable", "dev", "develop", "main", "master", "next", "current"}
+)
+_VERSION_TOKEN = re.compile(r"^v?\d+(?:\.\d+){0,2}(?:\.x)?$", re.IGNORECASE)
 
 
 class ArchiveError(RuntimeError):
@@ -51,19 +75,56 @@ def load_spec() -> list[dict[str, Any]]:
     data = json.loads(SPEC.read_text(encoding="utf-8"))
     entries = [dict(entry) for entry in data["fixtures"]]
     for entry in entries:
+        if entry["kind"] not in ("docs", "code"):
+            raise ArchiveError(f"bench.json unsupported kind: {entry['kind']!r}")
+        if entry["kind"] == "docs" and not str(entry.get("doc_version") or "").strip():
+            raise ArchiveError(
+                f"bench.json document fixture lacks doc_version: {entry}; "
+                f"state the version it documents, or {UNVERSIONED!r}"
+            )
+        if entry["kind"] == "code":
+            # The version of a source fixture is the ref it was taken at, so it
+            # is derived instead of written twice.
+            if "version" in entry:
+                raise ArchiveError(
+                    f"bench.json source fixture declares version: {entry}; "
+                    "the version follows from 'ref'"
+                )
+            entry["version"] = ref_label(entry)
         missing = [key for key in _IDENTITY_KEYS if not entry.get(key)]
         if missing:
             raise ArchiveError(f"bench.json fixture lacks {missing}: {entry}")
-        if entry["kind"] not in ("docs", "code"):
-            raise ArchiveError(f"bench.json unsupported kind: {entry['kind']!r}")
     ids = [fixture_id(entry) for entry in entries]
     if len(ids) != len(set(ids)):
         raise ArchiveError(f"bench.json duplicate fixture ids: {ids}")
     return entries
 
 
+def ref_label(entry: dict[str, Any]) -> str:
+    """Source fixture label: the pinned ref, or `head` when it follows the branch."""
+    ref = str(entry.get("ref") or "").strip()
+    return _path_safe(ref) if ref else HEAD_REF
+
+
+def _path_safe(ref: str) -> str:
+    """Refuse refs that would escape or distort the archive path."""
+    if any(ch in ref for ch in "/\\~^: ?*[\x00"):
+        raise ArchiveError(f"ref is not path safe: {ref!r}")
+    if ref in (".", ".."):
+        raise ArchiveError(f"ref is not path safe: {ref!r}")
+    return ref
+
+
 def fixture_id(entry: dict[str, Any]) -> str:
-    return f"{entry['project']}/{entry['kind']}"
+    """Fixture id, and with it the archive directory name.
+
+    A source fixture carries its ref in the name so a directory listing shows
+    whether the payload is a repository head or a fixed release.
+    """
+    name = f"{entry['project']}/{entry['kind']}"
+    if entry["kind"] == "code":
+        name = f"{name}-{ref_label(entry)}"
+    return name
 
 
 def identity(entry: dict[str, Any]) -> dict[str, Any]:
@@ -74,6 +135,118 @@ def identity(entry: dict[str, Any]) -> dict[str, Any]:
 def recipe(entry: dict[str, Any]) -> dict[str, Any]:
     """Acquisition inputs of one fixture, normalised for storage and comparison."""
     return {key: entry[key] for key in _RECIPE_KEYS[entry["kind"]] if key in entry}
+
+
+def _version_like(segment: str) -> bool:
+    return segment.lower() in _VERSION_STREAMS or bool(_VERSION_TOKEN.match(segment))
+
+
+def _segments(url: str) -> list[str]:
+    return [part for part in urlsplit(url).path.split("/") if part]
+
+
+def _from_paths(pages: list[dict[str, Any]]) -> dict[str, str] | None:
+    """Version segment shared by the crawled pages, e.g. `/en/2.9/` or `/docs/latest/`."""
+    if not pages:
+        return None
+    counts: dict[tuple[int, str], int] = {}
+    samples: dict[tuple[int, str], str] = {}
+    for page in pages:
+        segments = _segments(str(page["url"]))[:3]
+        for index, segment in enumerate(segments):
+            key = (index, segment)
+            counts[key] = counts.get(key, 0) + 1
+            samples.setdefault(key, str(page["url"]))
+    floor = max(2, -(-len(pages) * 4 // 5))
+    for (index, segment), hits in sorted(counts.items()):
+        if hits >= floor and _version_like(segment):
+            return {
+                "value": segment,
+                "signal": f"url-path[{index}]",
+                "sample_url": samples[(index, segment)],
+            }
+    return None
+
+
+def _first_body(pages: list[dict[str, Any]]) -> tuple[str, str]:
+    ordered = sorted(
+        pages, key=lambda page: (len(_segments(str(page["url"]))), str(page["url"]))
+    )
+    page = ordered[0]
+    return str(page["url"]), str(page.get("body") or "")
+
+
+def _from_canonical(pages: list[dict[str, Any]]) -> dict[str, str] | None:
+    """Version segment of the page the site declares canonical, when it names one."""
+    if not pages:
+        return None
+    from libref.crawler.extract import scrape_html
+
+    url, body = _first_body(pages)
+    if not body.strip():
+        return None
+    canonical = str(scrape_html(body, url).canonical or "")
+    for segment in _segments(canonical):
+        if _version_like(segment):
+            return {
+                "value": segment,
+                "signal": "canonical",
+                "sample_url": canonical,
+            }
+    return None
+
+
+def _from_meta(pages: list[dict[str, Any]]) -> dict[str, str] | None:
+    """Version the site publishes in metadata, e.g. Docusaurus docsearch version."""
+    if not pages:
+        return None
+    from selectolax.lexbor import LexborHTMLParser
+
+    url, body = _first_body(pages)
+    if not body.strip():
+        return None
+    tree = LexborHTMLParser(body)
+    for node in tree.css("meta"):
+        name = (
+            node.attributes.get("name") or node.attributes.get("property") or ""
+        ).lower()
+        if name not in ("docsearch:version", "version"):
+            continue
+        content = (node.attributes.get("content") or "").strip()
+        if content:
+            return {
+                "value": content,
+                "signal": f"meta:{name}",
+                "sample_url": url,
+            }
+    return None
+
+
+def doc_version_evidence(pages: list[dict[str, Any]]) -> dict[str, str]:
+    """What the documentation site itself says it documents.
+
+    Evidence is taken in order of reliability: the version segment of the crawled
+    paths, the canonical URL of a page, then site-published metadata. When none of
+    them states anything the corpus is marked unversioned instead of guessing from
+    the registry.
+    """
+    for find in (_from_paths, _from_canonical, _from_meta):
+        found = find(pages)
+        if found:
+            return found
+    return {"value": UNVERSIONED, "signal": "none", "sample_url": ""}
+
+
+def check_doc_version(declared: str, evidence: dict[str, str]) -> None:
+    """Refuse to freeze a corpus that contradicts the version its spec claims."""
+    observed = str(evidence.get("value") or UNVERSIONED)
+    if declared == observed:
+        return
+    raise ArchiveError(
+        f"doc_version {declared!r} does not match the site, which states "
+        f"{observed!r} (signal {evidence.get('signal')}, sample "
+        f"{evidence.get('sample_url') or '-'})"
+    )
 
 
 def select(names: list[str] | None = None) -> list[dict[str, Any]]:
@@ -92,7 +265,7 @@ def select(names: list[str] | None = None) -> list[dict[str, Any]]:
 
 
 def archive_dir(entry: dict[str, Any]) -> Path:
-    return FIXTURES / entry["project"] / entry["kind"]
+    return FIXTURES / fixture_id(entry)
 
 
 def payload_name(entry: dict[str, Any]) -> str:
@@ -166,7 +339,7 @@ def tree_digest(root: Path) -> tuple[str, int]:
     return digest.hexdigest(), len(files)
 
 
-def write_source(path: Path, root: Path) -> dict[str, Any]:
+def write_source(path: Path, root: Path, *, prefix: str = "") -> dict[str, Any]:
     """Pack a checkout into a byte-stable archive of its files, without the git store.
 
     Sorted entries plus zeroed timestamps and owners keep the digest stable
@@ -174,6 +347,10 @@ def write_source(path: Path, root: Path) -> dict[str, Any]:
     an unpacked tree carries none. Symlinks are dropped exactly as the index
     walk drops them: packing their target contents would index files the
     production path never sees.
+
+    `prefix` keeps the entries at their repository-relative location, so a
+    subtree archive still yields the same source identities as indexing the
+    whole checkout.
     """
     files: list[Path] = []
     for file in root.rglob("*"):
@@ -192,7 +369,7 @@ def write_source(path: Path, root: Path) -> dict[str, Any]:
         tarfile.open(fileobj=compressed, mode="w") as archive,
     ):
         for file in files:
-            rel = file.relative_to(root).as_posix()
+            rel = prefix + file.relative_to(root).as_posix()
             data = file.read_bytes()
             digest.update(rel.encode("utf-8"))
             digest.update(b"\0")

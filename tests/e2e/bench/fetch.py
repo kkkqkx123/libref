@@ -7,9 +7,10 @@ temporary directory. Both disappear as soon as the canonical payload has been
 exported, so no production store layout leaks into the fixture tree.
 
 The export is the freeze point. Documents keep their raw bodies (not the cleaned
-markdown) so cleaning and chunking changes can be compared on identical input;
-sources are packed as a working tree without the git store, with the commit
-carried by the metadata. The archive is verified before it is made read-only,
+markdown) so cleaning and chunking changes can be compared on identical input,
+plus the version the site itself states (path segment, canonical or metadata) or
+`unversioned` when it states nothing; sources are packed as a working tree
+without the git store, with the commit carried by the metadata. The archive is verified before it is made read-only,
 and `build.py` verifies it again, so a corpus can only change through an
 explicit re-acquisition that produces a new revision.
 
@@ -100,11 +101,13 @@ def _crawl_docs(entry: dict[str, Any]) -> dict[str, Any]:
                 snapshot_quota_mb=0,
                 crawl_delay_default=float(entry.get("crawl_delay", 0.2)),
             )
+            prefixes = list(entry.get("path_prefixes") or ())
             counts = IngestService(settings, conn).scrape_docs(
                 entry["library"],
                 entry["version"],
                 entry["start_url"],
                 max_pages=entry.get("max_pages"),
+                scope={"path_prefixes": prefixes} if prefixes else None,
                 ecosystem=entry["ecosystem"],
                 fresh=True,
             )
@@ -117,36 +120,74 @@ def _crawl_docs(entry: dict[str, Any]) -> dict[str, Any]:
             f"export incomplete: {len(rows)} captured bodies for {stored} stored pages"
         )
     urls = [str(row["url"]) for row in rows]
-    content = {"pages": len(rows), "urls_sha256": bench_archive.urls_digest(urls)}
+    evidence = bench_archive.doc_version_evidence(rows)
+    bench_archive.check_doc_version(str(entry["doc_version"]), evidence)
+    content = {
+        "pages": len(rows),
+        "urls_sha256": bench_archive.urls_digest(urls),
+        "doc_version": evidence,
+    }
     return {"rows": rows, "content": content}
 
 
-def _pack_code(
-    entry: dict[str, Any], payload: Path
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Clone the source repository, then pack the checkout at the cloned commit.
+def _checkout(entry: dict[str, Any], root: Path) -> tuple[Path, str]:
+    """Materialise the source repository at the ref the spec names.
 
-    The payload is written inside the acquisition scope because the checkout is
-    deleted together with the temporary directory it was cloned into.
+    Without a ref the fixture follows the default branch and goes through the
+    production repository manager, which is how every other indexing run gets
+    its checkout. A pinned ref is a different acquisition: it needs a shallow
+    checkout of that ref instead of the branch tip, so it is done here and the
+    resolved commit is recorded, which is what makes "the same view of upstream"
+    verifiable later.
     """
-    from libref.astminer.repos import RepoManager
-    from libref.db import apply_migrations, open_db
-
     name = f"{entry['ecosystem']}/{entry['library']}/{entry['version']}"
-    with tempfile.TemporaryDirectory(prefix="libref-bench-") as tmp:
-        root = Path(tmp)
+    ref = str(entry.get("ref") or "")
+    if not ref:
+        from libref.astminer.repos import RepoManager
+        from libref.db import apply_migrations, open_db
+
         conn = open_db(root / "acquire.db")
         apply_migrations(conn)
         try:
-            checkout, commit = RepoManager(root / "repos").ensure(
-                conn, name, entry["repo_url"]
-            )
+            return RepoManager(root / "repos").ensure(conn, name, entry["repo_url"])
         finally:
             conn.close()
+
+    from dulwich import porcelain
+
+    target = root / "repos" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        repo = porcelain.clone(str(entry["repo_url"]), str(target), depth=1, branch=ref)
+    except Exception as exc:
+        raise ArchiveError(
+            f"cannot check out ref {ref!r} of {entry['repo_url']}: {exc}"
+        ) from exc
+    try:
+        head = repo.head()
+    finally:
+        repo.close()
+    return target, head.decode()
+
+
+def _pack_code(entry: dict[str, Any], payload: Path) -> dict[str, Any]:
+    """Check out the source repository, then pack the indexed subtree of the checkout.
+
+    Packaging the subtree rather than the whole checkout keeps the payload equal
+    to what the build indexes, so the payload digest says something about the
+    corpus. The payload is written inside the acquisition scope because the
+    checkout is deleted together with the temporary directory it was cloned into.
+    """
+    with tempfile.TemporaryDirectory(prefix="libref-bench-") as tmp:
+        root = Path(tmp)
+        checkout, commit = _checkout(entry, root)
         subdir = str(entry.get("subdir") or "")
-        if subdir and not (checkout / subdir).is_dir():
+        tree = checkout / subdir if subdir else checkout
+        if not tree.is_dir():
             raise ArchiveError(f"checkout lacks subdir {subdir}: {checkout}")
-        stats = bench_archive.write_source(payload, checkout)
+        stats = bench_archive.write_source(
+            payload, tree, prefix=f"{subdir}/" if subdir else ""
+        )
         content = {"commit": commit, "subdir": subdir}
     return {**stats, **content}
 
