@@ -1,0 +1,178 @@
+{
+  "docs": [
+    {
+      "id": "D1",
+      "type": "qualified",
+      "query": "BM25 四列权重",
+      "file": "docs/architecture/tech-stack.md",
+      "heading": "存储与检索"
+    },
+    {
+      "id": "D2",
+      "type": "qualified",
+      "query": "rrf_k 默认值",
+      "file": "docs/app/config.md",
+      "heading": "检索"
+    },
+    {
+      "id": "D3",
+      "type": "semantic",
+      "query": "向量索引什么时候删除重建",
+      "file": "docs/features/db/vector.md",
+      "heading": "双后端"
+    },
+    {
+      "id": "D4",
+      "type": "semantic",
+      "query": "文档分块为什么有两条泳道",
+      "file": "docs/architecture/doc-indexing-chain.md",
+      "heading": "净化与分块"
+    },
+    {
+      "id": "D5",
+      "type": "cjk",
+      "query": "混合检索如何融合两路结果",
+      "file": "docs/architecture/doc-indexing-chain.md",
+      "heading": "检索语义"
+    },
+    {
+      "id": "D6",
+      "type": "qualified",
+      "query": "answer_total_budget",
+      "file": "docs/app/config.md",
+      "heading": "对话"
+    },
+    {
+      "id": "D7",
+      "type": "semantic",
+      "query": "MCP 工具鉴权令牌怎么配",
+      "file": "docs/app/mcp.md",
+      "heading": null
+    },
+    {
+      "id": "D8",
+      "type": "semantic",
+      "query": "Web 服务如何对外暴露",
+      "file": "docs/ops/deployment.md",
+      "heading": "暴露面规则"
+    },
+    {
+      "id": "D9",
+      "type": "qualified",
+      "query": "PrefixSpan 支持度 support",
+      "file": "docs/architecture/code-indexing-chain.md",
+      "heading": "挖掘与审核"
+    },
+    {
+      "id": "D10",
+      "type": "semantic",
+      "query": "模式归纳的提示词校验与落库",
+      "file": "docs/features/pattern-induction.md",
+      "heading": "校验与持久化"
+    },
+    {
+      "id": "D11",
+      "type": "cjk",
+      "query": "命令行检索问答有哪些参数",
+      "file": "docs/app/cli.md",
+      "heading": "检索问答"
+    },
+    {
+      "id": "D12",
+      "type": "semantic",
+      "query": "快照配额与删除日志保留多久",
+      "file": "docs/ops/deployment.md",
+      "heading": "配额与保留期"
+    },
+    {
+      "id": "D13",
+      "type": "qualified",
+      "query": "vec_version_meta 模型维度漂移",
+      "file": "docs/features/db/vector.md",
+      "heading": "表结构"
+    },
+    {
+      "id": "D14",
+      "type": "semantic",
+      "query": "调用实例的置信度分几档",
+      "file": "docs/features/db/code-mining.md",
+      "heading": "表结构"
+    },
+    {
+      "id": "D15",
+      "type": "absent",
+      "query": "kubernetes helm chart 部署清单",
+      "file": null,
+      "heading": null
+    },
+    {
+      "id": "D16",
+      "type": "absent",
+      "query": "react hooks 状态管理",
+      "file": null,
+      "heading": null
+    }
+  ],
+  "code": [
+    {
+      "id": "C1",
+      "type": "qualified",
+      "query": "RetryPolicy execute_with_retry",
+      "file": "src/libref/llm/retry.py"
+    },
+    {
+      "id": "C2",
+      "type": "qualified",
+      "query": "safe_fts_query",
+      "file": "src/libref/text/query.py"
+    },
+    {
+      "id": "C3",
+      "type": "qualified",
+      "query": "capped_alpha reusability",
+      "file": "src/libref/mining/scoring.py"
+    },
+    {
+      "id": "C4",
+      "type": "semantic",
+      "query": "版本写入锁心跳过期",
+      "file": "src/libref/services/infra/version_lock.py"
+    },
+    {
+      "id": "C5",
+      "type": "qualified",
+      "query": "search_async degraded reasons",
+      "file": "src/libref/store/retriever.py"
+    },
+    {
+      "id": "C6",
+      "type": "qualified",
+      "query": "store_page outcome inserted_ids",
+      "file": "src/libref/store/document_store.py"
+    },
+    {
+      "id": "C7",
+      "type": "qualified",
+      "query": "PrefixSpan closed patterns",
+      "file": "src/libref/mining/prefixspan.py"
+    },
+    {
+      "id": "C8",
+      "type": "semantic",
+      "query": "jieba 搜索模式分词",
+      "file": "src/libref/text/cjk.py"
+    },
+    {
+      "id": "C9",
+      "type": "semantic",
+      "query": "回答材料预算如何裁剪",
+      "file": "src/libref/services/docs/answer_materials.py"
+    },
+    {
+      "id": "C10",
+      "type": "absent",
+      "query": "kafka consumer group rebalance",
+      "file": null
+    }
+  ]
+}

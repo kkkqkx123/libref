@@ -1,0 +1,411 @@
+"""Parameter sweep over the real-project benchmark dataset.
+
+Answers "how should the knobs be set" with measurements instead of intuition:
+retrieval-time knobs are swept over the existing dataset, indexing-time knobs
+(chunk budgets) rebuild their own dataset because chunking happens at build
+time.
+
+Usage:
+    uv run python -m tests.e2e.bench.sweep [--out DIR] [--group NAME]...
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+import tempfile
+import time
+from pathlib import Path
+from typing import Any
+
+HERE = Path(__file__).resolve().parent
+DATA = HERE / "data"
+OUTPUT = HERE / "outputs" / "retrieval-bench"
+
+# name -> settings overrides; the first entry of each group is the shipped default.
+RETRIEVAL_VARIANTS: list[dict[str, Any]] = [
+    {
+        "group": "fts_weights",
+        "name": "title5_path3 (default)",
+        "overrides": {},
+        "corpora": ("docs",),
+        "methods": ("precise",),
+    },
+    {
+        "group": "fts_weights",
+        "name": "title10_path3",
+        "overrides": {"fts_w_title": 10.0},
+        "corpora": ("docs",),
+        "methods": ("precise",),
+    },
+    {
+        "group": "fts_weights",
+        "name": "title1_path3",
+        "overrides": {"fts_w_title": 1.0},
+        "corpora": ("docs",),
+        "methods": ("precise",),
+    },
+    {
+        "group": "fts_weights",
+        "name": "title5_path1",
+        "overrides": {"fts_w_path": 1.0},
+        "corpora": ("docs",),
+        "methods": ("precise",),
+    },
+    {
+        "group": "fts_weights",
+        "name": "title5_path8",
+        "overrides": {"fts_w_path": 8.0},
+        "corpora": ("docs",),
+        "methods": ("precise",),
+    },
+    {
+        "group": "rrf",
+        "name": "k20_vec0.5 (default)",
+        "overrides": {},
+        "corpora": ("docs", "code"),
+        "methods": ("fused",),
+    },
+    {
+        "group": "rrf",
+        "name": "k10_vec0.5",
+        "overrides": {"rrf_k": 10},
+        "corpora": ("docs", "code"),
+        "methods": ("fused",),
+    },
+    {
+        "group": "rrf",
+        "name": "k60_vec0.5",
+        "overrides": {"rrf_k": 60},
+        "corpora": ("docs", "code"),
+        "methods": ("fused",),
+    },
+    {
+        "group": "rrf",
+        "name": "k20_vec1.0",
+        "overrides": {"rrf_w_vec": 1.0},
+        "corpora": ("docs", "code"),
+        "methods": ("fused",),
+    },
+    {
+        "group": "rrf",
+        "name": "k20_vec0.25",
+        "overrides": {"rrf_w_vec": 0.25},
+        "corpora": ("docs", "code"),
+        "methods": ("fused",),
+    },
+    {
+        "group": "recall_budget",
+        "name": "mult3_floor30 (default)",
+        "overrides": {},
+        "corpora": ("docs", "code"),
+        "methods": ("fused",),
+    },
+    {
+        "group": "recall_budget",
+        "name": "mult1_floor10",
+        "overrides": {"candidate_multiplier": 1, "rerank_candidate_limit": 10},
+        "corpora": ("docs", "code"),
+        "methods": ("fused",),
+    },
+    {
+        "group": "recall_budget",
+        "name": "mult6_floor60",
+        "overrides": {"candidate_multiplier": 6, "rerank_candidate_limit": 60},
+        "corpora": ("docs", "code"),
+        "methods": ("fused",),
+    },
+    {
+        "group": "assemble_window",
+        "name": "mult2_min10 (default)",
+        "overrides": {},
+        "corpora": ("docs", "code"),
+        "methods": ("fused",),
+    },
+    {
+        "group": "assemble_window",
+        "name": "mult1_min5",
+        "overrides": {"assemble_multiplier": 1, "assemble_min": 5},
+        "corpora": ("docs", "code"),
+        "methods": ("fused",),
+    },
+    {
+        "group": "assemble_window",
+        "name": "mult4_min20",
+        "overrides": {"assemble_multiplier": 4, "assemble_min": 20},
+        "corpora": ("docs", "code"),
+        "methods": ("fused",),
+    },
+    {
+        "group": "rerank_depth",
+        "name": "top_n10 (default)",
+        "overrides": {},
+        "corpora": ("docs", "code"),
+        "methods": ("fused_rerank",),
+    },
+    {
+        "group": "rerank_depth",
+        "name": "top_n5",
+        "overrides": {"rerank_top_n": 5},
+        "corpora": ("docs", "code"),
+        "methods": ("fused_rerank",),
+    },
+    {
+        "group": "rerank_depth",
+        "name": "top_n30",
+        "overrides": {"rerank_top_n": 30},
+        "corpora": ("docs", "code"),
+        "methods": ("fused_rerank",),
+    },
+    {
+        "group": "mining_weight",
+        "name": "alpha_0.15_0.05 (default)",
+        "overrides": {},
+        "corpora": ("code",),
+        "methods": ("fused",),
+    },
+    {
+        "group": "mining_weight",
+        "name": "alpha_0_0",
+        "overrides": {"freq_alpha": 0.0, "cluster_alpha": 0.0},
+        "corpora": ("code",),
+        "methods": ("fused",),
+    },
+    {
+        "group": "mining_weight",
+        "name": "alpha_0.3_0.2",
+        "overrides": {"freq_alpha": 0.3, "cluster_alpha": 0.2},
+        "corpora": ("code",),
+        "methods": ("fused",),
+    },
+    {
+        "group": "mining_weight",
+        "name": "cluster_only_0.2",
+        "overrides": {"freq_alpha": 0.0, "cluster_alpha": 0.2},
+        "corpora": ("code",),
+        "methods": ("fused",),
+    },
+]
+
+# Indexing-time variants: each rebuilds its own data set, docs corpus only.
+CHUNKING_VARIANTS: list[dict[str, Any]] = [
+    {"group": "chunk_bm25", "name": "150_45 (default)", "overrides": {}},
+    {
+        "group": "chunk_bm25",
+        "name": "80_30",
+        "overrides": {"chunk_bm25_max_terms": 80, "chunk_bm25_min_terms": 30},
+    },
+    {
+        "group": "chunk_bm25",
+        "name": "300_90",
+        "overrides": {"chunk_bm25_max_terms": 300, "chunk_bm25_min_terms": 90},
+    },
+    {
+        "group": "chunk_embed",
+        "name": "512_150 (default)",
+        "overrides": {},
+    },
+    {
+        "group": "chunk_embed",
+        "name": "320_96",
+        "overrides": {
+            "chunk_embed_max_tokens": 320,
+            "chunk_embed_min_tokens": 96,
+            "chunk_embed_overlap_tokens": 32,
+        },
+    },
+    {
+        "group": "chunk_embed",
+        "name": "800_200",
+        "overrides": {
+            "chunk_embed_max_tokens": 800,
+            "chunk_embed_min_tokens": 200,
+            "chunk_embed_overlap_tokens": 64,
+        },
+    },
+]
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="sweep retrieval parameters")
+    parser.add_argument("--out", default=str(OUTPUT))
+    parser.add_argument("--data", default=str(DATA))
+    parser.add_argument(
+        "--group", action="append", default=None, help="restrict to one or more groups"
+    )
+    return parser.parse_args()
+
+
+def _run_retrieval_variants(
+    data_dir: Path, groups: set[str] | None
+) -> list[dict[str, Any]]:
+    from libref.db import open_db
+    from tests.e2e.bench.evaluate import (
+        _aggregate,
+        _code_url,
+        _doc_url,
+        _evaluate_corpus,
+        _load,
+    )
+    from tests.e2e.bench.fakes import BagOfTermsEmbedder, SqliteVecStore, bench_settings
+
+    manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
+    judgments = _load()
+    libraries = {
+        "docs": manifest["fixtures"]["repo_docs"]["library"],
+        "code": manifest["fixtures"]["repo_code"]["library"],
+    }
+    conn = open_db(data_dir / "bench.db")
+    embedder = BagOfTermsEmbedder()
+    vectors = SqliteVecStore(conn, embedder)
+    rows: list[dict[str, Any]] = []
+    try:
+        for variant in RETRIEVAL_VARIANTS:
+            if groups and variant["group"] not in groups:
+                continue
+            settings = bench_settings(data_dir / "bench.db", **variant["overrides"])
+            started = time.monotonic()
+            for corpus in variant["corpora"]:
+                evaluation = asyncio.run(
+                    _evaluate_corpus(
+                        conn,
+                        settings,
+                        judgments[corpus],
+                        _doc_url if corpus == "docs" else _code_url,
+                        libraries[corpus],
+                        5,
+                        embedder=embedder,
+                        vectors=vectors,
+                        methods=variant["methods"],
+                    )
+                )
+                summary = _aggregate(evaluation, 5)
+                for method in variant["methods"]:
+                    metrics = summary[method]["all"]
+                    rows.append(
+                        {
+                            "group": variant["group"],
+                            "name": variant["name"],
+                            "corpus": corpus,
+                            "method": method,
+                            "recall_at_k": metrics["recall_at_k"],
+                            "mrr_at_k": metrics["mrr_at_k"],
+                            "ndcg_at_k": metrics["ndcg_at_k"],
+                            "duplicate_rate": metrics["duplicate_rate"],
+                        }
+                    )
+            elapsed = int((time.monotonic() - started) * 1000)
+            for row in rows:
+                if row["group"] == variant["group"] and row["name"] == variant["name"]:
+                    row["elapsed_ms"] = elapsed
+    finally:
+        conn.close()
+    return rows
+
+
+def _run_chunking_variants(
+    groups: set[str] | None,
+) -> list[dict[str, Any]]:
+    from libref.db import open_db
+    from tests.e2e.bench.build import build
+    from tests.e2e.bench.evaluate import _aggregate, _doc_url, _evaluate_corpus, _load
+    from tests.e2e.bench.fakes import bench_settings
+
+    judgments = _load()["docs"]
+    rows: list[dict[str, Any]] = []
+    for variant in CHUNKING_VARIANTS:
+        if groups and variant["group"] not in groups:
+            continue
+        with tempfile.TemporaryDirectory() as tmp:
+            out_dir = Path(tmp) / "data"
+            started = time.monotonic()
+            manifest = build(
+                out_dir,
+                names=["repo_docs"],
+                settings_overrides=variant["overrides"],
+            )
+            library = manifest["fixtures"]["repo_docs"]["library"]
+            settings = bench_settings(out_dir / "bench.db", **variant["overrides"])
+            conn = open_db(out_dir / "bench.db")
+            try:
+                evaluation = asyncio.run(
+                    _evaluate_corpus(
+                        conn,
+                        settings,
+                        judgments,
+                        _doc_url,
+                        library,
+                        5,
+                        methods=("precise", "fused"),
+                    )
+                )
+                summary = _aggregate(evaluation, 5)
+                for method in ("precise", "fused"):
+                    metrics = summary[method]["all"]
+                    rows.append(
+                        {
+                            "group": variant["group"],
+                            "name": variant["name"],
+                            "corpus": "docs",
+                            "method": method,
+                            "recall_at_k": metrics["recall_at_k"],
+                            "mrr_at_k": metrics["mrr_at_k"],
+                            "ndcg_at_k": metrics["ndcg_at_k"],
+                            "duplicate_rate": metrics["duplicate_rate"],
+                            "chunks": manifest["fixtures"]["repo_docs"]["chunks"],
+                            "pages": manifest["fixtures"]["repo_docs"]["pages"],
+                            "elapsed_ms": int((time.monotonic() - started) * 1000),
+                        }
+                    )
+            finally:
+                conn.close()
+    return rows
+
+
+def _write(out_dir: Path, rows: list[dict[str, Any]]) -> Path:
+    lines = ["# 参数扫描结果", ""]
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault(row["group"], []).append(row)
+    for group, items in groups.items():
+        lines.append(f"## {group}")
+        lines.append("")
+        has_chunks = any("chunks" in item for item in items)
+        header = "| 变体 | 语料 | 方法 | recall@5 | MRR@5 | nDCG@5 | 重复率 |"
+        separator = "|---|---|---|---|---|---|---|"
+        if has_chunks:
+            header += " 块数 |"
+            separator += "---|"
+        lines += [header, separator]
+        for item in items:
+            line = (
+                f"| {item['name']} | {item['corpus']} | {item['method']} "
+                f"| {item['recall_at_k']:.3f} | {item['mrr_at_k']:.3f} "
+                f"| {item['ndcg_at_k']:.3f} | {item['duplicate_rate']:.3f} |"
+            )
+            if has_chunks:
+                line += f" {item.get('chunks', '')} |"
+            lines.append(line)
+        lines.append("")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "sweep.md"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (out_dir / "sweep.json").write_text(
+        json.dumps(rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return path
+
+
+def main() -> int:
+    args = _parse_args()
+    groups = set(args.group) if args.group else None
+    rows = _run_retrieval_variants(Path(args.data), groups)
+    rows += _run_chunking_variants(groups)
+    path = _write(Path(args.out), rows)
+    print(f"sweep: {path}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

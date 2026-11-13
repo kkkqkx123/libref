@@ -21,3 +21,13 @@
 文档运行器打开快照开关，原始抓取体留存到 snapshots/ 目录，
 净化文本由导出步骤重新生成到 outputs/docs/ 下，审查报告附对应索引。
 断言文件只断言不变量，不写输出文件。
+
+## 检索问答基准
+
+`bench/` 是离线基准目录（真实项目夹具 + 判定集 + 数据生成 + 方法矩阵 + 门禁），
+不联网但耗时可观，脚本与判据见 `bench/README.md`。
+门禁用例位于 `tests/integration/test_retrieval_bench.py`，需显式开启：
+
+```bash
+LIBREF_RUN_BENCH=1 uv run pytest tests/integration/test_retrieval_bench.py -q
+```

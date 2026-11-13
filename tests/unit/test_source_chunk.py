@@ -127,3 +127,15 @@ def test_large_member_splits_with_enclosing_kind(monkeypatch, tmp_path):
     embed = [c for c in split.chunks if c.chunk_path == ChunkPath.EMBEDDING.value]
     assert len(embed) > 1
     assert {c.span_kind for c in embed} == {"enclosing_entity"}
+
+
+def test_chunk_ids_are_unique_within_a_group(monkeypatch, tmp_path):
+    source = b"class S:\n    def a(self):\n        return 1\n\n    def b(self):\n        return 2\n"
+    decls, _aliases, _raw = _extract("s.py", source)
+    groups = ast_grouping.build_groups(decls, source, "s.py")
+    by_qual = {d.qualified_name: d for d in decls}
+    split = ast_source_chunk.build_source_chunks(
+        groups, by_qual, source, "s.py", repo="r"
+    )
+    ids = [chunk.chunk_id for chunk in split.chunks]
+    assert len(ids) == len(set(ids))

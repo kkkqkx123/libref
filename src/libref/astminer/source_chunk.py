@@ -214,7 +214,7 @@ def _emit_pieces(
                 repo=repo,
                 qual=qual,
                 group_id=group.group_id,
-                chunk_id=f"{group.group_id}::{chunk_path.value}::{index}",
+                chunk_id=f"{group.group_id}::{qual or 'header'}::{chunk_path.value}::{index}",
                 chunk_path=chunk_path.value,
                 content=piece,
                 start_byte=piece_start,
