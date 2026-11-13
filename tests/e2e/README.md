@@ -24,11 +24,11 @@
 
 ## 检索问答基准
 
-`bench/` 是检索问答基准目录：用生产抓取服务与生产仓库管理真实下载第三方文档站与官方仓库
-（`fetch.py`），离线回放建库（`build.py`），再跑方法矩阵、专项探针与门禁。
-下载物、数据集与报告都不入库，只有脚本、夹具规格与判定集进版本库；
-脚本与判据见 `bench/README.md`。门禁用例位于 `tests/integration/test_retrieval_bench.py`，
-需显式开启，`fixtures/` 缺失时按环境不可用跳过：
+`bench/` 是检索问答基准目录：用生产抓取服务与生产仓库管理真实获取第三方文档站与官方仓库
+（`fetch.py`，只做一次），导出为不可变归档后丢弃临时获取层，再离线回放建库（`build.py`）、
+跑方法矩阵、专项探针与门禁。归档、数据集与报告都不入库，只有脚本、规格、判定集与门禁进版本库；
+设计与判据见 `docs/bench/`，脚本说明见 `bench/README.md`。门禁用例位于
+`tests/integration/test_retrieval_bench.py`，需显式开启，归档缺失时按环境不可用跳过：
 
 ```bash
 LIBREF_RUN_BENCH=1 uv run pytest tests/integration/test_retrieval_bench.py -q

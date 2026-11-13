@@ -14,7 +14,11 @@ import threading
 
 from libref.chunking import ChunkPath, ensure_hard_limit
 from libref.services.registry.libraries import mining_version_ids
-from libref.text.embedding import build_embed_text, is_embeddable_metadata
+from libref.text.embedding import (
+    EMBEDDABLE_SQL_CONDITION,
+    build_embed_text,
+    is_embeddable_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +39,7 @@ def ensure_collection_guarded(conn, vec_store, model: str, dim: int) -> None:
 def embeddable_doc_ids(conn, version_id: int) -> list[int]:
     """Ids of a version that belong in vectors; bm25-only chunks serve FTS and are excluded."""
     rows = conn.execute(
-        "SELECT id FROM documents WHERE version_id=? AND "
-        "(json_extract(metadata, '$.chunk_path') IS NULL "
-        "OR json_extract(metadata, '$.chunk_path') != 'bm25') "
+        f"SELECT id FROM documents WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION} "
         "ORDER BY id",
         (version_id,),
     ).fetchall()
@@ -47,9 +49,7 @@ def embeddable_doc_ids(conn, version_id: int) -> list[int]:
 def sqlite_embeddable_count(conn, version_id: int) -> int:
     """Reconciliation baseline on the truth side; mirrors the embeddable filter above."""
     row = conn.execute(
-        "SELECT count(*) FROM documents WHERE version_id=? AND "
-        "(json_extract(metadata, '$.chunk_path') IS NULL "
-        "OR json_extract(metadata, '$.chunk_path') != 'bm25')",
+        f"SELECT count(*) FROM documents WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION}",
         (version_id,),
     ).fetchone()
     return int(row[0])
@@ -182,9 +182,7 @@ async def reconcile_version(conn, settings, vec_store, embed, version_id: int) -
         vec_store.delete_version(version_id)
         rows = conn.execute(
             "SELECT id, library_id, version_id, content, metadata "
-            "FROM documents WHERE version_id=?"
-            " AND (json_extract(metadata, '$.chunk_path') IS NULL"
-            " OR json_extract(metadata, '$.chunk_path') != 'bm25')"
+            f"FROM documents WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION}"
             " ORDER BY id",
             (version_id,),
         ).fetchall()
@@ -433,9 +431,7 @@ class MaintenanceService:
         ).fetchone()
         rows = self._conn.execute(
             "SELECT id, library_id, version_id, content, metadata "
-            "FROM documents WHERE version_id=?"
-            " AND (json_extract(metadata, '$.chunk_path') IS NULL"
-            " OR json_extract(metadata, '$.chunk_path') != 'bm25')"
+            f"FROM documents WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION}"
             " ORDER BY id",
             (version_id,),
         ).fetchall()

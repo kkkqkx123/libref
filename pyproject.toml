@@ -54,7 +54,6 @@ markers = [
 # 夹具是待解析的源样本，刻意含未定义调用与闲置绑定，不做清理。
 "tests/fixtures/**" = ["F821", "F841"]
 "tests/e2e/fixtures/**" = ["F821", "F841"]
-"tests/e2e/bench/fixtures/**" = ["F821", "F841", "I001"]
 
 [tool.uv.workspace]
 members = [

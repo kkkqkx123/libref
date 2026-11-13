@@ -1,21 +1,25 @@
 {
-  "docs": {
-    "kind": "docs",
-    "library": "httpx",
-    "version": "docs",
-    "ecosystem": "pypi",
-    "start_url": "https://www.python-httpx.org/",
-    "max_pages": 40,
-    "crawl_delay": 0.2,
-    "note": "第三方文档站（httpx 官方文档）：sitemap 发现 23 页，含标题层级、代码围栏、表格与跨页链接；与源码分支是同一个库，构成真实的库知识库场景"
-  },
-  "code": {
-    "kind": "code",
-    "library": "httpx",
-    "version": "head",
-    "repo_url": "https://github.com/encode/httpx",
-    "subdir": "httpx",
-    "ecosystem": "pypi",
-    "note": "同一库的官方仓库：纯 Python 工程，含相对导入、别名解析、装饰器、协议与跨文件调用"
-  }
+  "fixtures": [
+    {
+      "project": "httpx",
+      "kind": "docs",
+      "library": "httpx",
+      "ecosystem": "pypi",
+      "version": "docs",
+      "start_url": "https://www.python-httpx.org/",
+      "max_pages": 40,
+      "crawl_delay": 0.2,
+      "note": "第三方文档站（httpx 官方文档）：sitemap 发现 23 页，含标题层级、代码围栏、表格与跨页链接；与源码分支是同一个库，构成真实的库知识库场景"
+    },
+    {
+      "project": "httpx",
+      "kind": "code",
+      "library": "httpx",
+      "ecosystem": "pypi",
+      "version": "head",
+      "repo_url": "https://github.com/encode/httpx",
+      "subdir": "httpx",
+      "note": "同一库的官方仓库：纯 Python 工程，含相对导入、别名解析、装饰器、协议与跨文件调用"
+    }
+  ]
 }

@@ -1,11 +1,15 @@
 {
   "top_k": 5,
+  "revisions": {
+    "httpx/docs": "6ca0d3d66d43",
+    "httpx/code": "c5e82c0ae4ce"
+  },
   "precise_floors": {
-    "docs": {
+    "httpx/docs": {
       "recall_at_k": 0.8,
       "mrr_at_k": 0.58
     },
-    "code": {
+    "httpx/code": {
       "recall_at_k": 0.72,
       "mrr_at_k": 0.72
     }
@@ -14,7 +18,7 @@
     "max_duplicate_rate": 0.0
   },
   "real_floors": {
-    "docs": {
+    "httpx/docs": {
       "fused": {
         "recall_at_k": 0.95,
         "mrr_at_k": 0.7
@@ -24,7 +28,7 @@
         "mrr_at_k": 0.7
       }
     },
-    "code": {
+    "httpx/code": {
       "fused": {
         "recall_at_k": 0.82,
         "mrr_at_k": 0.82

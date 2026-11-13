@@ -72,23 +72,20 @@ class SqliteVecStore:
         self._cache: dict[int, list[float]] = {}
         self._batch = 256
 
-    _LANE_FILTER = (
-        "COALESCE(json_extract(d.metadata, '$.chunk_path'), 'embedding') != 'bm25'"
-    )
-
     def _vector_rows(self, version_id: int | None = None) -> list[tuple[int, str]]:
         import json
 
-        if version_id is None:
+        from libref.text.embedding import EMBEDDABLE_SQL_CONDITION
+
+        sql = (
+            "SELECT id, content, metadata FROM documents "
+            f"WHERE {EMBEDDABLE_SQL_CONDITION}"
+        )
+        params: tuple = ()
+        if version_id is not None:
             sql = (
-                "SELECT d.id, d.content, d.metadata FROM documents d "
-                f"WHERE {self._LANE_FILTER}"
-            )
-            params: tuple = ()
-        else:
-            sql = (
-                "SELECT d.id, d.content, d.metadata FROM documents d "
-                f"WHERE d.version_id=? AND {self._LANE_FILTER}"
+                "SELECT id, content, metadata FROM documents "
+                f"WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION}"
             )
             params = (int(version_id),)
 

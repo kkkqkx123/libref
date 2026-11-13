@@ -46,7 +46,7 @@ tests/e2e/repos/
 tests/e2e/outputs/
 tests/e2e/snapshots/
 
-# retrieval benchmark downloads, dataset and reports (only fetch/build scripts are versioned)
+# retrieval benchmark archive, dataset and reports (only scripts, spec, judgments and gates are versioned)
 tests/e2e/bench/fixtures/
 tests/e2e/bench/data/
 tests/e2e/bench/outputs/

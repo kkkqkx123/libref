@@ -33,168 +33,168 @@ RETRIEVAL_VARIANTS: list[dict[str, Any]] = [
         "group": "fts_weights",
         "name": "title5_path3 (default)",
         "overrides": {},
-        "corpora": ("docs",),
+        "kinds": ("docs",),
         "methods": ("precise",),
     },
     {
         "group": "fts_weights",
         "name": "title10_path3",
         "overrides": {"fts_w_title": 10.0},
-        "corpora": ("docs",),
+        "kinds": ("docs",),
         "methods": ("precise",),
     },
     {
         "group": "fts_weights",
         "name": "title1_path3",
         "overrides": {"fts_w_title": 1.0},
-        "corpora": ("docs",),
+        "kinds": ("docs",),
         "methods": ("precise",),
     },
     {
         "group": "fts_weights",
         "name": "title5_path1",
         "overrides": {"fts_w_path": 1.0},
-        "corpora": ("docs",),
+        "kinds": ("docs",),
         "methods": ("precise",),
     },
     {
         "group": "fts_weights",
         "name": "title5_path8",
         "overrides": {"fts_w_path": 8.0},
-        "corpora": ("docs",),
+        "kinds": ("docs",),
         "methods": ("precise",),
     },
     {
         "group": "rrf",
         "name": "k20_vec1.0 (default)",
         "overrides": {},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused", "fused_rerank"),
     },
     {
         "group": "rrf",
         "name": "k10_vec1.0",
         "overrides": {"rrf_k": 10},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused", "fused_rerank"),
     },
     {
         "group": "rrf",
         "name": "k60_vec1.0",
         "overrides": {"rrf_k": 60},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused", "fused_rerank"),
     },
     {
         "group": "rrf",
         "name": "k20_vec0.5",
         "overrides": {"rrf_w_vec": 0.5},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused", "fused_rerank"),
     },
     {
         "group": "rrf",
         "name": "k20_vec0.25",
         "overrides": {"rrf_w_vec": 0.25},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused", "fused_rerank"),
     },
     {
         "group": "rrf",
         "name": "k20_vec1.5",
         "overrides": {"rrf_w_vec": 1.5},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused", "fused_rerank"),
     },
     {
         "group": "recall_budget",
         "name": "mult3_floor30 (default)",
         "overrides": {},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused",),
     },
     {
         "group": "recall_budget",
         "name": "mult1_floor10",
         "overrides": {"candidate_multiplier": 1, "rerank_candidate_limit": 10},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused",),
     },
     {
         "group": "recall_budget",
         "name": "mult6_floor60",
         "overrides": {"candidate_multiplier": 6, "rerank_candidate_limit": 60},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused",),
     },
     {
         "group": "assemble_window",
         "name": "mult2_min10 (default)",
         "overrides": {},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused",),
     },
     {
         "group": "assemble_window",
         "name": "mult1_min5",
         "overrides": {"assemble_multiplier": 1, "assemble_min": 5},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused",),
     },
     {
         "group": "assemble_window",
         "name": "mult4_min20",
         "overrides": {"assemble_multiplier": 4, "assemble_min": 20},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused",),
     },
     {
         "group": "rerank_depth",
         "name": "top_n10 (default)",
         "overrides": {},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused_rerank",),
     },
     {
         "group": "rerank_depth",
         "name": "top_n5",
         "overrides": {"rerank_top_n": 5},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused_rerank",),
     },
     {
         "group": "rerank_depth",
         "name": "top_n30",
         "overrides": {"rerank_top_n": 30},
-        "corpora": ("docs", "code"),
+        "kinds": ("docs", "code"),
         "methods": ("fused_rerank",),
     },
     {
         "group": "mining_weight",
         "name": "alpha_0.15_0.05 (default)",
         "overrides": {},
-        "corpora": ("code",),
+        "kinds": ("code",),
         "methods": ("fused",),
     },
     {
         "group": "mining_weight",
         "name": "alpha_0_0",
         "overrides": {"freq_alpha": 0.0, "cluster_alpha": 0.0},
-        "corpora": ("code",),
+        "kinds": ("code",),
         "methods": ("fused",),
     },
     {
         "group": "mining_weight",
         "name": "alpha_0.3_0.2",
         "overrides": {"freq_alpha": 0.3, "cluster_alpha": 0.2},
-        "corpora": ("code",),
+        "kinds": ("code",),
         "methods": ("fused",),
     },
     {
         "group": "mining_weight",
         "name": "cluster_only_0.2",
         "overrides": {"freq_alpha": 0.0, "cluster_alpha": 0.2},
-        "corpora": ("code",),
+        "kinds": ("code",),
         "methods": ("fused",),
     },
 ]
@@ -253,16 +253,20 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _fixture_ids(fixtures: dict[str, Any], kinds: tuple[str, ...]) -> list[str]:
+    """Fixture ids of the requested kinds, in manifest order."""
+    return [name for name, info in fixtures.items() if info["kind"] in kinds]
+
+
 def _run_retrieval_variants(
     data_dir: Path, groups: set[str] | None, real: bool
 ) -> list[dict[str, Any]]:
     from libref.db import open_db
     from tests.e2e.bench.evaluate import (
         _aggregate,
-        _code_url,
-        _doc_url,
         _evaluate_corpus,
         _load,
+        _url_for,
     )
     from tests.e2e.bench.fakes import (
         BagOfTermsEmbedder,
@@ -275,14 +279,16 @@ def _run_retrieval_variants(
 
     manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
     judgments = _load()
+    fixtures = manifest["fixtures"]
     scopes = {
         name: {
             "library": info["library"],
             "version": info["version"],
-            "ecosystem": info.get("ecosystem", "custom"),
+            "ecosystem": info["ecosystem"],
         }
-        for name, info in manifest["fixtures"].items()
+        for name, info in fixtures.items()
     }
+    urls = {name: _url_for(info) for name, info in fixtures.items()}
     conn = open_db(data_dir / "bench.db")
     base_settings = (
         real_settings(data_dir / "bench.db")
@@ -305,13 +311,13 @@ def _run_retrieval_variants(
             model = real_settings if real else bench_settings
             settings = model(data_dir / "bench.db", **variant["overrides"])
             started = time.monotonic()
-            for corpus in variant["corpora"]:
+            for corpus in _fixture_ids(fixtures, variant["kinds"]):
                 evaluation = asyncio.run(
                     _evaluate_corpus(
                         conn,
                         settings,
                         judgments[corpus],
-                        _doc_url if corpus == "docs" else _code_url,
+                        urls[corpus],
                         scopes[corpus],
                         5,
                         embedder=embedder,
@@ -346,8 +352,9 @@ def _run_retrieval_variants(
 
 def _run_chunking_variants(groups: set[str] | None, real: bool) -> list[dict[str, Any]]:
     from libref.db import open_db
+    from tests.e2e.bench import archive as bench_archive
     from tests.e2e.bench.build import build
-    from tests.e2e.bench.evaluate import _aggregate, _doc_url, _evaluate_corpus, _load
+    from tests.e2e.bench.evaluate import _aggregate, _evaluate_corpus, _load, _url_for
     from tests.e2e.bench.fakes import (
         BagOfTermsEmbedder,
         bench_settings,
@@ -356,7 +363,17 @@ def _run_chunking_variants(groups: set[str] | None, real: bool) -> list[dict[str
         real_settings,
     )
 
-    judgments = _load()["docs"]
+    judgments = _load()
+    docs_ids = [
+        bench_archive.fixture_id(entry)
+        for entry in bench_archive.select()
+        if entry["kind"] == "docs"
+    ]
+    if not docs_ids:
+        raise SystemExit("spec holds no documents fixture to sweep chunk budgets on")
+    # Indexing knobs rebuild the dataset, so they are swept on the first
+    # documents fixture in spec order rather than on every project.
+    docs_id = docs_ids[0]
     rows: list[dict[str, Any]] = []
     for variant in CHUNKING_VARIANTS:
         if groups and variant["group"] not in groups:
@@ -366,13 +383,14 @@ def _run_chunking_variants(groups: set[str] | None, real: bool) -> list[dict[str
             started = time.monotonic()
             manifest = build(
                 out_dir,
-                names=["docs"],
+                names=[docs_id],
                 settings_overrides=variant["overrides"],
             )
+            corpus = manifest["fixtures"][docs_id]
             scope = {
-                "library": manifest["fixtures"]["docs"]["library"],
-                "version": manifest["fixtures"]["docs"]["version"],
-                "ecosystem": manifest["fixtures"]["docs"].get("ecosystem", "custom"),
+                "library": corpus["library"],
+                "version": corpus["version"],
+                "ecosystem": corpus["ecosystem"],
             }
             model = real_settings if real else bench_settings
             settings = model(out_dir / "bench.db", **variant["overrides"])
@@ -388,8 +406,8 @@ def _run_chunking_variants(groups: set[str] | None, real: bool) -> list[dict[str
                     _evaluate_corpus(
                         conn,
                         settings,
-                        judgments,
-                        _doc_url,
+                        judgments[docs_id],
+                        _url_for(corpus),
                         scope,
                         5,
                         embedder=embedder,
@@ -404,14 +422,14 @@ def _run_chunking_variants(groups: set[str] | None, real: bool) -> list[dict[str
                         {
                             "group": variant["group"],
                             "name": variant["name"],
-                            "corpus": "docs",
+                            "corpus": docs_id,
                             "method": method,
                             "recall_at_k": metrics["recall_at_k"],
                             "mrr_at_k": metrics["mrr_at_k"],
                             "ndcg_at_k": metrics["ndcg_at_k"],
                             "duplicate_rate": metrics["duplicate_rate"],
-                            "chunks": manifest["fixtures"]["docs"]["chunks"],
-                            "pages": manifest["fixtures"]["docs"]["pages"],
+                            "chunks": corpus["chunks"],
+                            "pages": corpus["pages"],
                             "elapsed_ms": int((time.monotonic() - started) * 1000),
                         }
                     )

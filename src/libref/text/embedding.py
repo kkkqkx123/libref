@@ -59,3 +59,11 @@ def build_embed_text(
 def is_embeddable_metadata(meta: dict | None) -> bool:
     """Whether derived vectors include this chunk: bm25 chunks serve FTS only and are not embedded."""
     return (meta or {}).get("chunk_path", "embedding") != "bm25"
+
+
+# SQL form of the same rule, for callers that must filter candidate rows before
+# reading their metadata. Both forms describe one rule and change together.
+EMBEDDABLE_SQL_CONDITION = (
+    "(json_extract(metadata, '$.chunk_path') IS NULL "
+    "OR json_extract(metadata, '$.chunk_path') != 'bm25')"
+)

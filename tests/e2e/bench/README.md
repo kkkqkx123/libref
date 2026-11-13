@@ -1,46 +1,65 @@
-# 检索问答基准（真实下载夹具）
+# 检索问答基准（冻结夹具归档）
 
 本目录用真实使用场景做检索问答基准：文档来自第三方文档站，源码来自该库的官方仓库，
-两者都经生产获取工具下载，而不是用本仓库自己的文件凑语料。
+两者都经生产获取工具取得，而不是用本仓库自己的文件凑语料。
 
-- **获取**：`fetch.py` 用生产抓取服务（robots/sitemap 发现、逐主机退避、正文抽取、快照留存）
-  抓文档，用生产仓库管理（dulwich 浅克隆）拉源码，结果落在 `fixtures/`。
-- **构建**：`build.py` 离线回放下载物，走生产净化、双泳道分块、落库、解析与挖掘。
-- **不入库**：`fixtures/`（下载物与克隆）、`data/`（数据集）、`outputs/`（报告）全部忽略；
-  只有 `bench.json`、脚本与判定集进版本库。
+**获取只做一次。** 抓取与克隆发生在临时目录里，产物导出成不可变归档后立即丢弃临时层；
+此后的构建、评测与扫描只读归档。语料因此不会随站点改动、提供方漂移或本机目录结构变化，
+门禁下限也只在归档修订不变时有效。
 
-夹具规格见 `bench.json`：当前为 `httpx` 官方文档站（`https://www.python-httpx.org/`，
-sitemap 23 页）与 `https://github.com/encode/httpx`（`httpx/` 子目录），
-同一个库的文档与源码构成真实的库知识库场景。
+- **归档**：`fixtures/{项目}/{分支}/`，一目录一份；文档分支存原始正文（不是净化文本），
+  源码分支存固定提交的工作树打包（不含版本库）。身份（库、生态、版本）写在元数据里，
+  不写进路径，所以移动归档不会改变它描述的对象。
+- **不入库**：`fixtures/`（归档）、`data/`（数据集）、`outputs/`（报告）全部忽略；
+  只有规格、脚本、判定集与门禁进版本库。
+- **规格**：`bench.json` 列出每个项目分支的获取配方与身份。当前为 `httpx` 的官方文档站
+  （`https://www.python-httpx.org/`）与 `https://github.com/encode/httpx`（`httpx/` 子目录），
+  同一个库的两条分支构成真实的库知识库场景。
 
 ## 运行
 
 ```bash
-uv run python -m tests.e2e.bench.fetch             # 下载夹具（联网，一次即可）
-uv run python -m tests.e2e.bench.build             # 离线回放，产出 data/bench.db
-uv run python -m tests.e2e.bench.evaluate          # 方法矩阵 + 专项探针 + 门禁
-uv run python -m tests.e2e.bench.evaluate --real   # 真实嵌入与重排，门禁含融合与精排
-uv run python -m tests.e2e.bench.sweep [--real]    # 参数扫描
+uv run python -m tests.e2e.bench.fetch              # 获取并冻结归档（联网，一次即可）
+uv run python -m tests.e2e.bench.fetch --only httpx/docs --reacquire   # 重新获取，产生新修订
+uv run python -m tests.e2e.bench.build              # 离线回放归档，产出 data/bench.db
+uv run python -m tests.e2e.bench.evaluate           # 方法矩阵 + 专项探针 + 门禁
+uv run python -m tests.e2e.bench.evaluate --real    # 真实嵌入与重排，门禁含融合与精排
+uv run python -m tests.e2e.bench.sweep [--real]     # 参数扫描
 LIBREF_RUN_BENCH=1 uv run pytest tests/integration/test_retrieval_bench.py -q
 ```
 
-`fetch.py` 支持 `--docs-only` / `--code-only` / `--refresh`；已下载时直接复用
-`fixtures/lock.json` 记录的下载物。网络或站点不可用退出码为 2，标记环境不可用，不算回归。
-`evaluate` 退出码非零表示门禁不满足；报告里同时列出失败项与全部观测值。
-`fixtures/` 缺失时构建直接报错并提示先运行 `fetch.py`，门禁用例按环境不可用跳过。
+`fetch.py` 支持 `--only ID` 与 `--reacquire`：没有 `--reacquire` 时已存在的归档不会被覆盖。
+网络或站点不可用退出码为 2，标记环境不可用，不算回归。`build.py` 与 `evaluate.py` 退出码
+非零表示归档校验或门禁不满足，报告里同时列出失败项与全部观测值。归档缺失时构建直接报错，
+门禁用例跳过。
+
+## 冻结与校验
+
+- 获取时先导出到暂存目录，成功后才落到归档；归档写完后重读一遍校验内容摘要，再置为只读。
+- 构建读归档时校验身份、获取配方与载荷摘要，并在消费过程中重算页集合摘要或源码树摘要，
+  任何不一致都是硬失败。归档被改动、规格被改动但没有重新获取，都会在这一步暴露。
+- 构建只接受空目录，或只含 `bench.db` 与 `manifest.json` 的上一次数据集；其他目录直接拒绝，
+  不会先删再建。
+- 归档修订是载荷摘要的前 12 位，写进数据集清单与报告；`gates.json` 记录下限所属的修订，
+  修订不符即门禁失败，提示重新测量下限。
+- 获取先写进暂存目录，成功后才替换归档；中途失败不留下半个归档，也不会破坏已有归档。
+- 归档在磁盘上可直接离线拷贝复用；不需要额外配置开关。
+- 人工核对归档内容时，用标准解包命令展开到临时目录查看，不要解到仓库树内：第三方源码会被
+  测试收集器与静态检查扫到，归档本身也因此保持单文件形态。
 
 ## 文件职责
 
 | 文件 | 职责 |
 |---|---|
-| `bench.json` | 夹具规格：文档站入口与抓取上限、源码仓库与子目录 |
-| `fetch.py` | 下载：生产抓取服务抓文档并导出原始正文缓存，生产仓库管理克隆源码，写 `fixtures/lock.json` |
-| `build.py` | 离线回放：页面缓存 → 净化分块落库，克隆目录 → 解析挖掘，产出数据集与清单 |
-| `judgments.json` | 判定集：查询、类型（qualified/semantic/cjk/absent）、期望目标（文档站绝对地址或源码文件） |
+| `bench.json` | 夹具规格：项目分支的获取配方与身份 |
+| `archive.py` | 归档契约：规格解析、目录布局、元数据、摘要校验、只读冻结 |
+| `fetch.py` | 获取：生产抓取服务抓文档、生产仓库管理克隆源码，导出成归档后才丢弃临时层 |
+| `build.py` | 离线回放：归档正文 → 净化分块落库，归档源码 → 解析挖掘，产出数据集与清单 |
+| `judgments.json` | 判定集：按夹具标识分组，查询、类型（qualified/semantic/cjk/absent）、期望目标 |
 | `evaluate.py` | 方法矩阵、专项探针、门禁检查与报告生成 |
 | `metrics.py` | 纯排序指标：Recall@k、MRR@k、nDCG@k、空结果率、重复率、分布统计 |
 | `fakes.py` | 两种向量与重排端点：确定性离线替身，以及读环境文件的真实模型（`--real`） |
-| `gates.json` | 版本化门禁：全文路绝对下限、全方法结构不变量、真实模型下的融合与精排下限 |
+| `gates.json` | 版本化门禁：修订绑定、全文路绝对下限、全方法结构不变量、真实模型下的融合与精排下限 |
 | `sweep.py` | 参数扫描：检索期旋钮复用数据集，索引期分块旋钮各自重建数据集 |
 
 ## 方法矩阵与门禁口径
@@ -49,12 +68,15 @@ LIBREF_RUN_BENCH=1 uv run pytest tests/integration/test_retrieval_bench.py -q
 - `fused` / `fused_rerank`：生产融合与重排接线。默认跑确定性替身，只受结构不变量约束
   （结果不得出现重复材料）；加 `--real` 时改用 `BAAI/bge-m3` 与 `BAAI/bge-reranker-v2-m3`
   （密钥取自仓库根环境文件，缺失即报错），此时融合与精排一并进入 `real_floors` 下限。
+- 探针在每类语料的首个夹具上跑（文档类：材料预算、置信度、查询整形、首位保留；
+  源码类：副表加载成本），报告标出所属夹具。
 
 ## 扩展
 
-- **换夹具**：改 `bench.json` 的 `docs.start_url` 与 `code.repo_url`，重跑 `fetch.py --refresh`，
-  然后按新语料重写判定集与门禁下限。夹具是下载物，不进版本库。
+- **加项目分支**：在 `bench.json` 加一条（项目、分支、身份、配方），跑 `fetch.py`，
+  在 `judgments.json` 加同名的判定集键，在 `gates.json` 补该夹具的修订与下限。
 - **判定集**：`targets` 用绝对 URL（文档）或仓库内相对文件路径（源码），可给多个等价目标；
   `heading` 用标题子串进一步收窄文档命中。`absent` 类型用于观察空结果行为。
 - **真实模型运行**：`--real` 直接调用生产传输层，不落快照文件；每次运行都会重新编码语料
-  （文档 202 块、源码 1145 块，约两分钟）。
+  （文档 483 块、源码 1197 块，约两分钟）。
+- 设计依据与后续扩展方向见 `docs/bench/`。

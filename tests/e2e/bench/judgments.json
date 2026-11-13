@@ -1,5 +1,5 @@
 {
-  "docs": [
+  "httpx/docs": [
     {
       "id": "D1",
       "type": "qualified",
@@ -134,7 +134,7 @@
       "targets": []
     }
   ],
-  "code": [
+  "httpx/code": [
     {
       "id": "C1",
       "type": "qualified",
