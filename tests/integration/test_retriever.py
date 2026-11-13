@@ -8,6 +8,7 @@ import json
 import pytest
 
 from libref.chunking import Chunk
+from libref.services.docs.search import SearchService
 from libref.store.document_store import DocumentStore
 from libref.store.retriever import HybridRetriever
 from tests.conftest import make_settings, seed_library_version
@@ -95,7 +96,8 @@ def test_multi_version_fanout_capped(conn, tmp_path, monkeypatch) -> None:
         )
     )
     assert status["degraded"] is True
-    assert vec.seen == [1, 2]
+    # Newest ingested versions stay inside the fan-out cap; the oldest ones fall out.
+    assert vec.seen == [4, 3]
 
 
 def test_hybrid_marks_sources_and_fused_score_sorted(
@@ -370,9 +372,7 @@ def test_preset_rejects_unknown(conn, tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     s = make_settings(monkeypatch, tmp_path)
     with __import__("pytest").raises(ValueError, match="preset"):
-        asyncio.run(
-            HybridRetriever(conn, s).search_async("quetzalhybrid", preset="turbo")
-        )
+        asyncio.run(SearchService(conn, s).search_with_mode("quetzalhybrid", "turbo"))
 
 
 def test_precise_preset_skips_vectors(conn, tmp_path, monkeypatch) -> None:
@@ -381,14 +381,14 @@ def test_precise_preset_skips_vectors(conn, tmp_path, monkeypatch) -> None:
     s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0, cluster_alpha=0.05)
     vec = _FakeVec([ids["pattern"], ids["plain"]])
     results, status = asyncio.run(
-        HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
-            "quetzalhybrid", limit=8, preset="precise"
+        SearchService(conn, s, vec_store=vec, embed=_fake_embed).search_with_mode(
+            "quetzalhybrid", "precise", limit=8
         )
     )
+    assert results
     assert status["degraded"] is False
     assert status["vec_count"] == 0
     assert status["rerank_applied"] is False
-    assert all(r["sources"] == ["fts"] for r in results)
 
 
 def test_status_carries_road_counts(conn, tmp_path, monkeypatch) -> None:
@@ -437,8 +437,87 @@ def test_thorough_enables_window_by_default(conn, tmp_path, monkeypatch) -> None
     s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
     results, status = asyncio.run(
         HybridRetriever(conn, s).search_async(
-            "quetzalwindow", limit=1, preset="thorough"
+            "quetzalwindow", limit=1, expand_window=True
         )
     )
     assert status["degraded"] is False
     assert results
+
+
+def test_auxiliary_lane_twin_is_dropped(conn, tmp_path, monkeypatch) -> None:
+    seed_library_version(conn)
+    store = DocumentStore(conn)
+    url = "https://d.example/dual.html"
+    body = "quetzaltwin shared section body"
+    store.store_page(
+        1,
+        1,
+        url,
+        "stored",
+        chunks=[
+            Chunk(
+                url=url,
+                path="G",
+                title="G",
+                content=body,
+                sort_order=0,
+                chunk_path="embedding",
+                source_group_id="sec_0",
+                chunk_id="sec_0_embedding_0",
+            ),
+            Chunk(
+                url=url,
+                path="G",
+                title="G",
+                content="quetzaltwin shared section body cleaned",
+                sort_order=1,
+                chunk_path="bm25",
+                source_group_id="sec_0",
+                chunk_id="sec_0_bm25_0",
+            ),
+        ],
+        raw_content=body,
+    )
+    monkeypatch.chdir(tmp_path)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+    results, _status = asyncio.run(
+        HybridRetriever(conn, s).search_async("quetzaltwin", limit=8)
+    )
+    assert [r["chunk_id"] for r in results] == ["sec_0_embedding_0"]
+
+
+def test_rerank_failure_is_reported_once(conn, tmp_path, monkeypatch) -> None:
+    _seed(conn)
+    monkeypatch.chdir(tmp_path)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+
+    async def boom(query: str, texts: list[str], top_n: int | None):
+        raise RuntimeError("provider down")
+
+    results, status = asyncio.run(
+        HybridRetriever(conn, s, rerank=boom).search_async("quetzalhybrid", limit=8)
+    )
+    assert results
+    assert status["degraded"] is True
+    assert status["reasons"] == ["rerank_error"]
+    assert status["rerank_applied"] is False
+
+
+def test_rerank_success_is_reported(conn, tmp_path, monkeypatch) -> None:
+    ids = _seed(conn)
+    monkeypatch.chdir(tmp_path)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+
+    async def rank(query: str, texts: list[str], top_n: int | None):
+        return [
+            (idx, 1.0 if "numpy.array" in text else 0.0)
+            for idx, text in enumerate(texts)
+        ]
+
+    results, status = asyncio.run(
+        HybridRetriever(conn, s, rerank=rank).search_async("quetzalhybrid", limit=8)
+    )
+    assert status["rerank_applied"] is True
+    assert status["reasons"] == []
+    assert results[0]["id"] == ids["pattern"]
+    assert results[0]["score"] > results[-1]["score"]

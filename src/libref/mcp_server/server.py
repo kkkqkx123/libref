@@ -116,7 +116,7 @@ def build_mcp_server(
     discovery_svc = build_discovery_service(conn, resolve_settings)
     pages = PageService(conn)
     catalog_svc = LibraryService(conn)
-    mining = MiningReadService(conn)
+    mining = MiningReadService(conn, resolve_settings)
     review_svc = ReviewService(conn)
 
     async def search(
@@ -135,8 +135,6 @@ def build_mcp_server(
         bad = _check_limit(limit, low=1, high=100)
         if bad is not None:
             return _invalid(bad)
-        if preset not in ("precise", "balanced", "thorough"):
-            return _invalid(f"unsupported search preset: {preset}")
         try:
             results, status = await search_svc.search_with_mode(
                 query,
@@ -252,8 +250,6 @@ def build_mcp_server(
         bad = _check_limit(limit, low=1, high=50)
         if bad is not None:
             return _invalid(bad)
-        if preset not in ("precise", "balanced", "thorough"):
-            return _invalid(f"unsupported search preset: {preset}")
         try:
             return await answer_query_async(
                 conn,

@@ -161,6 +161,16 @@ def cmd_mine(args: argparse.Namespace) -> int:
 
     settings = _load_settings(args)
     conn = _connect(settings)
+    cluster_threshold = (
+        args.cluster_threshold
+        if args.cluster_threshold is not None
+        else settings.cluster_threshold
+    )
+    cluster_min_size = (
+        args.cluster_min_size
+        if args.cluster_min_size is not None
+        else settings.cluster_min_size
+    )
     try:
         kinds = (
             args.resolve_kinds.split(",")
@@ -181,8 +191,8 @@ def cmd_mine(args: argparse.Namespace) -> int:
                     maxlen=args.maxlen,
                     minlen=args.minlen,
                     include_ambiguous=bool(args.include_ambiguous),
-                    cluster_threshold=args.cluster_threshold,
-                    cluster_min_size=args.cluster_min_size,
+                    cluster_threshold=cluster_threshold,
+                    cluster_min_size=cluster_min_size,
                     resolve_kinds=kinds,
                     min_args=getattr(args, "min_args", None),
                     max_args=getattr(args, "max_args", None),
@@ -209,8 +219,8 @@ def cmd_mine(args: argparse.Namespace) -> int:
             maxlen=args.maxlen,
             minlen=args.minlen,
             include_ambiguous=bool(args.include_ambiguous),
-            cluster_threshold=args.cluster_threshold,
-            cluster_min_size=args.cluster_min_size,
+            cluster_threshold=cluster_threshold,
+            cluster_min_size=cluster_min_size,
             resolve_kinds=kinds,
             min_args=getattr(args, "min_args", None),
             max_args=getattr(args, "max_args", None),
@@ -303,11 +313,12 @@ def cmd_induce_labels(args: argparse.Namespace) -> int:
 def cmd_api_insight(args: argparse.Namespace) -> int:
     import json
 
-    conn = _connect(_load_settings(args))
+    settings = _load_settings(args)
+    conn = _connect(settings)
     try:
         try:
             apis = args.apis.split(",") if getattr(args, "apis", None) else None
-            rows = MiningReadService(conn).api_insight(
+            rows = MiningReadService(conn, settings).api_insight(
                 args.view,
                 getattr(args, "api", None),
                 apis=apis,
@@ -329,7 +340,8 @@ def cmd_api_insight(args: argparse.Namespace) -> int:
 def cmd_pattern_insight(args: argparse.Namespace) -> int:
     import json
 
-    conn = _connect(_load_settings(args))
+    settings = _load_settings(args)
+    conn = _connect(settings)
     try:
         containing = (
             args.containing.split(",") if getattr(args, "containing", None) else None
@@ -348,7 +360,7 @@ def cmd_pattern_insight(args: argparse.Namespace) -> int:
         else:
             dedup_value = None
         try:
-            rows = MiningReadService(conn).pattern_insight(
+            rows = MiningReadService(conn, settings).pattern_insight(
                 args.view,
                 pattern=pattern,
                 containing=containing,
@@ -373,11 +385,12 @@ def cmd_pattern_insight(args: argparse.Namespace) -> int:
 def cmd_symbol_insight(args: argparse.Namespace) -> int:
     import json
 
-    conn = _connect(_load_settings(args))
+    settings = _load_settings(args)
+    conn = _connect(settings)
     try:
         try:
             apis = args.apis.split(",") if getattr(args, "apis", None) else None
-            rows = MiningReadService(conn).symbol_insight(
+            rows = MiningReadService(conn, settings).symbol_insight(
                 args.view,
                 getattr(args, "api", None),
                 apis=apis,
@@ -400,7 +413,8 @@ def cmd_symbol_insight(args: argparse.Namespace) -> int:
 def cmd_call_insight(args: argparse.Namespace) -> int:
     import json
 
-    conn = _connect(_load_settings(args))
+    settings = _load_settings(args)
+    conn = _connect(settings)
     try:
         try:
             kinds = (
@@ -408,7 +422,7 @@ def cmd_call_insight(args: argparse.Namespace) -> int:
                 if getattr(args, "resolve_kinds", None)
                 else None
             )
-            rows = MiningReadService(conn).call_insight(
+            rows = MiningReadService(conn, settings).call_insight(
                 args.view,
                 getattr(args, "api", None),
                 library=args.library,
@@ -434,10 +448,11 @@ def cmd_call_insight(args: argparse.Namespace) -> int:
 def cmd_import_insight(args: argparse.Namespace) -> int:
     import json
 
-    conn = _connect(_load_settings(args))
+    settings = _load_settings(args)
+    conn = _connect(settings)
     try:
         try:
-            rows = MiningReadService(conn).import_insight(
+            rows = MiningReadService(conn, settings).import_insight(
                 args.view,
                 getattr(args, "api", None),
                 library=args.library,
@@ -459,10 +474,11 @@ def cmd_import_insight(args: argparse.Namespace) -> int:
 def cmd_mining_health(args: argparse.Namespace) -> int:
     import json
 
-    conn = _connect(_load_settings(args))
+    settings = _load_settings(args)
+    conn = _connect(settings)
     try:
         try:
-            health = MiningReadService(conn).mining_health(
+            health = MiningReadService(conn, settings).mining_health(
                 library=getattr(args, "library", None),
                 version=getattr(args, "version", None),
                 ecosystem=getattr(args, "ecosystem", None),

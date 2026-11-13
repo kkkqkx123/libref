@@ -142,7 +142,7 @@ grammar wheel 与 py-tree-sitter 存在 ABI 兼容窗口，`uv.lock` 钉死全�
   - `schema_meta`（键值元数据：vec_model/vec_dim，供向量索引失效校验）
 - FTS5：`tokenize='porter unicode61'`，触发器同步（按列收窄的 update 触发器照搬）。
 - 向量：**单集合**（`libref_chunks` 按库文件派生隔离），Point id=documents.id，payload 只存 `library_id`/`version_id` 过滤键，正文命中后回 SQLite 取；模型/维度变更时集合删除重建（元数据记于 schema_meta）。默认本地 simvec 引擎（进程内，Qdrant 语义的本地实现），Qdrant 服务保留为可选后端（`version_id` 整数索引 `is_principal=True` 租户优化）。
-- 检索：FTS5 BM25（bm25(10.0,1.0,5.0,1.0) 权重）+ 向量 KNN（COSINE，version_id 过滤）两路 → **RRF 融合** → 频次特征重排（本课题创新：seq_patterns 支持度作为加权项）→ 段落重组（按 URL 分组扩展兄弟/父块）；向量不可用时降级为 FTS-only 单路。
+- 检索：FTS5 BM25（四列加权，标题最高、路径次之、正文与地址为基准，权重与融合常数均为配置项）+ 向量 KNN（COSINE，version_id 过滤）两路 → **RRF 融合** → 同源去重 → 可选精排 → 频次特征重排（本课题创新：seq_patterns 支持度作为加权项）→ 段落重组（按页内序号扩展兄弟块）；向量不可用时降级为 FTS-only 单路。
 
 ---
 

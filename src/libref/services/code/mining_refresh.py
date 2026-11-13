@@ -445,9 +445,6 @@ def mine_job_params(
 
 def build_mine_runner(settings, conn):
     """Build the mining job consumer function, handling only mine_patterns, decoupled from source indexing."""
-    from libref.config import LibrefSettings
-
-    _cluster_fields = LibrefSettings.model_fields
 
     async def runner(job):
         if job.kind != MINE_PATTERNS_JOB_KIND:
@@ -464,16 +461,14 @@ def build_mine_runner(settings, conn):
             minlen=int(p.get("minlen", DEFAULT_MINLEN)),
             include_ambiguous=bool(p.get("include_ambiguous", False)),
             cluster_threshold=float(
-                p.get(
-                    "cluster_threshold",
-                    _cluster_fields["cluster_threshold"].default,
-                )
+                p.get("cluster_threshold")
+                if p.get("cluster_threshold") is not None
+                else settings.cluster_threshold
             ),
             cluster_min_size=int(
-                p.get(
-                    "cluster_min_size",
-                    _cluster_fields["cluster_min_size"].default,
-                )
+                p.get("cluster_min_size")
+                if p.get("cluster_min_size") is not None
+                else settings.cluster_min_size
             ),
             resolve_kinds=p.get("resolve_kinds"),
             min_args=p.get("min_args"),
@@ -562,7 +557,7 @@ async def induce_labels(
     prompt_version = str(setting_or_default(settings, "induction_prompt_version"))
     model = str(setting_or_default(settings, "chat_model"))
     batch_size = max(1, int(setting_or_default(settings, "induction_batch")))
-    reader = MiningReadService(conn)
+    reader = MiningReadService(conn, settings)
     patterns = reader.list_patterns(
         library, version, ecosystem, limit=max(1, want_topn)
     )

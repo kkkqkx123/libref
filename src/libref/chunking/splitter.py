@@ -248,15 +248,21 @@ def _split_section_by_cost(
     cur_cost = 0
     in_fence = False
     for line in content.splitlines():
-        if _FENCE_RE.match(line):
-            in_fence = not in_fence
+        is_fence = bool(_FENCE_RE.match(line))
         line_cost = cost(line, path) + 1
-        if cur and cur_cost + line_cost > budget.body_limit and not in_fence:
+        if (
+            cur
+            and not is_fence
+            and not in_fence
+            and cur_cost + line_cost > budget.body_limit
+        ):
             parts.append("\n".join(cur))
             cur, cur_cost = [], 0
         if not cur and line_cost > budget.body_limit:
             parts.extend(_split_long_line(line, path, budget.body_limit))
             continue
+        if is_fence:
+            in_fence = not in_fence
         cur.append(line)
         cur_cost += line_cost
     if cur:
@@ -266,7 +272,7 @@ def _split_section_by_cost(
         if cost(part, path) <= budget.body_limit:
             out.append(part)
         else:
-            out.extend(split_lines_by_cost(part, path, budget.body_limit))
+            out.extend(_split_lines_fence_aware(part, path, budget.body_limit))
     return [p for p in out if p]
 
 
@@ -292,7 +298,7 @@ def _repair_embed_parts(
         if cost(part, ChunkPath.EMBEDDING) + head_cost + 1 <= budget.hard_limit:
             out.append(part)
         else:
-            out.extend(split_lines_by_cost(part, ChunkPath.EMBEDDING, room))
+            out.extend(_split_lines_fence_aware(part, ChunkPath.EMBEDDING, room))
     return [p for p in out if p]
 
 
@@ -344,6 +350,47 @@ def _fences_balanced(text: str) -> bool:
         if _FENCE_RE.match(line):
             count += 1
     return count % 2 == 0
+
+
+def _split_lines_fence_aware(text: str, path: ChunkPath, limit: int) -> list[str]:
+    """Line assembly that closes and reopens a fence instead of cutting inside it.
+
+    A section may carry one code block longer than the body budget. Slicing it
+    verbatim emits chunks whose fences never balance, so the cut becomes a
+    synthesized boundary: the open marker closes the current part and opens the
+    next one, keeping the block body verbatim.
+    """
+    if limit <= 0 or not text.strip():
+        return [text] if text.strip() else []
+    parts: list[str] = []
+    cur: list[str] = []
+    cur_cost = 0
+    marker: str | None = None
+    for line in text.splitlines():
+        is_fence = bool(_FENCE_RE.match(line))
+        line_cost = cost(line, path) + 1
+        if cur and not is_fence:
+            projected = cur_cost + line_cost
+            if marker is not None:
+                projected += cost(marker[:3], path) + 1
+            if projected > limit:
+                if marker is None:
+                    parts.append("\n".join(cur))
+                    cur, cur_cost = [], 0
+                else:
+                    parts.append("\n".join([*cur, marker[:3]]))
+                    cur = [marker]
+                    cur_cost = cost(marker, path) + 1
+        if not cur and line_cost > limit:
+            parts.extend(split_lines_by_cost(line, path, limit))
+            continue
+        if is_fence:
+            marker = line.strip() if marker is None else None
+        cur.append(line)
+        cur_cost += line_cost
+    if cur:
+        parts.append("\n".join(cur))
+    return [part for part in parts if part.strip()]
 
 
 def chunk_content_hash(content: str) -> str:

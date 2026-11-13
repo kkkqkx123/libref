@@ -119,7 +119,7 @@
 | fts_w_path | 浮点（≥0） | 3.0 | LIBREF_FTS_W_PATH | 全文路径列权重 |
 | cluster_threshold | 浮点（≥0） | 0.15 | LIBREF_CLUSTER_THRESHOLD | 聚类阈值，挖掘与加权共用 |
 | cluster_min_size | 整数（≥1） | 2 | LIBREF_CLUSTER_MIN_SIZE | 聚类最小规模 |
-| evidence_per_file_limit | 整数（≥1） | 1 | LIBREF_EVIDENCE_PER_FILE_LIMIT | 每文件证据上限 |
+| evidence_per_file_limit | 整数（≥1） | 1 | LIBREF_EVIDENCE_PER_FILE_LIMIT | 每文件证据上限（挖掘读取按此值解析） |
 | evidence_dedup | 布尔 | 开 | LIBREF_EVIDENCE_DEDUP | 证据去重默认 |
 | induction_enabled | 布尔 | 关 | LIBREF_INDUCTION_ENABLED | 标签归纳开关 |
 | induction_topn | 整数（≥1） | 20 | LIBREF_INDUCTION_TOPN | 归纳数量 |
@@ -165,7 +165,7 @@
 | chat_timeout | 浮点（>0） | 60.0 | LIBREF_CHAT_TIMEOUT | 问答超时，秒 |
 | chat_enable_thinking | 布尔 | 关 | LIBREF_CHAT_ENABLE_THINKING | 思考模式开关 |
 | material_limit | 整数（≥1） | 1500 | LIBREF_MATERIAL_LIMIT | 单材料上限 |
-| answer_total_budget | 整数（≥1） | 6000 | LIBREF_ANSWER_TOTAL_BUDGET | 回答总预算，按排序分配 |
+| answer_total_budget | 整数（≥1） | 6000 | LIBREF_ANSWER_TOTAL_BUDGET | 回答材料总预算（硬上限），按排序分配，超出部分整条丢弃并以省略标记告知模型 |
 
 ## 服务暴露（[mcp]、[mcp.auth]、[web]）
 

@@ -166,8 +166,9 @@ def _call_filter_sql(
 class MiningReadService:
     """Read-only queries over call_instances, seq_patterns, and derived tables."""
 
-    def __init__(self, conn) -> None:
+    def __init__(self, conn, settings=None) -> None:
         self._conn = conn
+        self._settings = settings
 
     def api_usage_counts(
         self,
@@ -512,18 +513,16 @@ class MiningReadService:
         from libref.config import setting_or_default
         from libref.mining.idiom import deduplicate_evidence, synthesize_snippet
 
-        file_cap = per_file_limit
-        if file_cap is None:
-            try:
-                file_cap = int(setting_or_default(None, "evidence_per_file_limit"))
-            except Exception:  # noqa: BLE001 -- defaults keep evidence readable without settings
-                file_cap = 1
-        do_dedup = dedup
-        if do_dedup is None:
-            try:
-                do_dedup = bool(setting_or_default(None, "evidence_dedup"))
-            except Exception:  # noqa: BLE001 -- defaults keep evidence readable without settings
-                do_dedup = True
+        file_cap = (
+            per_file_limit
+            if per_file_limit is not None
+            else int(setting_or_default(self._settings, "evidence_per_file_limit"))
+        )
+        do_dedup = (
+            dedup
+            if dedup is not None
+            else bool(setting_or_default(self._settings, "evidence_dedup"))
+        )
         out = deduplicate_evidence(
             out, per_file_limit=max(1, int(file_cap)), cross_file_dedup=bool(do_dedup)
         )

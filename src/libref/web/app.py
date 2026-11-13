@@ -59,7 +59,7 @@ def build_web_app(
     discovery = DiscoveryService(conn, settings)
     pages = PageService(conn)
     catalog = LibraryService(conn)
-    mining = MiningReadService(conn)
+    mining = MiningReadService(conn, settings)
     review = ReviewService(conn)
     app = FastAPI(title="libref")
 

@@ -1,4 +1,4 @@
-"""Search orchestration: precise full-text and preset hybrid retrieval over storage primitives."""
+"""Search orchestration: the single preset router over storage primitives."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def normalize_preset(preset: str) -> str:
 
 
 class SearchService:
-    """Thin retrieval orchestration; page and mining reads live elsewhere."""
+    """Retrieval orchestration and preset routing; page and mining reads live elsewhere."""
 
     def __init__(
         self, conn, settings=None, *, vec_store=None, embed=None, rerank=None
@@ -39,7 +39,7 @@ class SearchService:
         ecosystem: str | None = None,
         limit: int = 8,
     ) -> list[dict[str, Any]]:
-        """Exact full-text query: FTS single path only; the hybrid default goes through the async hybrid entry."""
+        """Exact full-text query: the FTS single path used by the precise preset."""
         from libref.config import setting_or_default
         from libref.store.retriever import alignment_key, fts_search
 
@@ -51,9 +51,8 @@ class SearchService:
         )
         radius = int(setting_or_default(self._settings, "snippet_radius"))
         cap = int(setting_or_default(self._settings, "snippet_cap"))
-        scoped = library is not None or version is not None or ecosystem is not None
         # Extra picks compensate rows folded away by group dedup below.
-        budget = limit if not scoped else max(limit, min(limit * 5, 500))
+        budget = max(limit, min(limit * 5, 500))
         pairs = fts_search(
             self._conn,
             query,
@@ -124,20 +123,22 @@ class SearchService:
             )
         return out[:limit]
 
-    async def search_hybrid_async(
+    async def search_with_mode(
         self,
         query: str,
+        preset: str = "balanced",
         *,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 8,
-        vec_store=None,
-        embed=None,
-        rerank=None,
-        preset: str = "balanced",
+        expand_window: bool | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        """Hybrid recall for balanced and thorough presets; precise callers use the sync full-text path."""
+        """Route presets: precise keeps the exact full-text path, the others fuse recall.
+
+        Window expansion follows the caller's explicit preference, then the preset, then
+        the configuration; an unspecified preference defers to the latter two.
+        """
         from libref.store.retriever import HybridRetriever
 
         use_preset = normalize_preset(preset)
@@ -157,12 +158,18 @@ class SearchService:
                 "fused_order": [int(r["id"]) for r in results],
                 "rerank_applied": False,
             }
+        if expand_window is not None:
+            expand: bool | None = bool(expand_window)
+        elif use_preset == "thorough":
+            expand = True
+        else:
+            expand = None
         retriever = HybridRetriever(
             self._conn,
             self._settings,
-            vec_store=vec_store if vec_store is not None else self._vec,
-            embed=embed if embed is not None else self._embed,
-            rerank=rerank if rerank is not None else self._rerank,
+            vec_store=self._vec,
+            embed=self._embed,
+            rerank=self._rerank,
         )
         return await retriever.search_async(
             query,
@@ -170,42 +177,5 @@ class SearchService:
             version=version,
             ecosystem=ecosystem,
             limit=limit,
-            preset=use_preset,
-        )
-
-    async def search_with_mode(
-        self,
-        query: str,
-        preset: str = "balanced",
-        *,
-        library: str | None = None,
-        version: str | None = None,
-        ecosystem: str | None = None,
-        limit: int = 8,
-    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        """Unified retrieval: precise uses exact full-text, balanced and thorough use fused recall."""
-        use_preset = normalize_preset(preset)
-        if use_preset == "precise":
-            results = self.search_docs(
-                query,
-                library=library,
-                version=version,
-                ecosystem=ecosystem,
-                limit=limit,
-            )
-            return results, {
-                "degraded": False,
-                "reasons": [],
-                "fts_count": len(results),
-                "vec_count": 0,
-                "fused_order": [int(r["id"]) for r in results],
-                "rerank_applied": False,
-            }
-        return await self.search_hybrid_async(
-            query,
-            library=library,
-            version=version,
-            ecosystem=ecosystem,
-            limit=limit,
-            preset=use_preset,
+            expand_window=expand,
         )

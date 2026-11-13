@@ -94,8 +94,8 @@
 | --topn | 否 | 无 | 按调用次数保留限定名前列 |
 | --include-ambiguous | 否 | 关 | 序列中计入待定调用 |
 | --maxlen/--minlen | 否 | 10/2 | 序列长度区间 |
-| --cluster-threshold | 否 | 0.15 | 聚类阈值，对应 `cluster_threshold` |
-| --cluster-min-size | 否 | 2 | 聚类最小规模，对应 `cluster_min_size` |
+| --cluster-threshold | 否 | 取配置 | 聚类阈值；未显式指定时取 `cluster_threshold` 配置值 |
+| --cluster-min-size | 否 | 取配置 | 聚类最小规模；未显式指定时取 `cluster_min_size` 配置值 |
 | --resolve-kinds | 否 | 无 | 逗号分隔的调用种类过滤 |
 | --min-args/--max-args | 否 | 无 | 实参数量区间过滤 |
 | --async | 否 | 关 | 经任务队列执行 |
@@ -130,7 +130,7 @@
 answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--preset balanced]
 ```
 
-无证据打印 `(no evidence)` 并返回 0。成功打印回答正文与引用，降级或低置信（回答未引用任何材料）时标准错误提示。`precise` 预设下回答不附带模式标签，保持零挖掘；`balanced/thorough` 在命中实体非空时附带至多三条标签。
+无证据打印 `(no evidence)` 并返回 0。成功打印回答正文与引用，降级或低置信（回答未引用任何材料）时标准错误提示。`precise` 预设下回答不附带模式标签，保持零挖掘；`balanced/thorough` 在命中实体非空时附带至多三条不可引用的模式提示。材料总预算为硬上限，超出部分整条丢弃并在材料块以省略标记告知模型，引用编号与保留材料一一对应。预设优先级为调用方显式指定高于预设高于配置；问答不展开窗口。
 
 ### read
 

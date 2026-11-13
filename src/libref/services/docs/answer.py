@@ -35,6 +35,44 @@ def _run_coro(coro):
     return asyncio.run(coro)
 
 
+def _empty_answer(degraded: bool, reasons: list[str]) -> dict[str, Any]:
+    """No usable evidence: the caller must not pay for a generation call."""
+    return {
+        "answer": "",
+        "citations": [],
+        "degraded": degraded,
+        "reasons": reasons,
+        "model": "",
+        "confidence": "low",
+        "cited_ids": [],
+    }
+
+
+def _pattern_labels(conn, settings, results, library, version, ecosystem, preset):
+    """Pick up to three mined labels overlapping the recalled entities; precise stays mining-free."""
+    if preset == "precise":
+        return []
+    entities = {str(e) for r in results for e in (r.get("entities") or []) if e}
+    if not entities:
+        return []
+    from libref.services.code.mining_read import MiningReadService
+
+    candidates = MiningReadService(conn, settings).list_labels(
+        library=library, version=version, ecosystem=ecosystem, limit=20
+    )
+    ranked = sorted(
+        enumerate(candidates),
+        key=lambda kv: (
+            -len(
+                (set(kv[1].get("pattern") or []) | set(kv[1].get("related_apis") or []))
+                & entities
+            ),
+            kv[0],
+        ),
+    )
+    return [item for _, item in ranked[:3]]
+
+
 async def answer_query_async(
     conn,
     settings,
@@ -72,67 +110,39 @@ async def answer_query_async(
         version=version,
         ecosystem=ecosystem,
         limit=limit,
+        expand_window=False,
     )
     degraded = bool(status.get("degraded", False))
     reasons = list(status.get("reasons", []) or [])
     if not results:
-        return {
-            "answer": "",
-            "citations": [],
-            "degraded": degraded,
-            "reasons": reasons,
-            "model": "",
-            "confidence": "low",
-            "cited_ids": [],
-        }
-    try:
-        rows = DocumentStore(conn).get_documents([int(r["id"]) for r in results])
-        full_by_id = {int(r["id"]): str(r.get("content") or "") for r in rows}
-    except Exception:  # noqa: BLE001 — missing full content degrades gracefully to empty materials
-        full_by_id = {}
+        return _empty_answer(degraded, reasons)
+    rows = DocumentStore(conn).get_documents([int(r["id"]) for r in results])
+    full_by_id = {int(r["id"]): str(r.get("content") or "") for r in rows}
+    if any(int(r["id"]) not in full_by_id for r in results):
+        degraded = True
+        reasons.append("material_missing")
     per_limit = int(settings.material_limit)
-    try:
-        total_limit = int(settings.answer_total_budget)
-    except Exception:  # noqa: BLE001 -- fall back to per-material budgeting
-        total_limit = per_limit * max(1, len(results))
-    budgeted = apply_total_budget(results, full_by_id, per_limit, total_limit)
-    labels: list[dict[str, Any]] = []
-    try:
-        entities = {str(e) for r in results for e in (r.get("entities") or []) if e}
-        if entities and use_preset != "precise":
-            from libref.services.code.mining_read import MiningReadService
-
-            candidates = MiningReadService(conn).list_labels(
-                library=library, version=version, ecosystem=ecosystem, limit=20
-            )
-            if candidates:
-                ranked = sorted(
-                    enumerate(candidates),
-                    key=lambda kv: (
-                        -len(
-                            (
-                                set(kv[1].get("pattern") or [])
-                                | set(kv[1].get("related_apis") or [])
-                            )
-                            & entities
-                        ),
-                        kv[0],
-                    ),
-                )
-                labels = [item for _, item in ranked[:3]]
-    except Exception:  # noqa: BLE001 — labels are display-only enrichment
-        labels = []
-    messages = build_messages(query, results, budgeted, per_limit, labels=labels)
+    kept, bodies, omitted = apply_total_budget(
+        results, full_by_id, per_limit, int(settings.answer_total_budget)
+    )
+    if not kept:
+        return _empty_answer(degraded, reasons)
+    labels = _pattern_labels(
+        conn, settings, kept, library, version, ecosystem, use_preset
+    )
+    messages = build_messages(
+        query, kept, bodies, per_limit, omitted=omitted, labels=labels
+    )
     answer = await answer_chat(messages)
-    kept_results, cited = filter_citations_by_answer(results, answer)
+    cited_results, cited = filter_citations_by_answer(kept, answer)
     return {
         "answer": answer,
-        "citations": build_citations(kept_results),
+        "citations": build_citations(cited_results),
         "degraded": degraded,
-        "reasons": reasons,
+        "reasons": list(dict.fromkeys(reasons)),
         "model": settings.chat_model,
         "confidence": "high" if cited else "low",
-        "cited_ids": [int(r["id"]) for r in kept_results],
+        "cited_ids": [int(r["id"]) for r in cited_results],
     }
 
 

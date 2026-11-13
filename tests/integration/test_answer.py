@@ -178,10 +178,82 @@ def test_answer_precise_skips_pattern_labels(conn, monkeypatch, tmp_path) -> Non
         conn, s, "numpy", chat=_cited_chat(s, seen_balanced), preset="balanced"
     )
     assert out["confidence"] == "high"
-    assert "label-1" in seen_balanced["user"]
+    assert '<pattern_hints count="1">' in seen_balanced["user"]
+    assert 'kind="pattern-hint"' in seen_balanced["user"]
     seen_precise: dict = {}
     out = answer_query(
         conn, s, "numpy", chat=_cited_chat(s, seen_precise), preset="precise"
     )
     assert out["confidence"] == "high"
-    assert "label-1" not in seen_precise["user"]
+    assert "pattern-hint" not in seen_precise["user"]
+
+
+def _seed_budget_docs(conn, count: int) -> None:
+    seed_library_version(conn)
+    store = DocumentStore(conn)
+    for index in range(count):
+        url = f"https://d.example/budget{index}.html"
+        body = f"budgettopic doc{index} " + "filler " * 40
+        store.store_page(
+            1,
+            1,
+            url,
+            "stored",
+            chunks=[
+                Chunk(
+                    url=url,
+                    path="G",
+                    title=f"T{index}",
+                    content=body,
+                    sort_order=0,
+                )
+            ],
+            raw_content=body,
+        )
+
+
+def test_answer_material_budget_is_hard_and_numbering_matches(
+    conn, monkeypatch, tmp_path
+) -> None:
+    _seed_budget_docs(conn, 3)
+    s = make_settings(
+        monkeypatch,
+        tmp_path,
+        embedding_api_key="k",
+        chat_enabled=True,
+        material_limit=120,
+        answer_total_budget=200,
+    )
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = __import__("json").loads(request.content.decode())
+        seen["user"] = body["messages"][-1]["content"]
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "结论 [2]"}}]}
+        )
+
+    out = answer_query(conn, s, "budgettopic", chat=_chat_fn(s, handler))
+    user = seen["user"]
+    assert user.count("<unit ") == 2
+    assert "<omitted units=" in user
+    second = __import__("re").search(
+        r'n="2" url="[^"]*" title="[^"]*" doc="(\d+)"', user
+    )
+    assert second is not None
+    assert out["cited_ids"] == [int(second.group(1))]
+
+
+def test_answer_reports_missing_material(conn, monkeypatch, tmp_path) -> None:
+    _seed_docs(conn)
+    s = make_settings(monkeypatch, tmp_path, embedding_api_key="k", chat_enabled=True)
+    monkeypatch.setattr(DocumentStore, "get_documents", lambda self, ids: [])
+
+    def boom(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("must not call chat without usable material")
+
+    out = answer_query(conn, s, "uv", chat=_chat_fn(s, boom))
+    assert out["answer"] == ""
+    assert out["citations"] == []
+    assert out["degraded"] is True
+    assert "material_missing" in out["reasons"]

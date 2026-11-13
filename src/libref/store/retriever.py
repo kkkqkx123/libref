@@ -21,8 +21,6 @@ from libref.mining.scoring import (
     support_for_content,
     support_for_entities,
 )
-
-VALID_PRESETS = ("precise", "balanced", "thorough")
 from libref.text.embedding import strip_markdown_for_embedding
 from libref.text.query import safe_fts_query
 from libref.text.snippet import make_snippet, truncate_material
@@ -46,8 +44,11 @@ def _version_ids(
         filters.append("v.version = ?")
         params.append(version)
     where = ("WHERE " + " AND ".join(filters)) if filters else ""
+    # Newest ingested first: scoped recall fans out over versions until the cap truncates,
+    # and the truncated tail must be the oldest versions rather than the freshest ones.
     rows = conn.execute(
-        f"SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id {where} ORDER BY v.id",
+        f"SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id {where}"
+        " ORDER BY v.id DESC",
         params,
     ).fetchall()
     return [int(r[0]) for r in rows]
@@ -207,8 +208,13 @@ def alignment_key(meta: dict[str, Any] | None, url: str | None, doc_id: int) -> 
     return f"c:{doc_id}"
 
 
-def _collapse_by_group(conn: sqlite3.Connection, fused: list[int]) -> list[int]:
-    """Keep the top two chunks per source group so rerank still sees intra-group competition."""
+def _collapse_duplicates(conn: sqlite3.Connection, fused: list[int]) -> list[int]:
+    """Drop the auxiliary full-text twin of a section part, then cap each source group at two chunks.
+
+    Both chunk lanes index the same sections: the auxiliary lane only exists for lexical
+    matching, so its copy never becomes user-facing material while the full-body twin is
+    recalled. The per-group cap stays because merged sections legitimately split into parts.
+    """
     if len(fused) < 2:
         return fused
     marks = ",".join("?" for _ in fused)
@@ -216,20 +222,38 @@ def _collapse_by_group(conn: sqlite3.Connection, fused: list[int]) -> list[int]:
         f"SELECT id, url, metadata FROM documents WHERE id IN ({marks})", fused
     ).fetchall()
     groups: dict[int, str] = {}
+    lanes: dict[int, str] = {}
+    parts: dict[int, str] = {}
+    full_body_parts: set[str] = set()
     for doc_id, url, raw in rows:
         try:
             meta = json.loads(raw) if raw else {}
         except ValueError:
             meta = {}
-        groups[int(doc_id)] = alignment_key(meta, url, int(doc_id))
+        key = alignment_key(meta, url, int(doc_id))
+        lane = str(meta.get("chunk_path") or "embedding")
+        part = str(meta.get("chunk_index", 0) or 0)
+        groups[int(doc_id)] = key
+        lanes[int(doc_id)] = lane
+        parts[int(doc_id)] = part
+        if lane != "bm25":
+            full_body_parts.add(f"{key}\x00{part}")
     counts: dict[str, int] = {}
     out: list[int] = []
     for doc_id in fused:
-        key = groups.get(doc_id, f"c:{doc_id}")
-        seen = counts.get(key, 0)
+        group_key = groups.get(doc_id)
+        if group_key is None:
+            out.append(doc_id)
+            continue
+        if (
+            lanes[doc_id] == "bm25"
+            and f"{group_key}\x00{parts[doc_id]}" in full_body_parts
+        ):
+            continue
+        seen = counts.get(group_key, 0)
         if seen >= 2:
             continue
-        counts[key] = seen + 1
+        counts[group_key] = seen + 1
         out.append(doc_id)
     return out
 
@@ -332,20 +356,20 @@ class HybridRetriever:
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 8,
-        preset: str = "balanced",
+        expand_window: bool | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-        """Hybrid retrieval, returning results plus a status map with degraded reasons and road counts."""
+        """Hybrid retrieval, returning results plus a status map with degraded reasons and road counts.
+
+        Window expansion follows the configuration unless the caller states a preference.
+        """
         from libref.config import setting_or_default
 
         if not query.strip():
             raise ValueError("query is empty")
         if limit <= 0:
             raise ValueError("limit must be positive")
-        if preset not in VALID_PRESETS:
-            raise ValueError(f"unsupported search preset: {preset}")
         degraded = False
         reasons: list[str] = []
-        precise_only = preset == "precise"
         candidate_floor = int(
             setting_or_default(self._settings, "rerank_candidate_limit")
         )
@@ -367,13 +391,7 @@ class HybridRetriever:
         vec_ids: list[int] = []
         vids = _version_ids(self._conn, library, version, ecosystem)
         max_versions = int(setting_or_default(self._settings, "retrieval_max_versions"))
-        use_vectors = (
-            not precise_only
-            and self._vec is not None
-            and self._embed is not None
-            and bool(vids)
-        )
-        if use_vectors and self._vec is not None and self._embed is not None:
+        if self._vec is not None and self._embed is not None and bool(vids):
             vids, drift_skipped = _current_vids(self._conn, self._settings, vids)
             if drift_skipped:
                 degraded = True
@@ -439,42 +457,35 @@ class HybridRetriever:
                             vec_ids = merged
         fused = self._rrf(fts_ids, vec_ids)
         fused_order = list(fused)
-        fused = _collapse_by_group(self._conn, fused)
+        fused = _collapse_duplicates(self._conn, fused)
         if not fused:
             return [], self._status(
                 degraded, reasons, fts_ids, vec_ids, fused_order, False
             )
-        rerank_applied = False
-        rerank_scores: dict[int, float] = {}
-        if not precise_only:
-            rerank_before = degraded
-            fused, degraded, rerank_scores = await self._apply_rerank(
-                query,
-                fused,
-                limit,
-                degraded,
-                window=assemble_window,
-                top_n=int(setting_or_default(self._settings, "rerank_top_n")),
-            )
-            rerank_applied = bool(self._rerank is not None)
-            if degraded and not rerank_before:
-                reasons.append("rerank_error")
-        if preset == "thorough":
-            expand = True
-        else:
-            expand = bool(setting_or_default(self._settings, "retriever_expand_window"))
-            if precise_only:
-                expand = False
+        fused, rerank_scores, rerank_failed = await self._apply_rerank(
+            query,
+            fused,
+            window=assemble_window,
+            top_n=int(setting_or_default(self._settings, "rerank_top_n")),
+        )
+        rerank_applied = bool(rerank_scores)
+        if rerank_failed:
+            degraded = True
+            reasons.append("rerank_error")
+        expand = (
+            bool(setting_or_default(self._settings, "retriever_expand_window"))
+            if expand_window is None
+            else bool(expand_window)
+        )
         radius = int(setting_or_default(self._settings, "retriever_window_radius"))
         results, window_ok = self._postprocess(
             query,
             fused[:assemble_window],
             fts_ids,
             vec_ids,
-            expand_window=bool(expand),
+            expand_window=expand,
             window_radius=int(radius),
             rerank_scores=rerank_scores,
-            precise_only=precise_only,
         )
         if not window_ok:
             degraded = True
@@ -527,48 +538,43 @@ class HybridRetriever:
         self,
         query: str,
         fused: list[int],
-        limit: int,
-        degraded: bool,
         *,
         window: int,
         top_n: int | None,
-    ) -> tuple[list[int], bool, dict[int, float]]:
+    ) -> tuple[list[int], dict[int, float], bool]:
+        """Rerank the recall head; returns the reordered ids, the score map, and the failure flag."""
         from libref.config import setting_or_default
 
         if self._rerank is None:
-            return fused, degraded, {}
+            return fused, {}, False
         if top_n is not None:
             window = min(window, int(top_n))
         head, tail = fused[:window], fused[window:]
         if not head:
-            return fused, degraded, {}
+            return fused, {}, False
         radius = int(setting_or_default(self._settings, "snippet_radius"))
         cap = int(setting_or_default(self._settings, "snippet_cap"))
         details = _fetch_details(
             self._conn, head, query, snippet_radius=radius, snippet_cap=cap
         )
-        # Drop vanished rows only; one vector orphan no longer blocks the whole window.
-        vanished = {d for d in head if d not in details}
-        if vanished:
-            head = [d for d in head if d in details]
-            tail = [d for d in tail if d not in vanished]
+        head = [d for d in head if d in details]
         if not head:
-            return head + tail, degraded, {}
+            return tail, {}, False
         link_cap = int(setting_or_default(self._settings, "rerank_truncate"))
         total_cap = int(setting_or_default(self._settings, "material_limit"))
         link_cap = min(link_cap, total_cap)
         texts = [truncate_material(details[d]["content"], link_cap) for d in head]
         try:
             scored = await self._rerank(query, texts, len(head))
-        except Exception:  # noqa: BLE001 -- rerank failure marks degraded, keep fused order
-            return fused, True, {}
+        except Exception:  # noqa: BLE001 -- rerank failure keeps fused order and is reported by the caller
+            return fused, {}, True
         order = sorted(scored, key=lambda kv: kv[1], reverse=True)
         pos_of = {idx: rank for rank, (idx, _) in enumerate(order)}
         head_sorted = sorted(range(len(head)), key=lambda i: pos_of.get(i, len(order)))
         rerank_scores = {
             head[idx]: float(score) for idx, score in scored if 0 <= idx < len(head)
         }
-        return [head[i] for i in head_sorted] + tail, degraded, rerank_scores
+        return [head[i] for i in head_sorted] + tail, rerank_scores, False
 
     def _assemble(
         self,
@@ -578,7 +584,6 @@ class HybridRetriever:
         vec_ids: list[int],
         *,
         rerank_scores: dict[int, float] | None = None,
-        precise_only: bool = False,
     ) -> list[dict[str, Any]]:
         from libref.config import setting_or_default
 
@@ -592,12 +597,8 @@ class HybridRetriever:
         cluster_alpha = float(setting_or_default(self._settings, "cluster_alpha"))
         rrf = self._rrf_scores(fts_ids, vec_ids)
         vids = sorted({details[d]["version_id"] for d in fused if d in details})
-        # Skip the mining side tables entirely when both bonuses are disabled.
-        if precise_only:
-            raw_alpha = 0.0
-            cluster_alpha = 0.0
         wanted: set[str] = set()
-        if raw_alpha > 0 and not precise_only:
+        if raw_alpha > 0:
             for doc in fused:
                 info = details.get(doc)
                 if info is None:
@@ -605,16 +606,8 @@ class HybridRetriever:
                 for entity in info.get("entities", []) or []:
                     if entity:
                         wanted.add(str(entity))
-        patterns = (
-            _pattern_supports(self._conn, vids, wanted)
-            if raw_alpha > 0 and not precise_only
-            else {}
-        )
-        clusters = (
-            _cluster_sets(self._conn, vids)
-            if cluster_alpha > 0 and not precise_only
-            else {}
-        )
+        patterns = _pattern_supports(self._conn, vids, wanted) if raw_alpha > 0 else {}
+        clusters = _cluster_sets(self._conn, vids) if cluster_alpha > 0 else {}
         health_rows = [{"support": s} for plist in patterns.values() for _, s in plist]
         health = reuse_diversity(
             health_rows,
@@ -712,7 +705,6 @@ class HybridRetriever:
         expand_window: bool,
         window_radius: int,
         rerank_scores: dict[int, float] | None = None,
-        precise_only: bool = False,
     ) -> tuple[list[dict[str, Any]], bool]:
         """Post-processing chain: assembly runs in order; on window-expansion failure the assembled order is kept."""
         results = self._assemble(
@@ -721,7 +713,6 @@ class HybridRetriever:
             fts_ids,
             vec_ids,
             rerank_scores=rerank_scores,
-            precise_only=precise_only,
         )
         return self._expand_windows(
             results, enabled=expand_window, radius=window_radius

@@ -1,4 +1,4 @@
-"""Chat transport, compatible with non-streaming and streaming chat endpoints; disabled by default, not wired into the retrieval call chain."""
+"""Chat transport, compatible with non-streaming and streaming chat endpoints; driven by the grounded answer path and disabled until a key is set."""
 
 from __future__ import annotations
 
