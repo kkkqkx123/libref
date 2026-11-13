@@ -39,6 +39,8 @@ browser = ["playwright>=1.47"]      # 反爬兜底（tech-stack §6 P1），默�
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# 基准下载物（第三方仓库克隆）不参与收集
+norecursedirs = ["tests/e2e/bench/fixtures", "tests/e2e/repos", ".venv"]
 markers = [
     "unit: pure in-memory tests, no DB or subprocess",
     "integration: needs sqlite, subprocess or external service",
@@ -52,6 +54,7 @@ markers = [
 # 夹具是待解析的源样本，刻意含未定义调用与闲置绑定，不做清理。
 "tests/fixtures/**" = ["F821", "F841"]
 "tests/e2e/fixtures/**" = ["F821", "F841"]
+"tests/e2e/bench/fixtures/**" = ["F821", "F841", "I001"]
 
 [tool.uv.workspace]
 members = [

@@ -2,15 +2,37 @@
   "top_k": 5,
   "precise_floors": {
     "docs": {
-      "recall_at_k": 0.6,
-      "mrr_at_k": 0.34
+      "recall_at_k": 0.8,
+      "mrr_at_k": 0.58
     },
     "code": {
-      "recall_at_k": 0.75,
-      "mrr_at_k": 0.75
+      "recall_at_k": 0.72,
+      "mrr_at_k": 0.72
     }
   },
   "invariants": {
     "max_duplicate_rate": 0.0
+  },
+  "real_floors": {
+    "docs": {
+      "fused": {
+        "recall_at_k": 0.95,
+        "mrr_at_k": 0.75
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.95,
+        "mrr_at_k": 0.77
+      }
+    },
+    "code": {
+      "fused": {
+        "recall_at_k": 0.95,
+        "mrr_at_k": 0.87
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.95,
+        "mrr_at_k": 0.8
+      }
+    }
   }
 }

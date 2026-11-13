@@ -659,8 +659,13 @@ class HybridRetriever:
             scored.append((final, doc))
         scored.sort(key=lambda kv: kv[0], reverse=True)
         out: list[dict[str, Any]] = []
+        seen_excerpts: set[tuple[str, str]] = set()
         for final, doc in scored:
             info = details[doc]
+            excerpt = (str(info["url"] or ""), str(info["snippet"] or ""))
+            if excerpt in seen_excerpts:
+                continue
+            seen_excerpts.add(excerpt)
             sources = []
             if doc in fts_set:
                 sources.append("fts")

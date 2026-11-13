@@ -6,7 +6,11 @@ retrieval-time knobs are swept over the existing dataset, indexing-time knobs
 time.
 
 Usage:
-    uv run python -m tests.e2e.bench.sweep [--out DIR] [--group NAME]...
+    uv run python -m tests.e2e.bench.sweep [--out DIR] [--group NAME]... [--real]
+
+Without `--real` the vector and rerank endpoints are the deterministic stand-ins;
+with it they are the real models from the repository environment file, which is
+what makes the fusion and rerank knobs calibrated rather than merely wired.
 """
 
 from __future__ import annotations
@@ -62,38 +66,45 @@ RETRIEVAL_VARIANTS: list[dict[str, Any]] = [
     },
     {
         "group": "rrf",
-        "name": "k20_vec0.5 (default)",
+        "name": "k20_vec1.0 (default)",
         "overrides": {},
         "corpora": ("docs", "code"),
-        "methods": ("fused",),
+        "methods": ("fused", "fused_rerank"),
     },
     {
         "group": "rrf",
-        "name": "k10_vec0.5",
+        "name": "k10_vec1.0",
         "overrides": {"rrf_k": 10},
         "corpora": ("docs", "code"),
-        "methods": ("fused",),
+        "methods": ("fused", "fused_rerank"),
     },
     {
         "group": "rrf",
-        "name": "k60_vec0.5",
+        "name": "k60_vec1.0",
         "overrides": {"rrf_k": 60},
         "corpora": ("docs", "code"),
-        "methods": ("fused",),
+        "methods": ("fused", "fused_rerank"),
     },
     {
         "group": "rrf",
-        "name": "k20_vec1.0",
-        "overrides": {"rrf_w_vec": 1.0},
+        "name": "k20_vec0.5",
+        "overrides": {"rrf_w_vec": 0.5},
         "corpora": ("docs", "code"),
-        "methods": ("fused",),
+        "methods": ("fused", "fused_rerank"),
     },
     {
         "group": "rrf",
         "name": "k20_vec0.25",
         "overrides": {"rrf_w_vec": 0.25},
         "corpora": ("docs", "code"),
-        "methods": ("fused",),
+        "methods": ("fused", "fused_rerank"),
+    },
+    {
+        "group": "rrf",
+        "name": "k20_vec1.5",
+        "overrides": {"rrf_w_vec": 1.5},
+        "corpora": ("docs", "code"),
+        "methods": ("fused", "fused_rerank"),
     },
     {
         "group": "recall_budget",
@@ -217,11 +228,11 @@ CHUNKING_VARIANTS: list[dict[str, Any]] = [
     },
     {
         "group": "chunk_embed",
-        "name": "800_200",
+        "name": "256_80",
         "overrides": {
-            "chunk_embed_max_tokens": 800,
-            "chunk_embed_min_tokens": 200,
-            "chunk_embed_overlap_tokens": 64,
+            "chunk_embed_max_tokens": 256,
+            "chunk_embed_min_tokens": 80,
+            "chunk_embed_overlap_tokens": 32,
         },
     },
 ]
@@ -234,11 +245,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--group", action="append", default=None, help="restrict to one or more groups"
     )
+    parser.add_argument(
+        "--real",
+        action="store_true",
+        help="use the real embedding and rerank models from the environment file",
+    )
     return parser.parse_args()
 
 
 def _run_retrieval_variants(
-    data_dir: Path, groups: set[str] | None
+    data_dir: Path, groups: set[str] | None, real: bool
 ) -> list[dict[str, Any]]:
     from libref.db import open_db
     from tests.e2e.bench.evaluate import (
@@ -248,23 +264,46 @@ def _run_retrieval_variants(
         _evaluate_corpus,
         _load,
     )
-    from tests.e2e.bench.fakes import BagOfTermsEmbedder, SqliteVecStore, bench_settings
+    from tests.e2e.bench.fakes import (
+        BagOfTermsEmbedder,
+        SqliteVecStore,
+        bench_settings,
+        real_embedder,
+        real_rerank,
+        real_settings,
+    )
 
     manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
     judgments = _load()
-    libraries = {
-        "docs": manifest["fixtures"]["repo_docs"]["library"],
-        "code": manifest["fixtures"]["repo_code"]["library"],
+    scopes = {
+        name: {
+            "library": info["library"],
+            "version": info["version"],
+            "ecosystem": info.get("ecosystem", "custom"),
+        }
+        for name, info in manifest["fixtures"].items()
     }
     conn = open_db(data_dir / "bench.db")
-    embedder = BagOfTermsEmbedder()
+    base_settings = (
+        real_settings(data_dir / "bench.db")
+        if real
+        else bench_settings(data_dir / "bench.db")
+    )
+    if real:
+        embedder = real_embedder(base_settings)
+        rerank = real_rerank(base_settings)
+    else:
+        embedder = BagOfTermsEmbedder()
+        rerank = None
     vectors = SqliteVecStore(conn, embedder)
+    asyncio.run(vectors.prepare())
     rows: list[dict[str, Any]] = []
     try:
         for variant in RETRIEVAL_VARIANTS:
             if groups and variant["group"] not in groups:
                 continue
-            settings = bench_settings(data_dir / "bench.db", **variant["overrides"])
+            model = real_settings if real else bench_settings
+            settings = model(data_dir / "bench.db", **variant["overrides"])
             started = time.monotonic()
             for corpus in variant["corpora"]:
                 evaluation = asyncio.run(
@@ -273,10 +312,11 @@ def _run_retrieval_variants(
                         settings,
                         judgments[corpus],
                         _doc_url if corpus == "docs" else _code_url,
-                        libraries[corpus],
+                        scopes[corpus],
                         5,
                         embedder=embedder,
                         vectors=vectors,
+                        rerank=rerank,
                         methods=variant["methods"],
                     )
                 )
@@ -304,13 +344,17 @@ def _run_retrieval_variants(
     return rows
 
 
-def _run_chunking_variants(
-    groups: set[str] | None,
-) -> list[dict[str, Any]]:
+def _run_chunking_variants(groups: set[str] | None, real: bool) -> list[dict[str, Any]]:
     from libref.db import open_db
     from tests.e2e.bench.build import build
     from tests.e2e.bench.evaluate import _aggregate, _doc_url, _evaluate_corpus, _load
-    from tests.e2e.bench.fakes import bench_settings
+    from tests.e2e.bench.fakes import (
+        BagOfTermsEmbedder,
+        bench_settings,
+        real_embedder,
+        real_rerank,
+        real_settings,
+    )
 
     judgments = _load()["docs"]
     rows: list[dict[str, Any]] = []
@@ -322,11 +366,22 @@ def _run_chunking_variants(
             started = time.monotonic()
             manifest = build(
                 out_dir,
-                names=["repo_docs"],
+                names=["docs"],
                 settings_overrides=variant["overrides"],
             )
-            library = manifest["fixtures"]["repo_docs"]["library"]
-            settings = bench_settings(out_dir / "bench.db", **variant["overrides"])
+            scope = {
+                "library": manifest["fixtures"]["docs"]["library"],
+                "version": manifest["fixtures"]["docs"]["version"],
+                "ecosystem": manifest["fixtures"]["docs"].get("ecosystem", "custom"),
+            }
+            model = real_settings if real else bench_settings
+            settings = model(out_dir / "bench.db", **variant["overrides"])
+            if real:
+                embedder = real_embedder(settings)
+                rerank = real_rerank(settings)
+            else:
+                embedder = BagOfTermsEmbedder()
+                rerank = None
             conn = open_db(out_dir / "bench.db")
             try:
                 evaluation = asyncio.run(
@@ -335,8 +390,10 @@ def _run_chunking_variants(
                         settings,
                         judgments,
                         _doc_url,
-                        library,
+                        scope,
                         5,
+                        embedder=embedder,
+                        rerank=rerank,
                         methods=("precise", "fused"),
                     )
                 )
@@ -353,8 +410,8 @@ def _run_chunking_variants(
                             "mrr_at_k": metrics["mrr_at_k"],
                             "ndcg_at_k": metrics["ndcg_at_k"],
                             "duplicate_rate": metrics["duplicate_rate"],
-                            "chunks": manifest["fixtures"]["repo_docs"]["chunks"],
-                            "pages": manifest["fixtures"]["repo_docs"]["pages"],
+                            "chunks": manifest["fixtures"]["docs"]["chunks"],
+                            "pages": manifest["fixtures"]["docs"]["pages"],
                             "elapsed_ms": int((time.monotonic() - started) * 1000),
                         }
                     )
@@ -400,8 +457,8 @@ def _write(out_dir: Path, rows: list[dict[str, Any]]) -> Path:
 def main() -> int:
     args = _parse_args()
     groups = set(args.group) if args.group else None
-    rows = _run_retrieval_variants(Path(args.data), groups)
-    rows += _run_chunking_variants(groups)
+    rows = _run_retrieval_variants(Path(args.data), groups, args.real)
+    rows += _run_chunking_variants(groups, args.real)
     path = _write(Path(args.out), rows)
     print(f"sweep: {path}")
     return 0

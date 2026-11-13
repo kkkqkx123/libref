@@ -103,7 +103,7 @@
 |---|---|---|---|---|
 | rrf_k | 整数（≥1） | 20 | LIBREF_RRF_K | 融合深度常数 |
 | rrf_w_fts | 浮点（≥0） | 1.0 | LIBREF_RRF_W_FTS | 全文路权重 |
-| rrf_w_vec | 浮点（≥0） | 0.5 | LIBREF_RRF_W_VEC | 向量路权重 |
+| rrf_w_vec | 浮点（≥0） | 1.0 | LIBREF_RRF_W_VEC | 向量路权重 |
 | freq_alpha | 浮点（≥0） | 0.15 | LIBREF_FREQ_ALPHA | 序列支持度加权 |
 | cluster_alpha | 浮点（≥0） | 0.05 | LIBREF_CLUSTER_ALPHA | 聚类加权 |
 | candidate_multiplier | 整数（≥1） | 3 | LIBREF_CANDIDATE_MULTIPLIER | 召回预算倍数 |

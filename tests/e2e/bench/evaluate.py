@@ -6,7 +6,12 @@ questions (mining side-table cost, score scale, query shaping, material
 budget units, confidence policy) and checks the versioned gates.
 
 Usage:
-    uv run python -m tests.e2e.bench.evaluate [--out DIR] [--gate-only]
+    uv run python -m tests.e2e.bench.evaluate [--out DIR] [--gate-only] [--real]
+
+Without `--real` the vector and rerank endpoints are deterministic stand-ins, so
+the run is offline and repeatable. With `--real` the production transports call
+the models configured in the repository environment file, which puts the fused
+rows under their own quality floors (`real_floors` in `gates.json`).
 
 Reports land under `outputs/` (not versioned); gates live in `gates.json`.
 """
@@ -29,8 +34,7 @@ OUTPUT = HERE / "outputs" / "retrieval-bench"
 JUDGMENTS = HERE / "judgments.json"
 GATES = HERE / "gates.json"
 
-DOC_URL_BASE = "https://bench.local"
-CODE_URL_BASE = "repo://python/libref/1"
+CODE_URL_BASE = "repo://pypi/httpx/head"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -47,11 +51,17 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="skip the design probes and only run the method matrix",
     )
+    parser.add_argument(
+        "--real",
+        action="store_true",
+        help="use the real embedding and rerank models from the environment file",
+    )
     return parser.parse_args()
 
 
-def _doc_url(rel: str) -> str:
-    return f"{DOC_URL_BASE}/{rel}"
+def _doc_url(url: str) -> str:
+    """Documentation judgments anchor on the crawled absolute URL."""
+    return url
 
 
 def _code_url(rel: str) -> str:
@@ -66,15 +76,22 @@ def _gates(path: Path = GATES) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _services(conn, settings, *, embedder=None, vectors=None):
-    """Build the three method families over the same corpus; sweeps share one fake store."""
-    from libref.services.docs.search import SearchService
-    from tests.e2e.bench.fakes import BagOfTermsEmbedder, SqliteVecStore, lexical_rerank
+def _store(conn, embedder=None, vectors=None):
+    """Resolve the encoder and its store; sweeps and probes share one prepared store."""
+    from tests.e2e.bench.fakes import BagOfTermsEmbedder, SqliteVecStore
 
     if embedder is None:
         embedder = BagOfTermsEmbedder()
     if vectors is None:
         vectors = SqliteVecStore(conn, embedder)
+    return embedder, vectors
+
+
+def _services(conn, settings, *, embedder, vectors, rerank=None):
+    """Build the three method families over the same corpus."""
+    from libref.services.docs.search import SearchService
+    from tests.e2e.bench.fakes import lexical_rerank
+
     return {
         "precise": SearchService(conn, settings),
         "fused": SearchService(conn, settings, vec_store=vectors, embed=embedder),
@@ -83,17 +100,33 @@ def _services(conn, settings, *, embedder=None, vectors=None):
             settings,
             vec_store=vectors,
             embed=embedder,
-            rerank=lexical_rerank(),
+            rerank=rerank if rerank is not None else lexical_rerank(),
         ),
     }
 
 
+def _version_id(conn, scope: dict[str, Any]) -> int:
+    """Resolve the corpus version id from library, version and ecosystem."""
+    row = conn.execute(
+        "SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id "
+        "WHERE l.name=? AND l.ecosystem=? AND v.version=?",
+        (scope["library"], scope["ecosystem"], scope["version"]),
+    ).fetchone()
+    if row is None:
+        raise SystemExit(f"corpus version not indexed: {scope}")
+    return int(row[0])
+
+
 def _duplicate_count(results: list[dict[str, Any]]) -> int:
-    """Repeated material inside one result set: same page carrying the same excerpt twice."""
+    """Repeated material inside one result set: the same chunk, or one page's excerpt twice."""
     seen: set[tuple[str, str]] = set()
     duplicates = 0
     for item in results:
-        key = (str(item.get("url") or ""), str(item.get("snippet") or ""))
+        identity = str(item.get("chunk_id") or "")
+        key = (
+            str(item.get("url") or ""),
+            identity or str(item.get("snippet") or ""),
+        )
         if key in seen:
             duplicates += 1
         seen.add(key)
@@ -105,38 +138,42 @@ async def _evaluate_corpus(
     settings,
     judgments: list[dict[str, Any]],
     url_of,
-    library: str,
+    scope: dict[str, Any],
     limit: int,
     *,
     embedder=None,
     vectors=None,
+    rerank=None,
     methods: tuple[str, ...] = ("precise", "fused", "fused_rerank"),
 ) -> dict[str, Any]:
     """Run the selected methods over one corpus and collect per-query rank rows."""
     before = time.monotonic()
-    all_services = _services(conn, settings, embedder=embedder, vectors=vectors)
+    embedder, vectors = _store(conn, embedder, vectors)
+    await vectors.prepare()
+    all_services = _services(
+        conn, settings, embedder=embedder, vectors=vectors, rerank=rerank
+    )
     services = {name: all_services[name] for name in methods}
     out: dict[str, Any] = {"build_ms": int((time.monotonic() - before) * 1000)}
     for method, service in services.items():
         preset = "precise" if method == "precise" else "balanced"
         rows: dict[str, list[dict[str, Any]]] = {}
         for judgment in judgments:
-            expected = judgment.get("file")
             try:
                 results, _status = await service.search_with_mode(
                     judgment["query"],
                     preset,
-                    library=library,
+                    **scope,
                     limit=limit,
                 )
             except ValueError as exc:
                 raise SystemExit(f"query '{judgment['id']}' rejected: {exc}") from exc
             rank = 0
             heading = judgment.get("heading")
-            if expected:
-                wanted = url_of(expected)
+            wanted = {url_of(target) for target in judgment.get("targets", [])}
+            if wanted:
                 for index, item in enumerate(results):
-                    if str(item.get("url") or "") != wanted:
+                    if str(item.get("url") or "") not in wanted:
                         continue
                     if heading and heading not in str(item.get("path") or ""):
                         continue
@@ -202,17 +239,18 @@ def _probe_chunk_identity(conn) -> dict[str, Any]:
 
 
 def _probe_side_tables(
-    conn, settings, judgments: list[dict[str, Any]], library: str
+    conn,
+    settings,
+    judgments: list[dict[str, Any]],
+    scope: dict[str, Any],
+    *,
+    embedder,
+    vectors,
 ) -> dict[str, Any]:
     """Mining side-table load: stored rows and per-query rows assembled across limits."""
     from libref.store import retriever as retriever_mod
 
-    version_row = conn.execute(
-        "SELECT id FROM versions WHERE library_id="
-        "(SELECT id FROM libraries WHERE name=?)",
-        (library,),
-    ).fetchone()
-    version_id = int(version_row[0]) if version_row else 0
+    version_id = _version_id(conn, scope)
     patterns = int(
         conn.execute(
             "SELECT count(*) FROM seq_patterns WHERE version_id=?", (version_id,)
@@ -240,7 +278,7 @@ def _probe_side_tables(
     retriever_mod._pattern_supports = counting_patterns
     retriever_mod._cluster_sets = counting_clusters
     per_limit: dict[str, Any] = {}
-    services = _services(conn, settings)
+    services = _services(conn, settings, embedder=embedder, vectors=vectors)
     try:
         for limit in (5, 20):
             pattern_rows: list[int] = []
@@ -254,7 +292,7 @@ def _probe_side_tables(
                 started = time.monotonic()
                 asyncio.run(
                     services["fused"].search_with_mode(
-                        judgment["query"], "balanced", library=library, limit=limit
+                        judgment["query"], "balanced", **scope, limit=limit
                     )
                 )
                 samples.append(time.monotonic() - started)
@@ -288,7 +326,7 @@ def _probe_score_scale(evaluation: dict[str, Any]) -> dict[str, Any]:
 
 
 def _probe_query_shaping(
-    conn, settings, judgments: list[dict[str, Any]], limit: int
+    conn, settings, judgments: list[dict[str, Any]], scope: dict[str, Any], limit: int
 ) -> dict[str, Any]:
     """Compare the current OR bag against an all-tokens-required variant."""
     from libref.store.retriever import fts_search
@@ -310,10 +348,11 @@ def _probe_query_shaping(
         weights = _weights()
         rows = conn.execute(
             "SELECT documents_fts.rowid FROM documents_fts"
-            f" WHERE documents_fts MATCH ?"
+            f" WHERE documents_fts MATCH ? AND rowid IN"
+            f" (SELECT id FROM documents WHERE version_id=?)"
             f" ORDER BY bm25(documents_fts, {weights[0]}, {weights[1]},"
             f" {weights[2]}, {weights[3]}) LIMIT ?",
-            [and_query, limit],
+            [and_query, _version_id(conn, scope), limit],
         ).fetchall()
         urls = []
         for (doc_id,) in rows:
@@ -326,13 +365,14 @@ def _probe_query_shaping(
 
     variants = {"or_tokens": [], "and_tokens": []}
     for judgment in judgments:
-        if not judgment.get("file"):
+        wanted_set = {_doc_url(target) for target in judgment.get("targets", [])}
+        if not wanted_set:
             continue
-        wanted = _doc_url(judgment["file"])
         heading = judgment.get("heading")
         pairs = fts_search(
             conn,
             judgment["query"],
+            **scope,
             weights=_weights(),
             budget=limit,
         )
@@ -345,13 +385,13 @@ def _probe_query_shaping(
                 or_urls.append((str(row[0]), str(row[1] or "")))
         rank = 0
         for index, (url, meta) in enumerate(or_urls):
-            if url == wanted and (not heading or heading in meta):
+            if url in wanted_set and (not heading or heading in meta):
                 rank = index + 1
                 break
         variants["or_tokens"].append({"rank": rank})
         rank = 0
         for index, url in enumerate(_and_matches(judgment["query"])):
-            if url == wanted:
+            if url in wanted_set:
                 rank = index + 1
                 break
         variants["and_tokens"].append({"rank": rank})
@@ -359,7 +399,7 @@ def _probe_query_shaping(
 
 
 def _probe_material_units(
-    conn, settings, judgments: list[dict[str, Any]]
+    conn, settings, judgments: list[dict[str, Any]], scope: dict[str, Any]
 ) -> dict[str, Any]:
     """Material budget units: character cap versus the token convention."""
     from libref.chunking.budget import estimate_tokens
@@ -374,9 +414,7 @@ def _probe_material_units(
         if judgment.get("type") == "absent":
             continue
         results, _status = asyncio.run(
-            service.search_with_mode(
-                judgment["query"], "precise", library="bench-docs", limit=5
-            )
+            service.search_with_mode(judgment["query"], "precise", **scope, limit=5)
         )
         if not results:
             continue
@@ -414,7 +452,7 @@ def _probe_material_units(
 
 
 def _probe_confidence(
-    conn, settings, judgments: list[dict[str, Any]]
+    conn, settings, judgments: list[dict[str, Any]], scope: dict[str, Any]
 ) -> dict[str, Any]:
     """Confidence policy: replay three answer shapes against the current materials.
 
@@ -428,21 +466,19 @@ def _probe_confidence(
     service = SearchService(conn, settings)
     cases: list[dict[str, Any]] = []
     for judgment in judgments:
-        if judgment.get("type") == "absent" or not judgment.get("file"):
+        wanted_set = {_doc_url(target) for target in judgment.get("targets", [])}
+        if judgment.get("type") == "absent" or not wanted_set:
             continue
         results, _status = asyncio.run(
-            service.search_with_mode(
-                judgment["query"], "precise", library="bench-docs", limit=5
-            )
+            service.search_with_mode(judgment["query"], "precise", **scope, limit=5)
         )
         if len(results) < 2:
             continue
-        wanted = _doc_url(judgment["file"])
         right = next(
             (
                 index + 1
                 for index, item in enumerate(results)
-                if str(item.get("url") or "") == wanted
+                if str(item.get("url") or "") in wanted_set
             ),
             0,
         )
@@ -480,23 +516,26 @@ def _probe_fusion_rank_loss(
     conn,
     settings,
     judgments: list[dict[str, Any]],
-    library: str,
+    scope: dict[str, Any],
     limit: int,
+    *,
+    embedder,
+    vectors,
 ) -> dict[str, Any]:
     """Does fusion keep the full-text top pick? Counts page-level survival by query type."""
-    services = _services(conn, settings)
+    services = _services(conn, settings, embedder=embedder, vectors=vectors)
     rows: list[dict[str, Any]] = []
     for judgment in judgments:
         if judgment.get("type") == "absent":
             continue
         precise, _ = asyncio.run(
             services["precise"].search_with_mode(
-                judgment["query"], "precise", library=library, limit=limit
+                judgment["query"], "precise", **scope, limit=limit
             )
         )
         fused, _ = asyncio.run(
             services["fused"].search_with_mode(
-                judgment["query"], "balanced", library=library, limit=limit
+                judgment["query"], "balanced", **scope, limit=limit
             )
         )
         if not precise:
@@ -522,21 +561,31 @@ def _probe_fusion_rank_loss(
     }
 
 
-def _check_gates(summary: dict[str, Any], gates: dict[str, Any]) -> list[str]:
-    """Gate the production-representative path plus structural invariants.
+def _check_gates(
+    summary: dict[str, Any], gates: dict[str, Any], *, real: bool
+) -> list[str]:
+    """Gate the full-text path always, and the model paths only under real models.
 
-    The fused rows run on a lexical stand-in embedder, so their absolute quality
-    is an observation rather than a floor; what must hold everywhere is that no
-    duplicate material survives and the full-text path stays above its recorded
-    baseline.
+    The full-text path is production-representative in both modes. Fused rows
+    only get absolute floors under `--real`: with the lexical stand-ins their
+    quality reflects the stand-in, not the retrieval design.
     """
     failures: list[str] = []
     max_duplicate = float(gates["invariants"]["max_duplicate_rate"])
     for corpus, methods in summary.items():
         if not isinstance(methods, dict):
             continue
-        floors = gates["precise_floors"].get(corpus, {})
         precise = methods.get("precise", {}).get("all", {})
+        floors = dict(gates["precise_floors"].get(corpus, {}))
+        if real:
+            for method, metrics in gates.get("real_floors", {}).get(corpus, {}).items():
+                actual = methods.get(method, {}).get("all", {})
+                for metric, floor in metrics.items():
+                    if actual.get(metric, 0.0) < float(floor):
+                        failures.append(
+                            f"{corpus}/{method}: {metric}={actual.get(metric, 0.0):.3f}"
+                            f" below floor {float(floor):.3f}"
+                        )
         for metric, floor in floors.items():
             if precise.get(metric, 0.0) < float(floor):
                 failures.append(
@@ -560,8 +609,11 @@ def _report(
     failures: list[str],
     out_dir: Path,
     k: int,
+    models: str | None = None,
 ) -> Path:
     lines: list[str] = ["# 检索问答基准报告（真实项目夹具）", ""]
+    if models:
+        lines.append(f"- {models}")
     lines.append(f"语料根：`{manifest.get('root')}`")
     for name, info in manifest.get("fixtures", {}).items():
         lines.append(
@@ -576,7 +628,6 @@ def _report(
                     "version",
                     "library_id",
                     "version_id",
-                    "root",
                     "subdir",
                 }
             )
@@ -736,11 +787,20 @@ def _shape_metrics(rows: list[dict[str, Any]], k: int) -> dict[str, float]:
 
 
 def run(
-    data_dir: Path = DATA, out_dir: Path = OUTPUT, probes_enabled: bool = True
+    data_dir: Path = DATA,
+    out_dir: Path = OUTPUT,
+    probes_enabled: bool = True,
+    real: bool = False,
 ) -> dict[str, Any]:
     """Evaluate the dataset and write the report and results payload."""
     from libref.db import open_db
-    from tests.e2e.bench.fakes import bench_settings
+    from tests.e2e.bench.fakes import (
+        SqliteVecStore,
+        bench_settings,
+        real_embedder,
+        real_rerank,
+        real_settings,
+    )
 
     manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
     if manifest.get("skipped"):
@@ -749,7 +809,24 @@ def run(
     gates = _gates()
     limit = int(gates["top_k"])
     conn = open_db(data_dir / "bench.db")
-    settings = bench_settings(data_dir / "bench.db")
+    if real:
+        settings = real_settings(data_dir / "bench.db")
+        embedder = real_embedder(settings)
+        rerank = real_rerank(settings)
+        vectors = SqliteVecStore(conn, embedder)
+    else:
+        settings = bench_settings(data_dir / "bench.db")
+        rerank = None
+        embedder, vectors = _store(conn, None, None)
+    asyncio.run(vectors.prepare())
+    scopes = {
+        name: {
+            "library": info["library"],
+            "version": info["version"],
+            "ecosystem": info.get("ecosystem", "custom"),
+        }
+        for name, info in manifest["fixtures"].items()
+    }
     try:
         docs_eval = asyncio.run(
             _evaluate_corpus(
@@ -757,8 +834,11 @@ def run(
                 settings,
                 judgments["docs"],
                 _doc_url,
-                manifest["fixtures"]["repo_docs"]["library"],
+                scopes["docs"],
                 limit,
+                embedder=embedder,
+                vectors=vectors,
+                rerank=rerank,
             )
         )
         code_eval = asyncio.run(
@@ -767,8 +847,11 @@ def run(
                 settings,
                 judgments["code"],
                 _code_url,
-                manifest["fixtures"]["repo_code"]["library"],
+                scopes["code"],
                 limit,
+                embedder=embedder,
+                vectors=vectors,
+                rerank=rerank,
             )
         )
         summary = {
@@ -783,7 +866,9 @@ def run(
                     conn,
                     settings,
                     judgments["code"],
-                    manifest["fixtures"]["repo_code"]["library"],
+                    scopes["code"],
+                    embedder=embedder,
+                    vectors=vectors,
                 ),
                 "score_scale": {
                     "docs": _probe_score_scale(docs_eval),
@@ -793,27 +878,55 @@ def run(
                     conn,
                     settings,
                     judgments["docs"],
-                    manifest["fixtures"]["repo_docs"]["library"],
+                    scopes["docs"],
                     limit,
+                    embedder=embedder,
+                    vectors=vectors,
                 ),
                 "query_shaping": _probe_query_shaping(
-                    conn, settings, judgments["docs"], limit
+                    conn, settings, judgments["docs"], scopes["docs"], limit
                 ),
                 "material_units": _probe_material_units(
-                    conn, settings, judgments["docs"]
+                    conn, settings, judgments["docs"], scopes["docs"]
                 ),
-                "confidence": _probe_confidence(conn, settings, judgments["docs"]),
+                "confidence": _probe_confidence(
+                    conn, settings, judgments["docs"], scopes["docs"]
+                ),
             }
-        failures = _check_gates(summary, gates)
-        _report(manifest, summary, probes, failures, out_dir, limit)
+        failures = _check_gates(summary, gates, real=real)
+        _report(
+            manifest,
+            summary,
+            probes,
+            failures,
+            out_dir,
+            limit,
+            models=_model_line(settings, real),
+        )
     finally:
         conn.close()
     return {"summary": summary, "probes": probes, "failures": failures}
 
 
+def _model_line(settings, real: bool) -> str:
+    """One line stating which endpoints produced the numbers."""
+    if not real:
+        return "向量与重排：离线替身（词袋伪向量、词覆盖重排）"
+    return (
+        f"向量：{settings.embedding_model}（{settings.embedding_dim} 维）；"
+        f"重排：{settings.rerank_model}，候选 {settings.rerank_candidate_limit} 条、"
+        f"保留 {settings.rerank_top_n} 条、输入截断 {settings.rerank_truncate} 字符"
+    )
+
+
 def main() -> int:
     args = _parse_args()
-    result = run(Path(args.data), Path(args.out), probes_enabled=not args.no_probes)
+    result = run(
+        Path(args.data),
+        Path(args.out),
+        probes_enabled=not args.no_probes,
+        real=args.real,
+    )
     if not args.gate_only:
         print(f"report: {Path(args.out) / 'report.md'}")
     for failure in result["failures"]:

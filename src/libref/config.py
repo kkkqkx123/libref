@@ -99,7 +99,7 @@ class LibrefSettings(BaseSettings):
     rerank_truncate: int = Field(default=500, ge=1)
     rrf_k: int = Field(default=20, ge=1)
     rrf_w_fts: float = Field(default=1.0, ge=0)
-    rrf_w_vec: float = Field(default=0.5, ge=0)
+    rrf_w_vec: float = Field(default=1.0, ge=0)
     freq_alpha: float = Field(default=0.15, ge=0)
     cluster_alpha: float = Field(default=0.05, ge=0)
     candidate_multiplier: int = Field(default=3, ge=1)

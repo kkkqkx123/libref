@@ -1,29 +1,33 @@
-"""Build the retrieval benchmark dataset from real project fixtures.
+"""Build the retrieval benchmark dataset from downloaded fixtures.
 
-The corpus is the repository itself: its documentation tree feeds the document
-branch and its own source tree feeds the code branch, both through the
-production pipelines. The dataset lives outside version control and is rebuilt
-from the fixtures on demand, so measurements always describe current code.
+`fetch.py` performs the real acquisition: it crawls the documentation site with
+the production ingest service and clones the source repository with the
+production repository manager, leaving raw page bodies and the clone under the
+gitignored `fixtures/` directory. This script replays those downloads offline
+through the production cleaning, chunking, indexing and mining paths, so a
+rebuild never touches the network and always describes the same download.
 
 Usage:
-    uv run python tests/e2e/bench/build.py [--out DIR] [--fixture NAME]...
+    uv run python -m tests.e2e.bench.build [--out DIR] [--fixture NAME]...
 
-A fixture whose path is missing is reported and skipped; the run then marks the
-environment unavailable instead of failing as a regression.
+Missing fixtures abort the build with the command that produces them: a
+half-built dataset would silently change what the numbers mean.
 """
 
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import shutil
-import sys
 import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent.parent.parent
-SPEC = HERE / "fixtures.json"
+SPEC = HERE / "bench.json"
+FIXTURES = HERE / "fixtures"
+PAGE_CACHE = FIXTURES / "docs" / "pages.jsonl.gz"
+LOCK = FIXTURES / "lock.json"
 
 
 def _parse_args() -> argparse.Namespace:
@@ -35,53 +39,67 @@ def _parse_args() -> argparse.Namespace:
         "--fixture",
         action="append",
         default=None,
-        help="fixture name from fixtures.json; defaults to all",
+        help="fixture name from bench.json; defaults to all",
     )
     return parser.parse_args()
 
 
 def load_spec(path: Path = SPEC) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))["fixtures"]
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _index_docs(conn, settings, name: str, entry: dict) -> dict:
-    """Index a markdown tree through the production cleaning and dual-path chunking."""
+def load_lock() -> dict:
+    if not LOCK.is_file():
+        raise SystemExit(
+            "benchmark fixtures missing: run `uv run python -m tests.e2e.bench.fetch` first"
+        )
+    return json.loads(LOCK.read_text(encoding="utf-8"))
+
+
+def _cached_pages() -> list[dict]:
+    if not PAGE_CACHE.is_file():
+        raise SystemExit(f"page cache missing: {PAGE_CACHE}; rerun the fetch step")
+    with gzip.open(PAGE_CACHE, "rt", encoding="utf-8") as handle:
+        return [json.loads(line) for line in handle if line.strip()]
+
+
+def _index_docs(conn, settings, entry: dict, lock: dict) -> dict:
+    """Replay the crawled pages through the production clean, split and store path."""
     from libref.chunking import split_markdown_dual
-    from libref.services.docs.scrape_plan import (
-        build_doc_inputs,
-        doc_budgets,
-        normalize_text_content,
-    )
+    from libref.services.docs.page_pipeline import PagePipeline
+    from libref.services.docs.scrape_plan import build_doc_inputs, doc_budgets
     from libref.services.registry.libraries import LibraryService
     from libref.store.document_store import DocumentStore
+    from libref.text.normalize import classify_content
 
-    root = (ROOT / entry["path"]).resolve()
-    if not root.is_dir():
-        raise FileNotFoundError(f"fixture '{name}' path missing: {root}")
     library = str(entry["library"])
     version = str(entry["version"])
+    ecosystem = str(entry.get("ecosystem") or "custom")
     library_id, version_id = LibraryService(conn).ensure_library_version(
-        library, version, "custom"
+        library, version, ecosystem
     )
     budgets = doc_budgets(settings)
+    pipeline = PagePipeline(settings)
     store = DocumentStore(conn)
-    url_base = str(entry.get("url_base") or "https://bench.local").rstrip("/")
+    lanes = {"embedding": 0, "bm25": 0}
     pages = 0
     chunks = 0
-    lanes = {"embedding": 0, "bm25": 0}
-    patterns = list(entry.get("include") or ["**/*.md"])
-    files = sorted({path for pattern in patterns for path in root.glob(pattern)})
-    for path in files:
-        rel = path.relative_to(root).as_posix()
-        url = f"{url_base}/{entry['path']}/{rel}"
-        content = normalize_text_content(path.read_text(encoding="utf-8"))
-        if not content.strip():
+    empty = 0
+    for row in _cached_pages():
+        url = row["url"]
+        content_type = row["content_type"]
+        markdown = pipeline.clean_with_cache(
+            classify_content(content_type, url), row["body"], url
+        )
+        if not markdown.strip():
+            empty += 1
             continue
-        dual = split_markdown_dual(content, url, budgets=budgets)
+        dual = split_markdown_dual(markdown, url, budgets=budgets)
         inputs = build_doc_inputs(
             dual.embedding + dual.bm25, "text/markdown", "markdown"
         )
         if not inputs:
+            empty += 1
             continue
         store.store_page(
             version_id,
@@ -89,7 +107,7 @@ def _index_docs(conn, settings, name: str, entry: dict) -> dict:
             url,
             "stored",
             chunks=inputs,
-            raw_content=content,
+            raw_content=markdown,
         )
         pages += 1
         chunks += len(inputs)
@@ -100,25 +118,29 @@ def _index_docs(conn, settings, name: str, entry: dict) -> dict:
         "kind": "docs",
         "library": library,
         "version": version,
+        "ecosystem": ecosystem,
         "library_id": library_id,
         "version_id": version_id,
-        "root": str(root),
+        "source": lock.get("start_url", ""),
+        "urls_sha256": lock.get("urls_sha256", ""),
+        "fetched_at": lock.get("fetched_at", ""),
         "pages": pages,
+        "empty": empty,
         "chunks": chunks,
         "lanes": lanes,
     }
 
 
-def _index_code(conn, settings, name: str, entry: dict, out_dir: Path) -> dict:
-    """Index a source tree through the production clone/parse/chunk pipeline."""
+def _index_code(conn, settings, entry: dict, lock: dict, out_dir: Path) -> dict:
+    """Index the cloned repository through the production parse, chunk and mine path."""
     from libref.services.code.code_ingest import index_repo
     from libref.services.code.mining_refresh import mine_patterns
     from libref.services.registry.libraries import LibraryService
 
-    source = (ROOT / str(entry.get("source") or ".")).resolve()
+    source = Path(str(lock["path"]))
     subdir = str(entry.get("subdir") or "")
     if not (source / subdir).is_dir():
-        raise FileNotFoundError(f"fixture '{name}' path missing: {source / subdir}")
+        raise SystemExit(f"cloned repository missing {subdir}: {source}")
     library = str(entry["library"])
     version = str(entry["version"])
     ecosystem = str(entry.get("ecosystem") or "custom")
@@ -133,28 +155,25 @@ def _index_code(conn, settings, name: str, entry: dict, out_dir: Path) -> dict:
         subdir=subdir or None,
     )
     patterns = mine_patterns(conn, library, version, ecosystem=ecosystem)
-    catalog = LibraryService(conn)
-    library_id, version_id = catalog.ensure_library_version(library, version, ecosystem)
+    library_id, version_id = LibraryService(conn).ensure_library_version(
+        library, version, ecosystem
+    )
     patterns_total = conn.execute(
         "SELECT count(*) FROM seq_patterns WHERE version_id=?", (version_id,)
     ).fetchone()
     clusters = conn.execute(
         "SELECT count(*) FROM api_clusters WHERE version_id=?", (version_id,)
     ).fetchone()
-    repo = conn.execute(
-        "SELECT commit_sha, url FROM repos WHERE name=?",
-        (f"{ecosystem}/{library}/{version}",),
-    ).fetchone()
     return {
         "kind": "code",
         "library": library,
         "version": version,
+        "ecosystem": ecosystem,
         "library_id": library_id,
         "version_id": version_id,
-        "root": str(source),
+        "source": lock.get("repo_url", ""),
+        "commit": lock.get("commit", ""),
         "subdir": subdir,
-        "commit": repo[0] if repo else "",
-        "source": repo[1] if repo else "",
         "files": int(counts.get("files", 0)),
         "parsed": int(counts.get("parsed", 0)),
         "entities": int(counts.get("entities", 0)),
@@ -171,7 +190,7 @@ def build(
     names: list[str] | None = None,
     settings_overrides: dict | None = None,
 ) -> dict:
-    """Rebuild the whole dataset from the fixtures and write its manifest.
+    """Rebuild the dataset from the downloaded fixtures and write its manifest.
 
     Settings overrides exist for indexing-parameter sweeps: chunk budgets are
     fixed at build time, so a variant needs its own dataset.
@@ -180,7 +199,14 @@ def build(
     from tests.e2e.bench.fakes import bench_settings
 
     spec = load_spec()
+    lock = load_lock()
     wanted = names or list(spec)
+    for name in wanted:
+        if name not in lock:
+            raise SystemExit(
+                f"fixture '{name}' not downloaded: "
+                "run `uv run python -m tests.e2e.bench.fetch` first"
+            )
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -190,23 +216,18 @@ def build(
     apply_migrations(conn)
     manifest: dict = {
         "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "root": str(ROOT),
-        "commit": _head_commit(),
         "fixtures": {},
-        "skipped": [],
     }
     try:
         for name in wanted:
             entry = spec[name]
             started = time.monotonic()
             if entry["kind"] == "docs":
-                info = _index_docs(conn, settings, name, entry)
+                info = _index_docs(conn, settings, entry, lock[name])
             else:
-                info = _index_code(conn, settings, name, entry, out_dir)
+                info = _index_code(conn, settings, entry, lock[name], out_dir)
             info["elapsed_ms"] = int((time.monotonic() - started) * 1000)
             manifest["fixtures"][name] = info
-    except FileNotFoundError as exc:
-        manifest["skipped"].append(str(exc))
     finally:
         conn.close()
     (out_dir / "manifest.json").write_text(
@@ -215,24 +236,12 @@ def build(
     return manifest
 
 
-def _head_commit() -> str:
-    from dulwich import porcelain
-
-    try:
-        head = porcelain.revparse_single(str(ROOT), "HEAD")
-    except Exception:  # noqa: BLE001 -- absence of git metadata must not block the build
-        return ""
-    return getattr(head, "id", b"").decode("ascii", "ignore")
-
-
 def main() -> int:
     args = _parse_args()
     manifest = build(Path(args.out), args.fixture)
     for name, info in manifest["fixtures"].items():
-        summary = ", ".join(f"{k}={v}" for k, v in info.items() if k != "root")
+        summary = ", ".join(f"{key}={value}" for key, value in info.items())
         print(f"{name}: {summary}")
-    for reason in manifest["skipped"]:
-        print(f"SKIP: {reason}", file=sys.stderr)
     return 0
 
 

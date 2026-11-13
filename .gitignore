@@ -46,6 +46,7 @@ tests/e2e/repos/
 tests/e2e/outputs/
 tests/e2e/snapshots/
 
-# retrieval benchmark dataset and reports (rebuilt from fixtures)
+# retrieval benchmark downloads, dataset and reports (only fetch/build scripts are versioned)
+tests/e2e/bench/fixtures/
 tests/e2e/bench/data/
 tests/e2e/bench/outputs/

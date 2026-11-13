@@ -1,9 +1,10 @@
-"""Deterministic offline stand-ins for the vector and rerank services.
+"""Vector and rerank endpoints for the benchmark.
 
-The benchmark must run without an embedding API or Qdrant, yet still exercise
-the real fusion, dedup and rerank wiring. Both stand-ins are pure functions of
-the text, so two runs over the same corpus produce identical vectors, scores
-and rankings.
+Two modes share one wiring: deterministic offline stand-ins (default, no API
+key needed, byte-identical across runs) and the real models configured in the
+repository environment file. The offline stand-ins are pure functions of the
+text; the real mode calls the production transports unchanged, so the only
+difference between runs is model quality.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+from pathlib import Path
 from typing import Any
 
 from libref.text.cjk import CJK_RUN_RE, expand_cjk_run
@@ -55,36 +57,79 @@ class BagOfTermsEmbedder:
 
 
 class SqliteVecStore:
-    """Vector store over the SQLite truth: encodes stored chunks on demand.
+    """Vector store over the SQLite truth: vectors live in process, prepared up front.
 
     Mirrors the production embed-text convention (title and path first, body
     stripped of markdown), so a fusion comparison measures ranking rather than
-    a different text assembly.
+    a different text assembly. Preparation is explicit because the real encoder
+    batches over the network: a search over a missing vector is a harness bug,
+    not a case to paper over.
     """
 
-    def __init__(self, conn, embedder: BagOfTermsEmbedder) -> None:
+    def __init__(self, conn, embedder) -> None:
         self._conn = conn
         self._embedder = embedder
         self._cache: dict[int, list[float]] = {}
+        self._batch = 256
 
-    def _vectors(self, version_id: int) -> list[tuple[int, list[float]]]:
-        rows = self._conn.execute(
-            "SELECT d.id, d.content, d.metadata FROM documents d "
-            "WHERE d.version_id=? AND "
-            "COALESCE(json_extract(d.metadata, '$.chunk_path'), 'embedding') != 'bm25'",
-            (int(version_id),),
-        ).fetchall()
+    _LANE_FILTER = (
+        "COALESCE(json_extract(d.metadata, '$.chunk_path'), 'embedding') != 'bm25'"
+    )
+
+    def _vector_rows(self, version_id: int | None = None) -> list[tuple[int, str]]:
         import json
 
+        if version_id is None:
+            sql = (
+                "SELECT d.id, d.content, d.metadata FROM documents d "
+                f"WHERE {self._LANE_FILTER}"
+            )
+            params: tuple = ()
+        else:
+            sql = (
+                "SELECT d.id, d.content, d.metadata FROM documents d "
+                f"WHERE d.version_id=? AND {self._LANE_FILTER}"
+            )
+            params = (int(version_id),)
+
+        out: list[tuple[int, str]] = []
+        for doc_id, content, raw in self._conn.execute(sql, params).fetchall():
+            meta = json.loads(raw) if raw else {}
+            out.append(
+                (
+                    int(doc_id),
+                    build_embed_text(meta.get("title"), meta.get("path"), content),
+                )
+            )
+        return out
+
+    async def prepare(self) -> int:
+        """Encode every vector-lane chunk missing from the cache; ids already known are skipped."""
+        todo = [
+            (doc_id, text)
+            for doc_id, text in self._vector_rows()
+            if doc_id not in self._cache
+        ]
+        for start in range(0, len(todo), self._batch):
+            batch = todo[start : start + self._batch]
+            vectors = await self._embedder([text for _, text in batch])
+            if len(vectors) != len(batch):
+                raise RuntimeError(
+                    f"embedding count mismatch: got {len(vectors)}, want {len(batch)}"
+                )
+            for (doc_id, _), vector in zip(batch, vectors):
+                self._cache[doc_id] = vector
+        return len(todo)
+
+    def _vectors(self, version_id: int) -> list[tuple[int, list[float]]]:
         out: list[tuple[int, list[float]]] = []
-        for doc_id, content, raw in rows:
-            cached = self._cache.get(int(doc_id))
+        for doc_id, _text in self._vector_rows(version_id):
+            cached = self._cache.get(doc_id)
             if cached is None:
-                meta = json.loads(raw) if raw else {}
-                text = build_embed_text(meta.get("title"), meta.get("path"), content)
-                cached = self._embedder.vector_for(text)
-                self._cache[int(doc_id)] = cached
-            out.append((int(doc_id), cached))
+                raise RuntimeError(
+                    f"vector cache misses doc {doc_id}; call prepare() before searching"
+                )
+            out.append((doc_id, cached))
         return out
 
     def search(
@@ -96,12 +141,6 @@ class SqliteVecStore:
             scored.append((score, doc_id))
         scored.sort(key=lambda item: (-item[0], item[1]))
         return [(doc_id, score) for score, doc_id in scored[: max(0, int(k))]]
-
-    def count(self, version_id: int) -> int:
-        return len(self._vectors(version_id))
-
-    def list_ids(self, version_id: int, *, batch: int = 512) -> list[int]:
-        return [doc_id for doc_id, _ in self._vectors(version_id)]
 
 
 def lexical_rerank():
@@ -121,12 +160,41 @@ def lexical_rerank():
     return rerank
 
 
-def failing_rerank():
-    """Rerank stand-in that always fails, for degradation-path measurements."""
+REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ENV = REPO_ROOT / ".env"
 
-    async def rerank(query: str, documents: list[str], top_n: int | None):
-        raise RuntimeError("benchmark rerank failure")
 
+def real_settings(db_path, **overrides) -> Any:
+    """Settings backed by the repository environment file: real endpoints, rerank on."""
+    from libref.config import LibrefSettings
+
+    base: dict[str, Any] = {
+        "db_path": Path(db_path),
+        "vector_backend": "simvec",
+        "rerank_enabled": True,
+        "chat_enabled": False,
+    }
+    base.update(overrides)
+    return LibrefSettings(_env_file=REPO_ENV, **base)
+
+
+def real_embedder(settings):
+    """Real embedding transport; a missing key is a harness error, not a silent degrade."""
+    from libref.llm.embeddings import build_embed_fn
+
+    embed = build_embed_fn(settings)
+    if embed is None:
+        raise RuntimeError(f"real embedding requested but no key in {REPO_ENV}")
+    return embed
+
+
+def real_rerank(settings):
+    """Real rerank transport; requires the rerank switch on in the settings passed in."""
+    from libref.llm.rerank import build_rerank_fn
+
+    rerank = build_rerank_fn(settings)
+    if rerank is None:
+        raise RuntimeError("real rerank requested but rerank is disabled or unkeyed")
     return rerank
 
 

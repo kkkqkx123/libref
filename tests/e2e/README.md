@@ -24,9 +24,11 @@
 
 ## 检索问答基准
 
-`bench/` 是离线基准目录（真实项目夹具 + 判定集 + 数据生成 + 方法矩阵 + 门禁），
-不联网但耗时可观，脚本与判据见 `bench/README.md`。
-门禁用例位于 `tests/integration/test_retrieval_bench.py`，需显式开启：
+`bench/` 是检索问答基准目录：用生产抓取服务与生产仓库管理真实下载第三方文档站与官方仓库
+（`fetch.py`），离线回放建库（`build.py`），再跑方法矩阵、专项探针与门禁。
+下载物、数据集与报告都不入库，只有脚本、夹具规格与判定集进版本库；
+脚本与判据见 `bench/README.md`。门禁用例位于 `tests/integration/test_retrieval_bench.py`，
+需显式开启，`fixtures/` 缺失时按环境不可用跳过：
 
 ```bash
 LIBREF_RUN_BENCH=1 uv run pytest tests/integration/test_retrieval_bench.py -q
