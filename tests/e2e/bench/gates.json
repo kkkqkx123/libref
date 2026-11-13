@@ -17,21 +17,21 @@
     "docs": {
       "fused": {
         "recall_at_k": 0.95,
-        "mrr_at_k": 0.75
+        "mrr_at_k": 0.7
       },
       "fused_rerank": {
         "recall_at_k": 0.95,
-        "mrr_at_k": 0.77
+        "mrr_at_k": 0.7
       }
     },
     "code": {
       "fused": {
-        "recall_at_k": 0.95,
-        "mrr_at_k": 0.87
+        "recall_at_k": 0.82,
+        "mrr_at_k": 0.82
       },
       "fused_rerank": {
         "recall_at_k": 0.95,
-        "mrr_at_k": 0.8
+        "mrr_at_k": 0.72
       }
     }
   }

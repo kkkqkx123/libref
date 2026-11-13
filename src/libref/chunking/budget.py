@@ -1,19 +1,38 @@
 """Chunk budgets and metering: dual-path conventions, hard limits and planning reserves, plus term counting matching the index.
 
-The embedding path estimates tokens by the embedding convention; the full-text path counts terms.
-Term counting mirrors the full-text index's tokenization rules: Latin identifiers count as one,
-CJK counts per character; on the index side, after CJK expansion the token count per character string is
-the same order as the character count, so the planning convention still holds.
+The embedding path estimates tokens by character class: letters, symbols, whitespace, CJK and
+other scripts carry different per-character costs in the embedding model's tokenizer, so one
+flat ratio would make the same budget mean different real sizes for prose, code and Chinese.
+The weights are calibrated against measured token usage and rounded up, so a budget is a cap
+rather than an aspiration; recalibrate them whenever the embedding model changes.
+
+Term counting is a separate contract: it mirrors the full-text index's tokenization rules
+(Latin identifiers count as one, CJK counts per character), and the index expands CJK per
+character, so the planning convention holds for the full-text path.
 """
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from enum import Enum
 
 _LATIN_RUN_RE = re.compile(r"[A-Za-z0-9_]+")
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]")
+
+# Per-character token weights for the embedding convention, calibrated on measured usage of
+# the configured embedding model and rounded up. Letters are ASCII alphanumerics, symbols are
+# ASCII punctuation, CJK covers ideographs plus kana and hangul, and anything else counts whole.
+_LETTER_WEIGHT = 0.25
+_SYMBOL_WEIGHT = 1.0
+_SPACE_WEIGHT = 0.2
+_CJK_WEIGHT = 1.0
+_OTHER_WEIGHT = 1.0
+
+_ASCII_LETTER_RE = re.compile(r"[A-Za-z0-9_]")
+_ASCII_SPACE_RE = re.compile(r"[ \t\n\r\f\v]")
+_KANA_HANGUL_RE = re.compile(r"[\u3040-\u30ff\uac00-\ud7af\u1100-\u11ff\u3130-\u318f]")
 
 
 class ChunkPath(str, Enum):
@@ -88,12 +107,31 @@ SPAN_UNAVAILABLE = "unavailable"
 
 
 def estimate_tokens(text: str) -> int:
-    """Heuristic estimate in the embedding convention; needs only be monotonic, not match any specific encoder."""
+    """Token estimate in the embedding convention, charged per character class and rounded up."""
     if not text.strip():
         return 0
-    latin = len(_LATIN_RUN_RE.findall(text))
-    cjk = len(_CJK_RE.findall(text))
-    return latin + latin // 3 + cjk
+    if text.isascii():
+        letters = len(_ASCII_LETTER_RE.findall(text))
+        spaces = len(_ASCII_SPACE_RE.findall(text))
+        symbols = len(text) - letters - spaces
+        total = (
+            letters * _LETTER_WEIGHT + spaces * _SPACE_WEIGHT + symbols * _SYMBOL_WEIGHT
+        )
+        return math.ceil(total)
+    total = 0.0
+    for ch in text:
+        if ch.isascii():
+            if "0" <= ch <= "9" or "a" <= ch <= "z" or "A" <= ch <= "Z" or ch == "_":
+                total += _LETTER_WEIGHT
+            elif ch in " \t\n\r\f\v":
+                total += _SPACE_WEIGHT
+            else:
+                total += _SYMBOL_WEIGHT
+        elif _CJK_RE.match(ch) or _KANA_HANGUL_RE.match(ch):
+            total += _CJK_WEIGHT
+        else:
+            total += _OTHER_WEIGHT
+    return math.ceil(total)
 
 
 def count_terms(text: str) -> int:
