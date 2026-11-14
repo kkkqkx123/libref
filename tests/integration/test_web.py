@@ -131,6 +131,88 @@ def test_review_flow(tmp_path, monkeypatch) -> None:
         conn.close()
 
 
+def test_probe_routes(tmp_path, monkeypatch) -> None:
+    import contextlib
+
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith(("llms.txt", "llms-full.txt")):
+            return httpx.Response(404)
+        if path == "/robots.txt":
+            return httpx.Response(200, text="")
+        if path == "/sitemap.xml":
+            host = str(request.url.host)
+            return httpx.Response(
+                200,
+                text=(
+                    '<?xml version="1.0"?><urlset>'
+                    f"<url><loc>https://{host}/guide/a</loc></url>"
+                    f"<url><loc>https://{host}/blog/b</loc></url></urlset>"
+                ),
+            )
+        if path == "/guide/a":
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/html; charset=utf-8"},
+                text="<html><head><title>Guide A</title></head><body>hi</body></html>",
+            )
+        if path == "/blog/b":
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/markdown"},
+                text="# Beta\n\nbody\n",
+            )
+        raise AssertionError(path)
+
+    client_transport = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+
+    @contextlib.asynccontextmanager
+    async def fake(_settings):
+        yield client_transport
+
+    import libref.crawler.http as http_mod
+
+    monkeypatch.setattr(http_mod, "build_async_client", fake)
+    monkeypatch.chdir(tmp_path)
+    conn = _open(tmp_path, "probe.db")
+    try:
+        client = _client(conn, monkeypatch, tmp_path)
+        res = client.post(
+            "/doc-probe", json={"start_url": "https://d.example/sitemap.xml"}
+        )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["accepted"] == 2
+        assert body["budget_exceeded"] is False
+        assert len(body["sample_details"]) == 2
+        over = client.post(
+            "/doc-probe",
+            json={"start_url": "https://d.example/sitemap.xml", "max_pages": 1},
+        )
+        assert over.status_code == 200
+        assert over.json()["budget_exceeded"] is True
+        bad = client.post("/doc-probe", json={"start_url": ""})
+        assert bad.status_code == 422
+        repo = tmp_path / "web_repo"
+        repo.mkdir()
+        (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
+        (repo / "note.txt").write_text("hi\n", encoding="utf-8")
+        scoped = client.post(
+            "/repo-probe", json={"source": str(repo), "only_files": ["a.py"]}
+        )
+        assert scoped.status_code == 200
+        assert scoped.json()["effective_files"] == 1
+        assert scoped.json()["unmatched_only_files"] == []
+        assert conn.execute("SELECT count(*) FROM pages").fetchone()[0] == 0
+        assert conn.execute("SELECT count(*) FROM repos").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
 def test_unauthorized_when_token_set(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     conn = _open(tmp_path, "auth.db")

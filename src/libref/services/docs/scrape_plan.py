@@ -8,7 +8,12 @@ from typing import Any
 from libref.chunking import ChunkPath
 from libref.chunking.budget import ChunkBudget, budgets_from_settings
 from libref.crawler import build_scope
-from libref.crawler.scope import BudgetExceeded, crawl_key, sort_by_relevance
+from libref.crawler.scope import (
+    BudgetExceeded,
+    crawl_key,
+    score_url,
+    sort_by_relevance,
+)
 
 __all__ = ["BudgetExceeded"]
 from libref.store.document_store import DocumentInput
@@ -62,6 +67,10 @@ def plan_targets(
         accepted = [start_url]
     query = (scope or {}).get("crawl_query")
     if query and query.strip():
+        threshold = (scope or {}).get("score_threshold")
+        if threshold is not None:
+            bound = float(threshold)
+            accepted = [u for u in accepted if score_url(u, query) >= bound]
         accepted = sort_by_relevance(accepted, query)
     if max_pages is not None and len(accepted) > max_pages:
         raise BudgetExceeded(

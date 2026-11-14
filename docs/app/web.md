@@ -115,11 +115,23 @@ Web 出口是只读查询面，另带精简抓取写入。实现在 `src/libref/
 
 `job_id` 缺省列最近任务，`limit` 取 1 到 200 默认 20。未知编号返回未找到。本出口不提交任务。
 
+## 探查
+
+只读预检，与抓取共用同一发现器与范围策略。参数错误返回请求错误。
+
+### POST /doc-probe
+
+请求体 `start_url` 必填，`scope` 为范围字典，`sample_limit` 取 1 到 100，`fetch_sample_limit` 取 0 到 100（0 表示禁用），`max_pages` 设预算上限（超限只标记不抛错），`prefilter` 先做存活探测。返回探查结构，超预算时带标记并给出实际规模，开启跟随链接时带膨胀提示。
+
+### POST /repo-probe
+
+请求体 `source` 必填（远端地址或本地路径），`subdir` 可选，`max_files` 可选，`sample_limit` 取 1 到 100，`only_files` 为单文件限定数组（先过滤再做预算判断）。返回目录结构，未命中的限定路径在返回体中回显。
+
 ## 写入
 
 ### POST /scrape
 
-精简抓取，为命令行抓取的子集，不含范围限定与断点续抓参数。请求体 `library/version/start_url` 必填，`ecosystem` 默认 `custom`，`max_pages` 可选。返回各结局计数。写入面仅此一处，探查、索引、挖掘与向量运维均不在本出口开放。
+精简抓取，为命令行抓取的子集，不含范围限定与断点续抓参数。请求体 `library/version/start_url` 必填，`ecosystem` 默认 `custom`，`max_pages` 可选。返回各结局计数。写入面仅此一处，索引、挖掘与向量运维均不在本出口开放。
 
 ## 可配置项
 

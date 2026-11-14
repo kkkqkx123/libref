@@ -91,6 +91,8 @@ def cmd_probe_docs(args: argparse.Namespace) -> int:
             scope=_scope_from_args(args),
             sample_limit=getattr(args, "sample_limit", None),
             fetch_sample_limit=getattr(args, "fetch_sample_limit", None),
+            max_pages=getattr(args, "max_pages", None),
+            prefilter=bool(getattr(args, "prefilter", False)),
         )
     finally:
         conn.close()

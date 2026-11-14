@@ -169,11 +169,11 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 
 ### probe-docs
 
-只返回站点结构，不落库。`start_url` 必填，`--sample-limit/--fetch-sample-limit` 可选（后者 0 表示禁用），范围参数与 `ingest` 一致（`--url/--max-depth/--crawl-query/--score-threshold` 等）。
+只返回站点结构，不落库。`start_url` 必填，`--sample-limit/--fetch-sample-limit` 可选（后者 0 表示禁用），`--max-pages` 设预算上限（超限只标记不抛错），`--prefilter` 先做存活探测，`--follow-links` 提示跟随膨胀风险。范围参数与 `ingest` 一致（`--url/--max-depth/--crawl-query/--score-threshold` 等），阈值过滤口径与抓取相同。
 
 ### probe-repo
 
-只返回目录结构，不解析。`source` 必填，`--subdir/--max-files/--sample-limit` 可选。
+只返回目录结构，不解析。`source` 必填，`--subdir/--max-files/--sample-limit` 可选，`--only-file` 可重复（单文件限定，先过滤再做预算判断，未命中路径在返回体中回显）。
 
 ### dump-chunks
 

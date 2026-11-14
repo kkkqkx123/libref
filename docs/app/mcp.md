@@ -73,11 +73,11 @@ MCP 出口是面向模型的只读问答面，共十九个工具。实现在 `sr
 
 ### doc_probe
 
-探查文档站结构，不存储。`start_url` 非空必填，`sample_limit` 取 1 到 100，`fetch_sample_limit` 取 0 到 100（0 表示禁用），`scope` 为对象（非对象返回参数错误），缺省跟随配置。
+探查文档站结构，不存储。`start_url` 非空必填，`sample_limit` 取 1 到 100，`fetch_sample_limit` 取 0 到 100（0 表示禁用），`scope` 为对象（非对象返回参数错误），缺省跟随配置。`max_pages` 取 1 到 100000，超限不抛错而是在返回体中标记超预算并给出实际规模；`prefilter` 为布尔，打开时先做存活探测再发现。范围阈值与抓取同口径，命中查询词得分不足的目标同样过滤。返回体另带 `follow_links` 与跟随膨胀提示，开启跟随链接时实际抓取可能继续膨胀。
 
 ### repo_probe
 
-探查仓库目录结构，不解析。`source` 非空必填（远端地址或本地路径），`subdir` 可选，`max_files` 取 1 到 100000，`sample_limit` 取 1 到 100。
+探查仓库目录结构，不解析。`source` 非空必填（远端地址或本地路径），`subdir` 可选，`max_files` 取 1 到 100000，`sample_limit` 取 1 到 100，`only_files` 为非空字符串数组（单文件限定，先过滤再做预算判断）。返回体回显生效的限定与未命中的限定路径。
 
 ### repo_dependencies
 

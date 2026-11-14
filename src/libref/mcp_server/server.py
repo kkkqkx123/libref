@@ -334,6 +334,8 @@ def build_mcp_server(
         sample_limit: int | None = None,
         scope: dict[str, Any] | None = None,
         fetch_sample_limit: int | None = None,
+        max_pages: int | None = None,
+        prefilter: bool = False,
     ) -> dict[str, Any]:
         """Probe a documentation site structure without storing; confirm the range before scraping."""
         if not start_url.strip():
@@ -344,6 +346,11 @@ def build_mcp_server(
         bad = _check_limit(fetch_sample_limit, low=0, high=100)
         if bad is not None:
             return _invalid(bad)
+        bad = _check_limit(max_pages, low=1, high=100000)
+        if bad is not None:
+            return _invalid(bad)
+        if not isinstance(prefilter, bool):
+            return _invalid("prefilter must be a boolean")
         if scope is not None and not isinstance(scope, dict):
             return _invalid("scope must be an object")
         try:
@@ -354,6 +361,8 @@ def build_mcp_server(
                 scope=scope,
                 sample_limit=sample_limit,
                 fetch_sample_limit=fetch_sample_limit,
+                max_pages=max_pages,
+                prefilter=prefilter,
             )
         except ValueError as exc:
             return _invalid(str(exc))
@@ -366,6 +375,7 @@ def build_mcp_server(
         subdir: str | None = None,
         max_files: int | None = None,
         sample_limit: int | None = None,
+        only_files: list[str] | None = None,
     ) -> dict[str, Any]:
         """Probe a repository structure without parsing; confirm the range before indexing."""
         if not source.strip():
@@ -376,6 +386,12 @@ def build_mcp_server(
         bad = _check_limit(max_files, low=1, high=100000)
         if bad is not None:
             return _invalid(bad)
+        if only_files is not None and (
+            not isinstance(only_files, list)
+            or not only_files
+            or any(not isinstance(item, str) or not item.strip() for item in only_files)
+        ):
+            return _invalid("only_files must be a non-empty string list")
         try:
             probe = probe_repo(
                 source,
@@ -383,6 +399,7 @@ def build_mcp_server(
                 subdir=subdir,
                 max_files=max_files,
                 sample_limit=sample_limit,
+                only_files=only_files,
             )
         except ValueError as exc:
             return _invalid(str(exc))

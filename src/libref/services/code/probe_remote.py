@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import shutil
 import stat
 import tempfile
@@ -257,7 +258,7 @@ def acquire_remote(source: str, *, settings, suffixes, subdir) -> RemoteAcquisit
     slot = base / _reuse_key(source) if base is not None else None
     if slot is not None and _slot_fresh(slot, ttl):
         try:
-            slot.touch(exist_ok=True)
+            os.utime(slot, None)
         except OSError:
             pass
         return RemoteAcquisition(kind="root", root=slot, source_note="reused-clone")

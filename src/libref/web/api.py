@@ -145,6 +145,23 @@ class ScrapeRequest(BaseModel):
     max_pages: int | None = None
 
 
+class DocProbeRequest(BaseModel):
+    start_url: str = Field(min_length=1)
+    scope: dict[str, Any] | None = None
+    sample_limit: int | None = Field(default=None, ge=1, le=100)
+    fetch_sample_limit: int | None = Field(default=None, ge=0, le=100)
+    max_pages: int | None = Field(default=None, ge=1)
+    prefilter: bool = False
+
+
+class RepoProbeRequest(BaseModel):
+    source: str = Field(min_length=1)
+    subdir: str | None = None
+    max_files: int | None = Field(default=None, ge=1)
+    sample_limit: int | None = Field(default=None, ge=1, le=100)
+    only_files: list[str] | None = None
+
+
 class HealthResponse(BaseModel):
     ok: bool = True
     fingerprint: str = ""

@@ -506,6 +506,7 @@ def cmd_probe_repo(args: argparse.Namespace) -> int:
             subdir=getattr(args, "subdir", None),
             max_files=getattr(args, "max_files", None),
             sample_limit=getattr(args, "sample_limit", None),
+            only_files=list(getattr(args, "only_file", None) or []) or None,
         )
     except ValueError as exc:
         print(f"invalid: {exc}", file=sys.stderr)

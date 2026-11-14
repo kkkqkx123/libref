@@ -182,6 +182,156 @@ def test_doc_probe_without_storing(conn, monkeypatch, tmp_path) -> None:
     assert rows[0] == 0
 
 
+def _probe_handler(request: httpx.Request) -> httpx.Response:
+    path = request.url.path
+    if path.endswith(("llms.txt", "llms-full.txt")):
+        return httpx.Response(404)
+    if path == "/robots.txt":
+        return httpx.Response(200, text="")
+    if path == "/sitemap.xml":
+        host = str(request.url.host)
+        return httpx.Response(
+            200,
+            text=(
+                '<?xml version="1.0"?><urlset>'
+                f"<url><loc>https://{host}/guide/a</loc></url>"
+                f"<url><loc>https://{host}/blog/b</loc></url></urlset>"
+            ),
+        )
+    if path == "/guide/a":
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/html; charset=utf-8"},
+            text="<html><head><title>Guide A</title></head><body>hi</body></html>",
+        )
+    if path == "/blog/b":
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/markdown"},
+            text="# Beta\n\nbody\n",
+        )
+    raise AssertionError(path)
+
+
+def _patched_client(monkeypatch) -> None:
+    import libref.crawler.http as http_mod
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(_probe_handler))
+
+    @contextlib.asynccontextmanager
+    async def fake(_settings):
+        yield client
+
+    monkeypatch.setattr(http_mod, "build_async_client", fake)
+
+
+def test_doc_probe_budget_flag_without_raise(conn, monkeypatch, tmp_path) -> None:
+    _patched_client(monkeypatch)
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    import asyncio
+
+    over = asyncio.run(
+        probe_docs_async(
+            conn, settings, "https://d.example/sitemap.xml", max_pages=1
+        )
+    )
+    assert over.budget_exceeded is True
+    assert over.accepted == 2
+    assert len(over.samples) == 2
+    assert over.max_pages == 1
+    fitting = asyncio.run(
+        probe_docs_async(
+            conn, settings, "https://d.example/sitemap.xml", max_pages=5
+        )
+    )
+    assert fitting.budget_exceeded is False
+    assert fitting.accepted == 2
+    assert conn.execute("SELECT count(*) FROM pages").fetchone()[0] == 0
+
+
+def test_doc_probe_threshold_parity_with_ingest(conn, monkeypatch, tmp_path) -> None:
+    _patched_client(monkeypatch)
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    import asyncio
+
+    probe = asyncio.run(
+        probe_docs_async(
+            conn,
+            settings,
+            "https://d.example/sitemap.xml",
+            scope={"crawl_query": "guide", "score_threshold": 0.5},
+        )
+    )
+    assert probe.accepted == 1
+    assert probe.samples == ["https://d.example/guide/a"]
+    assert conn.execute("SELECT count(*) FROM pages").fetchone()[0] == 0
+
+
+def test_doc_probe_follow_flag(conn, monkeypatch, tmp_path) -> None:
+    _patched_client(monkeypatch)
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    import asyncio
+
+    plain = asyncio.run(
+        probe_docs_async(conn, settings, "https://d.example/sitemap.xml")
+    )
+    assert plain.follow_links is False
+    assert plain.follow_expansion_unknown is False
+    followed = asyncio.run(
+        probe_docs_async(
+            conn,
+            settings,
+            "https://d.example/sitemap.xml",
+            scope={"follow_links": True},
+        )
+    )
+    assert followed.follow_links is True
+    assert followed.follow_expansion_unknown is True
+
+
+def test_repo_probe_only_files(conn, monkeypatch, tmp_path) -> None:
+    repo = copy_mini_repo(tmp_path)
+    settings = make_settings(monkeypatch, tmp_path)
+    scoped = probe_repo(str(repo), settings=settings, only_files=["a.py"])
+    assert scoped.effective_files == 1
+    assert scoped.samples == ["a.py"]
+    assert scoped.only_files == ["a.py"]
+    assert scoped.unmatched_only_files == []
+    partial = probe_repo(
+        str(repo), settings=settings, only_files=["a.py", "missing.py"]
+    )
+    assert partial.effective_files == 1
+    assert partial.unmatched_only_files == ["missing.py"]
+    with pytest.raises(ValueError):
+        probe_repo(str(repo), settings=settings, only_files=[""])
+    from libref.crawler.scope import BudgetExceeded
+
+    with pytest.raises(BudgetExceeded):
+        probe_repo(
+            str(repo),
+            settings=settings,
+            only_files=["a.py", "b.py"],
+            max_files=1,
+        )
+    assert conn.execute("SELECT count(*) FROM repos").fetchone()[0] == 0
+
+
+def test_mcp_probe_tool_schemas(conn, monkeypatch, tmp_path) -> None:
+    from libref.mcp_server.server import build_mcp_server
+
+    settings = make_settings(monkeypatch, tmp_path)
+    mcp = build_mcp_server(conn, settings)
+    import asyncio
+
+    tools = asyncio.run(mcp.list_tools())
+    by_name = {tool.name: tool for tool in tools}
+    assert {"doc_probe", "repo_probe"} <= set(by_name)
+    doc_params = by_name["doc_probe"].input_schema.get("properties", {})
+    assert {"max_pages", "prefilter", "scope", "sample_limit"} <= set(doc_params)
+    repo_params = by_name["repo_probe"].input_schema.get("properties", {})
+    assert {"only_files", "subdir", "max_files", "sample_limit"} <= set(repo_params)
+
+
 def test_vector_watermark_roundtrip(conn) -> None:
     _library_id, version_id = seed_library_version(conn)
     save_progress(

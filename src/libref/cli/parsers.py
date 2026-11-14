@@ -697,6 +697,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Sample pages to fetch for title and content type; 0 disables",
     )
+    p_probe_docs.add_argument("--max-pages", type=int, default=None)
+    p_probe_docs.add_argument(
+        "--prefilter",
+        action="store_true",
+        help="Prefilter URLs with a liveness HEAD check",
+    )
+    p_probe_docs.add_argument(
+        "--follow-links",
+        action="store_true",
+        help="Report that in-page link following would expand the ingest set",
+    )
     p_probe_docs.add_argument(
         "--allow-cross-site", action="store_true", help="Allow crawling across sites"
     )
@@ -742,6 +753,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_probe_repo.add_argument("source", help="Remote URL or local path")
     p_probe_repo.add_argument("--subdir", default=None)
+    p_probe_repo.add_argument(
+        "--only-file",
+        action="append",
+        default=None,
+        help="Probe only this repository-relative file; repeatable",
+    )
     p_probe_repo.add_argument("--max-files", type=int, default=None)
     p_probe_repo.add_argument("--sample-limit", type=int, default=None)
     from libref.cli.code_commands import cmd_probe_repo

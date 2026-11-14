@@ -21,10 +21,12 @@ from libref.web.api import (
     AnswerQuery,
     ApiInsightQuery,
     CallInsightQuery,
+    DocProbeRequest,
     ImportInsightQuery,
     JobQuery,
     PatternInsightQuery,
     ReadQuery,
+    RepoProbeRequest,
     ResolveQuery,
     ReviewAction,
     ReviewQuery,
@@ -485,6 +487,49 @@ def build_web_app(
             ecosystem=body.ecosystem,
         )
         return {"counts": counts}
+
+    @app.post("/doc-probe")
+    async def doc_probe(body: DocProbeRequest, _: None = Depends(_guard)) -> dict[str, Any]:
+        from libref.services.docs.probe import probe_docs_async
+
+        if body.scope is not None and not isinstance(body.scope, dict):
+            raise HTTPException(status_code=400, detail="scope must be an object")
+        try:
+            probe = await probe_docs_async(
+                conn,
+                settings,
+                body.start_url,
+                scope=body.scope,
+                sample_limit=body.sample_limit,
+                fetch_sample_limit=body.fetch_sample_limit,
+                max_pages=body.max_pages,
+                prefilter=body.prefilter,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return probe.model_dump()
+
+    @app.post("/repo-probe")
+    def repo_probe(body: RepoProbeRequest, _: None = Depends(_guard)) -> dict[str, Any]:
+        from libref.services.code.probe import probe_repo
+
+        if body.only_files is not None and (
+            not body.only_files
+            or any(not item.strip() for item in body.only_files)
+        ):
+            raise HTTPException(status_code=400, detail="only_files must be non-empty strings")
+        try:
+            probe = probe_repo(
+                body.source,
+                settings=settings,
+                subdir=body.subdir,
+                max_files=body.max_files,
+                sample_limit=body.sample_limit,
+                only_files=body.only_files,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return probe.model_dump()
 
     @app.get("/jobs")
     def jobs(

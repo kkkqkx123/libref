@@ -9,6 +9,7 @@ before submitting an index job.
 
 from __future__ import annotations
 
+import json as _json
 import time
 from pathlib import Path
 
@@ -39,10 +40,16 @@ class RepoProbe(BaseModel):
     source_note: str = ""
     sizes_known: bool = True
     subdir: str | None = None
+    only_files: list[str] | None = None
+    unmatched_only_files: list[str] = []
     suffix_groups: list[SuffixGroup] = []
     top_dirs: list[DirGroup] = []
     samples: list[str] = []
     manifest_deps: list[dict] = []
+
+
+def _normalize_source(source: str) -> str:
+    return source.strip().removeprefix("git+").rstrip("/")
 
 
 def _cache_get(key: str, ttl_hours: float) -> RepoProbe | None:
@@ -70,6 +77,7 @@ def probe_repo(
     subdir: str | None = None,
     max_files: int | None = None,
     sample_limit: int | None = None,
+    only_files: list[str] | None = None,
 ) -> RepoProbe:
     """Walk only; parsing, caching, and persistence never run on this path."""
     from libref.astminer import config as ast_config
@@ -79,13 +87,23 @@ def probe_repo(
 
     if not source.strip():
         raise ValueError("repo source is empty")
+    normalized = _normalize_source(source)
+    only_list = list(only_files) if only_files is not None else None
+    if only_list is not None:
+        for item in only_list:
+            if not isinstance(item, str) or not item.strip():
+                raise ValueError("only_files must be non-empty strings")
     ttl = float(getattr(settings, "probe_cache_ttl_hours", 1.0) or 0.0)
     limit = int(
         sample_limit
         if sample_limit is not None
         else getattr(settings, "probe_sample_limit", 20)
     )
-    cache_key = f"{source}\0{subdir or ''}\0{max_files}\0{limit}"
+    try:
+        only_text = _json.dumps(only_list, sort_keys=True, ensure_ascii=False, default=str)
+    except TypeError, ValueError:
+        only_text = str(only_list)
+    cache_key = "\0".join((normalized, subdir or "", str(max_files), str(limit), only_text))
     cached = _cache_get(cache_key, ttl)
     if cached is not None:
         return cached
@@ -105,6 +123,7 @@ def probe_repo(
             ast_gradle,
             source_note="local",
             sizes_known=True,
+            only_files=only_list,
         )
         _cache_put(cache_key, probe)
         return probe
@@ -146,6 +165,7 @@ def probe_repo(
         source_note=acquired.source_note,
         sizes_known=acquired.sizes_known,
         truncated_extra=acquired.truncated,
+        only_files=only_list,
     )
     _cache_put(cache_key, probe)
     return probe
@@ -164,8 +184,14 @@ def _assemble(
     source_note="",
     sizes_known=True,
     truncated_extra=False,
+    only_files: list[str] | None = None,
 ) -> RepoProbe:
     files: list[str] = list(census["files"])
+    unmatched: list[str] = []
+    if only_files is not None:
+        wanted = set(only_files)
+        unmatched = [item for item in only_files if item not in set(files)]
+        files = [item for item in files if item in wanted]
     if max_files is not None and len(files) > max_files:
         from libref.crawler.scope import BudgetExceeded
 
@@ -208,6 +234,8 @@ def _assemble(
         oversized=int(census["oversized"]),
         truncated=truncated,
         subdir=subdir,
+        only_files=list(only_files) if only_files is not None else None,
+        unmatched_only_files=unmatched,
         suffix_groups=suffix_groups,
         top_dirs=top_dirs,
         samples=files[: max(0, limit)],

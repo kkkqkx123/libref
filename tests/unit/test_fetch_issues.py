@@ -100,6 +100,26 @@ def test_plan_targets_budget_is_loud():
         plan_targets(seed, "https://d.example/", None, 1)
 
 
+def test_plan_targets_applies_score_threshold():
+    seed = types.SimpleNamespace(
+        urls=["https://d.example/guide/a", "https://d.example/blog/b"],
+        cross_site=[],
+        truncated=False,
+    )
+    accepted, _rejected, _truncated, _stats = plan_targets(
+        seed,
+        "https://d.example/",
+        {"crawl_query": "guide", "score_threshold": 0.5},
+        None,
+    )
+    assert accepted == ["https://d.example/guide/a"]
+    assert "https://d.example/blog/b" not in accepted
+    ranked, _, _, _ = plan_targets(
+        seed, "https://d.example/", {"crawl_query": "guide"}, None
+    )
+    assert ranked[0] == "https://d.example/guide/a"
+
+
 def test_nested_sitemap_over_depth_is_loud():
     doc = (
         "<sitemapindex>"

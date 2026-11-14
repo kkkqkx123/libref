@@ -1,7 +1,7 @@
 # libref 目录结构与模块划分
 
 > 依据：`docs/architecture/tech-stack.md`（选型与分层）与 `docs/ref/overview.md` §五（落地顺序）。
-> 原则：**src 布局单包 `libref`**，三层架构（挖掘构建 / 知识库检索 / 双出口）映射为包内模块；三出口只调 `services/` 一层；测试与文档随仓库走，不进发布包。
+> 原则：**src 布局单包 `libref`**，三层架构（挖掘构建 / 知识库检索 / 三出口）映射为包内模块；三出口只调 `services/` 一层；测试与文档随仓库走，不进发布包。
 
 ## 1. 目录树（目标态，随 P0→P4 逐步填充）
 
@@ -34,7 +34,13 @@ libref/
 │   │   ├── robots.py           # [P1] robots 合规检查（SQLite 缓存 7 天 TTL，照搬 crawl4ai）
 │   │   ├── fetcher.py          # [P1] httpx 抓取 + etag/last_modified 增量 + per-host 退避
 │   │   ├── extract.py          # [P1] selectolax 正文净化（Pruning）→ markdownify
-│   │   └── browser.py          # [P1][可选 extra] Playwright 降级抓取（JS 渲染站点）
+│   │   ├── browser.py          # [P1][可选 extra] Playwright 降级抓取（JS 渲染站点）
+│   │   ├── http.py             # 共享异步客户端装配（代理、超时、重试）
+│   │   ├── scope.py            # 范围策略：起始地址加显式选项决定取舍，探查与抓取共用
+│   │   ├── versioning.py       # 站点版本多数证据判定
+│   │   ├── github.py           # 托管搜索传输
+│   │   ├── websearch.py        # 网页搜索传输
+│   │   └── registry/           # 各生态注册表负载解析与地址卫生
 │   │
 │   ├── chunking/               # ── 分块 ──
 │   │   ├── __init__.py
@@ -80,6 +86,7 @@ libref/
 │   │   ├── factory.py          # 装配根：gateway/向量与各服务装配
 │   │   ├── infra/              # 进程级基础设施：无领域依赖
 │   │   │   ├── jobs.py         # [P1] 内存队列 + jobs 表 write-through + 心跳恢复
+│   │   │   ├── progress.py     # 断点游标：总量/指纹/水位存取
 │   │   │   ├── version_lock.py # 版本互斥：DB 行仲裁 + 进程内锁
 │   │   │   └── vectors.py      # 网关/向量装配：无向量时降级
 │   │   ├── registry/           # 注册表前置：元数据 + 快照缓存 + 模糊发现
@@ -88,12 +95,24 @@ libref/
 │   │   │   └── discovery.py    # 模糊搜索与确定性排序
 │   │   ├── docs/               # 文档分支：抓取编排 + 文档检索问答
 │   │   │   ├── ingest.py       # [P1/P2] scrape_docs / refresh_version
+│   │   │   ├── scrape_jobs.py  # 抓取任务载荷与入队
+│   │   │   ├── scrape_plan.py  # 目标规划：范围过滤加阈值加预算，探查与抓取共用
+│   │   │   ├── scrape_sweep.py # 缺席清扫与配额
+│   │   │   ├── page_pipeline.py # 单页流水线：抓取/清洗/分块/存储
+│   │   │   ├── probe.py        # 只读文档探查：发现加过滤后即止，不落库
 │   │   │   ├── search.py       # [P1/P3] search_docs 检索编排
 │   │   │   ├── pages.py        # read_page/window/section
 │   │   │   ├── answer.py       # 问答编排：混合检索加 grounded 生成
 │   │   │   └── answer_materials.py # 引用块与消息组装
 │   │   ├── code/               # 源码分支：仓库摄取 + 用法挖掘读写
 │   │   │   ├── code_ingest.py  # 克隆/抽取/实体落块
+│   │   │   ├── probe.py        # 只读仓库探查：目录普查后即止，不解析不落库
+│   │   │   ├── probe_remote.py # 远端探查：复用槽/托管接口/无 blob 树/浅克隆逐级降级
+│   │   │   ├── repo_source.py  # 仓库来源解析：显式地址优先，按名解析复用
+│   │   │   ├── repo_collect.py # 文件收集与预算
+│   │   │   ├── repo_chunks.py  # 源码分块
+│   │   │   ├── repo_ids.py     # 实体与调用身份键
+│   │   │   ├── repo_persist.py # 实体与调用落库
 │   │   │   ├── mining_read.py  # 频次/共现/模式/树/聚类读模型
 │   │   │   └── mining_refresh.py # 序列模式/树/聚类重算
 │   │   └── ops/                # 治理与向量运维：被 docs/code 依赖，不反向依赖
@@ -110,8 +129,16 @@ libref/
 │   │   ├── __init__.py
 │   │   ├── app.py              # [P3] FastAPI 路由（只调 services/）
 │   │   └── api.py              # [P3] REST 模型（pydantic）
+│   ├── text/                   # 文本归一与片段构造（分块预算、BM25、引用片段）
+│   ├── observe.py              # 日志装配
 │   │
-│   └── cli.py                  # [P1] Typer/argparse 入口（只调 services/）
+│   └── cli/                    # [P1] argparse 入口包（只调 services/）
+│       ├── parsers.py          # 参数定义
+│       ├── common.py           # 设置/连接/范围装配
+│       ├── docs_commands.py    # 文档命令
+│       ├── code_commands.py    # 源码命令
+│       ├── registry_commands.py # 注册表与发现命令
+│       └── ops_commands.py     # 运维命令
 ├── webui/                      # [P3] 前端独立工程（npm/Vite + Vue 3 + Element Plus，不进 pyproject）
 └── tests/
     ├── conftest.py
