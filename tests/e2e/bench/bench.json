@@ -54,11 +54,11 @@
       "languages": [
         "typescript"
       ],
-      "exclude_globs": [
-        "*.test.ts",
-        "*/tests/*",
-        "*/benchmarks/*",
-        "*/v3/*"
+      "exclude_patterns": [
+        "\\.test\\.ts$",
+        "(^|/)tests/",
+        "(^|/)benchmarks/",
+        "(^|/)v3/"
       ],
       "max_files": 150,
       "max_build_ms": 17000
@@ -130,8 +130,8 @@
       "languages": [
         "go"
       ],
-      "exclude_globs": [
-        "*_test.go"
+      "exclude_patterns": [
+        "_test\\.go$"
       ],
       "max_files": 280,
       "max_build_ms": 27000
@@ -163,10 +163,10 @@
       "languages": [
         "typescript"
       ],
-      "exclude_globs": [
-        "*/__tests__/*",
-        "*.test.ts",
-        "*.spec.ts"
+      "exclude_patterns": [
+        "(^|/)__tests__/",
+        "\\.test\\.ts$",
+        "\\.spec\\.ts$"
       ],
       "tier": "main",
       "max_files": 90,
@@ -202,9 +202,9 @@
       "languages": [
         "python"
       ],
-      "exclude_globs": [
-        "*/tests/*",
-        "*/benchmarks/*"
+      "exclude_patterns": [
+        "(^|/)tests/",
+        "(^|/)benchmarks/"
       ],
       "tier": "main",
       "max_files": 130,
@@ -249,9 +249,9 @@
       "languages": [
         "csharp"
       ],
-      "exclude_globs": [
-        "*/tests/*",
-        "*Test*.cs"
+      "exclude_patterns": [
+        "(^|/)tests/",
+        "Test.*\\.cs$"
       ],
       "tier": "main",
       "max_files": 180,
@@ -287,8 +287,8 @@
       "languages": [
         "rust"
       ],
-      "exclude_globs": [
-        "*/tests/*"
+      "exclude_patterns": [
+        "(^|/)tests/"
       ],
       "tier": "main",
       "max_files": 140,
@@ -326,10 +326,10 @@
         "kotlin",
         "groovy"
       ],
-      "exclude_globs": [
-        "*/src/test/java/*",
-        "*/src/integTest/*",
-        "*.js"
+      "exclude_patterns": [
+        "(^|/)src/test/java/",
+        "(^|/)src/integTest/",
+        "\\.js$"
       ],
       "tier": "main",
       "max_files": 1500,
@@ -347,9 +347,9 @@
       "languages": [
         "python"
       ],
-      "exclude_globs": [
-        "*/tests/*",
-        "*.test.py"
+      "exclude_patterns": [
+        "(^|/)tests/",
+        "\\.test\\.py$"
       ],
       "tier": "pool",
       "max_files": 80,
@@ -399,8 +399,8 @@
       "languages": [
         "go"
       ],
-      "exclude_globs": [
-        "*_test.go"
+      "exclude_patterns": [
+        "_test\\.go$"
       ],
       "tier": "pool",
       "max_files": 60,
@@ -418,8 +418,8 @@
       "languages": [
         "rust"
       ],
-      "exclude_globs": [
-        "*/tests/*"
+      "exclude_patterns": [
+        "(^|/)tests/"
       ],
       "tier": "pool",
       "max_files": 20,

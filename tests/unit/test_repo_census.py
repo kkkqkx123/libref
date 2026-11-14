@@ -19,8 +19,8 @@ def test_filters_suffix_skip_and_oversize() -> None:
     assert census["files"] == ["docs/g.md", "guide/a.py"]
     assert census["skipped"] == 1
     assert census["oversized"] == 1
-    assert census["suffix_counts"] == {".py": 3, ".md": 1}
-    assert census["top_dirs"] == {"guide": 2, "docs": 1, "(root)": 1}
+    assert census["suffix_counts"] == {".py": 1, ".md": 1}
+    assert census["top_dirs"] == {"guide": 1, "docs": 1}
 
 
 def test_subdir_and_unknown_size() -> None:

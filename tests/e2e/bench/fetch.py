@@ -216,7 +216,7 @@ def _pack_code(entry: dict[str, Any], payload: Path) -> dict[str, Any]:
             payload,
             tree,
             prefix=f"{subdir}/" if subdir else "",
-            exclude=tuple(str(p) for p in (entry.get("exclude_globs") or ())),
+            exclude=tuple(str(p) for p in (entry.get("exclude_patterns") or ())),
         )
         content = {"commit": commit, "subdir": subdir}
     return {**stats, **content}

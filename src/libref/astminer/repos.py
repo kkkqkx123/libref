@@ -110,6 +110,17 @@ def census_of_relpaths(
             continue
         if any(rx.search(rel) for rx in exclude_res):
             continue
+        if _should_skip(rel):
+            skipped += 1
+            continue
+        if size is None:
+            pass
+        elif size < 0:
+            skipped += 1
+            continue
+        elif size > max_file_bytes:
+            oversized += 1
+            continue
         suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1
         head = rel.split("/", 1)[0] if "/" in rel else "(root)"
         top_dirs[head] = top_dirs.get(head, 0) + 1
@@ -117,18 +128,6 @@ def census_of_relpaths(
         while parent:
             dir_files[parent] = dir_files.get(parent, 0) + 1
             parent = parent.rpartition("/")[0]
-        if _should_skip(rel):
-            skipped += 1
-            continue
-        if size is None:
-            wanted.append(rel)
-            continue
-        if size < 0:
-            skipped += 1
-            continue
-        if size > max_file_bytes:
-            oversized += 1
-            continue
         wanted.append(rel)
     wanted.sort()
     return {

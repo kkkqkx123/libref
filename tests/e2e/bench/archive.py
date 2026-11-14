@@ -16,7 +16,6 @@ exactly the corpus.
 
 from __future__ import annotations
 
-import fnmatch
 import gzip
 import hashlib
 import io
@@ -51,7 +50,7 @@ _RECIPE_KEYS = {
         "follow_links",
         "extra_urls",
     ),
-    "code": ("repo_url", "subdir", "ref", "exclude_globs"),
+    "code": ("repo_url", "subdir", "ref", "exclude_patterns"),
 }
 
 # Evaluation tiers: the main set carries judgments and floors, regression keeps
@@ -394,9 +393,14 @@ def write_source(
 
     `prefix` keeps the entries at their repository-relative location, so a
     subtree archive still yields the same source identities as indexing the
-    whole checkout. `exclude` patterns match that same repository-relative path,
+    whole checkout. `exclude` patterns are regexes matching that same
+    repository-relative path, the same syntax the probe and index accept,
     so the corpus rule is what the fixture declares rather than a guess.
     """
+    try:
+        matchers = tuple(re.compile(pattern) for pattern in exclude)
+    except re.error as exc:
+        raise ArchiveError(f"invalid exclude pattern: {exc}") from exc
     files: list[Path] = []
     for file in root.rglob("*"):
         if file.is_symlink():
@@ -404,7 +408,7 @@ def write_source(
         if not file.is_file() or ".git" in file.relative_to(root).parts:
             continue
         rel = prefix + file.relative_to(root).as_posix()
-        if any(fnmatch.fnmatch(rel, pattern) for pattern in exclude):
+        if any(rx.search(rel) for rx in matchers):
             continue
         files.append(file)
     files.sort(key=lambda file: file.relative_to(root).as_posix())
