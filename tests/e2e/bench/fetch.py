@@ -102,12 +102,24 @@ def _crawl_docs(entry: dict[str, Any]) -> dict[str, Any]:
                 crawl_delay_default=float(entry.get("crawl_delay", 0.2)),
             )
             prefixes = list(entry.get("path_prefixes") or ())
+            scope: dict[str, Any] = {}
+            if prefixes:
+                scope["path_prefixes"] = prefixes
+            if entry.get("follow_links"):
+                # The sitemap names only the landing page; the stream is
+                # discovered by following site links within the prefixes.
+                scope["follow_links"] = True
+            extra = [str(url) for url in (entry.get("extra_urls") or ())]
+            if extra:
+                # Seed pages the main-content prune hides: navigation-only
+                # links never surface through link following.
+                scope["urls"] = extra
             counts = IngestService(settings, conn).scrape_docs(
                 entry["library"],
                 entry["version"],
                 entry["start_url"],
                 max_pages=entry.get("max_pages"),
-                scope={"path_prefixes": prefixes} if prefixes else None,
+                scope=scope or None,
                 ecosystem=entry["ecosystem"],
                 fresh=True,
             )
@@ -186,7 +198,10 @@ def _pack_code(entry: dict[str, Any], payload: Path) -> dict[str, Any]:
         if not tree.is_dir():
             raise ArchiveError(f"checkout lacks subdir {subdir}: {checkout}")
         stats = bench_archive.write_source(
-            payload, tree, prefix=f"{subdir}/" if subdir else ""
+            payload,
+            tree,
+            prefix=f"{subdir}/" if subdir else "",
+            exclude=tuple(str(p) for p in (entry.get("exclude_globs") or ())),
         )
         content = {"commit": commit, "subdir": subdir}
     return {**stats, **content}
@@ -271,6 +286,7 @@ def acquire(entry: dict[str, Any], reacquire: bool) -> dict[str, Any]:
             stats = bench_archive.write_pages(staged, acquired["rows"])
             stats["pages"] = acquired["content"]["pages"]
             stats["urls_sha256"] = acquired["content"]["urls_sha256"]
+            stats["doc_version"] = acquired["content"]["doc_version"]
         else:
             stats = _pack_code(entry, staged)
         meta = _meta(entry, stats)

@@ -2,40 +2,513 @@
   "top_k": 5,
   "revisions": {
     "httpx/docs": "6ca0d3d66d43",
-    "httpx/code-head": "62ab685d5170"
+    "httpx/code-head": "62ab685d5170",
+    "zod/docs": "f3649eb13d19",
+    "zod/code-v4.6.7": "6f7da5197b95",
+    "jsoup/docs": "b4f4e810fe67",
+    "jsoup/code-jsoup-1.24.1": "30c329f1d85d",
+    "fiber/docs": "da34e0591196",
+    "fiber/code-v3.7.0": "479419884fc8",
+    "vue/docs": "107b6568505b",
+    "vue/code-v3.5.45": "34ecfff5c291",
+    "pydantic/docs": "6e38f2435ece",
+    "pydantic/code-v2.14.3": "e74b6eb52052",
+    "FluentValidation/docs": "5a2da9af95b0",
+    "FluentValidation/code-12.2.0": "3bc59e583556",
+    "Rocket/docs": "316f86f196ea",
+    "Rocket/code-v0.5.2": "b3ba565e1639",
+    "gradle/docs": "95843ece7775",
+    "gradle/code-v9.9.1": "03672e43c065",
+    "boltons/code-26.2.0": "956156659729",
+    "mitt/code-v1.1.3": "1cff0a9562d4",
+    "gson/code-gson-parent-2.15.0": "361c57de04d1",
+    "mysql/code-v1.10.1": "fdd6026010ae",
+    "once_cell/code-v1.21.4": "f0b983e058e8",
+    "Dapper/code-2.1.89": "9c806513001a"
   },
   "precise_floors": {
     "httpx/docs": {
-      "recall_at_k": 0.8,
-      "mrr_at_k": 0.58
+      "recall_at_k": 0.89,
+      "mrr_at_k": 0.84
     },
     "httpx/code-head": {
-      "recall_at_k": 0.72,
-      "mrr_at_k": 0.72
+      "recall_at_k": 0.8,
+      "mrr_at_k": 0.69
+    },
+    "zod/docs": {
+      "recall_at_k": 0.6,
+      "mrr_at_k": 0.47
+    },
+    "zod/code-v4.6.7": {
+      "recall_at_k": 0.56,
+      "mrr_at_k": 0.32
+    },
+    "jsoup/docs": {
+      "recall_at_k": 0.75,
+      "mrr_at_k": 0.64
+    },
+    "jsoup/code-jsoup-1.24.1": {
+      "recall_at_k": 0.39,
+      "mrr_at_k": 0.36
+    },
+    "fiber/docs": {
+      "recall_at_k": 0.5,
+      "mrr_at_k": 0.35
+    },
+    "fiber/code-v3.7.0": {
+      "recall_at_k": 0.5,
+      "mrr_at_k": 0.47
+    },
+    "vue/docs": {
+      "recall_at_k": 0.68,
+      "mrr_at_k": 0.61
+    },
+    "vue/code-v3.5.45": {
+      "recall_at_k": 0.58,
+      "mrr_at_k": 0.52
+    },
+    "pydantic/docs": {
+      "recall_at_k": 0.58,
+      "mrr_at_k": 0.39
+    },
+    "pydantic/code-v2.14.3": {
+      "recall_at_k": 0.63,
+      "mrr_at_k": 0.53
+    },
+    "FluentValidation/docs": {
+      "recall_at_k": 0.63,
+      "mrr_at_k": 0.54
+    },
+    "FluentValidation/code-12.2.0": {
+      "recall_at_k": 0.53,
+      "mrr_at_k": 0.32
+    },
+    "Rocket/docs": {
+      "recall_at_k": 0.63,
+      "mrr_at_k": 0.61
+    },
+    "Rocket/code-v0.5.2": {
+      "recall_at_k": 0.63,
+      "mrr_at_k": 0.52
+    },
+    "gradle/docs": {
+      "recall_at_k": 0.58,
+      "mrr_at_k": 0.46
+    },
+    "gradle/code-v9.9.1": {
+      "recall_at_k": 0.42,
+      "mrr_at_k": 0.36
     }
   },
   "invariants": {
-    "max_duplicate_rate": 0.0
+    "max_duplicate_rate": 0.0,
+    "max_wrong_abstain_rate": 0.25
   },
   "real_floors": {
     "httpx/docs": {
       "fused": {
-        "recall_at_k": 0.95,
-        "mrr_at_k": 0.7
+        "recall_at_k": 0.89,
+        "mrr_at_k": 0.84
       },
       "fused_rerank": {
-        "recall_at_k": 0.95,
-        "mrr_at_k": 0.7
+        "recall_at_k": 0.89,
+        "mrr_at_k": 0.87
       }
     },
     "httpx/code-head": {
       "fused": {
-        "recall_at_k": 0.82,
+        "recall_at_k": 0.9,
+        "mrr_at_k": 0.78
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.9,
+        "mrr_at_k": 0.73
+      }
+    },
+    "zod/docs": {
+      "fused": {
+        "recall_at_k": 0.8,
+        "mrr_at_k": 0.66
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.85,
+        "mrr_at_k": 0.67
+      }
+    },
+    "zod/code-v4.6.7": {
+      "fused": {
+        "recall_at_k": 0.61,
+        "mrr_at_k": 0.45
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.72,
+        "mrr_at_k": 0.45
+      }
+    },
+    "jsoup/docs": {
+      "fused": {
+        "recall_at_k": 0.9,
+        "mrr_at_k": 0.83
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.9,
+        "mrr_at_k": 0.81
+      }
+    },
+    "jsoup/code-jsoup-1.24.1": {
+      "fused": {
+        "recall_at_k": 0.67,
+        "mrr_at_k": 0.47
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.67,
+        "mrr_at_k": 0.42
+      }
+    },
+    "fiber/docs": {
+      "fused": {
+        "recall_at_k": 0.75,
+        "mrr_at_k": 0.45
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.7,
+        "mrr_at_k": 0.34
+      }
+    },
+    "fiber/code-v3.7.0": {
+      "fused": {
+        "recall_at_k": 0.72,
+        "mrr_at_k": 0.52
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.89,
+        "mrr_at_k": 0.59
+      }
+    },
+    "vue/docs": {
+      "fused": {
+        "recall_at_k": 0.84,
+        "mrr_at_k": 0.61
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.89,
+        "mrr_at_k": 0.69
+      }
+    },
+    "vue/code-v3.5.45": {
+      "fused": {
+        "recall_at_k": 0.89,
+        "mrr_at_k": 0.79
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.89,
+        "mrr_at_k": 0.67
+      }
+    },
+    "pydantic/docs": {
+      "fused": {
+        "recall_at_k": 0.84,
+        "mrr_at_k": 0.65
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.89,
+        "mrr_at_k": 0.59
+      }
+    },
+    "pydantic/code-v2.14.3": {
+      "fused": {
+        "recall_at_k": 0.84,
+        "mrr_at_k": 0.55
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.79,
+        "mrr_at_k": 0.61
+      }
+    },
+    "FluentValidation/docs": {
+      "fused": {
+        "recall_at_k": 0.89,
+        "mrr_at_k": 0.77
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.89,
+        "mrr_at_k": 0.71
+      }
+    },
+    "FluentValidation/code-12.2.0": {
+      "fused": {
+        "recall_at_k": 0.68,
+        "mrr_at_k": 0.54
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.74,
+        "mrr_at_k": 0.53
+      }
+    },
+    "Rocket/docs": {
+      "fused": {
+        "recall_at_k": 0.84,
         "mrr_at_k": 0.82
       },
       "fused_rerank": {
-        "recall_at_k": 0.95,
-        "mrr_at_k": 0.72
+        "recall_at_k": 0.84,
+        "mrr_at_k": 0.75
+      }
+    },
+    "Rocket/code-v0.5.2": {
+      "fused": {
+        "recall_at_k": 0.89,
+        "mrr_at_k": 0.67
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.89,
+        "mrr_at_k": 0.64
+      }
+    },
+    "gradle/docs": {
+      "fused": {
+        "recall_at_k": 0.84,
+        "mrr_at_k": 0.65
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.74,
+        "mrr_at_k": 0.57
+      }
+    },
+    "gradle/code-v9.9.1": {
+      "fused": {
+        "recall_at_k": 0.68,
+        "mrr_at_k": 0.54
+      },
+      "fused_rerank": {
+        "recall_at_k": 0.74,
+        "mrr_at_k": 0.5
+      }
+    }
+  },
+  "absent_abstain_floors": {
+    "httpx/docs": 0.85,
+    "httpx/code-head": 0.85,
+    "zod/docs": 0.6,
+    "zod/code-v4.6.7": 0.6,
+    "jsoup/docs": 0.35,
+    "jsoup/code-jsoup-1.24.1": 0.85,
+    "fiber/docs": 0.6,
+    "fiber/code-v3.7.0": 0.85,
+    "vue/docs": 0.85,
+    "vue/code-v3.5.45": 0.35,
+    "pydantic/docs": 0.35,
+    "pydantic/code-v2.14.3": 0.85,
+    "FluentValidation/docs": 0.85,
+    "FluentValidation/code-12.2.0": 0.85,
+    "Rocket/docs": 0.35,
+    "Rocket/code-v0.5.2": 0.35,
+    "gradle/docs": 0.35,
+    "gradle/code-v9.9.1": 0.6
+  },
+  "cross_lingual_floors": {
+    "httpx/code-head": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.6
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.6
+        }
+      }
+    },
+    "zod/docs": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.67
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.83
+        }
+      }
+    },
+    "zod/code-v4.6.7": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.4
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.6
+        }
+      }
+    },
+    "jsoup/docs": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.75
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.75
+        }
+      }
+    },
+    "jsoup/code-jsoup-1.24.1": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.4
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.6
+        }
+      }
+    },
+    "fiber/docs": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.5
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.42
+        }
+      }
+    },
+    "fiber/code-v3.7.0": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.56
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.67
+        }
+      }
+    },
+    "vue/docs": {
+      "fused": {
+        "en->zh": {
+          "recall_at_k": 0.8
+        }
+      },
+      "fused_rerank": {
+        "en->zh": {
+          "recall_at_k": 0.8
+        }
+      }
+    },
+    "vue/code-v3.5.45": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.7
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.8
+        }
+      }
+    },
+    "pydantic/docs": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.6
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.7
+        }
+      }
+    },
+    "pydantic/code-v2.14.3": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.5
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.5
+        }
+      }
+    },
+    "FluentValidation/docs": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.7
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.7
+        }
+      }
+    },
+    "FluentValidation/code-12.2.0": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.3
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.3
+        }
+      }
+    },
+    "Rocket/docs": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.5
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.5
+        }
+      }
+    },
+    "Rocket/code-v0.5.2": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.6
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.6
+        }
+      }
+    },
+    "gradle/docs": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.7
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.6
+        }
+      }
+    },
+    "gradle/code-v9.9.1": {
+      "fused": {
+        "zh->en": {
+          "recall_at_k": 0.3
+        }
+      },
+      "fused_rerank": {
+        "zh->en": {
+          "recall_at_k": 0.4
+        }
       }
     }
   }

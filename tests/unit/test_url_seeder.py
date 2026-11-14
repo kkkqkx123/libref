@@ -24,12 +24,40 @@ def run(coro):
     return asyncio.run(coro)
 
 
+def test_llms_fullest_level_wins_over_section_file(monkeypatch, tmp_path):
+    """A section llms.txt must not shadow the fuller product listing above it."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/docs/latest/llms.txt":
+            links = "\n".join(
+                f"- [Page {i}](/docs/latest/p{i}.md)" for i in range(5)
+            )
+            return httpx.Response(200, text=links + "\n")
+        if request.url.path == "/docs/latest/guide/llms.txt":
+            return httpx.Response(
+                200, text="- [One](/docs/latest/guide/one.md)\n"
+            )
+        return httpx.Response(404)
+
+    client = make_client(handler)
+    seeder = UrlSeeder(client, robots=None)  # type: ignore[arg-type]
+    result = run(
+        seeder._from_llms_txt("https://docs.example.com/docs/latest/guide/")
+    )
+    assert result.source == "llms.txt"
+    assert result.urls == [
+        f"https://docs.example.com/docs/latest/p{i}.md" for i in range(5)
+    ]
+
+
 def test_llms_txt_preferred_over_sitemap(monkeypatch, tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/llms.txt":
             return httpx.Response(
                 200, text="- [Install](/install.html): how to install\n"
             )
+        if request.url.path == "/llms-full.txt":
+            return httpx.Response(404)
         raise AssertionError("sitemap should not be fetched when llms.txt exists")
 
     client = make_client(handler)
@@ -83,6 +111,8 @@ def test_discover_filters_and_dedup(monkeypatch, tmp_path):
             )
         if p == "/robots.txt":
             return httpx.Response(200, text="User-agent: *\nDisallow: /private\n")
+        if p == "/llms-full.txt":
+            return httpx.Response(404)
         raise AssertionError(request.url.path)
 
     _SEED_CACHE.clear()
@@ -108,6 +138,8 @@ def test_discover_head_prefilter(monkeypatch, tmp_path):
             )
         if p == "/robots.txt":
             return httpx.Response(200, text="")
+        if p == "/llms-full.txt":
+            return httpx.Response(404)
         if p == "/a.html" and request.method == "HEAD":
             return httpx.Response(200, headers={"content-type": "text/html"})
         if p == "/missing.html" and request.method == "HEAD":
@@ -122,3 +154,31 @@ def test_discover_head_prefilter(monkeypatch, tmp_path):
     result = run(seeder.discover("https://docs.example.com/", prefilter=True))
     assert result.urls == ["https://docs.example.com/a.html"]
     conn.close()
+
+
+def test_llms_anchor_variants_collapse_to_one_page(tmp_path):
+    """An llms.txt naming one page per heading must not spend the page budget per heading."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/llms.txt":
+            return httpx.Response(
+                200,
+                text=(
+                    "- [API](https://docs.example.com/api)\n"
+                    "- [Strings](https://docs.example.com/api?id=strings)\n"
+                    "- [Enums](https://docs.example.com/api?id=enums)\n"
+                    "- [Basics](https://docs.example.com/basics)\n"
+                ),
+            )
+        if request.url.path == "/llms-full.txt":
+            return httpx.Response(404)
+        raise AssertionError(request.url.path)
+
+    _SEED_CACHE.clear()
+    client = make_client(handler)
+    seeder = UrlSeeder(client, robots=None)  # type: ignore[arg-type]
+    result = run(seeder.discover("https://docs.example.com/"))
+    assert result.urls == [
+        "https://docs.example.com/api",
+        "https://docs.example.com/basics",
+    ]

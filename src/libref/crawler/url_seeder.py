@@ -17,7 +17,12 @@ from urllib.parse import urljoin, urlsplit
 import httpx
 
 from libref.crawler.robots import RobotsChecker
-from libref.crawler.scope import content_type_allowed, score_url, sort_by_relevance
+from libref.crawler.scope import (
+    content_type_allowed,
+    crawl_key,
+    score_url,
+    sort_by_relevance,
+)
 
 _LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
 
@@ -152,7 +157,8 @@ class UrlSeeder:
         urls: list[str] = []
         cross_site: list[str] = []
         for url in result.urls:
-            if url in seen:
+            key = crawl_key(url)
+            if key in seen:
                 continue
             if _is_nonsense_url(url) or not content_type_allowed(url, None):
                 continue
@@ -164,7 +170,7 @@ class UrlSeeder:
                 continue
             if prefilter and not await self._head_ok(url):
                 continue
-            seen.add(url)
+            seen.add(key)
             urls.append(url)
         if query and query.strip():
             if score_threshold is not None:
@@ -208,9 +214,14 @@ class UrlSeeder:
         return await self._collect_llms(base)
 
     async def _collect_llms(self, start_url: str) -> SeedResult:
+        # Every level from the start directory up to the root is read: on
+        # multi-product sites a section file shadows the product file, and the
+        # fuller listing is the corpus, not the first hit. Single-level sites
+        # behave exactly as before.
         attempted: list[str] = []
         errors: dict[str, str] = {}
         transient_seen = False
+        best: dict[str, tuple[list[str], list[str]]] = {}
         for directory in _llms_directories(start_url):
             for variant in _LLMS_VARIANTS:
                 candidate = f"{directory}/{variant}"
@@ -221,15 +232,23 @@ class UrlSeeder:
                     transient_seen = transient_seen or transient
                     continue
                 urls, cross = self._parse_llms_body(body, candidate, start_url)
-                if urls:
-                    return SeedResult(
-                        urls=urls + cross,
-                        source="llms.txt",
-                        attempted=attempted,
-                        errors=errors,
-                        cross_site=[],
-                    )
-                errors[candidate] = "no urls"
+                if len(urls) > len(best.get(variant, ([], []))[0]):
+                    best[variant] = (urls, cross)
+                errors[candidate] = f"{len(urls)} urls" if urls else "no urls"
+        best_urls: list[str] = []
+        best_cross: list[str] = []
+        for variant in _LLMS_VARIANTS:
+            if variant in best:
+                best_urls, best_cross = best[variant]
+                break
+        if best_urls:
+            return SeedResult(
+                urls=best_urls + best_cross,
+                source="llms.txt",
+                attempted=attempted,
+                errors=errors,
+                cross_site=[],
+            )
         return SeedResult(
             attempted=attempted,
             errors=errors,
@@ -262,9 +281,10 @@ class UrlSeeder:
                 if norm not in cross and norm not in seen:
                     cross.append(norm)
                 return
-            if norm not in seen:
-                seen.add(norm)
-                urls.append(norm)
+            key = crawl_key(norm)
+            if key not in seen:
+                seen.add(key)
+                urls.append(key)
 
         for line in body.splitlines():
             stripped = line.strip()

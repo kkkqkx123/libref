@@ -72,6 +72,7 @@ libref/
 │   │   ├── __init__.py
 │   │   ├── document_store.py   # [P1/P3] pages/documents 读写、增量结局六态
 │   │   ├── vec_store.py        # [P0] 向量双后端（默认本地 simvec，Qdrant 保留）：写入/KNN/集合治理（真源 SQLite 的可重建派生索引）
+│   │   ├── evidence.py         # [P3] 证据充分度：候选池与头部词项覆盖 → 可答/弱/不可答
 │   │   └── retriever.py        # [P3] FTS5 BM25 + 向量 KNN → RRF → 频次重排 → 段落重组
 │   │
 │   ├── services/               # ── 业务工具层（三出口唯一调用面）──

@@ -20,7 +20,9 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+from libref.text.cjk import CJK_RUN_RE
 from tests.e2e.bench import archive as bench_archive
 
 HERE = Path(__file__).resolve().parent
@@ -102,6 +104,8 @@ def _index_docs(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
     pages = 0
     chunks = 0
     empty = 0
+    cjk_pages = 0
+    paths: list[str] = []
     for row in bench_archive.iter_pages(_verify_pages(entry, meta)):
         url = row["url"]
         content_type = row["content_type"]
@@ -127,6 +131,9 @@ def _index_docs(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
             raw_content=markdown,
         )
         pages += 1
+        paths.append(urlsplit(url).path or "/")
+        if CJK_RUN_RE.search(markdown):
+            cjk_pages += 1
         chunks += len(inputs)
         for item in inputs:
             lanes[item.chunk_path] = lanes.get(item.chunk_path, 0) + 1
@@ -134,6 +141,8 @@ def _index_docs(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
     evidence = meta["content"]["doc_version"]
     return {
         "pages": pages,
+        "page_paths": paths,
+        "cjk_pages": cjk_pages,
         "empty": empty,
         "chunks": chunks,
         "lanes": lanes,
@@ -143,11 +152,53 @@ def _index_docs(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
     }
 
 
-def _check_docs(name: str, info: dict) -> None:
-    """Fail on a corpus that produced no page or no chunk at all."""
+def _check_docs(name: str, entry: dict[str, Any], info: dict) -> None:
+    """Fail on an empty corpus, and on a corpus language the pages do not show.
+
+    The declared language decides which side of the cross-lingual comparison the
+    fixture measures, so it is measured from the indexed pages instead of trusted.
+    A fixture that limits its stream with path prefixes additionally asserts every
+    page stays inside them: a prefix that matches nothing fails silently otherwise.
+    """
     if not info["pages"] or not info["chunks"]:
         raise bench_archive.ArchiveError(
             f"fixture {name}: pages={info['pages']} chunks={info['chunks']}"
+        )
+    declared = str(entry.get("corpus_lang") or "")
+    if not declared:
+        raise bench_archive.ArchiveError(f"fixture {name}: spec has no corpus_lang")
+    measured = "cjk" if info["cjk_pages"] * 2 >= info["pages"] else "en"
+    if measured != declared:
+        raise bench_archive.ArchiveError(
+            f"fixture {name}: corpus_lang={declared} but "
+            f"{info['cjk_pages']}/{info['pages']} pages contain CJK"
+        )
+    prefixes = [str(p) for p in (entry.get("path_prefixes") or ())]
+    if prefixes:
+        outside = [
+            url
+            for url in info.get("page_paths", [])
+            if not any(
+                url == prefix or url.startswith(prefix.rstrip("/") + "/")
+                for prefix in prefixes
+            )
+        ]
+        if outside:
+            raise bench_archive.ArchiveError(
+                f"fixture {name}: {len(outside)} pages escape path_prefixes "
+                f"{prefixes}: {outside[:3]}"
+            )
+    _check_budget(name, entry, info)
+
+
+def _check_budget(name: str, entry: dict[str, Any], info: dict) -> None:
+    """Cost bounds the spec declares: a warehouse that outgrows its budget fails loudly."""
+    if entry.get("max_build_ms") is not None and info.get("elapsed_ms", 0) > int(
+        entry["max_build_ms"]
+    ):
+        raise bench_archive.ArchiveError(
+            f"fixture {name}: build took {info.get('elapsed_ms')}ms, "
+            f"over budget {entry['max_build_ms']}ms"
         )
 
 
@@ -183,6 +234,10 @@ def _check_code(name: str, entry: dict[str, Any], info: dict, root: Path) -> Non
     for key in ("entities", "calls", "source_chunks"):
         if not info[key]:
             raise bench_archive.ArchiveError(f"fixture {name}: {key} is zero")
+    if entry.get("max_files") is not None and info["files"] > int(entry["max_files"]):
+        raise bench_archive.ArchiveError(
+            f"fixture {name}: {info['files']} files over budget {entry['max_files']}"
+        )
 
 
 def _index_code(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> dict:
@@ -278,9 +333,13 @@ def build(
             started = time.monotonic()
             if entry["kind"] == "docs":
                 info = _index_docs(conn, settings, entry, meta)
-                _check_docs(name, info)
             else:
                 info = _index_code(conn, settings, entry, meta)
+            info["elapsed_ms"] = int((time.monotonic() - started) * 1000)
+            if entry["kind"] == "docs":
+                _check_docs(name, entry, info)
+            else:
+                _check_budget(name, entry, info)
             info.update(
                 {
                     "kind": entry["kind"],
@@ -288,13 +347,13 @@ def build(
                     "library": entry["library"],
                     "version": entry["version"],
                     "ecosystem": entry["ecosystem"],
+                    "tier": str(entry.get("tier") or "main"),
                     "revision": meta["revision"],
                     "payload_sha256": meta["payload"]["sha256"],
                     "acquired_at": meta["acquired_at"],
                     "source": meta["recipe"].get(
                         "start_url" if entry["kind"] == "docs" else "repo_url", ""
                     ),
-                    "elapsed_ms": int((time.monotonic() - started) * 1000),
                 }
             )
             manifest["fixtures"][name] = info

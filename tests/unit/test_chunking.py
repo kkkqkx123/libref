@@ -64,6 +64,22 @@ def test_heading_paths(monkeypatch, tmp_path):
     assert all(c.url == "https://docs.example.com/guide" for c in chunks)
 
 
+def test_anchor_link_heading_keeps_label_only(monkeypatch, tmp_path):
+    """A heading rendered as a self-link keeps its label; the target URL is not part of the path."""
+    md = (
+        "# Defining schemas\n\n"
+        "## [Coercion](https://zod.dev/api?id=coercion#coercion)\n\n"
+        "text\n\n"
+        "### ![](https://cdn.example.com/i.png) [XOR](https://zod.dev/api?id=xor)\n\n"
+        "more\n"
+    )
+    chunks = split_markdown(md, "https://zod.dev/api")
+    paths = {c.path for c in chunks}
+    assert "Defining schemas / Coercion" in paths
+    assert "Defining schemas / Coercion / XOR" in paths
+    assert not any("http" in path for path in paths)
+
+
 def test_fence_hash_not_heading(monkeypatch, tmp_path):
     chunks = split_markdown(SAMPLE, "u")
     usage = [c for c in chunks if c.path == "Guide / Usage"]

@@ -8,7 +8,7 @@ from typing import Any
 from libref.chunking import ChunkPath
 from libref.chunking.budget import ChunkBudget, budgets_from_settings
 from libref.crawler import build_scope
-from libref.crawler.scope import sort_by_relevance
+from libref.crawler.scope import crawl_key, sort_by_relevance
 from libref.store.document_store import DocumentInput
 from libref.text.normalize import normalize_markdown
 
@@ -54,6 +54,7 @@ def plan_targets(
         list(extra) + seed.urls + [u for u in seed.cross_site if u not in seed.urls]
     )
     accepted, rejected, stats = policy.filter_with_stats(candidates)
+    accepted = list(dict.fromkeys(crawl_key(url) for url in accepted))
     if not accepted and policy.accept(start_url):
         accepted = [start_url]
     query = (scope or {}).get("crawl_query")

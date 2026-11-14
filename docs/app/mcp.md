@@ -21,7 +21,7 @@ MCP 出口是面向模型的只读问答面，共十九个工具。实现在 `sr
 | suggest | 否 | 关 | 空命中时跑一次模糊发现 |
 | include_prerelease | 否 | 关 | 建议排序含预发布版本 |
 
-返回 `items/count/degraded/reasons`，`reasons` 为降级原因枚举（向量缺失除外：纯全文无向量不算降级）。`suggest` 且空命中时附带 `suggestions`，发现失败附带 `suggest_error`。
+返回 `items/count/degraded/reasons/answerable/answerability/cross_lingual`，`reasons` 为降级原因枚举（向量缺失除外：纯全文无向量不算降级）。`answerable` 为证据是否足以回答：查询与语料共享书写系统时按池级与头部词项覆盖判定，不共享脚本（如中文查询打英文语料）时记为 `weak` 而非拒答；`cross_lingual` 表示全文单路因书写系统不匹配而零命中、结果全部来自向量单路。结果不按该判定过滤，调用方自行决定是否弃答。`suggest` 且空命中时附带 `suggestions`，发现失败附带 `suggest_error`。
 
 ### answer
 

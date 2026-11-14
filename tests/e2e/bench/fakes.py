@@ -64,12 +64,17 @@ class SqliteVecStore:
     a different text assembly. Preparation is explicit because the real encoder
     batches over the network: a search over a missing vector is a harness bug,
     not a case to paper over.
+
+    Each corpus becomes one dense matrix on first search, so scanning tens of
+    thousands of chunks costs a matrix-vector product instead of a Python loop
+    over every row.
     """
 
     def __init__(self, conn, embedder) -> None:
         self._conn = conn
         self._embedder = embedder
         self._cache: dict[int, list[float]] = {}
+        self._matrices: dict[int, tuple[list[int], Any]] = {}
         self._batch = 256
 
     def _vector_rows(self, version_id: int | None = None) -> list[tuple[int, str]]:
@@ -118,26 +123,38 @@ class SqliteVecStore:
                 self._cache[doc_id] = vector
         return len(todo)
 
-    def _vectors(self, version_id: int) -> list[tuple[int, list[float]]]:
-        out: list[tuple[int, list[float]]] = []
+    def _matrix(self, version_id: int) -> tuple[list[int], Any]:
+        """Dense matrix of one corpus plus its row ids, built once per corpus."""
+        import numpy as np
+
+        hit = self._matrices.get(version_id)
+        if hit is not None:
+            return hit
+        ids: list[int] = []
+        rows: list[list[float]] = []
         for doc_id, _text in self._vector_rows(version_id):
             cached = self._cache.get(doc_id)
             if cached is None:
                 raise RuntimeError(
                     f"vector cache misses doc {doc_id}; call prepare() before searching"
                 )
-            out.append((doc_id, cached))
-        return out
+            ids.append(doc_id)
+            rows.append(cached)
+        matrix = np.asarray(rows, dtype=np.float32)
+        self._matrices[version_id] = (ids, matrix)
+        return ids, matrix
 
     def search(
         self, query_vec: list[float], *, k: int, version_id: int
     ) -> list[tuple[int, float]]:
-        scored: list[tuple[float, int]] = []
-        for doc_id, vector in self._vectors(version_id):
-            score = sum(a * b for a, b in zip(query_vec, vector))
-            scored.append((score, doc_id))
-        scored.sort(key=lambda item: (-item[0], item[1]))
-        return [(doc_id, score) for score, doc_id in scored[: max(0, int(k))]]
+        import numpy as np
+
+        ids, matrix = self._matrix(version_id)
+        if not ids:
+            return []
+        scores = matrix @ np.asarray(query_vec, dtype=np.float32)
+        order = np.lexsort((np.asarray(ids), -scores))[: max(0, int(k))]
+        return [(ids[int(index)], float(scores[int(index)])) for index in order]
 
 
 def lexical_rerank():

@@ -32,6 +32,15 @@ logger = logging.getLogger(__name__)
 
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _FENCE_RE = re.compile(r"^(```|~~~)")
+# Inline link syntax inside a heading: sites that render every heading as an anchor
+# yield headings such as `## [Coercion](https://x/api?id=coercion)`, whose label is
+# the heading and whose target is the same page.
+_HEADING_LINK_RE = re.compile(r"!?\[([^\]]*)\]\([^)]*\)")
+
+
+def _heading_text(raw: str) -> str:
+    """Heading label without inline link targets, so a heading path reads as the page shows it."""
+    return " ".join(_HEADING_LINK_RE.sub(r"\1", raw).split())
 
 
 @dataclass
@@ -144,7 +153,7 @@ def _split_by_headings(md_text: str) -> list[_Section]:
                     )
                     buf = []
                 level = len(m.group(1))
-                title = m.group(2).strip()
+                title = _heading_text(m.group(2).strip())
                 path[level] = title
                 for deeper in [k for k in path if k > level]:
                     del path[deeper]

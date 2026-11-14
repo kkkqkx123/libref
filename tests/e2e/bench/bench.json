@@ -10,7 +10,9 @@
       "max_pages": 40,
       "crawl_delay": 0.2,
       "note": "第三方文档站（httpx 官方文档）：sitemap 发现 23 页，含标题层级、代码围栏、表格与跨页链接；站点不声明任何版本（无版本路径、canonical 指向首页、无版本元数据），因此文档版本记为 unversioned；与源码分支是同一个库，构成真实的库知识库场景",
-      "doc_version": "unversioned"
+      "doc_version": "unversioned",
+      "corpus_lang": "en",
+      "max_build_ms": 8000
     },
     {
       "project": "httpx",
@@ -22,7 +24,422 @@
       "note": "同一库的官方仓库：纯 Python 工程，含相对导入、别名解析、装饰器、协议与跨文件调用；未声明 ref，跟随默认分支最新提交，归档目录因此带 head 后缀",
       "languages": [
         "python"
+      ],
+      "max_files": 40,
+      "max_build_ms": 4000
+    },
+    {
+      "project": "zod",
+      "kind": "docs",
+      "library": "zod",
+      "ecosystem": "npm",
+      "version": "docs",
+      "start_url": "https://zod.dev/",
+      "max_pages": 40,
+      "crawl_delay": 0.2,
+      "note": "Official documentation site discovered through llms.txt (no sitemap): the entry links every section by anchor, so the crawl collapses to 17 pages. TypeScript code fences and tables dominate the body; the site states no version (no version path segment, no canonical, no version metadata), so doc_version is unversioned",
+      "doc_version": "unversioned",
+      "corpus_lang": "en",
+      "max_build_ms": 90000
+    },
+    {
+      "project": "zod",
+      "kind": "code",
+      "library": "zod",
+      "ecosystem": "npm",
+      "repo_url": "https://github.com/colinhacks/zod",
+      "subdir": "packages/zod/src",
+      "ref": "v4.6.7",
+      "note": "Monorepo pinned at the v4.6.7 release: the indexed subtree is the published package's v4 implementation, without its tests, benchmarks and the bundled v3 compatibility tree, so a symbol query has one place to land. Path aliases and barrel re-exports decide which file a call belongs to",
+      "languages": [
+        "typescript"
+      ],
+      "exclude_globs": [
+        "*.test.ts",
+        "*/tests/*",
+        "*/benchmarks/*",
+        "*/v3/*"
+      ],
+      "max_files": 150,
+      "max_build_ms": 17000
+    },
+    {
+      "project": "jsoup",
+      "kind": "docs",
+      "library": "jsoup",
+      "ecosystem": "maven",
+      "version": "docs",
+      "start_url": "https://jsoup.org/",
+      "max_pages": 30,
+      "crawl_delay": 0.2,
+      "note": "Official site discovered through sitemap, narrowed to the cookbook: the rest of the sitemap is release notes and a Javadoc tree that only answers with a redirect stub. No version path segment and the canonical URL is the root, so doc_version is unversioned",
+      "doc_version": "unversioned",
+      "path_prefixes": [
+        "/cookbook/"
+      ],
+      "corpus_lang": "en",
+      "max_build_ms": 2000
+    },
+    {
+      "project": "jsoup",
+      "kind": "code",
+      "library": "jsoup",
+      "ecosystem": "maven",
+      "repo_url": "https://github.com/jhy/jsoup",
+      "subdir": "src/main/java",
+      "ref": "jsoup-1.24.1",
+      "note": "Library sources only, without the test tree: generics, overloads, inner classes and annotations in one package hierarchy",
+      "languages": [
+        "java"
+      ],
+      "max_files": 140,
+      "max_build_ms": 33000
+    },
+    {
+      "project": "fiber",
+      "kind": "docs",
+      "library": "fiber",
+      "ecosystem": "go",
+      "version": "docs",
+      "start_url": "https://docs.gofiber.io/",
+      "max_pages": 70,
+      "crawl_delay": 0.2,
+      "note": "Official Docusaurus site discovered through sitemap: the sitemap also lists blog posts and the v1.x / v2.x / next streams, so the prefixes keep the current stream only. The page metadata states docsearch:version=v3.x, which is the version evidence recorded",
+      "doc_version": "v3.x",
+      "path_prefixes": [
+        "/api/",
+        "/middleware/",
+        "/guide/",
+        "/client/",
+        "/extra/",
+        "/whats_new",
+        "/partials/"
+      ],
+      "corpus_lang": "en",
+      "max_build_ms": 900000
+    },
+    {
+      "project": "fiber",
+      "kind": "code",
+      "library": "fiber",
+      "ecosystem": "go",
+      "repo_url": "https://github.com/gofiber/fiber",
+      "subdir": "",
+      "ref": "v3.7.0",
+      "note": "Whole repository minus its test files: interface embedding makes methods of the same name belong to different packages, and the root package spans many files",
+      "languages": [
+        "go"
+      ],
+      "exclude_globs": [
+        "*_test.go"
+      ],
+      "max_files": 280,
+      "max_build_ms": 27000
+    },
+    {
+      "project": "vue",
+      "kind": "docs",
+      "library": "vue",
+      "ecosystem": "npm",
+      "version": "docs",
+      "start_url": "https://cn.vuejs.org/",
+      "max_pages": 60,
+      "crawl_delay": 0.2,
+      "note": "Vue 中文文档站（cn.vuejs.org）：llms.txt 发现 96 个 .md 章节页，按目录顺序抓取上限内的 60 页；站点不声明版本（路径无版本段、canonical 指向自身、无版本元数据时记 unversioned，由获取期取证决定）；中文语料，CJK 分词与跨语言 en->zh 方向的判定载体",
+      "doc_version": "unversioned",
+      "corpus_lang": "cjk",
+      "tier": "main",
+      "max_build_ms": 30000
+    },
+    {
+      "project": "vue",
+      "kind": "code",
+      "library": "vue",
+      "ecosystem": "npm",
+      "repo_url": "https://github.com/vuejs/core",
+      "subdir": "packages/runtime-core/src",
+      "ref": "v3.5.45",
+      "note": "多包大仓的子树：只索引 runtime-core（渲染器、组件、调度器），路径别名与桶文件重导出在此成立；与中文文档站共享术语",
+      "languages": [
+        "typescript"
+      ],
+      "exclude_globs": [
+        "*/__tests__/*",
+        "*.test.ts",
+        "*.spec.ts"
+      ],
+      "tier": "main",
+      "max_files": 90,
+      "max_build_ms": 10000
+    },
+    {
+      "project": "pydantic",
+      "kind": "docs",
+      "library": "pydantic",
+      "ecosystem": "pypi",
+      "version": "docs",
+      "start_url": "https://pydantic.dev/docs/validation/latest/get-started/",
+      "max_pages": 40,
+      "crawl_delay": 0.2,
+      "note": "第二套站点生成器（MkDocs Material）：围栏与表格交替密集，分块不变量的压力例；Python 第二个中库；sitemap 含多版本，path_prefixes 只收 latest 流",
+      "doc_version": "latest",
+      "path_prefixes": [
+        "/docs/validation/latest/"
+      ],
+      "corpus_lang": "en",
+      "tier": "main",
+      "max_build_ms": 60000
+    },
+    {
+      "project": "pydantic",
+      "kind": "code",
+      "library": "pydantic",
+      "ecosystem": "pypi",
+      "repo_url": "https://github.com/pydantic/pydantic",
+      "subdir": "pydantic",
+      "ref": "v2.14.3",
+      "note": "同一库的官方仓库：装饰器、描述符与 Rust 核心绑定的混合调用形态",
+      "languages": [
+        "python"
+      ],
+      "exclude_globs": [
+        "*/tests/*",
+        "*/benchmarks/*"
+      ],
+      "tier": "main",
+      "max_files": 130,
+      "max_build_ms": 20000
+    },
+    {
+      "project": "FluentValidation",
+      "kind": "docs",
+      "library": "FluentValidation",
+      "ecosystem": "nuget",
+      "version": "docs",
+      "start_url": "https://docs.fluentvalidation.net/en/latest/",
+      "max_pages": 40,
+      "crawl_delay": 0.2,
+      "note": "Read the Docs 多版本站：sitemap 只列落地页，其余靠站内跟随链接发现；path_prefixes 把 12.x 稳定流与其他版本隔开",
+      "doc_version": "latest",
+      "path_prefixes": [
+        "/en/latest/"
+      ],
+      "corpus_lang": "en",
+      "tier": "main",
+      "max_build_ms": 60000,
+      "follow_links": true,
+      "extra_urls": [
+        "https://docs.fluentvalidation.net/en/latest/installation.html",
+        "https://docs.fluentvalidation.net/en/latest/collections.html",
+        "https://docs.fluentvalidation.net/en/latest/custom-validators.html",
+        "https://docs.fluentvalidation.net/en/latest/including-rules.html",
+        "https://docs.fluentvalidation.net/en/latest/error-codes.html",
+        "https://docs.fluentvalidation.net/en/latest/custom-state.html"
       ]
+    },
+    {
+      "project": "FluentValidation",
+      "kind": "code",
+      "library": "FluentValidation",
+      "ecosystem": "nuget",
+      "repo_url": "https://github.com/FluentValidation/FluentValidation",
+      "subdir": "src/FluentValidation",
+      "ref": "12.2.0",
+      "note": "C# 泛型＋表达式树＋链式 RuleFor：调用形态与 Java 重载完全不同；nuget 生态首个代表",
+      "languages": [
+        "csharp"
+      ],
+      "exclude_globs": [
+        "*/tests/*",
+        "*Test*.cs"
+      ],
+      "tier": "main",
+      "max_files": 180,
+      "max_build_ms": 20000
+    },
+    {
+      "project": "Rocket",
+      "kind": "docs",
+      "library": "Rocket",
+      "ecosystem": "crates",
+      "version": "docs",
+      "start_url": "https://rocket.rs/guide/v0.5/",
+      "max_pages": 25,
+      "crawl_delay": 0.2,
+      "note": "版本化指南站：sitemap 含 v0.3/v0.4/v0.5/master 四条流，path_prefixes 只收 v0.5；过程宏与属性宏的调用形态在指南里有名",
+      "doc_version": "v0.5",
+      "path_prefixes": [
+        "/guide/v0.5/"
+      ],
+      "corpus_lang": "en",
+      "tier": "main",
+      "max_build_ms": 60000
+    },
+    {
+      "project": "Rocket",
+      "kind": "code",
+      "library": "Rocket",
+      "ecosystem": "crates",
+      "repo_url": "https://github.com/rwf2/Rocket",
+      "subdir": "core/lib/src",
+      "ref": "v0.5.2",
+      "note": "属性宏声明与调用文本形态差异最大（#[get] 之于 routes!）；声明可见性是解析要点",
+      "languages": [
+        "rust"
+      ],
+      "exclude_globs": [
+        "*/tests/*"
+      ],
+      "tier": "main",
+      "max_files": 140,
+      "max_build_ms": 20000
+    },
+    {
+      "project": "gradle",
+      "kind": "docs",
+      "library": "gradle",
+      "ecosystem": "maven",
+      "version": "docs",
+      "start_url": "https://docs.gradle.org/current/userguide/getting_started.md",
+      "max_pages": 60,
+      "crawl_delay": 0.2,
+      "note": "用户手册流（current）：.md 与 .html 同页双形态，path_prefixes 只收 userguide；llms.txt 声明 Kotlin DSL 优先",
+      "doc_version": "current",
+      "path_prefixes": [
+        "/current/userguide/"
+      ],
+      "corpus_lang": "en",
+      "tier": "main",
+      "max_build_ms": 90000
+    },
+    {
+      "project": "gradle",
+      "kind": "code",
+      "library": "gradle",
+      "ecosystem": "maven",
+      "repo_url": "https://github.com/gradle/gradle",
+      "subdir": "subprojects/core",
+      "ref": "v9.9.1",
+      "note": "大仓子集＋跨语言混排：main/java 实现、build.gradle.kts 构建脚本、test/groovy 测试即 Groovy 语料（core 内 Groovy 只存在于测试树，故测试树 Java/集成测试与 JS 资源模板排除、Groovy 保留）；生成代码与成本上限样本",
+      "languages": [
+        "java",
+        "kotlin",
+        "groovy"
+      ],
+      "exclude_globs": [
+        "*/src/test/java/*",
+        "*/src/integTest/*",
+        "*.js"
+      ],
+      "tier": "main",
+      "max_files": 1500,
+      "max_build_ms": 180000
+    },
+    {
+      "project": "boltons",
+      "kind": "code",
+      "library": "boltons",
+      "ecosystem": "pypi",
+      "repo_url": "https://github.com/mahmoud/boltons",
+      "subdir": "boltons",
+      "ref": "26.2.0",
+      "note": "干扰池：Python 小库，与 httpx/pydantic 同生态近义混淆",
+      "languages": [
+        "python"
+      ],
+      "exclude_globs": [
+        "*/tests/*",
+        "*.test.py"
+      ],
+      "tier": "pool",
+      "max_files": 80,
+      "max_build_ms": 20000
+    },
+    {
+      "project": "mitt",
+      "kind": "code",
+      "library": "mitt",
+      "ecosystem": "npm",
+      "repo_url": "https://github.com/developit/mitt",
+      "subdir": "src",
+      "ref": "v1.1.3",
+      "note": "干扰池：TypeScript 微型事件库，与 zod/vue 同生态近义混淆",
+      "languages": [
+        "javascript"
+      ],
+      "tier": "pool",
+      "max_files": 20,
+      "max_build_ms": 10000
+    },
+    {
+      "project": "gson",
+      "kind": "code",
+      "library": "gson",
+      "ecosystem": "maven",
+      "repo_url": "https://github.com/google/gson",
+      "subdir": "gson/src/main/java",
+      "ref": "gson-parent-2.15.0",
+      "note": "干扰池：Java JSON 库，与 jsoup/gradle 同生态近义混淆",
+      "languages": [
+        "java"
+      ],
+      "tier": "pool",
+      "max_files": 400,
+      "max_build_ms": 60000
+    },
+    {
+      "project": "mysql",
+      "kind": "code",
+      "library": "mysql",
+      "ecosystem": "go",
+      "repo_url": "https://github.com/go-sql-driver/mysql",
+      "subdir": "",
+      "ref": "v1.10.1",
+      "note": "干扰池：Go 数据库驱动，与 fiber 同生态近义混淆",
+      "languages": [
+        "go"
+      ],
+      "exclude_globs": [
+        "*_test.go"
+      ],
+      "tier": "pool",
+      "max_files": 60,
+      "max_build_ms": 20000
+    },
+    {
+      "project": "once_cell",
+      "kind": "code",
+      "library": "once_cell",
+      "ecosystem": "crates",
+      "repo_url": "https://github.com/matklad/once_cell",
+      "subdir": "src",
+      "ref": "v1.21.4",
+      "note": "干扰池：Rust 单次初始化库，与 Rocket 同生态近义混淆",
+      "languages": [
+        "rust"
+      ],
+      "exclude_globs": [
+        "*/tests/*"
+      ],
+      "tier": "pool",
+      "max_files": 20,
+      "max_build_ms": 10000
+    },
+    {
+      "project": "Dapper",
+      "kind": "code",
+      "library": "Dapper",
+      "ecosystem": "nuget",
+      "repo_url": "https://github.com/DapperLib/Dapper",
+      "subdir": "Dapper",
+      "ref": "2.1.89",
+      "note": "干扰池：C# 微型 ORM，与 FluentValidation 同生态近义混淆",
+      "languages": [
+        "csharp"
+      ],
+      "tier": "pool",
+      "max_files": 80,
+      "max_build_ms": 30000
     }
   ]
 }

@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 
 from libref.crawler import HttpFetcher, RobotsChecker, UrlSeeder, build_scope
+from libref.crawler.scope import crawl_key
 from libref.llm import EmbedFn
 from libref.services.docs.scrape_jobs import (
     SCRAPE_JOB_KIND,
@@ -442,11 +443,13 @@ class IngestService:
                             render_skipped,
                             stage_ms,
                         )
-                        if detail.canonical and detail.canonical != url:
-                            visited.add(detail.canonical)
+                        canonical = crawl_key(detail.canonical)
+                        if canonical and canonical != url:
+                            visited.add(canonical)
                         if follow:
                             for link in detail.links:
-                                if link in visited:
+                                target = crawl_key(link)
+                                if target in visited:
                                     continue
                                 if (
                                     policy.max_depth is not None
@@ -454,10 +457,10 @@ class IngestService:
                                 ):
                                     counts["deep_truncated"] = 1
                                     continue
-                                if not policy.accept(link):
+                                if not policy.accept(target):
                                     continue
-                                visited.add(link)
-                                pending.append((link, depth + 1))
+                                visited.add(target)
+                                pending.append((target, depth + 1))
                         _beat()
 
                 from libref.services.infra.progress import (

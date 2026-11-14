@@ -93,10 +93,15 @@ def fts_search(
     if not vids:
         return []
     marks = ",".join("?" for _ in vids)
+    # The scope predicate is a correlated EXISTS rather than `rowid IN (subquery)`:
+    # SQLite materialises an IN subquery into an unindexed list and probes it once per
+    # index row, which turns a scoped search over a large corpus quadratic (seconds per
+    # query instead of milliseconds). The EXISTS form is an indexed primary-key probe.
     rows = conn.execute(
         f"SELECT documents_fts.rowid, {_bm25_expr(weights)} FROM documents_fts "
         "WHERE documents_fts MATCH ? "
-        f"AND rowid IN (SELECT id FROM documents WHERE version_id IN ({marks})) "
+        "AND EXISTS (SELECT 1 FROM documents d WHERE d.id = documents_fts.rowid "
+        f"AND d.version_id IN ({marks})) "
         f"ORDER BY {_bm25_expr(weights)} LIMIT ?",
         [safe, *vids, budget],
     ).fetchall()
@@ -258,6 +263,22 @@ def _collapse_duplicates(conn: sqlite3.Connection, fused: list[int]) -> list[int
     return out
 
 
+def _cross_lingual_miss(query: str, fts_ids: list[int], vec_ids: list[int]) -> bool:
+    """A CJK query whose lexical lane matched nothing while the vector lane did.
+
+    The full-text lane matches literal terms, so a Chinese query over an English
+    corpus cannot match there; reporting it as a failure to find evidence would
+    be wrong. The vector lane carries such queries on its own, which the fused
+    order already reflects: with no lexical ids the fusion leaves vector ranks
+    untouched.
+    """
+    if fts_ids or not vec_ids:
+        return False
+    from libref.text.cjk import CJK_RUN_RE
+
+    return bool(CJK_RUN_RE.search(query or ""))
+
+
 def _pattern_supports(
     conn: sqlite3.Connection,
     version_ids: list[int],
@@ -363,6 +384,7 @@ class HybridRetriever:
         Window expansion follows the configuration unless the caller states a preference.
         """
         from libref.config import setting_or_default
+        from libref.store.evidence import pool_texts, verdict
 
         if not query.strip():
             raise ValueError("query is empty")
@@ -458,9 +480,17 @@ class HybridRetriever:
         fused = self._rrf(fts_ids, vec_ids)
         fused_order = list(fused)
         fused = _collapse_duplicates(self._conn, fused)
+        cross_lingual = _cross_lingual_miss(query, fts_ids, vec_ids)
         if not fused:
             return [], self._status(
-                degraded, reasons, fts_ids, vec_ids, fused_order, False
+                degraded,
+                reasons,
+                fts_ids,
+                vec_ids,
+                fused_order,
+                False,
+                verdict(query, [], {}),
+                cross_lingual,
             )
         fused, rerank_scores, rerank_failed = await self._apply_rerank(
             query,
@@ -491,7 +521,19 @@ class HybridRetriever:
             degraded = True
             reasons.append("window_error")
         return results[:limit], self._status(
-            degraded, reasons, fts_ids, vec_ids, fused_order, rerank_applied
+            degraded,
+            reasons,
+            fts_ids,
+            vec_ids,
+            fused_order,
+            rerank_applied,
+            verdict(
+                query,
+                results[:limit],
+                pool_texts(self._conn, fused[:assemble_window]),
+                self._settings,
+            ),
+            cross_lingual,
         )
 
     def _rrf_scores(self, fts_ids: list[int], vec_ids: list[int]) -> dict[int, float]:
@@ -524,6 +566,8 @@ class HybridRetriever:
         vec_ids: list[int],
         fused_order: list[int],
         rerank_applied: bool,
+        answerability: dict[str, Any],
+        cross_lingual: bool,
     ) -> dict[str, Any]:
         return {
             "degraded": bool(degraded),
@@ -532,6 +576,8 @@ class HybridRetriever:
             "vec_count": len(vec_ids),
             "fused_order": list(fused_order),
             "rerank_applied": bool(rerank_applied),
+            "cross_lingual": bool(cross_lingual),
+            **answerability,
         }
 
     async def _apply_rerank(

@@ -278,7 +278,7 @@ def _run_retrieval_variants(
     )
 
     manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
-    judgments = _load()
+    judgments = _dev_only(_load())
     fixtures = manifest["fixtures"]
     scopes = {
         name: {
@@ -304,6 +304,7 @@ def _run_retrieval_variants(
     vectors = SqliteVecStore(conn, embedder)
     asyncio.run(vectors.prepare())
     rows: list[dict[str, Any]] = []
+    series: dict[tuple[str, str, str, str], dict[str, list[float]]] = {}
     try:
         for variant in RETRIEVAL_VARIANTS:
             if groups and variant["group"] not in groups:
@@ -328,7 +329,10 @@ def _run_retrieval_variants(
                 )
                 summary = _aggregate(evaluation, 5)
                 for method in variant["methods"]:
-                    metrics = summary[method]["all"]
+                    metrics = summary[method]["dev"]
+                    series[(variant["group"], variant["name"], corpus, method)] = (
+                        _series(evaluation[method], 5)
+                    )
                     rows.append(
                         {
                             "group": variant["group"],
@@ -347,6 +351,7 @@ def _run_retrieval_variants(
                     row["elapsed_ms"] = elapsed
     finally:
         conn.close()
+    _annotate(rows, series)
     return rows
 
 
@@ -363,7 +368,7 @@ def _run_chunking_variants(groups: set[str] | None, real: bool) -> list[dict[str
         real_settings,
     )
 
-    judgments = _load()
+    judgments = _dev_only(_load())
     docs_ids = [
         bench_archive.fixture_id(entry)
         for entry in bench_archive.select()
@@ -375,6 +380,7 @@ def _run_chunking_variants(groups: set[str] | None, real: bool) -> list[dict[str
     # documents fixture in spec order rather than on every project.
     docs_id = docs_ids[0]
     rows: list[dict[str, Any]] = []
+    series: dict[tuple[str, str, str, str], dict[str, list[float]]] = {}
     for variant in CHUNKING_VARIANTS:
         if groups and variant["group"] not in groups:
             continue
@@ -417,7 +423,10 @@ def _run_chunking_variants(groups: set[str] | None, real: bool) -> list[dict[str
                 )
                 summary = _aggregate(evaluation, 5)
                 for method in ("precise", "fused"):
-                    metrics = summary[method]["all"]
+                    metrics = summary[method]["dev"]
+                    series[(variant["group"], variant["name"], docs_id, method)] = (
+                        _series(evaluation[method], 5)
+                    )
                     rows.append(
                         {
                             "group": variant["group"],
@@ -435,7 +444,56 @@ def _run_chunking_variants(groups: set[str] | None, real: bool) -> list[dict[str
                     )
             finally:
                 conn.close()
+    _annotate(rows, series)
     return rows
+
+
+def _dev_only(judgments: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """Tuning reads the dev half only; the held-out half belongs to the gates."""
+    return {
+        corpus: [entry for entry in entries if entry["split"] == "dev"]
+        for corpus, entries in judgments.items()
+    }
+
+
+def _series(evaluation: dict[str, Any], k: int) -> dict[str, list[float]]:
+    from tests.e2e.bench.metrics import metric_series
+
+    rows = [
+        row
+        for name, group in evaluation["by_type"].items()
+        if name != "absent"
+        for row in group
+    ]
+    return metric_series(rows, k)
+
+
+def _annotate(
+    rows: list[dict[str, Any]],
+    series: dict[tuple[str, str, str, str], dict[str, list[float]]],
+) -> None:
+    """Attach each variant's difference against its group's shipped default.
+
+    Recall and MRR are both carried: a weight change usually moves ranks inside
+    the top k, which recall cannot see, while an indexing change moves recall.
+    """
+    from tests.e2e.bench.metrics import paired_delta
+
+    baseline: dict[str, str] = {}
+    for row in rows:
+        baseline.setdefault(row["group"], row["name"])
+    for row in rows:
+        base_name = baseline[row["group"]]
+        key = (row["group"], row["name"], row["corpus"], row["method"])
+        base_key = (row["group"], base_name, row["corpus"], row["method"])
+        if key not in series or base_key not in series:
+            continue
+        for metric in ("recall", "mrr"):
+            delta = paired_delta(series[key][metric], series[base_key][metric])
+            row[f"delta_{metric}"] = delta["delta"]
+            row[f"delta_{metric}_lo"] = delta["lo"]
+            row[f"delta_{metric}_hi"] = delta["hi"]
+            row[f"{metric}_significant"] = delta["significant"]
 
 
 def _write(out_dir: Path, rows: list[dict[str, Any]]) -> Path:
@@ -447,8 +505,11 @@ def _write(out_dir: Path, rows: list[dict[str, Any]]) -> Path:
         lines.append(f"## {group}")
         lines.append("")
         has_chunks = any("chunks" in item for item in items)
-        header = "| 变体 | 语料 | 方法 | recall@5 | MRR@5 | nDCG@5 | 重复率 |"
-        separator = "|---|---|---|---|---|---|---|"
+        header = (
+            "| 变体 | 语料 | 方法 | recall@5 | MRR@5 | nDCG@5 | 重复率 "
+            "| Δrecall [95%] | 显著 | ΔMRR [95%] | 显著 |"
+        )
+        separator = "|---|---|---|---|---|---|---|---|---|---|---|"
         if has_chunks:
             header += " 块数 |"
             separator += "---|"
@@ -457,7 +518,15 @@ def _write(out_dir: Path, rows: list[dict[str, Any]]) -> Path:
             line = (
                 f"| {item['name']} | {item['corpus']} | {item['method']} "
                 f"| {item['recall_at_k']:.3f} | {item['mrr_at_k']:.3f} "
-                f"| {item['ndcg_at_k']:.3f} | {item['duplicate_rate']:.3f} |"
+                f"| {item['ndcg_at_k']:.3f} | {item['duplicate_rate']:.3f} "
+                f"| {item.get('delta_recall', 0.0):+.3f} "
+                f"[{item.get('delta_recall_lo', 0.0):+.3f}, "
+                f"{item.get('delta_recall_hi', 0.0):+.3f}] "
+                f"| {'是' if item.get('recall_significant') else '否'} "
+                f"| {item.get('delta_mrr', 0.0):+.3f} "
+                f"[{item.get('delta_mrr_lo', 0.0):+.3f}, "
+                f"{item.get('delta_mrr_hi', 0.0):+.3f}] "
+                f"| {'是' if item.get('mrr_significant') else '否'} |"
             )
             if has_chunks:
                 line += f" {item.get('chunks', '')} |"

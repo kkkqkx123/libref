@@ -71,7 +71,7 @@ KOTLIN_CONFIG = LanguageConfig(
 GROOVY_CONFIG = LanguageConfig(
     name="groovy",
     grammar="tree_sitter_groovy",
-    file_suffixes=(".groovy",),
+    file_suffixes=(".groovy", ".gradle"),
     config_version=1,
 )
 

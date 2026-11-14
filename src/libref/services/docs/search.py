@@ -139,6 +139,7 @@ class SearchService:
         Window expansion follows the caller's explicit preference, then the preset, then
         the configuration; an unspecified preference defers to the latter two.
         """
+        from libref.store.evidence import pool_texts, script_mismatch, verdict
         from libref.store.retriever import HybridRetriever
 
         use_preset = normalize_preset(preset)
@@ -150,6 +151,11 @@ class SearchService:
                 ecosystem=ecosystem,
                 limit=limit,
             )
+            pool = pool_texts(self._conn, [int(r["id"]) for r in results])
+            # The lexical lane cannot answer a query whose script the corpus never
+            # uses; the flag marks the downgrade so the benchmark does not score it
+            # as a missed retrieval.
+            cross_lingual = script_mismatch(query, list(pool.values()))
             return results, {
                 "degraded": False,
                 "reasons": [],
@@ -157,6 +163,13 @@ class SearchService:
                 "vec_count": 0,
                 "fused_order": [int(r["id"]) for r in results],
                 "rerank_applied": False,
+                "cross_lingual": cross_lingual,
+                **verdict(
+                    query,
+                    results,
+                    pool,
+                    self._settings,
+                ),
             }
         if expand_window is not None:
             expand: bool | None = bool(expand_window)

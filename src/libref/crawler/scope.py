@@ -54,6 +54,46 @@ class FilterStats:
     content_type_rejected: int = 0
 
 
+#
+# Query parameters that only point inside the document they are attached to.
+# A URL carrying nothing but these names is the same document as its bare path:
+# anchor-listing sources such as `llms.txt` enumerate one page once per heading.
+_ANCHOR_QUERY_KEYS = frozenset({"id", "anchor", "section", "highlight", "hl"})
+_TRACKING_QUERY_PREFIXES = ("utm_",)
+_TRACKING_QUERY_KEYS = frozenset({"ref", "source", "referrer"})
+
+
+def crawl_key(url: str) -> str:
+    """Identity of the document behind a URL, for crawl deduplication.
+
+    The fragment never reaches the server, and a query that names only an anchor
+    or a tracking parameter selects no other document than the bare path: both
+    halves are dropped so the crawl spends its page budget once per page and
+    stores one body per page instead of one per heading.
+    """
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return url
+    keys = [
+        key
+        for key, _value in (
+            pair.split("=", 1) if "=" in pair else (pair, "")
+            for pair in parts.query.split("&")
+            if pair
+        )
+    ]
+    if keys and not all(
+        key.lower() in _ANCHOR_QUERY_KEYS
+        or key.lower() in _TRACKING_QUERY_KEYS
+        or key.lower().startswith(_TRACKING_QUERY_PREFIXES)
+        for key in keys
+    ):
+        return url.split("#", 1)[0]
+    bare = parts._replace(query="", fragment="").geturl()
+    return bare
+
+
 def content_type_allowed(url: str, content_type: str | None) -> bool:
     """Suffix-first, MIME-second document check shared by scope filtering and HEAD prescreening."""
     lowered = (url or "").lower().split("?")[0]

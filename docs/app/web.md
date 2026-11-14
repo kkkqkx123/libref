@@ -29,7 +29,7 @@ Web 出口是只读查询面，另带精简抓取写入。实现在 `src/libref/
 | suggest | 否 | 关 | 空命中时附带注册表建议 |
 | include_prerelease | 否 | 关 | 建议排序含预发布版本 |
 
-返回 `items/count/degraded/reasons`。`suggest` 且空命中时附带 `suggestions`，发现失败附带 `suggest_error`。
+返回 `items/count/degraded/reasons/answerable/answerability`，`answerable` 语义与 MCP 检索一致。`suggest` 且空命中时附带 `suggestions`，发现失败附带 `suggest_error`。
 
 ### GET /library-search
 

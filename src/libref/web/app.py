@@ -118,6 +118,8 @@ def build_web_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         out = envelope(results, degraded=bool(status.get("degraded", False)))
         out["reasons"] = list(status.get("reasons", []) or [])
+        out["answerable"] = bool(status["answerable"])
+        out["answerability"] = float(status["answerability"])
         if params.suggest and not results:
             try:
                 out["suggestions"] = await discovery.search_async(

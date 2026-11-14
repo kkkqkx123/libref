@@ -153,6 +153,9 @@ def build_mcp_server(
             "count": len(results),
             "degraded": bool(status.get("degraded", False)),
             "reasons": list(status.get("reasons", []) or []),
+            "answerable": bool(status["answerable"]),
+            "answerability": float(status["answerability"]),
+            "cross_lingual": bool(status["cross_lingual"]),
         }
         if suggest and not results:
             try:

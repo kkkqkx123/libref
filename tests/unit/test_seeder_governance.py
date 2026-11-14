@@ -76,7 +76,13 @@ def test_result_cache_avoids_refetch(monkeypatch, tmp_path) -> None:
     first = _run(seeder.discover("https://docs.example.com/"))
     second = _run(seeder.discover("https://docs.example.com/"))
     assert first.urls == second.urls == ["https://docs.example.com/a.html"]
-    assert len(calls) == 1
+    # One fresh discovery reads every llms.txt variant once; the repeat reads none.
+    assert sorted(calls) == ["/llms-full.txt", "/llms.txt"]
     third = _run(seeder.discover("https://docs.example.com/", force=True))
     assert third.urls == ["https://docs.example.com/a.html"]
-    assert len(calls) == 2
+    assert sorted(calls) == [
+        "/llms-full.txt",
+        "/llms-full.txt",
+        "/llms.txt",
+        "/llms.txt",
+    ]

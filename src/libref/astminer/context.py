@@ -119,8 +119,12 @@ def determine_module_path(rel_path: str, language: str) -> str | None:
                 break
         return path.replace("/", ".") or None
     if language == "groovy":
+        # Build scripts are Groovy sources too: without the `.gradle` suffix the
+        # build-script mix of a Gradle project never enters the corpus.
         if path.endswith(".groovy"):
             path = path[: -len(".groovy")]
+        elif path.endswith(".gradle"):
+            path = path[: -len(".gradle")]
         else:
             return None
         for root in _GROOVY_SOURCE_ROOTS:

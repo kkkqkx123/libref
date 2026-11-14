@@ -155,9 +155,9 @@ def test_python_pyi_suffix_extracts() -> None:
     assert by_qual["pkg.a.f"].kind == "function"
 
 
-def test_groovy_gradle_suffix_excluded_from_source() -> None:
-    assert ast_config.config_for_suffix(".gradle") is None
-    assert ast_context.determine_module_path("build.gradle", "groovy") is None
+def test_groovy_gradle_suffix_indexes_build_scripts() -> None:
+    assert ast_config.config_for_suffix(".gradle") is ast_config.GROOVY_CONFIG
+    assert ast_context.determine_module_path("build.gradle", "groovy") == "build"
 
 
 def test_java_static_import_alias() -> None:

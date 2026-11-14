@@ -60,6 +60,82 @@ def test_two_refs_of_one_repository_do_not_collide():
     assert bench_archive.fixture_id(head) != bench_archive.fixture_id(tag)
 
 
+def _loadable(entry):
+    entry = dict(entry)
+    # The version of a source fixture follows from its ref, so it is derived
+    # by load_spec instead of written into the spec.
+    if entry.get("kind") == "code":
+        entry.pop("version", None)
+    return entry
+
+
+def test_tier_defaults_to_main_and_rejects_unknown(monkeypatch, tmp_path):
+    monkeypatch.setattr(bench_archive, "SPEC", tmp_path / "bench.json")
+    entry = {
+        "project": "demo",
+        "kind": "docs",
+        "library": "demo",
+        "ecosystem": "pypi",
+        "version": "docs",
+        "start_url": "https://example.invalid/",
+        "doc_version": "unversioned",
+    }
+    entry = _loadable(entry)
+    _spec(tmp_path, dict(entry))
+    assert bench_archive.load_spec()[0]["tier"] == "main"
+    _spec(tmp_path, dict(entry, tier="pool"))
+    with pytest.raises(bench_archive.ArchiveError):
+        bench_archive.load_spec()
+    _spec(tmp_path, dict(entry, tier="archive"))
+    with pytest.raises(bench_archive.ArchiveError):
+        bench_archive.load_spec()
+
+
+def test_pool_fixtures_only_supply_source_material(monkeypatch, tmp_path):
+    monkeypatch.setattr(bench_archive, "SPEC", tmp_path / "bench.json")
+    _spec(tmp_path, _loadable(_source(tier="pool")))
+    assert bench_archive.load_spec()[0]["tier"] == "pool"
+    _spec(
+        tmp_path,
+        {
+            "project": "demo",
+            "kind": "docs",
+            "library": "demo",
+            "ecosystem": "pypi",
+            "version": "docs",
+            "start_url": "https://example.invalid/",
+            "tier": "pool",
+        },
+    )
+    with pytest.raises(bench_archive.ArchiveError):
+        bench_archive.load_spec()
+
+
+def test_budgets_must_be_positive_and_code_only_for_files(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(bench_archive, "SPEC", tmp_path / "bench.json")
+    _spec(tmp_path, _loadable(_source(max_files=100, max_build_ms=1000)))
+    assert bench_archive.load_spec()[0]["max_files"] == 100
+    _spec(tmp_path, _loadable(_source(max_files=0)))
+    with pytest.raises(bench_archive.ArchiveError):
+        bench_archive.load_spec()
+    _spec(
+        tmp_path,
+        {
+            "project": "demo",
+            "kind": "docs",
+            "library": "demo",
+            "ecosystem": "pypi",
+            "version": "docs",
+            "start_url": "https://example.invalid/",
+            "max_files": 10,
+        },
+    )
+    with pytest.raises(bench_archive.ArchiveError):
+        bench_archive.load_spec()
+
+
 def test_document_fixture_keeps_its_plain_name():
     entry = {
         "project": "demo",
@@ -191,3 +267,28 @@ def test_spec_requires_a_document_version(monkeypatch, tmp_path):
     monkeypatch.setattr(bench_archive, "SPEC", _spec(tmp_path, entry))
     with pytest.raises(bench_archive.ArchiveError):
         bench_archive.load_spec()
+
+
+def test_source_payload_keeps_only_what_the_spec_indexes(tmp_path):
+    """Excluded entries never reach the payload, and the declared exclusions are part of the recipe."""
+    tree = tmp_path / "tree"
+    (tree / "pkg").mkdir(parents=True)
+    (tree / "pkg" / "impl.go").write_text("package pkg\n", encoding="utf-8")
+    (tree / "pkg" / "impl_test.go").write_text("package pkg\n", encoding="utf-8")
+    payload = tmp_path / "source.tar.gz"
+    stats = bench_archive.write_source(
+        payload, tree, prefix="pkg/", exclude=("*_test.go",)
+    )
+    assert stats["files"] == 1
+    extracted = bench_archive.extract_source(payload, tmp_path / "out")
+    assert sorted(path.name for path in extracted.rglob("*") if path.is_file()) == [
+        "impl.go"
+    ]
+
+
+def test_recipe_records_the_exclusions(monkeypatch, tmp_path):
+    entry = _source(exclude_globs=["*_test.go"])
+    entry.pop("version")
+    monkeypatch.setattr(bench_archive, "SPEC", _spec(tmp_path, entry))
+    loaded = bench_archive.load_spec()[0]
+    assert bench_archive.recipe(loaded)["exclude_globs"] == ["*_test.go"]

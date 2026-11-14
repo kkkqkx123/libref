@@ -56,6 +56,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="use the real embedding and rerank models from the environment file",
     )
+    parser.add_argument(
+        "--suggest-gates",
+        action="store_true",
+        help="print floors derived from this run's held-out measurements",
+    )
     return parser.parse_args()
 
 
@@ -114,40 +119,162 @@ def _corpus_urls(conn, scope: dict[str, Any]) -> set[str]:
     return {str(row[0]) for row in rows}
 
 
+def _all_urls(conn) -> set[str]:
+    """Every page identity the dataset holds, across all fixtures."""
+    rows = conn.execute("SELECT DISTINCT url FROM documents").fetchall()
+    return {str(row[0]) for row in rows}
+
+
 def _validate_targets(
     name: str,
     conn,
     scope: dict[str, Any],
     judgments: list[dict[str, Any]],
     url_of,
+    all_urls: set[str] | None = None,
 ) -> None:
     """Reject judgments anchored outside the corpus before they are scored.
 
     A target that the dataset never received is an authoring error, not a
-    retrieval miss: it would quietly read as a failure of every method.
+    retrieval miss: it would quietly read as a failure of every method. A global
+    judgment names complete URLs (it can land in any library), so its targets
+    are checked against the whole dataset instead of the fixture scope.
     """
     valid = _corpus_urls(conn, scope)
-    broken = {
-        judgment["id"]: [
-            target
-            for target in judgment.get("targets", [])
-            if url_of(target) not in valid
-        ]
-        for judgment in judgments
-    }
-    broken = {key: value for key, value in broken.items() if value}
+    broken: dict[str, list[str]] = {}
+    for judgment in judgments:
+        if judgment.get("scope") == "global":
+            pool = all_urls if all_urls is not None else valid
+            missing_targets = [
+                target for target in judgment.get("targets", []) if target not in pool
+            ]
+        else:
+            missing_targets = [
+                target
+                for target in judgment.get("targets", [])
+                if url_of(target) not in valid
+            ]
+        if missing_targets:
+            broken[str(judgment["id"])] = missing_targets
     if broken:
         raise SystemExit(
             f"fixture {name}: judgment targets outside the corpus: {broken}"
         )
 
 
+def _query_lang(entry: dict[str, Any]) -> str:
+    """Query language, explicit on the entry or derived from its script.
+
+    A cross-lingual judgment is a language pair, not a query type: the corpus
+    side comes from the fixture declaration, so the entry only states its own.
+    """
+    lang = str(entry.get("query_lang") or "")
+    if lang in ("zh", "en"):
+        return lang
+    if entry.get("query_lang") is not None:
+        raise SystemExit(
+            f"{entry.get('id')}: query_lang must be zh or en, got {lang!r}"
+        )
+    from libref.text.cjk import CJK_RUN_RE
+
+    return "zh" if CJK_RUN_RE.search(str(entry.get("query", ""))) else "en"
+
+
 def _load(judgments: Path = JUDGMENTS) -> dict:
-    return json.loads(judgments.read_text(encoding="utf-8"))
+    """Load the judgment set and enforce the tuning/holdout contract.
+
+    Tuning reads dev, gates read test: a set where either side is missing cannot
+    certify anything, so the file is rejected rather than silently halving.
+    A judgment optionally scopes itself globally (retrieved without a library
+    scope, for cross-library disambiguation) and always knows its own language.
+    """
+    data = json.loads(judgments.read_text(encoding="utf-8"))
+    for corpus, entries in data.items():
+        splits: dict[str, set[str]] = {}
+        for entry in entries:
+            split = entry.get("split")
+            if split not in ("dev", "test"):
+                raise SystemExit(f"{corpus}/{entry.get('id')} has no dev/test split")
+            scope = entry.get("scope", "scoped")
+            if scope not in ("scoped", "global"):
+                raise SystemExit(
+                    f"{corpus}/{entry.get('id')}: scope must be scoped or global"
+                )
+            entry["query_lang"] = _query_lang(entry)
+            splits.setdefault(str(entry["type"]), set()).add(split)
+        if set().union(*splits.values()) != {"dev", "test"}:
+            raise SystemExit(f"{corpus} needs queries on both sides of the split")
+        for query_type, seen in splits.items():
+            if "test" not in seen:
+                raise SystemExit(f"{corpus}/{query_type} has no held-out query")
+    return data
 
 
 def _gates(path: Path = GATES) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _corpus_languages() -> dict[str, str]:
+    """Corpus language per fixture, from the spec.
+
+    A `cjk` query over an English corpus and a latin query over a Chinese corpus
+    fail for opposite reasons; the report and the gates have to say which side of
+    the crossing a row belongs to.
+    """
+    from tests.e2e.bench import archive as bench_archive
+
+    return {
+        bench_archive.fixture_id(entry): str(entry.get("corpus_lang") or "en")
+        for entry in bench_archive.select([])
+    }
+
+
+def _suggested_floor(value: float, queries: int) -> float:
+    """A floor two queries below the held-out measurement, never tighter.
+
+    One query moves a small set by far more than a real regression would, so the
+    slack is measured in queries rather than in points; small sets get the wider
+    slack they need to not flag noise.
+    """
+    slack = max(0.05, 2.0 / max(1, queries))
+    return round(max(0.0, float(value) - slack), 2)
+
+
+def _print_suggested_gates(summary: dict[str, Any], revisions: dict[str, str]) -> None:
+    """Print floors derived from this run so a human can freeze them deliberately.
+
+    Nothing here writes the gate file: freezing is a decision, and a floor that
+    rewrites itself on every run stops being a gate.
+    """
+    floors: dict[str, Any] = {}
+    absent: dict[str, float] = {}
+    for corpus, methods in summary.items():
+        if not isinstance(methods, dict):
+            continue
+        test = methods["precise"]["test"]
+        queries = int(test["queries"])
+        floors[corpus] = {
+            "recall_at_k": _suggested_floor(test["recall_at_k"], queries),
+            "mrr_at_k": _suggested_floor(test["mrr_at_k"], queries),
+        }
+        # The floor holds for every method family: the weakest lane sets it, so a
+        # fused run cannot fail a bound that was only measured on full text.
+        weakest = min(
+            float(payload["absent"]["test_abstain_rate"])
+            for payload in methods.values()
+        )
+        absent[corpus] = round(max(0.0, weakest - 0.15), 2)
+    print(
+        json.dumps(
+            {
+                "revisions": revisions,
+                "precise_floors": floors,
+                "absent_abstain_floors": absent,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 def _store(conn, embedder=None, vectors=None):
@@ -191,6 +318,15 @@ def _version_id(conn, scope: dict[str, Any]) -> int:
     return int(row[0])
 
 
+def _grade(url: str, wanted: set[str], heading: str | None, path: str) -> int:
+    """2 for the target section the query names, 1 for the target page, 0 for neither."""
+    if url not in wanted:
+        return 0
+    if heading and heading not in path:
+        return 1
+    return 2
+
+
 def _duplicate_count(results: list[dict[str, Any]]) -> int:
     """Repeated material inside one result set: the same chunk, or one page's excerpt twice."""
     seen: set[tuple[str, str]] = set()
@@ -207,6 +343,17 @@ def _duplicate_count(results: list[dict[str, Any]]) -> int:
     return duplicates
 
 
+def _pool_urls(conn, ids: list[int]) -> set[str]:
+    """URLs of the candidate pool behind one result set, for pool-level diagnosis."""
+    if not ids:
+        return set()
+    marks = ",".join("?" for _ in ids)
+    rows = conn.execute(
+        f"SELECT DISTINCT url FROM documents WHERE id IN ({marks})", ids
+    ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
 async def _evaluate_corpus(
     conn,
     settings,
@@ -219,6 +366,7 @@ async def _evaluate_corpus(
     vectors=None,
     rerank=None,
     methods: tuple[str, ...] = ("precise", "fused", "fused_rerank"),
+    corpus_lang: str = "en",
 ) -> dict[str, Any]:
     """Run the selected methods over one corpus and collect per-query rank rows."""
     before = time.monotonic()
@@ -233,33 +381,60 @@ async def _evaluate_corpus(
         preset = "precise" if method == "precise" else "balanced"
         rows: dict[str, list[dict[str, Any]]] = {}
         for judgment in judgments:
+            # A global judgment is retrieved without a library scope: it asks
+            # whether the pipeline finds the right library, not the right page.
+            effective = {} if judgment.get("scope") == "global" else scope
             try:
-                results, _status = await service.search_with_mode(
+                results, status = await service.search_with_mode(
                     judgment["query"],
                     preset,
-                    **scope,
+                    **effective,
                     limit=limit,
                 )
             except ValueError as exc:
                 raise SystemExit(f"query '{judgment['id']}' rejected: {exc}") from exc
             rank = 0
             heading = judgment.get("heading")
-            wanted = {url_of(target) for target in judgment.get("targets", [])}
-            if wanted:
-                for index, item in enumerate(results):
-                    if str(item.get("url") or "") not in wanted:
-                        continue
-                    if heading and heading not in str(item.get("path") or ""):
-                        continue
+            # Global judgments name complete URLs; scoped ones name fixture-relative
+            # targets resolved through the corpus address scheme.
+            if judgment.get("scope") == "global":
+                wanted = set(judgment.get("targets", []))
+            else:
+                wanted = {url_of(target) for target in judgment.get("targets", [])}
+            gains = [
+                _grade(
+                    str(item.get("url") or ""),
+                    wanted,
+                    heading,
+                    str(item.get("path") or ""),
+                )
+                for item in results
+            ]
+            for index, grade in enumerate(gains):
+                if grade > 0:
                     rank = index + 1
                     break
+            pool = _pool_urls(
+                conn, [int(item) for item in (status.get("fused_order") or [])]
+            )
             rows.setdefault(str(judgment["type"]), []).append(
                 {
                     "id": judgment["id"],
+                    "type": str(judgment["type"]),
+                    "split": str(judgment["split"]),
+                    "scope": str(judgment.get("scope", "scoped")),
+                    "query_lang": str(judgment.get("query_lang") or "en"),
                     "rank": rank,
+                    "gains": gains,
+                    "best": 0 if not wanted else (2 if heading else 1),
                     "count": len(results),
                     "duplicates": _duplicate_count(results),
                     "scores": [float(item.get("score") or 0.0) for item in results],
+                    "evidence": str(status["evidence"]),
+                    "answerability": float(status["answerability"]),
+                    "cross_lingual": bool(status.get("cross_lingual", False)),
+                    "in_pool": bool(wanted and wanted.intersection(pool)),
+                    "corpus_lang": corpus_lang,
                 }
             )
         flat = [row for group in rows.values() for row in group]
@@ -268,7 +443,7 @@ async def _evaluate_corpus(
 
 
 def _aggregate(evaluation: dict[str, Any], k: int) -> dict[str, Any]:
-    from tests.e2e.bench.metrics import summarize
+    from tests.e2e.bench.metrics import bootstrap_ci, metric_series, summarize
 
     summary: dict[str, Any] = {}
     for method, payload in evaluation.items():
@@ -280,18 +455,95 @@ def _aggregate(evaluation: dict[str, Any], k: int) -> dict[str, Any]:
             if name != "absent"
             for row in group
         ]
+        absent = payload["by_type"].get("absent", [])
+        test = [row for row in answerable if row["split"] == "test"]
+        # A flagged downgrade is the pipeline behaving correctly, not a miss:
+        # the in-scope lane is what the full-text floors gate on.
+        in_scope = [row for row in test if not row.get("cross_lingual", False)]
         summary[method] = {
             "all": summarize(answerable, k),
+            "dev": summarize([row for row in answerable if row["split"] == "dev"], k),
+            "test": summarize(test, k),
+            "test_in_scope": summarize(in_scope, k),
             "by_type": {
                 name: summarize(group, k)
                 for name, group in payload["by_type"].items()
                 if name != "absent"
             },
-            "absent_empty_rate": summarize(payload["by_type"].get("absent", []), k)[
-                "empty_rate"
-            ],
+            "by_direction": _direction_rates(answerable, k),
+            "interval": {
+                name: bootstrap_ci(values)
+                for name, values in metric_series(test, k).items()
+            },
+            "absent": _absent_rates(absent),
+            "wrong_abstain": _wrong_abstain(payload),
         }
     return summary
+
+
+def _direction_rates(rows: list[dict[str, Any]], k: int) -> dict[str, dict[str, Any]]:
+    """Metrics per query-language to corpus-language direction.
+
+    Two crossings fail for opposite reasons (no shared vocabulary versus
+    segmentation and expansion), so they share neither a row nor, under real
+    models, a floor.
+    """
+    from tests.e2e.bench.metrics import summarize
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        corpus = "zh" if str(row.get("corpus_lang") or "en") == "cjk" else "en"
+        grouped.setdefault(f"{row.get('query_lang', 'en')}->{corpus}", []).append(row)
+    return {name: summarize(group, k) for name, group in grouped.items()}
+
+
+def _absent_rates(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Two signals kept apart: did anything come back, and did the pipeline admit it."""
+
+    def _rate(group: list[dict[str, Any]], predicate) -> float:
+        if not group:
+            return 0.0
+        return sum(1 for row in group if predicate(row)) / len(group)
+
+    return {
+        "queries": len(rows),
+        "empty_rate": _rate(rows, lambda row: row.get("count", 0) == 0),
+        "abstain_rate": _rate(rows, lambda row: row["evidence"] == "none"),
+        "test_queries": sum(1 for row in rows if row["split"] == "test"),
+        "test_empty_rate": _rate(
+            [row for row in rows if row["split"] == "test"],
+            lambda row: row.get("count", 0) == 0,
+        ),
+        "test_abstain_rate": _rate(
+            [row for row in rows if row["split"] == "test"],
+            lambda row: row["evidence"] == "none",
+        ),
+    }
+
+
+def _wrong_abstain(payload: dict[str, Any]) -> dict[str, float]:
+    """Share of answerable queries refused although candidates were returned.
+
+    A query that retrieved nothing is not a refusal: abstaining there is the only
+    correct answer, and counting it would reward returning noise.
+    """
+    rows = [
+        row
+        for name, group in payload["by_type"].items()
+        if name != "absent"
+        for row in group
+        if row.get("count", 0) > 0
+    ]
+
+    def _rate(group: list[dict[str, Any]]) -> float:
+        if not group:
+            return 0.0
+        return sum(1 for row in group if row["evidence"] == "none") / len(group)
+
+    return {
+        "all": _rate(rows),
+        "test": _rate([row for row in rows if row["split"] == "test"]),
+    }
 
 
 def _probe_chunk_identity(conn) -> dict[str, Any]:
@@ -428,8 +680,8 @@ def _probe_query_shaping(
         weights = _weights()
         rows = conn.execute(
             "SELECT documents_fts.rowid FROM documents_fts"
-            f" WHERE documents_fts MATCH ? AND rowid IN"
-            f" (SELECT id FROM documents WHERE version_id=?)"
+            f" WHERE documents_fts MATCH ? AND EXISTS (SELECT 1 FROM documents d"
+            " WHERE d.id = documents_fts.rowid AND d.version_id=?)"
             f" ORDER BY bm25(documents_fts, {weights[0]}, {weights[1]},"
             f" {weights[2]}, {weights[3]}) LIMIT ?",
             [and_query, _version_id(conn, scope), limit],
@@ -597,6 +849,23 @@ def _probe_confidence(
     }
 
 
+def _classify_pool(rank: int, in_pool: bool) -> str:
+    """Where a miss happened: the answer never entered the pool, or pooling
+    dropped it before the top k. The choice of aggregation only matters for the
+    second bucket."""
+    if rank > 0:
+        return "kept"
+    return "aggregation_loss" if in_pool else "recall_loss"
+
+
+def _pool_buckets(rows: list[dict[str, Any]]) -> dict[str, int]:
+    """Pool diagnosis over collected rows: no re-search, just the classification."""
+    buckets = {"kept": 0, "aggregation_loss": 0, "recall_loss": 0}
+    for row in rows:
+        buckets[_classify_pool(int(row.get("rank", 0)), bool(row.get("in_pool")))] += 1
+    return buckets
+
+
 def _probe_fusion_rank_loss(
     conn,
     settings,
@@ -606,32 +875,57 @@ def _probe_fusion_rank_loss(
     *,
     embedder,
     vectors,
+    url_of=None,
 ) -> dict[str, Any]:
-    """Does fusion keep the full-text top pick? Counts page-level survival by query type."""
+    """Three-way pool diagnosis: the target is kept in the top k, sits in the
+    fusion pool but outside the top k (aggregation loss), or never entered the
+    pool at all (recall loss)."""
     services = _services(conn, settings, embedder=embedder, vectors=vectors)
     rows: list[dict[str, Any]] = []
     for judgment in judgments:
         if judgment.get("type") == "absent":
             continue
+        effective = {} if judgment.get("scope") == "global" else scope
         precise, _ = asyncio.run(
             services["precise"].search_with_mode(
-                judgment["query"], "precise", **scope, limit=limit
+                judgment["query"], "precise", **effective, limit=limit
             )
         )
-        fused, _ = asyncio.run(
+        fused, fused_status = asyncio.run(
             services["fused"].search_with_mode(
-                judgment["query"], "balanced", **scope, limit=limit
+                judgment["query"], "balanced", **effective, limit=limit
             )
         )
         if not precise:
             continue
         top_url = str(precise[0].get("url") or "")
         kept = any(str(item.get("url") or "") == top_url for item in fused)
-        rows.append({"id": judgment["id"], "type": judgment["type"], "kept": kept})
+        wanted: set[str] = set()
+        if url_of is not None:
+            wanted = {url_of(target) for target in judgment.get("targets", [])}
+        pool = _pool_urls(
+            conn, [int(item) for item in (fused_status.get("fused_order") or [])]
+        )
+        fused_urls = [str(item.get("url") or "") for item in fused]
+        rank = 0
+        for index, url in enumerate(fused_urls):
+            if url in wanted:
+                rank = index + 1
+                break
+        rows.append(
+            {
+                "id": judgment["id"],
+                "type": judgment["type"],
+                "kept": kept,
+                "bucket": _classify_pool(rank, bool(wanted and wanted & pool)),
+            }
+        )
     total = len(rows)
     lost = [row["id"] for row in rows if not row["kept"]]
+    buckets: dict[str, int] = {"kept": 0, "aggregation_loss": 0, "recall_loss": 0}
     by_type: dict[str, list[int]] = {}
     for row in rows:
+        buckets[row["bucket"]] = buckets.get(row["bucket"], 0) + 1
         bucket = by_type.setdefault(str(row["type"]), [0, 0])
         bucket[0] += 1
         bucket[1] += 0 if row["kept"] else 1
@@ -639,6 +933,8 @@ def _probe_fusion_rank_loss(
         "queries": total,
         "top1_lost": len(lost),
         "lost_ids": lost,
+        "aggregation_loss": buckets["aggregation_loss"],
+        "recall_loss": buckets["recall_loss"],
         "by_type": {
             name: {"queries": counts[0], "lost": counts[1]}
             for name, counts in by_type.items()
@@ -652,19 +948,32 @@ def _check_gates(
     *,
     real: bool,
     revisions: dict[str, str],
+    pool: set[str] | None = None,
 ) -> list[str]:
     """Gate the full-text path always, and the model paths only under real models.
 
-    The full-text path is production-representative in both modes. Fused rows
-    only get absolute floors under `--real`: with the lexical stand-ins their
-    quality reflects the stand-in, not the retrieval design. Every floor is
-    carried per fixture and bound to the archive revision it was measured on,
-    so a re-acquired corpus cannot silently keep an old floor.
+    Every floor reads the held-out half only: the same queries that tuned a
+    threshold cannot also certify it. The full-text path is production-
+    representative in both modes. Fused rows only get absolute floors under
+    `--real`: with the lexical stand-ins their quality reflects the stand-in, not
+    the retrieval design. Every floor is carried per fixture and bound to the
+    archive revision it was measured on, so a re-acquired corpus cannot silently
+    keep an old floor. Pool fixtures supply material but carry no judgments, so
+    they are never gated.
+
+    Abstention is gated twice on purpose: a floor on refusing unanswerable
+    queries, and a ceiling on refusing answerable ones. Cross-lingual floors only
+    apply under real models: the stand-ins share no vocabulary across scripts.
     """
     failures: list[str] = []
-    max_duplicate = float(gates["invariants"]["max_duplicate_rate"])
+    pool = pool or set()
+    invariants = gates["invariants"]
+    max_duplicate = float(invariants["max_duplicate_rate"])
+    max_wrong_abstain = float(invariants["max_wrong_abstain_rate"])
     for corpus, methods in summary.items():
         if not isinstance(methods, dict):
+            continue
+        if corpus in pool:
             continue
         recorded = gates["revisions"].get(corpus)
         if recorded is None:
@@ -674,20 +983,36 @@ def _check_gates(
                 f"{corpus}: dataset revision {revisions.get(corpus)} differs from the "
                 f"gate revision {recorded}; re-measure the floors"
             )
-        precise = methods.get("precise", {}).get("all", {})
+        # Downgraded cross-lingual rows are correct behavior, not misses: the
+        # full-text floors gate the in-scope lane.
+        scoped = methods.get("precise", {}).get("test_in_scope", {})
+        precise = scoped or methods.get("precise", {}).get("test", {})
         floors = gates["precise_floors"].get(corpus)
         if floors is None:
             failures.append(f"{corpus}: no full-text floor recorded")
             floors = {}
         if real:
             for method, metrics in gates["real_floors"].get(corpus, {}).items():
-                actual = methods.get(method, {}).get("all", {})
+                actual = methods.get(method, {}).get("test", {})
                 for metric, floor in metrics.items():
                     if actual.get(metric, 0.0) < float(floor):
                         failures.append(
                             f"{corpus}/{method}: {metric}={actual.get(metric, 0.0):.3f}"
                             f" below floor {float(floor):.3f}"
                         )
+            for method, metrics in (
+                gates.get("cross_lingual_floors", {}).get(corpus, {}).items()
+            ):
+                directions = methods.get(method, {}).get("by_direction", {})
+                for direction, expected in metrics.items():
+                    actual = directions.get(direction, {})
+                    for metric, floor in expected.items():
+                        if actual.get(metric, 0.0) < float(floor):
+                            failures.append(
+                                f"{corpus}/{method}/{direction}: {metric}="
+                                f"{actual.get(metric, 0.0):.3f} below floor "
+                                f"{float(floor):.3f}"
+                            )
         for metric, floor in floors.items():
             if precise.get(metric, 0.0) < float(floor):
                 failures.append(
@@ -701,6 +1026,23 @@ def _check_gates(
                     f"{corpus}/{method}: duplicate_rate={duplicates:.3f}"
                     f" exceeds {max_duplicate:.3f}"
                 )
+            wrong = float(payload.get("wrong_abstain", {}).get("test", 0.0))
+            if wrong > max_wrong_abstain:
+                failures.append(
+                    f"{corpus}/{method}: wrong_abstain_rate={wrong:.3f}"
+                    f" exceeds {max_wrong_abstain:.3f}"
+                )
+        abstain_floor = gates["absent_abstain_floors"].get(corpus)
+        if abstain_floor is None:
+            failures.append(f"{corpus}: no abstain floor recorded")
+            continue
+        for method, payload in methods.items():
+            actual = float(payload.get("absent", {}).get("test_abstain_rate", 0.0))
+            if actual < float(abstain_floor):
+                failures.append(
+                    f"{corpus}/{method}: absent_abstain_rate={actual:.3f}"
+                    f" below floor {float(abstain_floor):.3f}"
+                )
     return failures
 
 
@@ -712,16 +1054,20 @@ def _report(
     out_dir: Path,
     k: int,
     models: str | None = None,
+    languages: dict[str, str] | None = None,
 ) -> Path:
     lines: list[str] = ["# 检索问答基准报告（真实项目夹具）", ""]
     if models:
         lines.append(f"- {models}")
     lines.append(f"- 归档修订：{_revision_line(manifest)}")
+    langs = languages or {}
     for name, info in manifest.get("fixtures", {}).items():
         parts = [
             f"{key}={info.get(key)}"
             for key in ("library", "ecosystem", "version", "revision", "source")
         ]
+        if name in langs:
+            parts.append(f"语料语言={langs[name]}")
         if info.get("doc_version"):
             parts.append(
                 f"文档版本={info['doc_version']}（{info.get('doc_version_signal')}）"
@@ -732,25 +1078,48 @@ def _report(
         counts = ", ".join(
             f"{key}={value}"
             for key, value in info.items()
-            if key not in _REPORT_IDENTITY_KEYS
+            if key not in _REPORT_IDENTITY_KEYS and key != "page_paths"
         )
-        lines.append(f"- {name}: {identity}；{counts}")
-    lines += ["", f"## 方法矩阵（Recall/MRR/nDCG @{k}）", ""]
+        tier = str(info.get("tier", "main"))
+        suffix = "（干扰池：只供材料，不评分、不进门禁）" if tier == "pool" else ""
+        lines.append(f"- {name}: {identity}；{counts}{suffix}")
+    lines += [
+        "",
+        f"## 方法矩阵（Recall/MRR/nDCG @{k}，全部查询）",
+        "",
+        "区间为按查询重采样的 95% 置信区间；门禁读的是下面 test 分栏，不是这一栏。",
+        "",
+    ]
     for corpus, methods in summary.items():
         if not isinstance(methods, dict):
             continue
         lines += [f"### {corpus}", ""]
-        lines.append("| 方法 | recall@k | MRR@k | nDCG@k | 空结果率 | 重复率 |")
+        lines.append("| 方法 | recall@k [95%] | MRR@k | nDCG@k | 空结果率 | 重复率 |")
         lines.append("|---|---|---|---|---|---|")
         for method, payload in methods.items():
             all_metrics = payload.get("all", {})
+            recall_ci = payload.get("interval", {}).get("recall", {})
             lines.append(
-                f"| {method} | {all_metrics.get('recall_at_k', 0):.3f} "
+                f"| {method} "
+                f"| {all_metrics.get('recall_at_k', 0):.3f} "
+                f"[{recall_ci.get('lo', 0):.3f}, {recall_ci.get('hi', 0):.3f}] "
                 f"| {all_metrics.get('mrr_at_k', 0):.3f} "
                 f"| {all_metrics.get('ndcg_at_k', 0):.3f} "
                 f"| {all_metrics.get('empty_rate', 0):.3f} "
                 f"| {all_metrics.get('duplicate_rate', 0):.3f} |"
             )
+        lines.append("")
+        lines.append("| 方法 | 划分 | 查询数 | recall@k | MRR@k | nDCG@k |")
+        lines.append("|---|---|---|---|---|---|")
+        for method, payload in methods.items():
+            for split in ("dev", "all", "test"):
+                metrics = payload.get(split, {})
+                lines.append(
+                    f"| {method} | {split} | {metrics.get('queries', 0)} "
+                    f"| {metrics.get('recall_at_k', 0):.3f} "
+                    f"| {metrics.get('mrr_at_k', 0):.3f} "
+                    f"| {metrics.get('ndcg_at_k', 0):.3f} |"
+                )
         lines.append("")
         lines.append("| 方法 | 类型 | recall@k | MRR@k |")
         lines.append("|---|---|---|---|")
@@ -761,6 +1130,39 @@ def _report(
                     f"| {metrics.get('recall_at_k', 0):.3f} "
                     f"| {metrics.get('mrr_at_k', 0):.3f} |"
                 )
+        lines.append("")
+        lines.append("| 方法 | 语言方向 | 查询数 | recall@k | MRR@k |")
+        lines.append("|---|---|---|---|---|")
+        for method, payload in methods.items():
+            for direction, metrics in payload.get("by_direction", {}).items():
+                lines.append(
+                    f"| {method} | {direction} "
+                    f"| {metrics.get('queries', 0)} "
+                    f"| {metrics.get('recall_at_k', 0):.3f} "
+                    f"| {metrics.get('mrr_at_k', 0):.3f} |"
+                )
+        lines.append("")
+        lines.append(
+            "全文路门禁读的是 test 分栏里未被跨语言降级的查询"
+            "（`test_in_scope`），降级行不计入召回失败。"
+        )
+        absent_rows = [
+            (
+                f"| {method} | {payload['absent'].get('queries', 0)} "
+                f"| {payload['absent'].get('empty_rate', 0):.3f} "
+                f"| {payload['absent'].get('abstain_rate', 0):.3f} "
+                f"| {payload['absent'].get('test_empty_rate', 0):.3f} "
+                f"| {payload['absent'].get('test_abstain_rate', 0):.3f} "
+                f"| {payload['wrong_abstain'].get('test', 0):.3f} |"
+            )
+            for method, payload in methods.items()
+        ]
+        lines += [
+            "",
+            "| 方法 | 无答案查询数 | 空结果率 | 弃答率 | test 空结果率 | test 弃答率 | 误弃答率 |",
+            "|---|---|---|---|---|---|---|",
+            *absent_rows,
+        ]
         lines.append("")
     lines += ["## 专项探针", ""]
     identity = probes.get("chunk_identity", {})
@@ -815,7 +1217,27 @@ def _report(
             f"丢失 {loss.get('top1_lost', 0)} 条："
             f"{', '.join(loss.get('lost_ids', [])) or '无'}"
         ),
+        (
+            f"- 池级三分：目标在 top{k} 内 {loss.get('queries', 0) - loss.get('aggregation_loss', 0) - loss.get('recall_loss', 0)} 条、"
+            f"在池内但掉出 top{k}（聚合丢分）{loss.get('aggregation_loss', 0)} 条、"
+            f"不在池内（召回丢分）{loss.get('recall_loss', 0)} 条"
+        ),
     ]
+    diagnosis = probes.get("pool_diagnosis", {})
+    if diagnosis:
+        lines += [
+            "",
+            f"各夹具池级三分（fused，top{k}）：",
+            "",
+            "| 夹具 | 命中 | 聚合丢分 | 召回丢分 |",
+            "|---|---|---|---|",
+        ]
+        for corpus, buckets in diagnosis.items():
+            lines.append(
+                f"| {corpus} | {buckets.get('kept', 0)} "
+                f"| {buckets.get('aggregation_loss', 0)} "
+                f"| {buckets.get('recall_loss', 0)} |"
+            )
     for name, counts in loss.get("by_type", {}).items():
         lines.append(f"- {name}: 丢失 {counts.get('lost')}/{counts.get('queries')}")
     shaping = probes.get("query_shaping", {})
@@ -901,6 +1323,7 @@ def run(
     out_dir: Path = OUTPUT,
     probes_enabled: bool = True,
     real: bool = False,
+    suggest: bool = False,
 ) -> dict[str, Any]:
     """Evaluate the dataset and write the report and results payload."""
     from libref.db import open_db
@@ -915,6 +1338,7 @@ def run(
     manifest = json.loads((data_dir / "manifest.json").read_text(encoding="utf-8"))
     judgments = _load()
     gates = _gates()
+    languages = _corpus_languages()
     limit = int(gates["top_k"])
     conn = open_db(data_dir / "bench.db")
     if real:
@@ -928,17 +1352,27 @@ def run(
         embedder, vectors = _store(conn, None, None)
     asyncio.run(vectors.prepare())
     fixtures = manifest["fixtures"]
+    pool = {name for name, info in fixtures.items() if info.get("tier") == "pool"}
+    scored = {name: info for name, info in fixtures.items() if name not in pool}
+    for name in pool:
+        if name in judgments:
+            raise SystemExit(f"fixture {name}: pool fixtures carry no judgments")
+    for name in scored:
+        if name not in judgments:
+            raise SystemExit(f"fixture {name}: manifest has no judgment set")
     scopes = {
         name: {
             "library": info["library"],
             "version": info["version"],
             "ecosystem": info["ecosystem"],
         }
-        for name, info in fixtures.items()
+        for name, info in scored.items()
     }
-    urls = {name: _url_for(info) for name, info in fixtures.items()}
-    for name in fixtures:
-        _validate_targets(name, conn, scopes[name], judgments[name], urls[name])
+    urls = {name: _url_for(info) for name, info in scored.items()}
+    for name in scored:
+        _validate_targets(
+            name, conn, scopes[name], judgments[name], urls[name], _all_urls(conn)
+        )
     try:
         evaluations = {
             name: asyncio.run(
@@ -952,15 +1386,25 @@ def run(
                     embedder=embedder,
                     vectors=vectors,
                     rerank=rerank,
+                    corpus_lang=languages.get(name, "en"),
                 )
             )
-            for name in fixtures
+            for name in scored
         }
         summary = {name: _aggregate(item, limit) for name, item in evaluations.items()}
         probes: dict[str, Any] = {}
         if probes_enabled:
-            docs_id = _representative(fixtures, "docs")
-            code_id = _representative(fixtures, "code")
+            docs_id = _representative(scored, "docs")
+            code_id = _representative(scored, "code")
+            # Pool fixtures never reach the probes: they need a kind to run on.
+            if docs_id in pool or code_id in pool:
+                raise SystemExit("pool fixtures cannot serve as probe corpora")
+            docs_scoped = [
+                entry for entry in judgments[docs_id] if entry.get("scope") != "global"
+            ]
+            code_scoped = [
+                entry for entry in judgments[code_id] if entry.get("scope") != "global"
+            ]
             probes = {
                 "chunk_identity": _probe_chunk_identity(conn),
                 "side_tables": {
@@ -968,7 +1412,7 @@ def run(
                     **_probe_side_tables(
                         conn,
                         settings,
-                        judgments[code_id],
+                        code_scoped,
                         scopes[code_id],
                         embedder=embedder,
                         vectors=vectors,
@@ -976,6 +1420,16 @@ def run(
                 },
                 "score_scale": {
                     name: _probe_score_scale(item) for name, item in evaluations.items()
+                },
+                "pool_diagnosis": {
+                    name: _pool_buckets(
+                        [
+                            row
+                            for row in item["fused"]["rows"]
+                            if row.get("type") != "absent"
+                        ]
+                    )
+                    for name, item in evaluations.items()
                 },
                 "fusion_rank_loss": {
                     "fixture": docs_id,
@@ -987,6 +1441,7 @@ def run(
                         limit,
                         embedder=embedder,
                         vectors=vectors,
+                        url_of=urls[docs_id],
                     ),
                 },
                 "query_shaping": {
@@ -994,7 +1449,7 @@ def run(
                     **_probe_query_shaping(
                         conn,
                         settings,
-                        judgments[docs_id],
+                        docs_scoped,
                         scopes[docs_id],
                         limit,
                         url_of=urls[docs_id],
@@ -1003,7 +1458,7 @@ def run(
                 "material_units": {
                     "fixture": docs_id,
                     **_probe_material_units(
-                        conn, settings, judgments[docs_id], scopes[docs_id]
+                        conn, settings, docs_scoped, scopes[docs_id]
                     ),
                 },
                 "confidence": {
@@ -1011,14 +1466,18 @@ def run(
                     **_probe_confidence(
                         conn,
                         settings,
-                        judgments[docs_id],
+                        docs_scoped,
                         scopes[docs_id],
                         url_of=urls[docs_id],
                     ),
                 },
             }
         revisions = {name: str(info["revision"]) for name, info in fixtures.items()}
-        failures = _check_gates(summary, gates, real=real, revisions=revisions)
+        if suggest:
+            _print_suggested_gates(summary, revisions)
+        failures = _check_gates(
+            summary, gates, real=real, revisions=revisions, pool=pool
+        )
         _report(
             manifest,
             summary,
@@ -1027,6 +1486,7 @@ def run(
             out_dir,
             limit,
             models=_model_line(settings, real),
+            languages=languages,
         )
     finally:
         conn.close()
@@ -1064,6 +1524,7 @@ def main() -> int:
         Path(args.out),
         probes_enabled=not args.no_probes,
         real=args.real,
+        suggest=args.suggest_gates,
     )
     if not args.gate_only:
         print(f"report: {Path(args.out) / 'report.md'}")

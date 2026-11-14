@@ -5,6 +5,7 @@ from __future__ import annotations
 from libref.crawler.scope import (
     build_scope,
     content_type_allowed,
+    crawl_key,
     score_url,
     sort_by_relevance,
 )
@@ -62,3 +63,21 @@ def test_filter_stats_counts(monkeypatch, tmp_path) -> None:
     assert len(rejected) == 2
     assert stats.accepted == 1 and stats.rejected == 2
     assert stats.content_type_rejected == 1
+
+
+def test_crawl_key_collapses_anchor_variants(monkeypatch, tmp_path) -> None:
+    """One page listed once per heading is one document, whatever key names the anchor."""
+    same = [
+        "https://z.dev/api",
+        "https://z.dev/api?id=strings",
+        "https://z.dev/api?id=strings&hl=js",
+        "https://z.dev/api#coercion",
+        "https://z.dev/api?utm_source=llms",
+        "https://z.dev/api?ref=nav",
+    ]
+    assert {crawl_key(url) for url in same} == {"https://z.dev/api"}
+    assert crawl_key("https://z.dev/search?q=date") == "https://z.dev/search?q=date"
+    assert (
+        crawl_key("https://z.dev/search?q=date&id=1")
+        == "https://z.dev/search?q=date&id=1"
+    )

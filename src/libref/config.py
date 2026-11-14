@@ -113,6 +113,12 @@ class LibrefSettings(BaseSettings):
     fts_w_title: float = Field(default=5.0, ge=0)
     fts_w_url: float = Field(default=1.0, ge=0)
     fts_w_path: float = Field(default=3.0, ge=0)
+    # Evidence sufficiency: at or above the strong bound the material set is reported
+    # as answering the query, above the weak bound as weak, below it as unable to
+    # answer. Bounds come from the retrieval bench: the weak bound keeps the refusal
+    # rate on answerable queries near zero, the strong bound marks a settled answer.
+    answer_strong_threshold: float = Field(default=0.8, ge=0, le=1)
+    answer_weak_threshold: float = Field(default=0.5, ge=0, le=1)
     cluster_threshold: float = Field(default=0.15, ge=0)
     cluster_min_size: int = Field(default=2, ge=1)
     evidence_per_file_limit: int = Field(default=1, ge=1)
@@ -237,6 +243,10 @@ class LibrefSettings(BaseSettings):
             raise ValueError(
                 "chunk_bm25_min_terms must not exceed chunk_bm25_max_terms"
             )
+        if self.answer_weak_threshold > self.answer_strong_threshold:
+            raise ValueError(
+                "answer_weak_threshold must not exceed answer_strong_threshold"
+            )
         return self
 
 
@@ -347,6 +357,8 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "fts_w_title",
             "fts_w_url",
             "fts_w_path",
+            "answer_strong_threshold",
+            "answer_weak_threshold",
         }
     ),
     "registry": frozenset(

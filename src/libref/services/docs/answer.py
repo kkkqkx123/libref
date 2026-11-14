@@ -116,6 +116,10 @@ async def answer_query_async(
     reasons = list(status.get("reasons", []) or [])
     if not results:
         return _empty_answer(degraded, reasons)
+    # Weak candidates are still returned to a search caller, but generating an answer
+    # from them costs a call and invites a fabricated citation; abstaining is the answer.
+    if status["evidence"] == "none":
+        return _empty_answer(degraded, [*reasons, "low_evidence"])
     rows = DocumentStore(conn).get_documents([int(r["id"]) for r in results])
     full_by_id = {int(r["id"]): str(r.get("content") or "") for r in rows}
     if any(int(r["id"]) not in full_by_id for r in results):

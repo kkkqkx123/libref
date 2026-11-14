@@ -16,6 +16,7 @@ exactly the corpus.
 
 from __future__ import annotations
 
+import fnmatch
 import gzip
 import hashlib
 import io
@@ -47,9 +48,17 @@ _RECIPE_KEYS = {
         "crawl_delay",
         "path_prefixes",
         "doc_version",
+        "follow_links",
+        "extra_urls",
     ),
-    "code": ("repo_url", "subdir", "ref"),
+    "code": ("repo_url", "subdir", "ref", "exclude_globs"),
 }
+
+# Evaluation tiers: the main set carries judgments and floors, regression keeps
+# floors but no judgment budget, and the pool has neither. Pool fixtures only
+# supply distracting material for unanswerable and cross-library queries, so
+# they are never scored and never gated.
+TIERS = ("main", "regression", "pool")
 
 # Label of a source fixture that follows the default branch: the payload is the
 # repository head, not a fixed release, and the label says so.
@@ -77,6 +86,37 @@ def load_spec() -> list[dict[str, Any]]:
     for entry in entries:
         if entry["kind"] not in ("docs", "code"):
             raise ArchiveError(f"bench.json unsupported kind: {entry['kind']!r}")
+        tier = str(entry.get("tier") or "main")
+        if tier not in TIERS:
+            raise ArchiveError(
+                f"bench.json fixture tier must be one of {TIERS}: {entry!r}"
+            )
+        entry["tier"] = tier
+        if tier == "pool" and entry["kind"] != "code":
+            raise ArchiveError(
+                f"bench.json pool fixtures only supply source material: {entry!r}"
+            )
+        for key in ("max_files", "max_build_ms"):
+            value = entry.get(key)
+            if value is not None and (not isinstance(value, int) or value <= 0):
+                raise ArchiveError(
+                    f"bench.json {key} must be a positive integer: {entry!r}"
+                )
+        if "follow_links" in entry and not isinstance(entry["follow_links"], bool):
+            raise ArchiveError(
+                f"bench.json follow_links must be a boolean: {entry!r}"
+            )
+        if "extra_urls" in entry and (
+            not isinstance(entry["extra_urls"], list)
+            or not all(isinstance(url, str) for url in entry["extra_urls"])
+        ):
+            raise ArchiveError(
+                f"bench.json extra_urls must be a list of strings: {entry!r}"
+            )
+        if "max_files" in entry and entry["kind"] != "code":
+            raise ArchiveError(
+                f"bench.json max_files only applies to source fixtures: {entry!r}"
+            )
         if entry["kind"] == "docs" and not str(entry.get("doc_version") or "").strip():
             raise ArchiveError(
                 f"bench.json document fixture lacks doc_version: {entry}; "
@@ -339,7 +379,13 @@ def tree_digest(root: Path) -> tuple[str, int]:
     return digest.hexdigest(), len(files)
 
 
-def write_source(path: Path, root: Path, *, prefix: str = "") -> dict[str, Any]:
+def write_source(
+    path: Path,
+    root: Path,
+    *,
+    prefix: str = "",
+    exclude: tuple[str, ...] = (),
+) -> dict[str, Any]:
     """Pack a checkout into a byte-stable archive of its files, without the git store.
 
     Sorted entries plus zeroed timestamps and owners keep the digest stable
@@ -350,13 +396,17 @@ def write_source(path: Path, root: Path, *, prefix: str = "") -> dict[str, Any]:
 
     `prefix` keeps the entries at their repository-relative location, so a
     subtree archive still yields the same source identities as indexing the
-    whole checkout.
+    whole checkout. `exclude` patterns match that same repository-relative path,
+    so the corpus rule is what the fixture declares rather than a guess.
     """
     files: list[Path] = []
     for file in root.rglob("*"):
         if file.is_symlink():
             continue
         if not file.is_file() or ".git" in file.relative_to(root).parts:
+            continue
+        rel = prefix + file.relative_to(root).as_posix()
+        if any(fnmatch.fnmatch(rel, pattern) for pattern in exclude):
             continue
         files.append(file)
     files.sort(key=lambda file: file.relative_to(root).as_posix())

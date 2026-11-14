@@ -298,6 +298,17 @@ def cmd_search(args: argparse.Namespace) -> int:
         if degraded:
             suffix = f": {','.join(reasons)}" if reasons else ""
             print(f"(degraded: partial retrieval{suffix})", file=sys.stderr)
+        if status["evidence"] == "none" and results:
+            print(
+                "(weak evidence: the retrieved materials do not cover this query)",
+                file=sys.stderr,
+            )
+        if status["cross_lingual"]:
+            print(
+                "(cross-lingual query: full-text lane matched nothing; "
+                "results come from the vector lane)",
+                file=sys.stderr,
+            )
         if not results:
             print("(no results)")
             if getattr(args, "suggest", False):
@@ -338,7 +349,10 @@ def cmd_answer(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     if not out["answer"]:
-        print("(no evidence)")
+        if "low_evidence" in (out.get("reasons") or []):
+            print("(no answer: the retrieved materials do not cover this query)")
+        else:
+            print("(no evidence)")
         return 0
     print(out["answer"])
     for c in out["citations"]:

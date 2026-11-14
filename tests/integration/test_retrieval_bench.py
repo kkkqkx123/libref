@@ -45,4 +45,7 @@ def test_retrieval_benchmark_gates(tmp_path) -> None:
     assert result["failures"] == []
     summary = result["summary"]
     for corpus in names:
+        if fixtures[corpus].get("tier") == "pool":
+            assert corpus not in summary
+            continue
         assert summary[corpus]["precise"]["all"]["recall_at_k"] > 0

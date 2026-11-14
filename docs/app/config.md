@@ -121,6 +121,8 @@
 | fts_w_title | 浮点（≥0） | 5.0 | LIBREF_FTS_W_TITLE | 全文标题列权重 |
 | fts_w_url | 浮点（≥0） | 1.0 | LIBREF_FTS_W_URL | 全文地址列权重 |
 | fts_w_path | 浮点（≥0） | 3.0 | LIBREF_FTS_W_PATH | 全文路径列权重 |
+| answer_strong_threshold | 浮点（0～1） | 0.8 | LIBREF_ANSWER_STRONG_THRESHOLD | 证据充分下限，达标记为可答，须不小于弱档 |
+| answer_weak_threshold | 浮点（0～1） | 0.5 | LIBREF_ANSWER_WEAK_THRESHOLD | 证据弱档下限，低于此值记为不可答并弃答 |
 | cluster_threshold | 浮点（≥0） | 0.15 | LIBREF_CLUSTER_THRESHOLD | 聚类阈值，挖掘与加权共用 |
 | cluster_min_size | 整数（≥1） | 2 | LIBREF_CLUSTER_MIN_SIZE | 聚类最小规模 |
 | evidence_per_file_limit | 整数（≥1） | 1 | LIBREF_EVIDENCE_PER_FILE_LIMIT | 每文件证据上限（挖掘读取按此值解析） |
