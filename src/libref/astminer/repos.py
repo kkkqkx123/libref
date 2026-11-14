@@ -86,12 +86,20 @@ def census_of_relpaths(
     suffixes: tuple[str, ...],
     max_file_bytes: int = 1_000_000,
     subdir: str | None = None,
+    exclude_patterns: tuple[str, ...] | list[str] | None = None,
 ) -> dict:
     """File census over (relative path, size) pairs; unknown size skips the oversize check."""
+    import re as _re
+
     prefix = (subdir or "").strip().strip("/")
+    try:
+        exclude_res = tuple(_re.compile(p) for p in (exclude_patterns or ()))
+    except _re.error as exc:
+        raise ValueError(f"invalid exclude pattern: {exc}") from exc
     wanted: list[str] = []
     suffix_counts: dict[str, int] = {}
     top_dirs: dict[str, int] = {}
+    dir_files: dict[str, int] = {}
     skipped = 0
     oversized = 0
     for rel, size in items:
@@ -100,9 +108,15 @@ def census_of_relpaths(
             continue
         if prefix and rel != prefix and not rel.startswith(prefix + "/"):
             continue
+        if any(rx.search(rel) for rx in exclude_res):
+            continue
         suffix_counts[suffix] = suffix_counts.get(suffix, 0) + 1
         head = rel.split("/", 1)[0] if "/" in rel else "(root)"
         top_dirs[head] = top_dirs.get(head, 0) + 1
+        parent = rel.rpartition("/")[0]
+        while parent:
+            dir_files[parent] = dir_files.get(parent, 0) + 1
+            parent = parent.rpartition("/")[0]
         if _should_skip(rel):
             skipped += 1
             continue
@@ -121,6 +135,7 @@ def census_of_relpaths(
         "files": wanted,
         "suffix_counts": suffix_counts,
         "top_dirs": top_dirs,
+        "dir_files": dir_files,
         "skipped": skipped,
         "oversized": oversized,
     }
@@ -132,6 +147,7 @@ def describe_source_files(
     *,
     max_file_bytes: int = 1_000_000,
     subdir: str | None = None,
+    exclude_patterns: tuple[str, ...] | list[str] | None = None,
 ) -> dict:
     """Read-only file census for probes: effective list plus skip and shape counters."""
     items: list[tuple[str, int | None]] = []
@@ -155,7 +171,11 @@ def describe_source_files(
             size = -1
         items.append((rel, size))
     return census_of_relpaths(
-        items, suffixes=suffixes, max_file_bytes=max_file_bytes, subdir=subdir
+        items,
+        suffixes=suffixes,
+        max_file_bytes=max_file_bytes,
+        subdir=subdir,
+        exclude_patterns=exclude_patterns,
     )
 
 

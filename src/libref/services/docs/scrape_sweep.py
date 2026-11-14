@@ -38,6 +38,12 @@ def sweep_absent(
             removed.extend(result.removed_ids)
             removed_urls.append(url)
             counts["absent"] = counts.get("absent", 0) + 1
+    if removed_urls:
+        from libref.services.docs.links import prune_version_urls
+
+        pruned = prune_version_urls(conn, version_id, removed_urls)
+        if pruned:
+            counts["link_edges_pruned"] = counts.get("link_edges_pruned", 0) + pruned
     if removed_urls and snapshot_ctx is not None:
         try:
             from libref.services.ops.retention import (

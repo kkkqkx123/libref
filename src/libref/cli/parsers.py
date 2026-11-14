@@ -492,6 +492,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Index only this repository-relative file; repeatable",
     )
+    p_repo.add_argument(
+        "--exclude-pattern",
+        action="append",
+        default=None,
+        help="Exclude repository-relative paths matching this regex; repeatable",
+    )
     p_repo.add_argument("--max-files", type=int, default=None)
     p_repo.add_argument(
         "--fresh",
@@ -759,11 +765,35 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Probe only this repository-relative file; repeatable",
     )
+    p_probe_repo.add_argument(
+        "--exclude-pattern",
+        action="append",
+        default=None,
+        help="Exclude repository-relative paths matching this regex; repeatable",
+    )
+    p_probe_repo.add_argument("--tree-depth", type=int, default=None)
+    p_probe_repo.add_argument("--samples-per-dir", type=int, default=None)
     p_probe_repo.add_argument("--max-files", type=int, default=None)
     p_probe_repo.add_argument("--sample-limit", type=int, default=None)
     from libref.cli.code_commands import cmd_probe_repo
 
     p_probe_repo.set_defaults(func=cmd_probe_repo)
+
+    p_link_stats = sub.add_parser(
+        "link-stats",
+        help="Reference counts over stored document link edges",
+        parents=[_config_parent],
+    )
+    p_link_stats.add_argument("library")
+    p_link_stats.add_argument("version")
+    p_link_stats.add_argument("--ecosystem", default=None)
+    p_link_stats.add_argument(
+        "--url", default=None, help="Single page address for per-page stats"
+    )
+    p_link_stats.add_argument("--limit", type=int, default=20)
+    from libref.cli.docs_commands import cmd_link_stats
+
+    p_link_stats.set_defaults(func=cmd_link_stats)
 
     p_dump = sub.add_parser(
         "dump-chunks",

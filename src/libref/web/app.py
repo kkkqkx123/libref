@@ -24,6 +24,7 @@ from libref.web.api import (
     DocProbeRequest,
     ImportInsightQuery,
     JobQuery,
+    LinkStatsQuery,
     PatternInsightQuery,
     ReadQuery,
     RepoProbeRequest,
@@ -518,6 +519,13 @@ def build_web_app(
             or any(not item.strip() for item in body.only_files)
         ):
             raise HTTPException(status_code=400, detail="only_files must be non-empty strings")
+        if body.exclude_patterns is not None and (
+            not body.exclude_patterns
+            or any(not item.strip() for item in body.exclude_patterns)
+        ):
+            raise HTTPException(
+                status_code=400, detail="exclude_patterns must be non-empty strings"
+            )
         try:
             probe = probe_repo(
                 body.source,
@@ -526,6 +534,9 @@ def build_web_app(
                 max_files=body.max_files,
                 sample_limit=body.sample_limit,
                 only_files=body.only_files,
+                exclude_patterns=body.exclude_patterns,
+                tree_depth=body.tree_depth,
+                samples_per_dir=body.samples_per_dir,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -652,6 +663,52 @@ def build_web_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return envelope(rows)
+
+    @app.get("/link-stats")
+    def link_stats(
+        library: str,
+        version: str,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+        url: str | None = None,
+        _: None = Depends(_guard),
+    ) -> dict[str, Any]:
+        from libref.services.docs.links import (
+            page_link_stats,
+            top_referenced,
+            version_link_summary,
+        )
+
+        params = LinkStatsQuery(
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            limit=limit,
+            url=url,
+        )
+        try:
+            if params.url:
+                return page_link_stats(
+                    conn,
+                    params.url,
+                    params.library,
+                    params.version,
+                    params.ecosystem,
+                )
+            return {
+                "summary": version_link_summary(
+                    conn, params.library, params.version, params.ecosystem
+                ),
+                "items": top_referenced(
+                    conn,
+                    params.library,
+                    params.version,
+                    params.ecosystem,
+                    limit=params.limit,
+                ),
+            }
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/mining-health")
     def mining_health(

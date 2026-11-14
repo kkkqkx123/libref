@@ -92,6 +92,7 @@ async def index_repo_async(
     fresh: bool = False,
     subdir: str | None = None,
     only_files: list[str] | None = None,
+    exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
     heartbeat=None,
 ) -> dict[str, int]:
@@ -119,6 +120,7 @@ async def index_repo_async(
             fresh=fresh,
             subdir=subdir,
             only_files=only_files,
+            exclude_patterns=exclude_patterns,
             max_files=max_files,
             heartbeat=heartbeat,
         )
@@ -142,6 +144,7 @@ async def _index_repo_inner(
     fresh: bool = False,
     subdir: str | None = None,
     only_files: list[str] | None = None,
+    exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
     heartbeat=None,
 ) -> dict[str, int]:
@@ -199,7 +202,16 @@ async def _index_repo_inner(
     conn.commit()
     from libref.crawler.scope import BudgetExceeded
 
-    census = describe_source_files(root, ast_config.all_suffixes(), subdir=subdir)
+    if exclude_patterns is not None:
+        for item in exclude_patterns:
+            if not isinstance(item, str) or not item.strip():
+                raise ValueError("exclude_patterns must be non-empty strings")
+    census = describe_source_files(
+        root,
+        ast_config.all_suffixes(),
+        subdir=subdir,
+        exclude_patterns=exclude_patterns,
+    )
     files = list(census["files"])
     if only_files:
         wanted_files = set(only_files)
@@ -371,6 +383,7 @@ def index_repo(
     fresh: bool = False,
     subdir: str | None = None,
     only_files: list[str] | None = None,
+    exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
     heartbeat=None,
 ) -> dict[str, int]:
@@ -392,6 +405,7 @@ def index_repo(
             fresh=fresh,
             subdir=subdir,
             only_files=only_files,
+            exclude_patterns=exclude_patterns,
             max_files=max_files,
             heartbeat=heartbeat,
         )
@@ -412,6 +426,7 @@ def index_repo_by_name(
     fresh: bool = False,
     subdir: str | None = None,
     only_files: list[str] | None = None,
+    exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
     heartbeat=None,
 ) -> dict[str, int]:
@@ -429,6 +444,7 @@ def index_repo_by_name(
             fresh=fresh,
             subdir=subdir,
             only_files=only_files,
+            exclude_patterns=exclude_patterns,
             max_files=max_files,
             heartbeat=heartbeat,
         )
@@ -449,6 +465,7 @@ async def index_repo_by_name_async(
     fresh: bool = False,
     subdir: str | None = None,
     only_files: list[str] | None = None,
+    exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
     heartbeat=None,
 ) -> dict[str, int]:
@@ -488,6 +505,7 @@ async def index_repo_by_name_async(
             fresh=fresh,
             subdir=subdir,
             only_files=only_files,
+            exclude_patterns=exclude_patterns,
             max_files=max_files,
             heartbeat=heartbeat,
         )
@@ -575,6 +593,7 @@ def build_repo_runner(
             fresh=bool(p.get("fresh", False)),
             subdir=p.get("subdir"),
             only_files=p.get("only_files"),
+            exclude_patterns=p.get("exclude_patterns"),
             max_files=p.get("max_files"),
             heartbeat=heartbeat,
         )

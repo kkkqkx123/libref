@@ -29,6 +29,7 @@ class FetchDetail:
     links: list[str] = field(default_factory=list)
     canonical: str = ""
     structure_links: list[str] = field(default_factory=list)
+    external_links: list[str] = field(default_factory=list)
 
 
 def doc_budgets(settings) -> dict[ChunkPath, ChunkBudget]:

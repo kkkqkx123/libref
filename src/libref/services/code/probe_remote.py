@@ -99,7 +99,7 @@ def _gitlab_target(source: str) -> tuple[str, str] | None:
 
 
 async def _github_census(
-    client: httpx.AsyncClient, owner: str, repo: str, *, suffixes, subdir
+    client: httpx.AsyncClient, owner: str, repo: str, *, suffixes, subdir, exclude_patterns=None
 ) -> tuple[dict, bool, bool] | None:
     from libref.astminer.repos import census_of_relpaths
 
@@ -126,12 +126,12 @@ async def _github_census(
             continue
         size = entry.get("size")
         items.append((path, size if isinstance(size, int) else None))
-    census = census_of_relpaths(items, suffixes=suffixes, subdir=subdir)
+    census = census_of_relpaths(items, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns)
     return census, bool(body.get("truncated")), True
 
 
 async def _gitlab_census(
-    host: str, project: str, *, timeout: float, suffixes, subdir
+    host: str, project: str, *, timeout: float, suffixes, subdir, exclude_patterns=None
 ) -> tuple[dict, bool, bool] | None:
     from libref.astminer.repos import census_of_relpaths
 
@@ -168,12 +168,12 @@ async def _gitlab_census(
                 break
         else:
             truncated = True
-    census = census_of_relpaths(items, suffixes=suffixes, subdir=subdir)
+    census = census_of_relpaths(items, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns)
     return census, truncated, False
 
 
 async def _hosting_census(
-    source: str, *, settings, timeout: float, suffixes, subdir
+    source: str, *, settings, timeout: float, suffixes, subdir, exclude_patterns=None
 ) -> tuple[dict, bool, bool] | None:
     """Directory listing via hosting API; None when unavailable."""
     try:
@@ -190,7 +190,7 @@ async def _hosting_census(
                 base_url="https://api.github.com", timeout=timeout, headers=headers
             ) as client:
                 return await _github_census(
-                    client, github[0], github[1], suffixes=suffixes, subdir=subdir
+                    client, github[0], github[1], suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns
                 )
         gitlab = _gitlab_target(source)
         if gitlab is not None:
@@ -200,6 +200,7 @@ async def _hosting_census(
                 timeout=timeout,
                 suffixes=suffixes,
                 subdir=subdir,
+                exclude_patterns=exclude_patterns,
             )
         return None
     except Exception:  # noqa: BLE001 — every tier degrades to the next
@@ -221,7 +222,7 @@ def _collect_tree(
             out.append((rel, None))
 
 
-def git_tree_census(source: str, *, suffixes, subdir) -> dict | None:
+def git_tree_census(source: str, *, suffixes, subdir, exclude_patterns=None) -> dict | None:
     """Bare blobless clone plus in-git tree walk; no working tree, no blob downloads."""
     from dulwich import porcelain
 
@@ -244,12 +245,14 @@ def git_tree_census(source: str, *, suffixes, subdir) -> dict | None:
             return None
         from libref.astminer.repos import census_of_relpaths
 
-        return census_of_relpaths(out, suffixes=suffixes, subdir=subdir)
+        return census_of_relpaths(out, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def acquire_remote(source: str, *, settings, suffixes, subdir) -> RemoteAcquisition:
+def acquire_remote(
+    source: str, *, settings, suffixes, subdir, exclude_patterns=None
+) -> RemoteAcquisition:
     """Cheapest tier first; raises RuntimeError only when every tier fails."""
     from libref.astminer.repos import describe_source_files
 
@@ -268,7 +271,7 @@ def acquire_remote(source: str, *, settings, suffixes, subdir) -> RemoteAcquisit
     )
     hosted = asyncio.run(
         _hosting_census(
-            source, settings=settings, timeout=timeout, suffixes=suffixes, subdir=subdir
+            source, settings=settings, timeout=timeout, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns
         )
     )
     if hosted is not None:
@@ -280,7 +283,7 @@ def acquire_remote(source: str, *, settings, suffixes, subdir) -> RemoteAcquisit
             sizes_known=sizes_known,
             truncated=truncated,
         )
-    tree_census = git_tree_census(source, suffixes=suffixes, subdir=subdir)
+    tree_census = git_tree_census(source, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns)
     if tree_census is not None:
         return RemoteAcquisition(
             kind="census", census=tree_census, source_note="git-tree", sizes_known=False
@@ -303,7 +306,7 @@ def acquire_remote(source: str, *, settings, suffixes, subdir) -> RemoteAcquisit
             porcelain.clone(source, str(tmp / "repo"), depth=1)
         except Exception as exc:
             raise RuntimeError(f"probe clone failed for {source}: {exc}") from exc
-        census = describe_source_files(tmp / "repo", suffixes, subdir=subdir)
+        census = describe_source_files(tmp / "repo", suffixes, subdir=subdir, exclude_patterns=exclude_patterns)
         return RemoteAcquisition(
             kind="census", census=census, source_note="shallow-clone"
         )

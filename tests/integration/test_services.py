@@ -335,6 +335,87 @@ def test_scrape_falls_back_to_start_url_without_seed(conn, monkeypatch, tmp_path
     assert SearchService(conn).search_docs("javadoc") != []
 
 
+def test_scrape_persists_link_edges_and_refcounts(conn, monkeypatch, tmp_path):
+    from libref.services.docs.links import (
+        page_link_stats,
+        top_referenced,
+        version_link_summary,
+    )
+
+    seed_library_version(conn)
+
+    def page(title: str, body_links: str) -> str:
+        return (
+            f"<html><head><title>{title}</title></head><body>"
+            f"<nav><a href=\"/nav.html\">Nav</a></nav>"
+            f"<main><h1>{title}</h1><p>quetzal link body {title}</p>"
+            f"{body_links}</main></body></html>"
+        )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        p = request.url.path
+        if p == "/robots.txt":
+            return httpx.Response(200, text="")
+        if p == "/llms.txt":
+            return httpx.Response(
+                200,
+                text=(
+                    f"- [A](https://{host}/a.html)\n"
+                    f"- [B](https://{host}/b.html)\n"
+                ),
+            )
+        if p == "/llms-full.txt":
+            return httpx.Response(404)
+        if p == "/a.html":
+            return httpx.Response(
+                200,
+                text=page(
+                    "Alpha",
+                    '<p>Read the <a href="/b.html">companion guide</a> with '
+                    "plenty of surrounding prose so pruning keeps this paragraph, "
+                    'and see <a href="https://x.example/o">external notes</a> '
+                    "for background on every concept discussed above.</p>",
+                ),
+            )
+        if p == "/b.html":
+            return httpx.Response(
+                200,
+                text=page(
+                    "Beta",
+                    '<p>Start from the <a href="/a.html">overview page</a> with '
+                    "plenty of surrounding prose so pruning keeps this paragraph "
+                    "and follow each section in order.</p>",
+                ),
+            )
+        if p == "/nav.html":
+            return httpx.Response(200, text=page("Nav", ""))
+        raise AssertionError(request.url.path)
+
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    with mock_ingest(handler):
+        counts = IngestService(settings, conn).scrape_docs(
+            "docs", "1.0", "https://d.example/"
+        )
+
+    assert counts["link_edges"] == 5
+    summary = version_link_summary(conn, "docs", "1.0")
+    assert summary["edges"] == 5
+    assert summary["internal_edges"] == 2
+    assert summary["external_edges"] == 1
+    assert summary["structure_edges"] == 2
+    top = {r["url"]: r["inlinks"] for r in top_referenced(conn, "docs", "1.0")}
+    assert top["https://d.example/b.html"] == 1
+    assert top["https://x.example/o"] == 1
+    stats = page_link_stats(conn, "https://d.example/a.html", "docs", "1.0")
+    assert stats["outlinks"] == 3
+    assert stats["outlink_external"] == 1
+    assert stats["inlinks"] == 1
+    assert stats["inlink_sources"] == ["https://d.example/b.html"]
+    with pytest.raises(ValueError, match="unknown"):
+        version_link_summary(conn, "docs", "9.9")
+
+
 def test_start_scrape_job_runs_through_queue(conn, monkeypatch, tmp_path):
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/robots.txt":

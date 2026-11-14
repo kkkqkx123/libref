@@ -12,10 +12,11 @@ import json as _json
 import re
 import time as _time
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 from pydantic import BaseModel
+from selectolax.lexbor import LexborHTMLParser
 
 from libref.crawler import RobotsChecker, UrlSeeder
 from libref.services.docs.scrape_plan import plan_targets
@@ -32,6 +33,10 @@ class SampleFetch(BaseModel):
     content_type: str = ""
     title: str = ""
     error: str = ""
+    outlink_total: int = 0
+    outlink_external: int = 0
+    external_domains: list[str] = []
+    head_truncated: bool = False
 
 
 class DocProbe(BaseModel):
@@ -106,6 +111,42 @@ def _title_of(head: bytes) -> str:
     return " ".join(match.group(1).split())
 
 
+def _head_links(head: bytes, url: str) -> tuple[int, int, list[str]]:
+    """Outlink preview over the downloaded head bytes; truncation makes counts a lower bound."""
+    try:
+        tree = LexborHTMLParser(head.decode("utf-8", "ignore"))
+    except Exception:  # noqa: BLE001 — unparsable heads yield zero links
+        return 0, 0, []
+    host = urlsplit(url).netloc.lower()
+    try:
+        nodes = tree.css("a[href]")
+    except Exception:  # noqa: BLE001 — link collection is best-effort
+        return 0, 0, []
+    seen: set[str] = set()
+    domains: dict[str, int] = {}
+    external = 0
+    for node in nodes:
+        href = ((node.attributes or {}).get("href") or "").strip()
+        if not href or href.startswith(("#", "mailto:", "data:", "javascript:")):
+            continue
+        absolute = urljoin(url, href).split("#", 1)[0]
+        try:
+            parts = urlsplit(absolute)
+        except ValueError:
+            continue
+        if parts.scheme not in ("http", "https") or not parts.netloc:
+            continue
+        if absolute in seen:
+            continue
+        seen.add(absolute)
+        domain = parts.netloc.lower()
+        if domain != host:
+            external += 1
+            domains[domain] = domains.get(domain, 0) + 1
+    ranked = sorted(domains.items(), key=lambda item: (-item[1], item[0]))
+    return len(seen), external, [name for name, _ in ranked[:5]]
+
+
 async def _fetch_sample_heads(
     client: httpx.AsyncClient, urls: list[str], *, timeout_s: float
 ) -> list[SampleFetch]:
@@ -132,11 +173,18 @@ async def _fetch_sample_heads(
                         if len(head) >= _HEAD_READ_LIMIT:
                             break
                 title = _title_of(head) if "html" in content_type else ""
+                total, ext, domains = (
+                    _head_links(head, url) if "html" in content_type else (0, 0, [])
+                )
                 slots[index] = SampleFetch(
                     url=url,
                     status=response.status_code,
                     content_type=content_type,
                     title=title,
+                    outlink_total=total,
+                    outlink_external=ext,
+                    external_domains=domains,
+                    head_truncated=len(head) >= _HEAD_READ_LIMIT,
                 )
             except Exception as exc:  # noqa: BLE001 — per-URL failures are recorded, never raised
                 slots[index] = SampleFetch(url=url, error=f"{type(exc).__name__}: {exc}")

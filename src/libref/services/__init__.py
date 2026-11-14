@@ -40,6 +40,11 @@ from libref.services.docs.ingest import (
     start_refresh_job,
     start_scrape_job,
 )
+from libref.services.docs.links import (
+    page_link_stats,
+    top_referenced,
+    version_link_summary,
+)
 from libref.services.docs.pages import PageService
 from libref.services.docs.probe import DocProbe, probe_docs, probe_docs_async
 from libref.services.docs.search import PRESETS, SearchService, normalize_preset
@@ -126,6 +131,7 @@ __all__ = [
     "mine_patterns",
     "mining_version_ids",
     "normalize_preset",
+    "page_link_stats",
     "parse_cited_indices",
     "probe_docs",
     "probe_docs_async",
@@ -145,5 +151,7 @@ __all__ = [
     "start_refresh_job",
     "start_scrape_job",
     "sync_vectors_for_docs",
+    "top_referenced",
     "version_drifted",
+    "version_link_summary",
 ]

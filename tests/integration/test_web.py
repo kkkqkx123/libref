@@ -207,8 +207,76 @@ def test_probe_routes(tmp_path, monkeypatch) -> None:
         assert scoped.status_code == 200
         assert scoped.json()["effective_files"] == 1
         assert scoped.json()["unmatched_only_files"] == []
+        drilled = client.post(
+            "/repo-probe",
+            json={
+                "source": str(repo),
+                "exclude_patterns": [r"\.txt$"],
+                "tree_depth": 2,
+                "samples_per_dir": 2,
+            },
+        )
+        assert drilled.status_code == 200
+        assert drilled.json()["effective_files"] == 1
+        assert drilled.json()["exclude_patterns"] == [r"\.txt$"]
+        assert drilled.json()["dir_samples"] == [
+            {"directory": "(root)", "files": ["a.py"]}
+        ]
+        bad = client.post("/repo-probe", json={"source": str(repo), "tree_depth": 0})
+        assert bad.status_code == 422
         assert conn.execute("SELECT count(*) FROM pages").fetchone()[0] == 0
         assert conn.execute("SELECT count(*) FROM repos").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_link_stats_routes(tmp_path, monkeypatch) -> None:
+    from libref.services.docs.links import replace_version_edges
+
+    monkeypatch.chdir(tmp_path)
+    conn = _open(tmp_path, "links.db")
+    try:
+        conn.execute("INSERT INTO libraries(id, name) VALUES(1, 'docs')")
+        conn.execute("INSERT INTO versions(id, library_id, version) VALUES(1, 1, '1.0')")
+        conn.commit()
+        replace_version_edges(
+            conn,
+            1,
+            1,
+            {
+                "https://d.example/a": {
+                    ("https://d.example/b", "internal"),
+                    ("https://x.example/o", "external"),
+                },
+                "https://d.example/b": {("https://d.example/a", "internal")},
+            },
+        )
+        client = _client(conn, monkeypatch, tmp_path)
+        res = client.get("/link-stats", params={"library": "docs", "version": "1.0"})
+        assert res.status_code == 200
+        body = res.json()
+        assert body["summary"]["edges"] == 3
+        assert body["summary"]["external_edges"] == 1
+        assert {r["url"] for r in body["items"]} == {
+            "https://d.example/a",
+            "https://d.example/b",
+            "https://x.example/o",
+        }
+        single = client.get(
+            "/link-stats",
+            params={
+                "library": "docs",
+                "version": "1.0",
+                "url": "https://d.example/a",
+            },
+        )
+        assert single.status_code == 200
+        assert single.json()["outlinks"] == 2
+        assert single.json()["outlink_external"] == 1
+        missing = client.get(
+            "/link-stats", params={"library": "docs", "version": "9.9"}
+        )
+        assert missing.status_code == 400
     finally:
         conn.close()
 

@@ -77,11 +77,15 @@ MCP 出口是面向模型的只读问答面，共十九个工具。实现在 `sr
 
 ### repo_probe
 
-探查仓库目录结构，不解析。`source` 非空必填（远端地址或本地路径），`subdir` 可选，`max_files` 取 1 到 100000，`sample_limit` 取 1 到 100，`only_files` 为非空字符串数组（单文件限定，先过滤再做预算判断）。返回体回显生效的限定与未命中的限定路径。
+探查仓库目录结构，不解析。`source` 非空必填（远端地址或本地路径），`subdir` 可选，`max_files` 取 1 到 100000，`sample_limit` 取 1 到 100，`only_files` 为非空字符串数组（单文件限定，先过滤再做预算判断），`exclude_patterns` 为非空字符串数组（排除匹配路径，与索引同口径），`tree_depth` 取 1 到 10（目录树展开深度，缺省 1），`samples_per_dir` 取 1 到 50（每目录采样上限，缺省关闭，总量受采样数约束）。返回体回显生效的限定与未命中的限定路径，附目录树（目录与递归文件数，最多 100 条）与按目录分组的采样。
 
 ### repo_dependencies
 
 查询某版本清单声明的依赖。`library/version` 非空必填，`ecosystem/dep_ecosystem` 可选。
+
+### link_stats
+
+文档链接引用数统计，只读。`library/version` 非空必填，`ecosystem` 可选，`limit` 取 1 到 500，给出 `url` 时返回单页统计（出链数、站外出链数、被引用数、引用来源采样），不给时返回版本汇总加被引用排名。
 
 ## 源码洞察
 

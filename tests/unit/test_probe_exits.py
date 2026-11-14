@@ -42,3 +42,35 @@ def test_probe_repo_cli_only_file() -> None:
     )
     assert args.only_file == ["a.py", "b.py"]
     assert args.subdir is None
+
+
+def test_probe_repo_exclude_and_tree_depth_cli() -> None:
+    args = build_parser().parse_args(
+        [
+            "probe-repo",
+            "/tmp/x",
+            "--exclude-pattern",
+            r"(^|/)tests/",
+            "--tree-depth",
+            "3",
+        ]
+    )
+    assert args.exclude_pattern == [r"(^|/)tests/"]
+    assert args.tree_depth == 3
+    sampled = build_parser().parse_args(
+        ["probe-repo", "/tmp/x", "--samples-per-dir", "2"]
+    )
+    assert sampled.samples_per_dir == 2
+    indexed = build_parser().parse_args(
+        ["index-repo", "demo", "0.1", "/tmp/x", "--exclude-pattern", "^vendor/"]
+    )
+    assert indexed.exclude_pattern == ["^vendor/"]
+
+
+def test_link_stats_cli() -> None:
+    args = build_parser().parse_args(["link-stats", "docs", "1.0", "--limit", "5"])
+    assert (args.library, args.version, args.limit, args.url) == ("docs", "1.0", 5, None)
+    singled = build_parser().parse_args(
+        ["link-stats", "docs", "1.0", "--url", "https://d.example/a"]
+    )
+    assert singled.url == "https://d.example/a"

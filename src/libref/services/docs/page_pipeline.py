@@ -178,6 +178,9 @@ class PagePipeline:
                 structure_links=[]
                 if scraped.nofollow
                 else list(scraped.structure_links),
+                external_links=[]
+                if scraped.nofollow
+                else list(scraped.external_links),
             )
             if scraped.noindex:
                 stage_ms["fetch_ms"] = int((clean_start - fetch_start) * 1000)
@@ -226,6 +229,9 @@ class PagePipeline:
                             structure_links=[]
                             if rescraped.nofollow
                             else list(rescraped.structure_links),
+                            external_links=[]
+                            if rescraped.nofollow
+                            else list(rescraped.external_links),
                         )
                 if not markdown:
                     stage_ms["fetch_ms"] = int((clean_start - fetch_start) * 1000)

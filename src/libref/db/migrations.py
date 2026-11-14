@@ -11,6 +11,7 @@ from libref.db.schema import (
     CALL_RESOLVE_SQL,
     CALL_SCOPE_SQL,
     DISCOVERY_CACHE_SQL,
+    DOC_LINK_EDGES_SQL,
     FEATURE_TREE_CLUSTER_SQL,
     GOVERNANCE_SQL,
     IMPORT_EDGES_SQL,
@@ -62,6 +63,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(19, "import-edges", IMPORT_EDGES_SQL),
     Migration(20, "version-site-evidence", VERSION_SITE_EVIDENCE_SQL),
     Migration(21, "ingest-progress-pending", PROGRESS_PENDING_SQL),
+    Migration(22, "doc-link-edges", DOC_LINK_EDGES_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

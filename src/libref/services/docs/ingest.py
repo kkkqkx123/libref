@@ -461,6 +461,7 @@ class IngestService:
                 policy = build_scope(start_url, scope)
                 visited: set[str] = set(accepted)
                 pending: list[tuple[str, int]] = []
+                edge_accum: dict[str, set[tuple[str, str]]] = {}
 
                 async def process(url: str, depth: int) -> None:
                     async with sem:
@@ -504,6 +505,18 @@ class IngestService:
                         canonical = crawl_key(detail.canonical)
                         if canonical and canonical != url:
                             visited.add(canonical)
+                        if detail.links or detail.structure_links:
+                            external = set(detail.external_links)
+                            dsts = edge_accum.setdefault(url, set())
+                            for link in detail.links:
+                                dsts.add(
+                                    (
+                                        crawl_key(link),
+                                        "external" if link in external else "internal",
+                                    )
+                                )
+                            for link in detail.structure_links:
+                                dsts.add((crawl_key(link), "structure"))
                         if follow:
                             for link in detail.links:
                                 target = crawl_key(link)
@@ -634,6 +647,12 @@ class IngestService:
                 # in seed mode that set equals the seed set.
                 # Batch syncs already pushed page deltas with the version watermark;
                 # the closing sync only carries sweep deletions plus set verification.
+                if edge_accum:
+                    from libref.services.docs.links import replace_version_edges
+
+                    counts["link_edges"] = replace_version_edges(
+                        self._conn, library_id, version_id, edge_accum
+                    )
                 sweep_prev = len(removed_all)
                 removed_all.extend(
                     sweep_absent(

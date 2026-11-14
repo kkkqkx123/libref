@@ -101,6 +101,10 @@ Web 出口是只读查询面，另带精简抓取写入。实现在 `src/libref/
 
 `library/version/ecosystem` 全部可选，直接返回健康对象。
 
+### GET /link-stats
+
+`library/version` 必填，`ecosystem` 可选，`limit` 取 1 到 500 默认 20，给出 `url` 时返回单页统计，不给时返回版本汇总加被引用排名。版本定位不到返回请求错误。
+
 ## 治理
 
 ### GET /review
@@ -125,7 +129,7 @@ Web 出口是只读查询面，另带精简抓取写入。实现在 `src/libref/
 
 ### POST /repo-probe
 
-请求体 `source` 必填（远端地址或本地路径），`subdir` 可选，`max_files` 可选，`sample_limit` 取 1 到 100，`only_files` 为单文件限定数组（先过滤再做预算判断）。返回目录结构，未命中的限定路径在返回体中回显。
+请求体 `source` 必填（远端地址或本地路径），`subdir` 可选，`max_files` 可选，`sample_limit` 取 1 到 100，`only_files` 为单文件限定数组（先过滤再做预算判断），`exclude_patterns` 为排除正则数组（与索引同口径），`tree_depth` 取 1 到 10 缺省 1，`samples_per_dir` 取 1 到 50（每目录采样上限，缺省关闭，总量受采样数约束）。返回目录结构、目录树（目录与递归文件数，最多 100 条）与按目录分组的采样，未命中的限定路径在返回体中回显。
 
 ## 写入
 

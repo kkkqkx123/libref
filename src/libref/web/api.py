@@ -160,6 +160,17 @@ class RepoProbeRequest(BaseModel):
     max_files: int | None = Field(default=None, ge=1)
     sample_limit: int | None = Field(default=None, ge=1, le=100)
     only_files: list[str] | None = None
+    exclude_patterns: list[str] | None = None
+    tree_depth: int | None = Field(default=None, ge=1, le=10)
+    samples_per_dir: int | None = Field(default=None, ge=1, le=50)
+
+
+class LinkStatsQuery(BaseModel):
+    library: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    ecosystem: str | None = None
+    limit: int | None = Field(default=None, ge=1, le=500)
+    url: str | None = None
 
 
 class HealthResponse(BaseModel):

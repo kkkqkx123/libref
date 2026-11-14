@@ -77,6 +77,7 @@
 | --async | 否 | 关 | 经任务队列执行 |
 | --subdir | 否 | 无 | 只索引该子目录 |
 | --only-file | 否 | 无 | 可重复，只索引该仓内文件 |
+| --exclude-pattern | 否 | 无 | 可重复，排除匹配该正则的路径 |
 | --max-files | 否 | 无 | 文件数上限 |
 | --fresh | 否 | 关 | 丢弃断点游标 |
 
@@ -173,7 +174,11 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 
 ### probe-repo
 
-只返回目录结构，不解析。`source` 必填，`--subdir/--max-files/--sample-limit` 可选，`--only-file` 可重复（单文件限定，先过滤再做预算判断，未命中路径在返回体中回显）。
+只返回目录结构，不解析。`source` 必填，`--subdir/--max-files/--sample-limit` 可选，`--only-file` 可重复（单文件限定，先过滤再做预算判断，未命中路径在返回体中回显），`--exclude-pattern` 可重复（排除匹配路径），`--tree-depth` 展开目录树深度（缺省 1，返回目录与递归文件数，最多 100 条），`--samples-per-dir` 每目录采样上限（缺省关闭，打开后按目录分组采样，总量受采样数约束）。基路径分步走：先看根，再用 `--subdir` 下钻。
+
+### link-stats
+
+引用数统计，只读。`library/version` 必填，`--ecosystem` 可选，`--limit` 默认 20，给出 `--url` 时返回单页统计，不给时返回版本汇总加被引用排名。
 
 ### dump-chunks
 

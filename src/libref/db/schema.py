@@ -419,6 +419,21 @@ CREATE INDEX IF NOT EXISTS idx_import_edges_target ON import_edges(version_id, t
 CREATE INDEX IF NOT EXISTS idx_import_edges_file ON import_edges(version_id, importer_file);
 """
 
+# ── Document link edges: per-version source page to target page linkage ──
+DOC_LINK_EDGES_SQL = """
+CREATE TABLE doc_link_edges(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  src_url TEXT NOT NULL,
+  dst_url TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'internal',
+  UNIQUE(version_id, src_url, dst_url)
+);
+CREATE INDEX IF NOT EXISTS idx_doc_link_edges_dst ON doc_link_edges(version_id, dst_url);
+CREATE INDEX IF NOT EXISTS idx_doc_link_edges_src ON doc_link_edges(version_id, src_url);
+"""
+
 # ── Vector sync watermark: records how far vector sync progressed per version ──
 PROGRESS_VECTOR_WATERMARK_SQL = """
 ALTER TABLE ingest_progress ADD COLUMN vector_done INTEGER NOT NULL DEFAULT 0;

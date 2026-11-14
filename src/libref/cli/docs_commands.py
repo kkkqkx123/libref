@@ -100,6 +100,53 @@ def cmd_probe_docs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_link_stats(args: argparse.Namespace) -> int:
+    """Reference counts over stored document link edges."""
+    import json as _json
+
+    from libref.services.docs.links import (
+        page_link_stats,
+        top_referenced,
+        version_link_summary,
+    )
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        url = getattr(args, "url", None)
+        if url:
+            out = page_link_stats(
+                conn,
+                url,
+                args.library,
+                args.version,
+                getattr(args, "ecosystem", None),
+            )
+        else:
+            out = {
+                "summary": version_link_summary(
+                    conn,
+                    args.library,
+                    args.version,
+                    getattr(args, "ecosystem", None),
+                ),
+                "items": top_referenced(
+                    conn,
+                    args.library,
+                    args.version,
+                    getattr(args, "ecosystem", None),
+                    limit=getattr(args, "limit", 20),
+                ),
+            }
+    except ValueError as exc:
+        print(f"invalid: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    print(_json.dumps(out, ensure_ascii=False))
+    return 0
+
+
 def cmd_smoke(args: argparse.Namespace) -> int:
     """Local smoke test: spin up a temporary HTTP site to validate the full chain from discovery to storage, no external network needed."""
     import threading

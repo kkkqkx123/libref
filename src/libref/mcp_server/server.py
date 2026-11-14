@@ -66,6 +66,7 @@ ALL_MCP_TOOLS: frozenset[str] = frozenset(
         "doc_probe",
         "repo_probe",
         "repo_dependencies",
+        "link_stats",
         "api_insight",
         "pattern_insight",
         "symbol_insight",
@@ -376,6 +377,9 @@ def build_mcp_server(
         max_files: int | None = None,
         sample_limit: int | None = None,
         only_files: list[str] | None = None,
+        exclude_patterns: list[str] | None = None,
+        tree_depth: int | None = None,
+        samples_per_dir: int | None = None,
     ) -> dict[str, Any]:
         """Probe a repository structure without parsing; confirm the range before indexing."""
         if not source.strip():
@@ -392,6 +396,18 @@ def build_mcp_server(
             or any(not isinstance(item, str) or not item.strip() for item in only_files)
         ):
             return _invalid("only_files must be a non-empty string list")
+        if exclude_patterns is not None and (
+            not isinstance(exclude_patterns, list)
+            or not exclude_patterns
+            or any(not isinstance(item, str) or not item.strip() for item in exclude_patterns)
+        ):
+            return _invalid("exclude_patterns must be a non-empty string list")
+        bad = _check_limit(tree_depth, low=1, high=10)
+        if bad is not None:
+            return _invalid(bad)
+        bad = _check_limit(samples_per_dir, low=1, high=50)
+        if bad is not None:
+            return _invalid(bad)
         try:
             probe = probe_repo(
                 source,
@@ -400,6 +416,9 @@ def build_mcp_server(
                 max_files=max_files,
                 sample_limit=sample_limit,
                 only_files=only_files,
+                exclude_patterns=exclude_patterns,
+                tree_depth=tree_depth,
+                samples_per_dir=samples_per_dir,
             )
         except ValueError as exc:
             return _invalid(str(exc))
@@ -428,6 +447,41 @@ def build_mcp_server(
                     ecosystem=ecosystem,
                 )
             )
+        except ValueError as exc:
+            return _invalid(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _failed(str(exc))
+
+    def link_stats(
+        library: str,
+        version: str,
+        ecosystem: str | None = None,
+        limit: int | None = None,
+        url: str | None = None,
+    ) -> dict[str, Any]:
+        """Reference counts over stored document link edges; url selects per-page stats."""
+        from libref.services.docs.links import (
+            page_link_stats,
+            top_referenced,
+            version_link_summary,
+        )
+
+        if not library.strip():
+            return _invalid("library is empty")
+        if not version.strip():
+            return _invalid("version is empty")
+        bad = _check_limit(limit, low=1, high=500)
+        if bad is not None:
+            return _invalid(bad)
+        try:
+            if url:
+                return page_link_stats(conn, url, library, version, ecosystem)
+            return {
+                "summary": version_link_summary(conn, library, version, ecosystem),
+                "items": top_referenced(
+                    conn, library, version, ecosystem, limit=limit
+                ),
+            }
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -749,6 +803,7 @@ def build_mcp_server(
         "doc_probe": doc_probe,
         "repo_probe": repo_probe,
         "repo_dependencies": repo_dependencies,
+        "link_stats": link_stats,
         "api_insight": api_insight,
         "pattern_insight": pattern_insight,
         "symbol_insight": symbol_insight,

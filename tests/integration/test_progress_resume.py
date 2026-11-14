@@ -90,6 +90,109 @@ def test_repo_probe_local(monkeypatch, tmp_path) -> None:
     assert probe.suffix_groups, "probe suffix groups are empty"
 
 
+def _write_nested_repo(root) -> None:
+    layout = {
+        "pkg/__init__.py": "",
+        "pkg/core.py": "x = 1\n",
+        "pkg/sub/mod.py": "y = 2\n",
+        "pkg/sub/deep/leaf.py": "z = 3\n",
+        "pkg/tests/t_core.py": "t = 4\n",
+        "other/o.py": "w = 5\n",
+    }
+    for rel, body in layout.items():
+        path = root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+
+def test_repo_probe_tree_depth_and_exclude(monkeypatch, tmp_path) -> None:
+    repo = tmp_path / "nested"
+    _write_nested_repo(repo)
+    settings = make_settings(monkeypatch, tmp_path)
+    shallow = probe_repo(str(repo), settings=settings)
+    assert shallow.tree_depth == 1
+    assert {e.directory for e in shallow.dir_tree} == {"pkg", "other"}
+    deep = probe_repo(str(repo), settings=settings, tree_depth=3)
+    by_dir = {e.directory: e.files for e in deep.dir_tree}
+    assert by_dir["pkg"] == 5
+    assert by_dir["pkg/sub"] == 2
+    assert by_dir["pkg/sub/deep"] == 1
+    assert by_dir["pkg/tests"] == 1
+    assert deep.tree_truncated is False
+    scoped = probe_repo(
+        str(repo), settings=settings, tree_depth=3, exclude_patterns=[r"(^|/)tests/"]
+    )
+    assert scoped.exclude_patterns == [r"(^|/)tests/"]
+    assert scoped.effective_files == 5
+    assert "pkg/tests" not in {e.directory for e in scoped.dir_tree}
+    assert scoped.unmatched_only_files == []
+    with pytest.raises(ValueError, match="invalid exclude pattern"):
+        probe_repo(str(repo), settings=settings, exclude_patterns=["("])
+    with pytest.raises(ValueError, match="tree_depth"):
+        probe_repo(str(repo), settings=settings, tree_depth=0)
+
+
+def test_repo_probe_samples_per_dir(monkeypatch, tmp_path) -> None:
+    repo = tmp_path / "nested_samples"
+    _write_nested_repo(repo)
+    settings = make_settings(monkeypatch, tmp_path)
+    plain = probe_repo(str(repo), settings=settings)
+    assert plain.dir_samples == []
+    sampled = probe_repo(
+        str(repo), settings=settings, tree_depth=3, samples_per_dir=2
+    )
+    assert sampled.samples_per_dir == 2
+    total = sum(len(entry.files) for entry in sampled.dir_samples)
+    assert 0 < total <= settings.probe_sample_limit
+    assert all(len(entry.files) <= 2 for entry in sampled.dir_samples)
+    by_dir = {entry.directory: entry.files for entry in sampled.dir_samples}
+    assert by_dir["pkg"] == ["pkg/__init__.py", "pkg/core.py"]
+    assert by_dir["pkg/sub"] == ["pkg/sub/mod.py"]
+    assert by_dir["pkg/sub/deep"] == ["pkg/sub/deep/leaf.py"]
+    with pytest.raises(ValueError, match="samples_per_dir"):
+        probe_repo(str(repo), settings=settings, samples_per_dir=0)
+    with pytest.raises(ValueError, match="samples_per_dir"):
+        probe_repo(str(repo), settings=settings, samples_per_dir=51)
+
+
+def test_index_repo_exclude_matches_probe(conn, monkeypatch, tmp_path) -> None:
+    from libref.services.code.code_ingest import index_repo
+
+    repo = tmp_path / "nested_index"
+    _write_nested_repo(repo)
+    settings = make_settings(
+        monkeypatch, tmp_path, index_batch_files=10, repos_dir=tmp_path / "repos"
+    )
+    probe = probe_repo(
+        str(repo), settings=settings, exclude_patterns=[r"(^|/)tests/"]
+    )
+    assert probe.effective_files == 5
+    counts = index_repo(
+        conn,
+        "demo",
+        "0.1",
+        str(repo),
+        repos_dir=tmp_path / "repos",
+        settings=settings,
+        exclude_patterns=[r"(^|/)tests/"],
+    )
+    assert counts["files"] == probe.effective_files
+    rows = conn.execute(
+        "SELECT COUNT(*) FROM call_instances WHERE caller_file LIKE '%tests/%'"
+    ).fetchone()
+    assert rows[0] == 0
+    with pytest.raises(ValueError, match="invalid exclude pattern"):
+        index_repo(
+            conn,
+            "demo",
+            "0.2",
+            str(repo),
+            repos_dir=tmp_path / "repos",
+            settings=settings,
+            exclude_patterns=["("],
+        )
+
+
 def test_index_repo_batched_resume_clears_cursor(conn, monkeypatch, tmp_path) -> None:
     from libref.services.code.code_ingest import index_repo
 
@@ -202,7 +305,12 @@ def _probe_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
             200,
             headers={"content-type": "text/html; charset=utf-8"},
-            text="<html><head><title>Guide A</title></head><body>hi</body></html>",
+            text=(
+                "<html><head><title>Guide A</title></head><body>"
+                '<p><a href="/guide/deep">Deep</a> '
+                '<a href="https://x.example/o">X</a></p>'
+                "</body></html>"
+            ),
         )
     if path == "/blog/b":
         return httpx.Response(
@@ -267,6 +375,23 @@ def test_doc_probe_threshold_parity_with_ingest(conn, monkeypatch, tmp_path) -> 
     assert conn.execute("SELECT count(*) FROM pages").fetchone()[0] == 0
 
 
+def test_doc_probe_outlink_preview(conn, monkeypatch, tmp_path) -> None:
+    _patched_client(monkeypatch)
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    import asyncio
+
+    probe = asyncio.run(
+        probe_docs_async(conn, settings, "https://d.example/sitemap.xml")
+    )
+    by_url = {d.url: d for d in probe.sample_details}
+    assert by_url["https://d.example/guide/a"].outlink_total == 2
+    assert by_url["https://d.example/guide/a"].outlink_external == 1
+    assert by_url["https://d.example/guide/a"].external_domains == ["x.example"]
+    assert by_url["https://d.example/guide/a"].head_truncated is False
+    assert by_url["https://d.example/blog/b"].outlink_total == 0
+    assert conn.execute("SELECT count(*) FROM pages").fetchone()[0] == 0
+
+
 def test_doc_probe_follow_flag(conn, monkeypatch, tmp_path) -> None:
     _patched_client(monkeypatch)
     settings = make_crawler_settings(monkeypatch, tmp_path)
@@ -325,7 +450,12 @@ def test_mcp_probe_tool_schemas(conn, monkeypatch, tmp_path) -> None:
 
     tools = asyncio.run(mcp.list_tools())
     by_name = {tool.name: tool for tool in tools}
-    assert {"doc_probe", "repo_probe"} <= set(by_name)
+    assert {"doc_probe", "repo_probe", "link_stats"} <= set(by_name)
+    link_params = by_name["link_stats"].input_schema.get("properties", {})
+    assert {"library", "version", "limit", "url"} <= set(link_params)
+    repo_params = by_name["repo_probe"].input_schema.get("properties", {})
+    assert {"exclude_patterns", "tree_depth", "only_files", "subdir"} <= set(repo_params)
+    assert "samples_per_dir" in set(repo_params)
     doc_params = by_name["doc_probe"].input_schema.get("properties", {})
     assert {"max_pages", "prefilter", "scope", "sample_limit"} <= set(doc_params)
     repo_params = by_name["repo_probe"].input_schema.get("properties", {})
