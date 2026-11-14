@@ -148,7 +148,7 @@ async def _index_repo_inner(
     from libref.astminer import cache as ast_cache
     from libref.astminer import config as ast_config
     from libref.astminer import resolution as ast_resolution
-    from libref.astminer.repos import RepoManager, iter_source_files
+    from libref.astminer.repos import RepoManager, describe_source_files
     from libref.services.infra.progress import (
         CODE_KIND,
         resume_offset,
@@ -197,21 +197,30 @@ async def _index_repo_inner(
             )
     root, commit = manager.ensure(conn, repo_name, source, update=update)
     conn.commit()
-    files = [r for r in iter_source_files(root, ast_config.all_suffixes())]
-    prefix = (subdir or "").strip().strip("/")
-    if prefix:
-        files = [r for r in files if r == prefix or r.startswith(prefix + "/")]
+    from libref.crawler.scope import BudgetExceeded
+
+    census = describe_source_files(root, ast_config.all_suffixes(), subdir=subdir)
+    files = list(census["files"])
     if only_files:
         wanted_files = set(only_files)
         files = [r for r in files if r in wanted_files]
-    files_truncated = False
     if max_files is not None and len(files) > max_files:
-        files = files[:max_files]
-        files_truncated = True
+        raise BudgetExceeded(
+            f"source budget exceeded: {len(files)} files over budget {max_files}"
+        )
     batch_size = max(1, int(getattr(settings, "index_batch_files", 200) or 200))
     done, fingerprint = resume_offset(conn, version_id, CODE_KIND, files, fresh=fresh)
     counts = {"resumed_skipped": done, "batches": 0, "vector_failed": 0}
-    counts["files_truncated"] = 1 if files_truncated else 0
+    counts["files_truncated"] = 0
+    counts["skipped_oversize"] = int(census.get("oversized", 0))
+    if counts["skipped_oversize"]:
+        import logging as _logging
+
+        _logging.getLogger(__name__).warning(
+            "skipped %d oversize source files under %s",
+            counts["skipped_oversize"],
+            root,
+        )
     _vectors_live = settings is not None and vec_store is not None and embed is not None
     _doc_store = None
     if _vectors_live:

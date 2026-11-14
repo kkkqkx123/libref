@@ -9,6 +9,8 @@ from libref.store.document_store import DocumentStore
 logger = logging.getLogger(__name__)
 
 
+# NOTE: the baseline is the full visited set of the run, so link-followed
+# pages are covered exactly like seed pages.
 def sweep_absent(
     conn,
     store: DocumentStore,

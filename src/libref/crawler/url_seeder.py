@@ -18,6 +18,7 @@ import httpx
 
 from libref.crawler.robots import RobotsChecker
 from libref.crawler.scope import (
+    BudgetExceeded,
     content_type_allowed,
     crawl_key,
     score_url,
@@ -31,7 +32,6 @@ _SITEMAP_GZ_NAMES = ("sitemap.xml.gz", "sitemap_index.xml.gz", "sitemap-index.xm
 _FEED_NAMES = ("feed.xml", "atom.xml", "rss.xml", "feed")
 _LLMS_VARIANTS = ("llms.txt", "llms-full.txt")
 _MAX_SITEMAP_DEPTH = 3
-_MAX_SITEMAP_URLS = 20000
 
 # Utility addresses that are never documentation: seeder self-descriptions and
 # common static resources. Mirrors the blueprint nonsense-URL filter idea.
@@ -97,6 +97,8 @@ class SeedResult:
     truncated: bool = False
     failed: bool = False
     cross_site: list[str] = field(default_factory=list)
+    chosen_llms: str = ""
+    llms_levels: list[tuple[str, int, int]] = field(default_factory=list)
 
 
 class UrlSeeder:
@@ -119,6 +121,7 @@ class UrlSeeder:
         query: str | None = None,
         score_threshold: float | None = None,
         force: bool = False,
+        path_prefixes: tuple[str, ...] | list[str] | None = None,
     ) -> SeedResult:
         """Discover doc URLs from the start URL; llms.txt first, then the sitemap queue, then feed fallback."""
         if not force and self._cache_ttl > 0:
@@ -128,7 +131,8 @@ class UrlSeeder:
         parts = urlsplit(start_url)
         host = parts.netloc
 
-        llms = await self._collect_llms(start_url)
+        prefixes = tuple(path_prefixes or ())
+        llms = await self._collect_llms(start_url, path_prefixes=prefixes)
         if llms.urls:
             result = llms
             attempted = list(llms.attempted)
@@ -177,9 +181,9 @@ class UrlSeeder:
                 urls = [u for u in urls if score_url(u, query) >= score_threshold]
             urls = sort_by_relevance(urls, query)
         if max_pages is not None and len(urls) > max_pages:
-            # The count cap applies only to the filtered set; whether more candidates remain decides the truncated flag
-            truncated = True
-            urls = urls[:max_pages]
+            raise BudgetExceeded(
+                f"discovery budget exceeded: {len(urls)} candidates over budget {max_pages}"
+            )
 
         if not urls:
             outcome = SeedResult(
@@ -190,6 +194,8 @@ class UrlSeeder:
                 truncated=truncated,
                 failed=transient,
                 cross_site=cross_site,
+                chosen_llms=getattr(result, "chosen_llms", ""),
+                llms_levels=list(getattr(result, "llms_levels", [])),
             )
         else:
             outcome = SeedResult(
@@ -200,6 +206,8 @@ class UrlSeeder:
                 truncated=truncated,
                 failed=False,
                 cross_site=cross_site,
+                chosen_llms=getattr(result, "chosen_llms", ""),
+                llms_levels=list(getattr(result, "llms_levels", [])),
             )
         if self._cache_ttl > 0:
             while len(_SEED_CACHE) >= _SEED_CACHE_CAP:
@@ -213,15 +221,20 @@ class UrlSeeder:
     async def _from_llms_txt(self, base: str) -> SeedResult:
         return await self._collect_llms(base)
 
-    async def _collect_llms(self, start_url: str) -> SeedResult:
-        # Every level from the start directory up to the root is read: on
-        # multi-product sites a section file shadows the product file, and the
-        # fuller listing is the corpus, not the first hit. Single-level sites
+    async def _collect_llms(
+        self,
+        start_url: str,
+        *,
+        path_prefixes: tuple[str, ...] = (),
+    ) -> SeedResult:
+        # Every level from the start directory up to the root is read: the
+        # winner is the level with the most in-scope URLs when a prefix hint is
+        # given, otherwise the level with the most URLs. Single-level sites
         # behave exactly as before.
         attempted: list[str] = []
         errors: dict[str, str] = {}
         transient_seen = False
-        best: dict[str, tuple[list[str], list[str]]] = {}
+        levels: list[tuple[str, str, list[str], list[str]]] = []
         for directory in _llms_directories(start_url):
             for variant in _LLMS_VARIANTS:
                 candidate = f"{directory}/{variant}"
@@ -232,14 +245,41 @@ class UrlSeeder:
                     transient_seen = transient_seen or transient
                     continue
                 urls, cross = self._parse_llms_body(body, candidate, start_url)
-                if len(urls) > len(best.get(variant, ([], []))[0]):
-                    best[variant] = (urls, cross)
+                levels.append((candidate, variant, urls, cross))
                 errors[candidate] = f"{len(urls)} urls" if urls else "no urls"
         best_urls: list[str] = []
         best_cross: list[str] = []
+        chosen = ""
+        ranked_levels: list[tuple[str, int, int]] = []
+        for candidate, _variant, urls, _cross in levels:
+            if path_prefixes:
+                in_scope = sum(
+                    1
+                    for u in urls
+                    if any(urlsplit(u).path.startswith(p) for p in path_prefixes)
+                )
+            else:
+                in_scope = len(urls)
+            ranked_levels.append((candidate, len(urls), in_scope))
         for variant in _LLMS_VARIANTS:
-            if variant in best:
-                best_urls, best_cross = best[variant]
+            contenders = [lv for lv in levels if lv[1] == variant]
+            if not contenders:
+                continue
+
+            def _score(item: tuple[str, str, list[str], list[str]]) -> int:
+                _candidate, _v, urls, _c = item
+                if path_prefixes:
+                    return sum(
+                        1
+                        for u in urls
+                        if any(urlsplit(u).path.startswith(p) for p in path_prefixes)
+                    )
+                return len(urls)
+
+            winner = max(contenders, key=_score)
+            if _score(winner) > 0:
+                chosen = winner[0]
+                best_urls, best_cross = winner[2], winner[3]
                 break
         if best_urls:
             return SeedResult(
@@ -248,11 +288,14 @@ class UrlSeeder:
                 attempted=attempted,
                 errors=errors,
                 cross_site=[],
+                chosen_llms=chosen,
+                llms_levels=ranked_levels,
             )
         return SeedResult(
             attempted=attempted,
             errors=errors,
             failed=transient_seen,
+            llms_levels=ranked_levels,
         )
 
     def _parse_llms_body(
@@ -343,13 +386,12 @@ class UrlSeeder:
             )
             truncated = truncated or child_truncated
             if urls:
-                capped, capped_truncated = _cap_urls(urls)
                 return SeedResult(
-                    urls=capped,
+                    urls=urls,
                     source="sitemap",
                     attempted=attempted,
                     errors=errors,
-                    truncated=truncated or capped_truncated,
+                    truncated=truncated,
                 )
             errors[candidate] = "no urls"
         return SeedResult(
@@ -396,9 +438,11 @@ class UrlSeeder:
         errors: dict[str, str],
     ) -> tuple[list[str], bool]:
         if "<sitemapindex" not in text:
-            return _cap_urls(self._parse_loc_tags(text))
+            return self._parse_loc_tags(text), False
         if depth >= _MAX_SITEMAP_DEPTH:
-            return [], True
+            raise BudgetExceeded(
+                f"sitemap index nesting over depth {_MAX_SITEMAP_DEPTH}: {base_url}"
+            )
         nested: list[str] = []
         for child in self._parse_sitemap_locs(text):
             child_url = child if child.startswith("http") else urljoin(base_url, child)
@@ -424,9 +468,7 @@ class UrlSeeder:
                 nested.extend(deeper)
             else:
                 nested.extend(self._parse_loc_tags(child_text))
-            if len(nested) >= _MAX_SITEMAP_URLS:
-                return _cap_urls(nested)
-        return _cap_urls(nested)
+        return nested, False
 
     async def _get_text(self, url: str) -> tuple[str | None, str | None, bool]:
         body, note, transient = await self._get_bytes(url)
@@ -471,13 +513,12 @@ class UrlSeeder:
             text = payload.decode("utf-8", errors="replace")
             urls = _parse_feed_urls(text, candidate)
             if urls:
-                capped, capped_truncated = _cap_urls(urls)
                 return SeedResult(
-                    urls=capped,
+                    urls=urls,
                     source="feed",
                     attempted=attempted,
                     errors=errors,
-                    truncated=capped_truncated,
+                    truncated=False,
                 )
             errors[candidate] = "no urls"
         return SeedResult(
@@ -535,9 +576,7 @@ def _maybe_gunzip(body: bytes) -> bytes:
 
 
 def _cap_urls(urls: list[str]) -> tuple[list[str], bool]:
-    if len(urls) > _MAX_SITEMAP_URLS:
-        return urls[:_MAX_SITEMAP_URLS], True
-    return urls, len(urls) >= _MAX_SITEMAP_URLS
+    return urls, False
 
 
 def _llms_directories(start_url: str) -> list[str]:

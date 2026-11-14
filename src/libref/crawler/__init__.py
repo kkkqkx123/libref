@@ -33,6 +33,7 @@ from libref.crawler.registry import (
 )
 from libref.crawler.robots import RobotsChecker, ensure_robots_cache
 from libref.crawler.scope import (
+    BudgetExceeded,
     FilterStats,
     ScopePolicy,
     build_scope,
@@ -45,6 +46,7 @@ from libref.crawler.url_seeder import SeedResult, UrlSeeder
 __all__ = [
     "ECOSYSTEM_ALIASES",
     "SUPPORTED_ECOSYSTEMS",
+    "BudgetExceeded",
     "FetchOutcome",
     "FilterStats",
     "HttpFetcher",

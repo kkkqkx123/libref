@@ -166,11 +166,13 @@ def _assemble(
     truncated_extra=False,
 ) -> RepoProbe:
     files: list[str] = list(census["files"])
-    truncated = False
     if max_files is not None and len(files) > max_files:
-        files = files[:max_files]
-        truncated = True
-    truncated = truncated or truncated_extra
+        from libref.crawler.scope import BudgetExceeded
+
+        raise BudgetExceeded(
+            f"probe budget exceeded: {len(files)} files over budget {max_files}"
+        )
+    truncated = truncated_extra
     dir_counts = dict(census["top_dirs"])
     suffix_counts = dict(census["suffix_counts"])
     top_dirs = [

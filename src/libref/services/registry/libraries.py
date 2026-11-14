@@ -65,6 +65,42 @@ class LibraryService:
             )
         return out
 
+    def record_site_version(
+        self,
+        version_id: int,
+        value: str,
+        signal: str = "",
+        sample_url: str = "",
+    ) -> None:
+        """Persist what the site states it documents; pure write, no comparison."""
+        from libref.db.conn import write_lock
+
+        guard = write_lock(self._conn)
+        guard.acquire()
+        try:
+            self._conn.execute(
+                "UPDATE versions SET site_version=?, site_version_signal=?,"
+                " site_version_sample=? WHERE id=?",
+                (value, signal, sample_url, version_id),
+            )
+            self._conn.commit()
+        finally:
+            guard.release()
+
+    def site_version(self, version_id: int) -> dict[str, str]:
+        row = self._conn.execute(
+            "SELECT site_version, site_version_signal, site_version_sample"
+            " FROM versions WHERE id=?",
+            (version_id,),
+        ).fetchone()
+        if row is None:
+            return {"value": "", "signal": "", "sample_url": ""}
+        return {
+            "value": str(row[0] or ""),
+            "signal": str(row[1] or ""),
+            "sample_url": str(row[2] or ""),
+        }
+
     def list_versions(
         self, library: str, ecosystem: str | None = None
     ) -> list[dict[str, Any]]:

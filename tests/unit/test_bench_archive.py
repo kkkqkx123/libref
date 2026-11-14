@@ -111,9 +111,7 @@ def test_pool_fixtures_only_supply_source_material(monkeypatch, tmp_path):
         bench_archive.load_spec()
 
 
-def test_budgets_must_be_positive_and_code_only_for_files(
-    monkeypatch, tmp_path
-):
+def test_budgets_must_be_positive_and_code_only_for_files(monkeypatch, tmp_path):
     monkeypatch.setattr(bench_archive, "SPEC", tmp_path / "bench.json")
     _spec(tmp_path, _loadable(_source(max_files=100, max_build_ms=1000)))
     assert bench_archive.load_spec()[0]["max_files"] == 100

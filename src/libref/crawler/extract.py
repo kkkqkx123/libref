@@ -100,6 +100,7 @@ class ScrapeResult:
     cleaned_html: str = ""
     internal_links: list[str] = field(default_factory=list)
     external_links: list[str] = field(default_factory=list)
+    structure_links: list[str] = field(default_factory=list)
     title: str = ""
     description: str = ""
     canonical: str = ""
@@ -132,6 +133,7 @@ def scrape_html(
     meta = _extract_metadata(tree, base_url)
     if base_url:
         _absolutize_links(tree, base_url)
+    structure_internal, structure_external = _collect_structure_links(tree, base_url)
     for tag in _STRIP_TAGS:
         for node in list(tree.css(tag)):
             node.decompose()
@@ -150,6 +152,11 @@ def scrape_html(
     _prune_empty_nodes(root)
 
     internal, external = _collect_links(root, base_url)
+    structure = [
+        u
+        for u in structure_internal + structure_external
+        if u not in set(internal + external)
+    ]
     inner = root.html or ""
     try:
         markdown = md(inner, heading_style="ATX", strip=["img"])
@@ -160,6 +167,7 @@ def scrape_html(
         cleaned_html=inner,
         internal_links=internal,
         external_links=external,
+        structure_links=[] if meta["nofollow"] else structure,
         title=meta["title"],
         description=meta["description"],
         canonical=meta["canonical"],
@@ -265,6 +273,50 @@ def _extract_metadata(tree: HTMLParser, base_url: str | None) -> dict:
     except Exception:  # noqa: BLE001, S110 — metadata is best-effort, never blocks extraction
         pass
     return meta
+
+
+_STRUCTURE_SELECTORS = (
+    "nav",
+    '[role="navigation"]',
+    ".sidebar",
+    ".toctree",
+    ".toc",
+    "aside",
+    ".sphinxsidebar",
+)
+
+
+def _collect_structure_links(tree, base_url: str | None) -> tuple[list[str], list[str]]:
+    internal: list[str] = []
+    external: list[str] = []
+    seen: set[str] = set()
+    host = urlsplit(base_url).netloc.lower() if base_url else ""
+    try:
+        nodes: list = []
+        for selector in _STRUCTURE_SELECTORS:
+            try:
+                nodes.extend(tree.css(selector))
+            except Exception:  # noqa: BLE001, S112 — a bad selector skips only itself
+                continue
+    except Exception:  # noqa: BLE001 — structure collection is best-effort
+        return [], []
+    for container in nodes:
+        try:
+            anchors = list(container.css("a[href]"))
+        except Exception:  # noqa: BLE001, S112 — unreadable container holds no links
+            continue
+        for node in anchors:
+            href = (node.attributes or {}).get("href", "").strip()
+            if not href or href.startswith(("#", "mailto:", "data:", "javascript:")):
+                continue
+            if href in seen:
+                continue
+            seen.add(href)
+            if host and urlsplit(href).netloc.lower() not in ("", host):
+                external.append(href)
+            else:
+                internal.append(href)
+    return internal, external
 
 
 def _collect_links(root, base_url: str | None) -> tuple[list[str], list[str]]:

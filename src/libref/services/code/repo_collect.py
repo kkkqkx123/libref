@@ -25,7 +25,7 @@ def _collect_decl_index(
     files: list[str],
 ) -> tuple[
     list,
-    dict[str, list[tuple[str, str]]],
+    dict[str, list[tuple[str, str, str | None]]],
     dict[str, int],
     dict[str, tuple[str, int]],
 ]:

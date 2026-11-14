@@ -103,9 +103,7 @@ def load_spec() -> list[dict[str, Any]]:
                     f"bench.json {key} must be a positive integer: {entry!r}"
                 )
         if "follow_links" in entry and not isinstance(entry["follow_links"], bool):
-            raise ArchiveError(
-                f"bench.json follow_links must be a boolean: {entry!r}"
-            )
+            raise ArchiveError(f"bench.json follow_links must be a boolean: {entry!r}")
         if "extra_urls" in entry and (
             not isinstance(entry["extra_urls"], list)
             or not all(isinstance(url, str) for url in entry["extra_urls"])

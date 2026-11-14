@@ -231,6 +231,10 @@ def _check_code(name: str, entry: dict[str, Any], info: dict, root: Path) -> Non
         raise bench_archive.ArchiveError(
             f"fixture {name}: parsed {info['parsed']} of {info['files']} files"
         )
+    if int(info.get("skipped_oversize", 0)):
+        raise bench_archive.ArchiveError(
+            f"fixture {name}: {info['skipped_oversize']} oversize files skipped"
+        )
     for key in ("entities", "calls", "source_chunks"):
         if not info[key]:
             raise bench_archive.ArchiveError(f"fixture {name}: {key} is zero")
@@ -294,6 +298,7 @@ def _index_code(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
         "entities": int(counts.get("entities", 0)),
         "calls": int(counts.get("calls", 0)),
         "source_chunks": int(counts.get("source_chunks", 0)),
+        "skipped_oversize": int(counts.get("skipped_oversize", 0)),
         "patterns": int(patterns_total[0]) if patterns_total else 0,
         "pattern_hits": len(patterns),
         "clusters": int(clusters[0]) if clusters else 0,

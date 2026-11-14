@@ -424,3 +424,15 @@ PROGRESS_VECTOR_WATERMARK_SQL = """
 ALTER TABLE ingest_progress ADD COLUMN vector_done INTEGER NOT NULL DEFAULT 0;
 UPDATE ingest_progress SET vector_done = done WHERE vector_done = 0;
 """
+
+# ── Site-stated documentation version: what the site says it documents ──
+VERSION_SITE_EVIDENCE_SQL = """
+ALTER TABLE versions ADD COLUMN site_version TEXT;
+ALTER TABLE versions ADD COLUMN site_version_signal TEXT;
+ALTER TABLE versions ADD COLUMN site_version_sample TEXT;
+"""
+
+# ── Follow-queue persistence: the link-followed URLs outstanding at failure ──
+PROGRESS_PENDING_SQL = """
+ALTER TABLE ingest_progress ADD COLUMN pending TEXT NOT NULL DEFAULT '[]';
+"""

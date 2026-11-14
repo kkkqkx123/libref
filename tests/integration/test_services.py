@@ -208,6 +208,8 @@ def test_scrape_docs_end_to_end_with_mock(conn, tmp_path, monkeypatch):
             return httpx.Response(200, text=page_html)
         if p == "/gone.html":
             return httpx.Response(404)
+        if p == "/llms-full.txt":
+            return httpx.Response(404)
         raise AssertionError(request.url.path)
 
     settings = make_crawler_settings(monkeypatch, tmp_path)
@@ -251,6 +253,8 @@ def test_scrape_sweeps_pages_missing_from_seed_to_absent(conn, monkeypatch, tmp_
                 200,
                 text="<html><body><main><p>keep body quetzalkeep</p></main></body></html>",
             )
+        if request.url.path == "/llms-full.txt":
+            return httpx.Response(404)
         raise AssertionError(request.url.path)
 
     settings = make_crawler_settings(monkeypatch, tmp_path)
@@ -296,11 +300,14 @@ def test_scrape_skips_sweep_when_seed_truncated(conn, monkeypatch, tmp_path):
             return httpx.Response(
                 200, text="<html><body><main><p>page body</p></main></body></html>"
             )
+        if request.url.path == "/llms-full.txt":
+            return httpx.Response(404)
         raise AssertionError(request.url.path)
 
     settings = make_crawler_settings(monkeypatch, tmp_path)
-    with mock_ingest(handler):
-        # max_pages=1 truncates the discovery set: absent-page cleanup must be skipped to avoid deleting uncovered pages
+    # max_pages=1 is a budget: an over-budget discovery fails loudly instead
+    # of silently sweeping a subset, so the stale page is never touched
+    with mock_ingest(handler), pytest.raises(Exception, match="budget"):
         IngestService(settings, conn).scrape_docs(
             "docs", "1.0", "https://d.example/", max_pages=1
         )
@@ -341,6 +348,8 @@ def test_start_scrape_job_runs_through_queue(conn, monkeypatch, tmp_path):
                 200,
                 text="<html><body><main><p>use uv to install libref</p></main></body></html>",
             )
+        if request.url.path == "/llms-full.txt":
+            return httpx.Response(404)
         raise AssertionError(request.url.path)
 
     settings = make_crawler_settings(monkeypatch, tmp_path)
@@ -444,16 +453,14 @@ def test_follow_discovers_deep_page(conn, monkeypatch, tmp_path) -> None:
 def test_follow_respects_max_pages(conn, monkeypatch, tmp_path) -> None:
     _SEED_CACHE.clear()
     settings = make_crawler_settings(monkeypatch, tmp_path)
-    with mock_ingest(_follow_handler):
-        counts = IngestService(settings, conn).scrape_docs(
+    with mock_ingest(_follow_handler), pytest.raises(Exception, match="budget"):
+        IngestService(settings, conn).scrape_docs(
             "docs",
             "1.0",
             "https://d.example/",
             max_pages=1,
             scope={"follow_links": True},
         )
-    assert counts["stored"] == 1
-    assert counts["deep_truncated"] == 1
 
 
 def test_classify_content_dispatch(monkeypatch, tmp_path) -> None:

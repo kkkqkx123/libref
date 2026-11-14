@@ -8,7 +8,9 @@ from typing import Any
 from libref.chunking import ChunkPath
 from libref.chunking.budget import ChunkBudget, budgets_from_settings
 from libref.crawler import build_scope
-from libref.crawler.scope import crawl_key, sort_by_relevance
+from libref.crawler.scope import BudgetExceeded, crawl_key, sort_by_relevance
+
+__all__ = ["BudgetExceeded"]
 from libref.store.document_store import DocumentInput
 from libref.text.normalize import normalize_markdown
 
@@ -21,6 +23,7 @@ class FetchDetail:
 
     links: list[str] = field(default_factory=list)
     canonical: str = ""
+    structure_links: list[str] = field(default_factory=list)
 
 
 def doc_budgets(settings) -> dict[ChunkPath, ChunkBudget]:
@@ -60,12 +63,11 @@ def plan_targets(
     query = (scope or {}).get("crawl_query")
     if query and query.strip():
         accepted = sort_by_relevance(accepted, query)
-    ingest_truncated = False
     if max_pages is not None and len(accepted) > max_pages:
-        accepted = accepted[:max_pages]
-        ingest_truncated = True
-    truncated = bool(seed.truncated or ingest_truncated)
-    return accepted, rejected, truncated, stats
+        raise BudgetExceeded(
+            f"ingest budget exceeded: {len(accepted)} candidates over budget {max_pages}"
+        )
+    return accepted, rejected, bool(seed.truncated), stats
 
 
 def record_outcome(

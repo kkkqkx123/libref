@@ -14,7 +14,13 @@ from typing import Any
 
 import httpx
 
-from libref.crawler import HttpFetcher, RobotsChecker, UrlSeeder, build_scope
+from libref.crawler import (
+    BudgetExceeded,
+    HttpFetcher,
+    RobotsChecker,
+    UrlSeeder,
+    build_scope,
+)
 from libref.crawler.scope import crawl_key
 from libref.llm import EmbedFn
 from libref.services.docs.scrape_jobs import (
@@ -80,6 +86,49 @@ class IngestService:
         self._conn = conn
         self._vec, self._embed = paired_vector(vec_store, embed)
         self._pipeline = PagePipeline(settings)
+
+    @staticmethod
+    def _record_site_version(catalog, store, version_id, requested, counts) -> None:
+        from libref.crawler.versioning import compare_versions, majority_evidence
+
+        try:
+            urls = [
+                u
+                for u in store.list_page_urls(version_id)
+                if u.startswith(("http://", "https://"))
+            ]
+        except Exception:  # noqa: BLE001 — version evidence never blocks the scrape
+            return
+        if not urls:
+            return
+        evidence = majority_evidence(urls)
+        try:
+            catalog.record_site_version(
+                version_id,
+                evidence["value"],
+                evidence["signal"],
+                evidence["sample_url"],
+            )
+        except Exception:  # noqa: BLE001 — evidence write is best-effort on old schemas
+            return
+        verdict = compare_versions(str(requested or ""), evidence["value"])
+        logger.info(
+            "site version %r signal %s requested %r",
+            evidence["value"],
+            evidence["signal"],
+            requested,
+        )
+        if verdict == "fail":
+            raise BudgetExceeded(
+                f"site states {evidence['value']!r} but requested {requested!r}"
+            )
+        if verdict == "warn":
+            logger.warning(
+                "site version %r differs in kind from requested %r (%s)",
+                evidence["value"],
+                requested,
+                evidence["signal"],
+            )
 
     def scrape_docs(
         self,
@@ -323,6 +372,7 @@ class IngestService:
                 "snapshot_quota_skipped",
                 "deep_discovered",
                 "deep_truncated",
+                "structure_discovered",
                 "resumed_skipped",
                 "batches",
                 "elapsed_ms",
@@ -360,6 +410,7 @@ class IngestService:
                 force_seed = bool((scope or {}).get("refresh_seed", False)) or (
                     resolved_from == "refresh"
                 )
+                prefixes = tuple((scope or {}).get("path_prefixes") or ())
                 seed = await seeder.discover(
                     start_url,
                     prefilter=prefilter,
@@ -367,7 +418,14 @@ class IngestService:
                     query=(scope or {}).get("crawl_query"),
                     score_threshold=(scope or {}).get("score_threshold"),
                     force=force_seed,
+                    path_prefixes=prefixes or None,
                 )
+                if seed.chosen_llms:
+                    logger.info(
+                        "seed chose %s levels=%s",
+                        seed.chosen_llms,
+                        [(c, n, s) for c, n, s in seed.llms_levels],
+                    )
                 counts["discover_ms"] = int((_time.monotonic() - discover_start) * 1000)
                 accepted, rejected, truncated, plan_stats = plan_targets(
                     seed, start_url, scope, max_pages
@@ -455,19 +513,37 @@ class IngestService:
                                     policy.max_depth is not None
                                     and depth + 1 > policy.max_depth
                                 ):
-                                    counts["deep_truncated"] = 1
                                     continue
                                 if not policy.accept(target):
                                     continue
                                 visited.add(target)
                                 pending.append((target, depth + 1))
+                            for link in detail.structure_links:
+                                target = crawl_key(link)
+                                if target in visited:
+                                    continue
+                                if (
+                                    policy.max_depth is not None
+                                    and depth + 1 > policy.max_depth
+                                ):
+                                    continue
+                                if not policy.accept(target):
+                                    continue
+                                visited.add(target)
+                                pending.append((target, depth + 1))
+                                counts["structure_discovered"] = (
+                                    counts.get("structure_discovered", 0) + 1
+                                )
                         _beat()
 
+                from libref.crawler.scope import BudgetExceeded
                 from libref.services.infra.progress import (
                     DOCS_KIND,
                     clear_progress,
+                    load_pending,
                     load_progress,
                     resume_offset,
+                    save_pending,
                     save_progress,
                     save_vector_watermark,
                 )
@@ -520,18 +596,26 @@ class IngestService:
                     )
                     counts["vector_done"] = new_done
                     _beat()
+                if follow and not fresh:
+                    for saved_url in load_pending(self._conn, version_id, DOCS_KIND):
+                        key = crawl_key(saved_url)
+                        if key not in visited:
+                            visited.add(key)
+                            pending.append((key, 0))
                 if follow:
                     while pending:
-                        if max_pages is not None and len(visited) >= max_pages:
-                            counts["deep_truncated"] = 1
-                            break
+                        if max_pages is not None and len(visited) > max_pages:
+                            raise BudgetExceeded(
+                                f"follow budget exceeded: {len(visited)} visited over budget {max_pages}"
+                            )
                         batch = pending
                         pending = []
-                        if max_pages is not None:
-                            room = max_pages - len(visited)
-                            if len(batch) > room:
-                                counts["deep_truncated"] = 1
-                                batch = batch[:room]
+                        save_pending(
+                            self._conn,
+                            version_id,
+                            DOCS_KIND,
+                            [u for u, _d in batch],
+                        )
                         counts["deep_discovered"] += len(batch)
                         for start in range(0, len(batch), batch_size):
                             await asyncio.gather(
@@ -541,27 +625,29 @@ class IngestService:
                                 )
                             )
                             _beat()
-                # Absent sweeping is seed-driven; link-followed pages are outside
-                # the seed set, so the sweep is skipped in follow mode entirely.
-                # Follow-discovered pages also sit outside the resume cursor and
-                # are re-walked on retry.
+                        if max_pages is not None and len(visited) > max_pages:
+                            raise BudgetExceeded(
+                                f"follow budget exceeded: {len(visited)} visited over budget {max_pages}"
+                            )
+                    save_pending(self._conn, version_id, DOCS_KIND, [])
+                # Absent sweeping covers every page actually visited this run;
+                # in seed mode that set equals the seed set.
                 # Batch syncs already pushed page deltas with the version watermark;
                 # the closing sync only carries sweep deletions plus set verification.
                 sweep_prev = len(removed_all)
-                if not follow:
-                    removed_all.extend(
-                        sweep_absent(
-                            self._conn,
-                            store,
-                            library_id,
-                            version_id,
-                            seed,
-                            accepted,
-                            truncated=truncated,
-                            counts=counts,
-                            snapshot_ctx=(ecosystem, library, version),
-                        )
+                removed_all.extend(
+                    sweep_absent(
+                        self._conn,
+                        store,
+                        library_id,
+                        version_id,
+                        seed,
+                        list(visited),
+                        truncated=truncated,
+                        counts=counts,
+                        snapshot_ctx=(ecosystem, library, version),
                     )
+                )
                 vectors_start = _time.monotonic()
                 await sync_vectors(
                     self._conn,
@@ -576,6 +662,7 @@ class IngestService:
                     repair=False,
                 )
                 counts["vectors_ms"] += int((_time.monotonic() - vectors_start) * 1000)
+                self._record_site_version(catalog, store, version_id, version, counts)
                 clear_progress(self._conn, version_id, DOCS_KIND)
                 _beat()
             import time as _time2

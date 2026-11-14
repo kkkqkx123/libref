@@ -19,6 +19,7 @@ from libref.db.schema import (
     MINING_REVIEW_SCHEMA_SQL,
     PAGES_CONTENT_HASH_SQL,
     PATTERN_LABEL_SQL,
+    PROGRESS_PENDING_SQL,
     PROGRESS_SQL,
     PROGRESS_VECTOR_WATERMARK_SQL,
     QUERY_SUPPORT_SQL,
@@ -27,6 +28,7 @@ from libref.db.schema import (
     SYMBOL_DETAIL_SQL,
     VEC_VERSION_META_SQL,
     VECTOR_META_SQL,
+    VERSION_SITE_EVIDENCE_SQL,
 )
 
 
@@ -58,6 +60,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(17, "symbol-detail", SYMBOL_DETAIL_SQL),
     Migration(18, "call-resolve", CALL_RESOLVE_SQL),
     Migration(19, "import-edges", IMPORT_EDGES_SQL),
+    Migration(20, "version-site-evidence", VERSION_SITE_EVIDENCE_SQL),
+    Migration(21, "ingest-progress-pending", PROGRESS_PENDING_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

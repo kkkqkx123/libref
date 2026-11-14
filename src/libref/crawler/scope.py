@@ -6,6 +6,11 @@ import re
 from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
+
+class BudgetExceeded(RuntimeError):
+    """Loud budget stop: the candidate set outgrew its declared budget, so the run fails instead of silently returning a subset."""
+
+
 # Default binary suffixes rejected before any request is spent; override via
 # excluded_suffixes / allowed_suffixes options. Mirrors the blueprint
 # ContentTypeFilter idea of refusing non-document payloads at decision time.

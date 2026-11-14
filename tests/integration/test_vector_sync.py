@@ -90,6 +90,8 @@ def _handler(body: str):
             )
         if request.url.path == "/install.html":
             return httpx.Response(200, text=body)
+        if request.url.path == "/llms-full.txt":
+            return httpx.Response(404)
         raise AssertionError(request.url.path)
 
     return handle

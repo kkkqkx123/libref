@@ -123,6 +123,21 @@ def _crawl_docs(entry: dict[str, Any]) -> dict[str, Any]:
                 ecosystem=entry["ecosystem"],
                 fresh=True,
             )
+            extra_share = (
+                len(extra) / max(1, int(counts.get("stored", 0) or 0)) if extra else 0.0
+            )
+            if extra and extra_share > 0.5:
+                print(
+                    f"WARN {bench_archive.fixture_id(entry)}: manual seeds cover"
+                    f" {extra_share:.0%} of the corpus; reassess discovery",
+                )
+            if int(counts.get("seed_truncated", 0)) or int(
+                counts.get("deep_truncated", 0)
+            ):
+                raise ArchiveError(
+                    f"fixture {bench_archive.fixture_id(entry)}: budget truncated"
+                    " the corpus; widen the scope instead of slicing"
+                )
         finally:
             conn.close()
         rows = _snapshot_rows(root / "snapshots", entry)

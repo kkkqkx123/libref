@@ -29,21 +29,15 @@ def test_llms_fullest_level_wins_over_section_file(monkeypatch, tmp_path):
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/docs/latest/llms.txt":
-            links = "\n".join(
-                f"- [Page {i}](/docs/latest/p{i}.md)" for i in range(5)
-            )
+            links = "\n".join(f"- [Page {i}](/docs/latest/p{i}.md)" for i in range(5))
             return httpx.Response(200, text=links + "\n")
         if request.url.path == "/docs/latest/guide/llms.txt":
-            return httpx.Response(
-                200, text="- [One](/docs/latest/guide/one.md)\n"
-            )
+            return httpx.Response(200, text="- [One](/docs/latest/guide/one.md)\n")
         return httpx.Response(404)
 
     client = make_client(handler)
     seeder = UrlSeeder(client, robots=None)  # type: ignore[arg-type]
-    result = run(
-        seeder._from_llms_txt("https://docs.example.com/docs/latest/guide/")
-    )
+    result = run(seeder._from_llms_txt("https://docs.example.com/docs/latest/guide/"))
     assert result.source == "llms.txt"
     assert result.urls == [
         f"https://docs.example.com/docs/latest/p{i}.md" for i in range(5)

@@ -25,6 +25,10 @@ def ensure_progress_table(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE ingest_progress ADD COLUMN vector_done INTEGER NOT NULL DEFAULT 0"
         )
+    if "pending" not in cols:
+        conn.execute(
+            "ALTER TABLE ingest_progress ADD COLUMN pending TEXT NOT NULL DEFAULT '[]'"
+        )
     conn.commit()
 
 
@@ -113,6 +117,44 @@ def clear_progress(conn: sqlite3.Connection, version_id: int, kind: str) -> None
             (version_id, kind),
         )
         conn.commit()
+
+
+def save_pending(
+    conn: sqlite3.Connection, version_id: int, kind: str, pending: list[str]
+) -> None:
+    """Persist the follow queue alongside the cursor; an empty queue clears the key."""
+    import json as _json
+
+    from libref.db.conn import write_lock
+
+    ensure_progress_table(conn)
+    with write_lock(conn):
+        conn.execute(
+            "INSERT INTO ingest_progress(version_id, kind, pending)"
+            " VALUES(?, ?, ?)"
+            " ON CONFLICT(version_id, kind) DO UPDATE"
+            " SET pending=excluded.pending, updated_at=datetime('now')",
+            (version_id, kind, _json.dumps(list(pending))),
+        )
+        conn.commit()
+
+
+def load_pending(conn: sqlite3.Connection, version_id: int, kind: str) -> list[str]:
+    """Follow queue saved by the previous attempt; empty when nothing was saved."""
+    import json as _json
+
+    ensure_progress_table(conn)
+    row = conn.execute(
+        "SELECT pending FROM ingest_progress WHERE version_id=? AND kind=?",
+        (version_id, kind),
+    ).fetchone()
+    if row is None:
+        return []
+    try:
+        items = _json.loads(str(row[0] or "[]"))
+    except ValueError:
+        return []
+    return [str(u) for u in items] if isinstance(items, list) else []
 
 
 def resume_offset(
