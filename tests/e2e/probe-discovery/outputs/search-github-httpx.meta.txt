@@ -1,0 +1,5 @@
+argv: libref search-github httpx --limit 5
+exit: 0
+elapsed: 1.8s
+stderr:
+(empty)

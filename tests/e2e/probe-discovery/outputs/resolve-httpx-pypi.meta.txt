@@ -1,0 +1,5 @@
+argv: libref resolve httpx --ecosystem pypi
+exit: 0
+elapsed: 6.7s
+stderr:
+(empty)

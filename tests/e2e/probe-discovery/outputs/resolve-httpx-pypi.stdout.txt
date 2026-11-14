@@ -1,0 +1,1 @@
+{"ecosystem": "pypi", "name": "httpx", "requested_version": null, "version": "0.28.1", "registry_confirmed": true, "docs_url": "https://www.python-httpx.org", "candidates": ["https://www.python-httpx.org"], "homepage": null, "repo_url": "https://github.com/encode/httpx", "source": "registry"}

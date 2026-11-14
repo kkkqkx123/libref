@@ -1,0 +1,9 @@
+cases=/home/kkkqkx/code/libref/tests/e2e/probe-discovery/cases.json
+mitt-code bench=mitt/code-v1.1.3 exit=0 effective=1/1 suffixes=1 top_dirs=1 samples=1 deps=0
+httpx-code bench=httpx/code-head exit=0 effective=23/23 suffixes=1 top_dirs=1 samples=20 deps=0
+zod-code bench=zod/code-v4.6.7 exit=0 effective=112/112 suffixes=1 top_dirs=1 samples=20 deps=0
+httpx-docs bench=httpx/docs exit=0 source=sitemap total=23 accepted=23 samples=10 errors=2
+discover-httpx exit=0 candidates=5 first_keys=['candidates', 'description', 'docs_url', 'ecosystem', 'exact', 'homepage', 'name', 'popularity', 'rank', 'repo_url', 'source', 'updated', 'version']
+search-web-httpx exit=0 candidates=5 first_keys=['candidates', 'description', 'docs_url', 'ecosystem', 'exact', 'homepage', 'name', 'popularity', 'rank', 'repo_url', 'source', 'updated', 'version']
+search-github-httpx exit=0 candidates=5 first_keys=['candidates', 'description', 'docs_url', 'ecosystem', 'exact', 'homepage', 'name', 'popularity', 'rank', 'repo_url', 'source', 'updated', 'version']
+resolve-httpx-pypi exit=0 candidates=1 first_keys=['candidates', 'docs_url', 'ecosystem', 'homepage', 'name', 'registry_confirmed', 'repo_url', 'requested_version', 'source', 'version']

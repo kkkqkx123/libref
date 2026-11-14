@@ -1,0 +1,59 @@
+{
+  "probe_repo": [
+    {
+      "id": "mitt-code",
+      "bench": "mitt/code-v1.1.3",
+      "tree_depth": 2,
+      "samples_per_dir": 2,
+      "sample_limit": 20,
+      "note": "下限单文件库，与 zod 同生态近义混淆"
+    },
+    {
+      "id": "httpx-code",
+      "bench": "httpx/code-head",
+      "tree_depth": 2,
+      "samples_per_dir": 2,
+      "sample_limit": 20,
+      "note": "中型 Python 库，相对导入与装饰器"
+    },
+    {
+      "id": "zod-code",
+      "bench": "zod/code-v4.6.7",
+      "tree_depth": 2,
+      "samples_per_dir": 2,
+      "sample_limit": 20,
+      "note": "TS 多包子树，路径别名与桶重导出，带排除规则"
+    }
+  ],
+  "probe_docs": [
+    {
+      "id": "httpx-docs",
+      "bench": "httpx/docs",
+      "sample_limit": 10,
+      "fetch_sample_limit": 3,
+      "note": "小型英文文档站，需联网发现"
+    }
+  ],
+  "discovery": [
+    {
+      "id": "discover-httpx",
+      "argv": ["discover", "httpx", "--limit", "5"],
+      "note": "注册表扇出，需联网"
+    },
+    {
+      "id": "search-web-httpx",
+      "argv": ["search-web", "python httpx github", "--limit", "5"],
+      "note": "显式网页搜索，需联网"
+    },
+    {
+      "id": "search-github-httpx",
+      "argv": ["search-github", "httpx", "--limit", "5"],
+      "note": "显式托管搜索，需联网"
+    },
+    {
+      "id": "resolve-httpx-pypi",
+      "argv": ["resolve", "httpx", "--ecosystem", "pypi"],
+      "note": "注册表解析，需联网"
+    }
+  ]
+}
