@@ -143,13 +143,33 @@ class RobotsChecker:
     async def _fetch_body(self, url: str) -> str | None:
         import httpx
 
+        from libref.crawler.http import backoff_delay
+
         parts = urlsplit(url)
         scheme = (parts.scheme or "https").lower()
         target = f"{scheme}://{parts.netloc}/robots.txt"
-        try:
-            resp = await self._client.get(target)
-        except httpx.HTTPError:
-            return None
-        if resp.status_code >= 400:
-            return None
-        return resp.text
+        for attempt in range(3):
+            try:
+                resp = await self._client.get(target)
+            except httpx.HTTPError:
+                if attempt >= 2:
+                    return None
+                import asyncio as _asyncio
+
+                await _asyncio.sleep(backoff_delay(attempt, base=0.05, cap=0.4))
+                continue
+            if resp.status_code == 429 or resp.status_code >= 500:
+                if attempt >= 2:
+                    return None
+                import asyncio as _asyncio
+
+                from libref.crawler.http import compute_retry_delay
+
+                await _asyncio.sleep(
+                    compute_retry_delay(resp, attempt, base=0.05, cap=0.4)
+                )
+                continue
+            if resp.status_code >= 400:
+                return None
+            return resp.text
+        return None

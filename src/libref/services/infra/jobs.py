@@ -259,7 +259,7 @@ class JobManager:
 
     # ── heartbeat recovery ──
 
-    def recover(self) -> list[int]:
+    def recover(self, *, requeue: bool = False) -> list[int]:
         stale_ids = [
             r[0]
             for r in self._conn.execute(
@@ -269,14 +269,24 @@ class JobManager:
             )
         ]
         for job_id in stale_ids:
-            self._update(
-                job_id,
-                status="failed",
-                error="stale: heartbeat timeout",
-                finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
-            )
+            if requeue:
+                self._update(
+                    job_id,
+                    status="pending",
+                    error="stale: heartbeat timeout",
+                    heartbeat_at=None,
+                    finished_at=None,
+                )
+                self._queue.put_nowait(job_id)
+            else:
+                self._update(
+                    job_id,
+                    status="failed",
+                    error="stale: heartbeat timeout",
+                    finished_at=time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()),
+                )
         if stale_ids:
-            logger.warning("job stale recovered ids=%s", stale_ids)
+            logger.warning("job stale recovered ids=%s requeue=%s", stale_ids, requeue)
         return stale_ids
 
     # ── internal ──

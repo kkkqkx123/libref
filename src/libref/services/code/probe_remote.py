@@ -98,20 +98,53 @@ def _gitlab_target(source: str) -> tuple[str, str] | None:
     return host, project
 
 
+async def _host_get(
+    client: httpx.AsyncClient, url: str, *, params: dict | None = None
+) -> httpx.Response | None:
+    """Host API read with bounded retries; transport and 429/5xx wait and retry."""
+    from libref.crawler.http import backoff_delay, compute_retry_delay
+
+    last: httpx.Response | None = None
+    for attempt in range(3):
+        try:
+            resp = await client.get(url, params=params)
+        except httpx.HTTPError, OSError, TimeoutError:
+            if attempt >= 2:
+                return None
+            await asyncio.sleep(backoff_delay(attempt, base=0.05, cap=0.4))
+            continue
+        if resp.status_code == 429 or resp.status_code >= 500:
+            last = resp
+            if attempt >= 2:
+                return resp
+            await asyncio.sleep(compute_retry_delay(resp, attempt, base=0.05, cap=0.4))
+            continue
+        return resp
+    return last
+
+
 async def _github_census(
-    client: httpx.AsyncClient, owner: str, repo: str, *, suffixes, subdir, exclude_patterns=None
+    client: httpx.AsyncClient,
+    owner: str,
+    repo: str,
+    *,
+    suffixes,
+    subdir,
+    exclude_patterns=None,
 ) -> tuple[dict, bool, bool] | None:
     from libref.astminer.repos import census_of_relpaths
 
-    meta = await client.get(f"/repos/{owner}/{repo}")
-    if meta.status_code != 200:
+    meta = await _host_get(client, f"/repos/{owner}/{repo}")
+    if meta is None or meta.status_code != 200:
         return None
     try:
         branch = meta.json().get("default_branch") or "main"
     except ValueError:
         return None
-    tree = await client.get(f"/repos/{owner}/{repo}/git/trees/{branch}?recursive=1")
-    if tree.status_code != 200:
+    tree = await _host_get(
+        client, f"/repos/{owner}/{repo}/git/trees/{branch}?recursive=1"
+    )
+    if tree is None or tree.status_code != 200:
         return None
     try:
         body = tree.json()
@@ -126,7 +159,9 @@ async def _github_census(
             continue
         size = entry.get("size")
         items.append((path, size if isinstance(size, int) else None))
-    census = census_of_relpaths(items, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns)
+    census = census_of_relpaths(
+        items, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns
+    )
     return census, bool(body.get("truncated")), True
 
 
@@ -142,7 +177,8 @@ async def _gitlab_census(
         base_url=f"https://{host}", timeout=timeout, headers=headers
     ) as client:
         for page in range(1, _GITLAB_MAX_PAGES + 1):
-            resp = await client.get(
+            resp = await _host_get(
+                client,
                 f"/api/v4/projects/{quote(project, safe='')}/repository/tree",
                 params={
                     "recursive": "true",
@@ -150,7 +186,7 @@ async def _gitlab_census(
                     "page": str(page),
                 },
             )
-            if resp.status_code != 200:
+            if resp is None or resp.status_code != 200:
                 return None
             try:
                 entries = resp.json()
@@ -168,7 +204,9 @@ async def _gitlab_census(
                 break
         else:
             truncated = True
-    census = census_of_relpaths(items, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns)
+    census = census_of_relpaths(
+        items, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns
+    )
     return census, truncated, False
 
 
@@ -190,7 +228,12 @@ async def _hosting_census(
                 base_url="https://api.github.com", timeout=timeout, headers=headers
             ) as client:
                 return await _github_census(
-                    client, github[0], github[1], suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns
+                    client,
+                    github[0],
+                    github[1],
+                    suffixes=suffixes,
+                    subdir=subdir,
+                    exclude_patterns=exclude_patterns,
                 )
         gitlab = _gitlab_target(source)
         if gitlab is not None:
@@ -222,18 +265,33 @@ def _collect_tree(
             out.append((rel, None))
 
 
-def git_tree_census(source: str, *, suffixes, subdir, exclude_patterns=None) -> dict | None:
+def git_tree_census(
+    source: str, *, suffixes, subdir, exclude_patterns=None
+) -> dict | None:
     """Bare blobless clone plus in-git tree walk; no working tree, no blob downloads."""
+    import random as _random
+    import time as _time
+
     from dulwich import porcelain
 
     tmp = Path(tempfile.mkdtemp(prefix="libref-probe-tree-"))
     try:
-        try:
-            porcelain.clone(
-                source, str(tmp / "repo"), bare=True, depth=1, filter_spec="blob:none"
-            )
-        except Exception:  # noqa: BLE001 — any fetch failure degrades to the next tier
-            return None
+        for attempt in range(2):
+            try:
+                porcelain.clone(
+                    source,
+                    str(tmp / "repo"),
+                    bare=True,
+                    depth=1,
+                    filter_spec="blob:none",
+                )
+                break
+            except Exception:  # noqa: BLE001 — any fetch failure degrades to the next tier
+                if attempt >= 1:
+                    return None
+                _time.sleep(min(0.5 * (2**attempt), 8.0) + _random.uniform(0.0, 0.1))
+                shutil.rmtree(tmp / "repo", ignore_errors=True)
+                continue
         try:
             from dulwich.repo import Repo
 
@@ -245,7 +303,9 @@ def git_tree_census(source: str, *, suffixes, subdir, exclude_patterns=None) -> 
             return None
         from libref.astminer.repos import census_of_relpaths
 
-        return census_of_relpaths(out, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns)
+        return census_of_relpaths(
+            out, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns
+        )
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -271,7 +331,12 @@ def acquire_remote(
     )
     hosted = asyncio.run(
         _hosting_census(
-            source, settings=settings, timeout=timeout, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns
+            source,
+            settings=settings,
+            timeout=timeout,
+            suffixes=suffixes,
+            subdir=subdir,
+            exclude_patterns=exclude_patterns,
         )
     )
     if hosted is not None:
@@ -283,21 +348,45 @@ def acquire_remote(
             sizes_known=sizes_known,
             truncated=truncated,
         )
-    tree_census = git_tree_census(source, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns)
+    tree_census = git_tree_census(
+        source, suffixes=suffixes, subdir=subdir, exclude_patterns=exclude_patterns
+    )
     if tree_census is not None:
         return RemoteAcquisition(
             kind="census", census=tree_census, source_note="git-tree", sizes_known=False
         )
     if slot is not None:
-        shutil.rmtree(slot, ignore_errors=True)
+        import random as _random
+        import time as _time
+
         from dulwich import porcelain
 
-        try:
-            porcelain.clone(source, str(slot), depth=1)
-        except Exception as exc:
-            shutil.rmtree(slot, ignore_errors=True)
-            raise RuntimeError(f"probe clone failed for {source}: {exc}") from exc
-        return RemoteAcquisition(kind="root", root=slot, source_note="shallow-clone")
+        last: Exception | None = None
+        for attempt in range(3):
+            staging_parent = Path(
+                tempfile.mkdtemp(prefix="probe-clone-", dir=str(base))
+            )
+            staging = staging_parent / "repo"
+            try:
+                porcelain.clone(source, str(staging), depth=1)
+            except Exception as exc:  # noqa: BLE001 — probe clone retries then surfaces as RuntimeError
+                last = exc
+                shutil.rmtree(staging_parent, ignore_errors=True)
+                if attempt >= 2:
+                    break
+                _time.sleep(min(0.5 * (2**attempt), 8.0) + _random.uniform(0.0, 0.1))
+                continue
+            try:
+                shutil.rmtree(slot, ignore_errors=True)
+                staging.replace(slot)
+            except Exception as exc:
+                shutil.rmtree(staging_parent, ignore_errors=True)
+                raise RuntimeError(f"probe clone failed for {source}: {exc}") from exc
+            shutil.rmtree(staging_parent, ignore_errors=True)
+            return RemoteAcquisition(
+                kind="root", root=slot, source_note="shallow-clone"
+            )
+        raise RuntimeError(f"probe clone failed for {source}: {last}") from last
     tmp = Path(tempfile.mkdtemp(prefix="libref-probe-"))
     try:
         from dulwich import porcelain
@@ -306,7 +395,9 @@ def acquire_remote(
             porcelain.clone(source, str(tmp / "repo"), depth=1)
         except Exception as exc:
             raise RuntimeError(f"probe clone failed for {source}: {exc}") from exc
-        census = describe_source_files(tmp / "repo", suffixes, subdir=subdir, exclude_patterns=exclude_patterns)
+        census = describe_source_files(
+            tmp / "repo", suffixes, subdir=subdir, exclude_patterns=exclude_patterns
+        )
         return RemoteAcquisition(
             kind="census", census=census, source_note="shallow-clone"
         )

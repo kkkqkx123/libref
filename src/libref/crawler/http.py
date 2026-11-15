@@ -11,6 +11,9 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import os
+import random
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from urllib.request import getproxies
 
 import httpx
@@ -106,12 +109,45 @@ def build_async_client(
 _RETRYABLE_TRANSPORT = (httpx.HTTPError, OSError, TimeoutError)
 
 
-def _retry_after_delay(resp: httpx.Response, attempt: int) -> float:
+def retry_after_seconds(value: str | None) -> float:
+    """Parse a Retry-After hint in seconds or as an HTTP date."""
+    if value is None:
+        return 0.0
+    text = value.strip()
+    if not text:
+        return 0.0
     try:
-        seen = float(resp.headers.get("retry-after", "0"))
+        return max(0.0, float(text))
     except ValueError:
-        seen = 0.0
-    return min(max(seen, 0.05 * (2**attempt)), 0.4)
+        pass
+    try:
+        deadline = parsedate_to_datetime(text)
+    except TypeError, ValueError:
+        return 0.0
+    if deadline is None:
+        return 0.0
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=UTC)
+    return max(0.0, (deadline - datetime.now(UTC)).total_seconds())
+
+
+def backoff_delay(attempt: int, *, base: float = 0.05, cap: float = 0.4) -> float:
+    """Exponential backoff with a small jitter to avoid synchronized retries."""
+    return min(max(base * (2**attempt), 0.0), cap) + random.uniform(0.0, 0.02)
+
+
+def compute_retry_delay(
+    resp: httpx.Response | None, attempt: int, *, base: float = 0.05, cap: float = 0.4
+) -> float:
+    """Wait hint wins over backoff; the sum stays bounded by the cap plus jitter."""
+    seen = retry_after_seconds(
+        resp.headers.get("retry-after") if resp is not None else None
+    )
+    return min(max(seen, base * (2**attempt)), cap) + random.uniform(0.0, 0.02)
+
+
+def _retry_after_delay(resp: httpx.Response, attempt: int) -> float:
+    return compute_retry_delay(resp, attempt, base=0.05, cap=0.4)
 
 
 async def resilient_get(
@@ -129,7 +165,7 @@ async def resilient_get(
             resp = await client.get(url, headers=headers)
         except _RETRYABLE_TRANSPORT as exc:
             last_error = f"{type(exc).__name__}: {exc}"
-            await asyncio.sleep(min(0.05 * (2**attempt), 0.4))
+            await asyncio.sleep(backoff_delay(attempt, base=0.05, cap=0.4))
             continue
         if resp.status_code == 429 or resp.status_code >= 500:
             last_resp = resp

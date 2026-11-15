@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from libref.crawler.http import backoff_delay, compute_retry_delay, retry_after_seconds
+
 _BACKOFF_CAP = 8.0
 _DELAY_CAP = 30.0
 _RETRYABLE_STATUS = (408, 429)
@@ -73,7 +75,7 @@ class HttpFetcher:
             except (httpx.HTTPError, OSError, TimeoutError) as exc:
                 error = f"{type(exc).__name__}: {exc}"
                 await self._mark(url)
-                await asyncio.sleep(min(0.5 * (2**attempt), _BACKOFF_CAP))
+                await asyncio.sleep(backoff_delay(attempt, base=0.5, cap=_BACKOFF_CAP))
                 continue
             await self._mark(url)
             if resp.status_code == 304:
@@ -86,8 +88,12 @@ class HttpFetcher:
                 )
             if resp.status_code >= 500 or resp.status_code in _RETRYABLE_STATUS:
                 error = f"HTTP {resp.status_code}"
-                self._penalize(url)
-                await asyncio.sleep(min(0.5 * (2**attempt), _BACKOFF_CAP))
+                self._penalize(
+                    url, retry_after_seconds(resp.headers.get("retry-after"))
+                )
+                await asyncio.sleep(
+                    compute_retry_delay(resp, attempt, base=0.5, cap=_BACKOFF_CAP)
+                )
                 continue
             if resp.status_code >= 400:
                 self._relieve(url)
@@ -110,13 +116,12 @@ class HttpFetcher:
         now = time.monotonic()
         return [h for h, until in self._penalty_until.items() if until > now]
 
-    def _penalize(self, url: str) -> None:
+    def _penalize(self, url: str, retry_after: float = 0.0) -> None:
         host = urlsplit(url).netloc.lower()
         level = self._penalty_level.get(host, 0) + 1
         self._penalty_level[host] = level
-        self._penalty_until[host] = time.monotonic() + min(
-            0.5 * (2**level), _BACKOFF_CAP
-        )
+        backoff = min(0.5 * (2**level), _BACKOFF_CAP)
+        self._penalty_until[host] = time.monotonic() + max(backoff, retry_after)
 
     def _relieve(self, url: str) -> None:
         host = urlsplit(url).netloc.lower()

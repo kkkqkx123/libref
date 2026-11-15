@@ -231,21 +231,60 @@ class RepoManager:
         return target, commit
 
     def _clone(self, url: str, target: Path) -> None:
+        import random as _random
+        import shutil as _shutil
+        import tempfile as _tempfile
+        import time as _time
+
         from dulwich import porcelain
 
         Path(target).parent.mkdir(parents=True, exist_ok=True)
-        try:
-            porcelain.clone(url, str(target), depth=1)
-        except Exception as exc:
-            raise RuntimeError(f"clone failed for {url}: {exc}") from exc
+        last: Exception | None = None
+        for attempt in range(3):
+            staging_parent = Path(
+                _tempfile.mkdtemp(
+                    prefix=target.name + ".clone-", dir=str(target.parent)
+                )
+            )
+            staging = staging_parent / "repo"
+            try:
+                porcelain.clone(url, str(staging), depth=1)
+            except Exception as exc:  # noqa: BLE001 — clone retries then surfaces as RuntimeError
+                last = exc
+                _shutil.rmtree(staging_parent, ignore_errors=True)
+                if attempt >= 2:
+                    break
+                _time.sleep(min(0.5 * (2**attempt), 8.0) + _random.uniform(0.0, 0.1))
+                continue
+            try:
+                staging.replace(target)
+            except Exception as exc:
+                _shutil.rmtree(staging_parent, ignore_errors=True)
+                raise RuntimeError(f"clone failed for {url}: {exc}") from exc
+            try:
+                _shutil.rmtree(staging_parent, ignore_errors=True)
+            except OSError:
+                pass
+            return
+        raise RuntimeError(f"clone failed for {url}: {last}") from last
 
     def _pull(self, target: Path) -> None:
+        import random as _random
+        import time as _time
+
         from dulwich import porcelain
 
-        try:
-            porcelain.pull(str(target))
-        except Exception as exc:
-            raise RuntimeError(f"pull failed for {target}: {exc}") from exc
+        last: Exception | None = None
+        for attempt in range(3):
+            try:
+                porcelain.pull(str(target))
+                return
+            except Exception as exc:  # noqa: BLE001 — pull retries then surfaces as RuntimeError
+                last = exc
+                if attempt >= 2:
+                    break
+                _time.sleep(min(0.5 * (2**attempt), 8.0) + _random.uniform(0.0, 0.1))
+        raise RuntimeError(f"pull failed for {target}: {last}") from last
 
     def _head_commit(self, target: Path) -> str:
         from dulwich.repo import Repo
