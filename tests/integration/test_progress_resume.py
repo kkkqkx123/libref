@@ -14,9 +14,11 @@ from libref.services.infra.progress import (
     CODE_KIND,
     DOCS_KIND,
     fingerprint_of,
+    load_pending,
     load_progress,
     load_visited,
     resume_offset,
+    save_pending,
     save_progress,
     save_vector_watermark,
     save_visited,
@@ -499,3 +501,159 @@ def test_vector_watermark_roundtrip(conn) -> None:
         vector_done=1,
     )
     assert load_progress(conn, version_id, DOCS_KIND)["vector_done"] == 1
+
+
+def test_pending_depth_roundtrip_and_legacy(conn) -> None:
+    _library_id, version_id = seed_library_version(conn)
+    assert load_pending(conn, version_id, DOCS_KIND) == []
+    save_pending(
+        conn,
+        version_id,
+        DOCS_KIND,
+        [("https://d.example/a", 1), ("https://d.example/b", 2)],
+    )
+    assert load_pending(conn, version_id, DOCS_KIND) == [
+        ("https://d.example/a", 1),
+        ("https://d.example/b", 2),
+    ]
+    save_pending(conn, version_id, DOCS_KIND, [])
+    assert load_pending(conn, version_id, DOCS_KIND) == []
+    conn.execute(
+        "UPDATE ingest_progress SET pending=? WHERE version_id=? AND kind=?",
+        ('["https://d.example/old"]', version_id, DOCS_KIND),
+    )
+    conn.commit()
+    assert load_pending(conn, version_id, DOCS_KIND) == [("https://d.example/old", 0)]
+
+
+def test_code_resume_keeps_skipped_call_identities(conn, monkeypatch, tmp_path) -> None:
+    from pathlib import Path
+
+    from libref.astminer import config as ast_config
+    from libref.astminer.repos import describe_source_files
+    from libref.services.code.code_ingest import index_repo
+
+    repo = copy_mini_repo(tmp_path)
+    settings = make_settings(
+        monkeypatch, tmp_path, index_batch_files=100, repos_dir=tmp_path / "repos"
+    )
+    full = index_repo(
+        conn,
+        "demo",
+        "0.1",
+        str(repo),
+        repos_dir=tmp_path / "repos",
+        settings=settings,
+    )
+    assert full["calls"] > 0
+    version_id = conn.execute(
+        "SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id"
+        " WHERE l.name='demo' AND v.version='0.1'"
+    ).fetchone()[0]
+    expected = sorted(
+        r[0]
+        for r in conn.execute(
+            "SELECT call_uid FROM call_instances WHERE version_id=?", (version_id,)
+        ).fetchall()
+    )
+    assert expected
+    local_path = conn.execute(
+        "SELECT local_path FROM repos WHERE name=?", ("custom/demo/0.1",)
+    ).fetchone()[0]
+    census = describe_source_files(Path(local_path), ast_config.all_suffixes())
+    files = list(census["files"])
+    assert len(files) >= 2
+    cut = len(files) // 2
+    tail = set(files[cut:])
+    placeholders = ",".join("?" for _ in tail)
+    conn.execute(
+        f"DELETE FROM call_instances WHERE version_id=? AND caller_file IN ({placeholders})",
+        (version_id, *sorted(tail)),
+    )
+    conn.commit()
+    save_progress(
+        conn,
+        version_id,
+        CODE_KIND,
+        total=len(files),
+        done=cut,
+        fingerprint=fingerprint_of(files),
+        batch_size=1,
+    )
+    rerun = index_repo(
+        conn,
+        "demo",
+        "0.1",
+        str(repo),
+        repos_dir=tmp_path / "repos",
+        settings=settings,
+    )
+    assert rerun["resumed_skipped"] == cut
+    assert (
+        sorted(
+            r[0]
+            for r in conn.execute(
+                "SELECT call_uid FROM call_instances WHERE version_id=?",
+                (version_id,),
+            ).fetchall()
+        )
+        == expected
+    )
+
+
+def test_code_resume_replays_batch_lost_before_vector_sync(
+    conn, monkeypatch, tmp_path
+) -> None:
+    from libref.services.code.code_ingest import index_repo
+    from libref.services.ops import maintenance as maint
+    from tests.conftest import FakeVecStore, fake_embed_vectors
+
+    repo = copy_mini_repo(tmp_path)
+    settings = make_settings(
+        monkeypatch, tmp_path, index_batch_files=1, repos_dir=tmp_path / "repos"
+    )
+    vec = FakeVecStore()
+    real_sync = maint.sync_vectors_for_docs
+    sync_calls: list[int] = []
+
+    async def flaky_sync(*args, **kwargs):
+        sync_calls.append(1)
+        if len(sync_calls) == 2:
+            raise RuntimeError("injected vector sync crash")
+        return await real_sync(*args, **kwargs)
+
+    monkeypatch.setattr(maint, "sync_vectors_for_docs", flaky_sync)
+    with pytest.raises(RuntimeError, match="injected vector sync crash"):
+        index_repo(
+            conn,
+            "demo",
+            "0.1",
+            str(repo),
+            repos_dir=tmp_path / "repos",
+            settings=settings,
+            vec_store=vec,
+            embed=fake_embed_vectors,
+        )
+    monkeypatch.setattr(maint, "sync_vectors_for_docs", real_sync)
+    rerun = index_repo(
+        conn,
+        "demo",
+        "0.1",
+        str(repo),
+        repos_dir=tmp_path / "repos",
+        settings=settings,
+        vec_store=vec,
+        embed=fake_embed_vectors,
+    )
+    assert rerun["resumed_skipped"] == 1
+    assert rerun["source_chunks"] > 0
+    version_id = conn.execute(
+        "SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id"
+        " WHERE l.name='demo' AND v.version='0.1'"
+    ).fetchone()[0]
+    want = maint.embeddable_doc_ids(conn, version_id)
+    assert want
+    have = sorted(
+        pid for pid, point in vec.points.items() if point[2] == int(version_id)
+    )
+    assert have == want

@@ -618,11 +618,13 @@ class IngestService:
                 if follow and not fresh:
                     for saved_url in load_visited(self._conn, version_id, DOCS_KIND):
                         visited.add(saved_url)
-                    for saved_url in load_pending(self._conn, version_id, DOCS_KIND):
+                    for saved_url, saved_depth in load_pending(
+                        self._conn, version_id, DOCS_KIND
+                    ):
                         key = crawl_key(saved_url)
                         if key not in visited:
                             visited.add(key)
-                            pending.append((key, 0))
+                            pending.append((key, saved_depth))
                 if follow:
                     while pending:
                         if max_pages is not None and len(visited) > max_pages:
@@ -637,8 +639,7 @@ class IngestService:
                                 self._conn,
                                 version_id,
                                 DOCS_KIND,
-                                [u for u, _d in batch[start:]]
-                                + [u for u, _d in pending],
+                                list(batch[start:]) + list(pending),
                             )
                             await asyncio.gather(
                                 *(

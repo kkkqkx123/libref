@@ -275,6 +275,17 @@ async def _index_repo_inner(
     conn.commit()
     remaining = files[done:]
     wanted_calls: set[str] = set()
+    if done > 0:
+        # Resume skips the done files, so their call identities must seed the
+        # sweep set; otherwise the final sweep mistakes them for deleted calls.
+        # Content drift inside the skipped range needs a fresh run.
+        wanted_calls.update(
+            str(r[0])
+            for r in conn.execute(
+                "SELECT call_uid FROM call_instances WHERE version_id=?",
+                (version_id,),
+            ).fetchall()
+        )
     n_calls = 0
     removed_ids: list[int] = []
     inserted_ids: list[int] = []
@@ -311,15 +322,6 @@ async def _index_repo_inner(
         inserted_ids.extend(batch_inserted)
         conn.commit()
         counts["batches"] += 1
-        save_progress(
-            conn,
-            version_id,
-            CODE_KIND,
-            total=len(files),
-            done=done + start + len(batch_files),
-            fingerprint=fingerprint,
-            batch_size=batch_size,
-        )
         if _vectors_live:
             await _sync_docs(
                 conn,
@@ -333,6 +335,17 @@ async def _index_repo_inner(
                 version_id=version_id,
                 verify=False,
             )
+        # Sync-then-mark like the docs path: a crash never advances the
+        # cursor past unsynced vectors, so resume replays the batch.
+        save_progress(
+            conn,
+            version_id,
+            CODE_KIND,
+            total=len(files),
+            done=done + start + len(batch_files),
+            fingerprint=fingerprint,
+            batch_size=batch_size,
+        )
         _beat()
     swept_calls = _sweep_calls(conn, version_id, wanted_calls)
     counts["calls"] = n_calls

@@ -124,13 +124,22 @@ def clear_progress(conn: sqlite3.Connection, version_id: int, kind: str) -> None
 
 
 def save_pending(
-    conn: sqlite3.Connection, version_id: int, kind: str, pending: list[str]
+    conn: sqlite3.Connection,
+    version_id: int,
+    kind: str,
+    pending: list[str] | list[tuple[str, int]],
 ) -> None:
-    """Persist the follow queue alongside the cursor; an empty queue clears the key."""
+    """Persist the follow queue with per-URL depth; an empty queue clears the key."""
     import json as _json
 
     from libref.db.conn import write_lock
 
+    pairs: list[list] = []
+    for item in pending:
+        if isinstance(item, (tuple, list)):
+            pairs.append([str(item[0]), int(item[1])])
+        else:
+            pairs.append([str(item), 0])
     ensure_progress_table(conn)
     with write_lock(conn):
         conn.execute(
@@ -138,13 +147,17 @@ def save_pending(
             " VALUES(?, ?, ?)"
             " ON CONFLICT(version_id, kind) DO UPDATE"
             " SET pending=excluded.pending, updated_at=datetime('now')",
-            (version_id, kind, _json.dumps(list(pending))),
+            (version_id, kind, _json.dumps(pairs)),
         )
         conn.commit()
 
 
-def load_pending(conn: sqlite3.Connection, version_id: int, kind: str) -> list[str]:
-    """Follow queue saved by the previous attempt; empty when nothing was saved."""
+def load_pending(
+    conn: sqlite3.Connection, version_id: int, kind: str
+) -> list[tuple[str, int]]:
+    """Follow queue saved by the previous attempt as (url, depth) pairs.
+
+    Legacy rows stored plain URL strings; those load with depth zero."""
     import json as _json
 
     ensure_progress_table(conn)
@@ -158,7 +171,15 @@ def load_pending(conn: sqlite3.Connection, version_id: int, kind: str) -> list[s
         items = _json.loads(str(row[0] or "[]"))
     except ValueError:
         return []
-    return [str(u) for u in items] if isinstance(items, list) else []
+    if not isinstance(items, list):
+        return []
+    pairs: list[tuple[str, int]] = []
+    for item in items:
+        if isinstance(item, (tuple, list)) and len(item) == 2:
+            pairs.append((str(item[0]), int(item[1])))
+        elif isinstance(item, str):
+            pairs.append((item, 0))
+    return pairs
 
 
 def resume_offset(
