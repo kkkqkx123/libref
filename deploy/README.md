@@ -1,12 +1,16 @@
-# 部署示例配置（本阶段）
+# 部署示例配置
 
-本目录只提供**示例配置**，用于切换鉴权模式与验证 4 角色设计；镜像、compose、TLS 终止与 CI 属部署设计，本阶段不做（见 `docs/plan/multi-user-production-deferred.md` 的 T3/T4）。
+本目录提供**可直接起用的示例栈**：镜像构建（根 `Dockerfile`）、`compose.yml`（libref + Qdrant）、nginx 反向代理示例，以及鉴权模式切换配置。服务本身是纯 API（无静态资源），nginx 只做 TLS 终止与转发，不承担静态托管职责；前端立项后的托管方案见 `docs/architecture/frontend-hosting.md`。
+
+服务端口以 `[web]` 的 `web_port`（默认 `8001`）为唯一真相源，`Dockerfile`、`compose.yml`、`nginx.conf.example` 中的端口都与之对齐；改端口时三处随配置一起改。
 
 | 文件 | 用途 |
 |---|---|
 | `env.dev.example` | dev 模式：无鉴权、只绑回环 |
 | `env.prod.example` | enforced 模式：每请求需 Bearer API Key |
 | `libref.toml.example` | 非密钥配置文件示例（`[auth]` / `[client]` / `[server]` / `[mcp]` / `[web]` / `[logging]`） |
+| `compose.yml` | 示例编排：libref + Qdrant，数据走命名卷，libref 只绑回环 |
+| `nginx.conf.example` | 反向代理示例：TLS 终止、请求体上限、MCP 长连接头 |
 | 本文件 | 切换步骤与约束 |
 
 ## 命名约束
@@ -51,6 +55,12 @@ cp deploy/libref.toml.example libref.toml
 - **请求侧凭据**（用户/助手 API Key、引导 Key）与**上游密钥**（`LIBREF_EMBEDDING_API_KEY` / `LIBREF_CHAT_API_KEY` / `LIBREF_DISCOVERY_GITHUB_TOKEN`）只走环境变量，写入 `libref.toml` 会在加载时被拒绝（`src/libref/config.py:490-494`）。
 - 修改上游密钥后调用 `POST /admin/config/refresh` 重建冻结快照；不做热更新。
 - `config-show` 打印脱敏快照，`/health` 只回配置指纹，均不泄露密钥。
+
+## 示例栈启动
+
+1. 在 `deploy/` 下复制 `env.prod.example` 为 `libref.env` 并填入真实密钥（compose 的 `env_file` 指向该文件；根 `.env` 只供本地直接运行时使用）。
+2. 在仓库根执行 `docker compose -f deploy/compose.yml up --build -d`，健康检查轮询 `http://127.0.0.1:8001/health`。
+3. 对公暴露时在宿主机套用 `nginx.conf.example`（改好域名与证书路径），服务本身继续只绑回环。
 
 ## 启动命令
 

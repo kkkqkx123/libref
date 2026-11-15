@@ -14,12 +14,12 @@ services:
     volumes:
       - libref-data:/data
     ports:
-      - "127.0.0.1:8931:8931" # loopback only; expose via the reverse proxy
+      - "127.0.0.1:8001:8001" # loopback only; expose via the reverse proxy
     depends_on:
       qdrant:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8931/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -45,7 +45,7 @@ RUN ldconfig
 USER libref
 VOLUME ["/home/libref/.local/share/libref"]
 
-# Default serve port; TLS terminates at the reverse proxy, never here.
-EXPOSE 8931
+# Default serve port matches web_port in config.py; TLS terminates at the reverse proxy, never here.
+EXPOSE 8001
 
-CMD ["libref", "serve", "--host", "0.0.0.0", "--port", "8931"]
+CMD ["libref", "serve", "--host", "0.0.0.0", "--port", "8001"]
