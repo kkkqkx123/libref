@@ -15,9 +15,11 @@ from libref.services.infra.progress import (
     DOCS_KIND,
     fingerprint_of,
     load_progress,
+    load_visited,
     resume_offset,
     save_progress,
     save_vector_watermark,
+    save_visited,
 )
 from tests.conftest import (
     copy_mini_repo,
@@ -59,6 +61,15 @@ def test_resume_offset_fresh_mismatch_done(conn, monkeypatch, tmp_path) -> None:
     )
     done, _ = resume_offset(conn, version_id, CODE_KIND, items)
     assert done == 0
+
+
+def test_visited_roundtrip(conn, monkeypatch, tmp_path) -> None:
+    _library_id, version_id = seed_library_version(conn)
+    assert load_visited(conn, version_id, DOCS_KIND) == []
+    save_visited(conn, version_id, DOCS_KIND, {"b", "a"})
+    assert load_visited(conn, version_id, DOCS_KIND) == ["a", "b"]
+    save_visited(conn, version_id, DOCS_KIND, [])
+    assert load_visited(conn, version_id, DOCS_KIND) == []
 
 
 def test_plan_targets_explicit_urls() -> None:

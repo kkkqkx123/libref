@@ -8,6 +8,7 @@ idea. All requests go through the injected AsyncClient.
 from __future__ import annotations
 
 import asyncio
+import random
 import time
 from dataclasses import dataclass
 from typing import Literal
@@ -40,10 +41,12 @@ class HttpFetcher:
         *,
         max_retries: int = 3,
         default_delay: float = 1.0,
+        max_body_bytes: int | None = None,
     ) -> None:
         self._client = client
         self._max_retries = max_retries
         self._default_delay = default_delay
+        self._max_body_bytes = max_body_bytes
         self._last_request_at: dict[str, float] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._penalty_until: dict[str, float] = {}
@@ -71,45 +74,74 @@ class HttpFetcher:
         for attempt in range(self._max_retries + 1):
             await self._throttle(url, delay)
             try:
-                resp = await self._client.get(url, headers=headers)
+                async with self._client.stream("GET", url, headers=headers) as resp:
+                    await self._mark(url)
+                    if resp.status_code == 304:
+                        self._relieve(url)
+                        return FetchOutcome(url=url, status="unchanged")
+                    if resp.status_code == 404 or resp.status_code == 410:
+                        self._relieve(url)
+                        return FetchOutcome(
+                            url=url, status="absent", error=f"HTTP {resp.status_code}"
+                        )
+                    if resp.status_code >= 500 or resp.status_code in _RETRYABLE_STATUS:
+                        error = f"HTTP {resp.status_code}"
+                        self._penalize(
+                            url, retry_after_seconds(resp.headers.get("retry-after"))
+                        )
+                        await asyncio.sleep(
+                            compute_retry_delay(
+                                resp, attempt, base=0.5, cap=_BACKOFF_CAP
+                            )
+                        )
+                        continue
+                    if resp.status_code >= 400:
+                        self._relieve(url)
+                        return FetchOutcome(
+                            url=url, status="failed", error=f"HTTP {resp.status_code}"
+                        )
+                    text, over = await self._read_capped(resp)
+                    if over is not None:
+                        self._relieve(url)
+                        return FetchOutcome(url=url, status="failed", error=over)
+                    self._relieve(url)
+                    return FetchOutcome(
+                        url=url,
+                        status="ok",
+                        content=text,
+                        etag=resp.headers.get("etag"),
+                        last_modified=resp.headers.get("last-modified"),
+                        content_type=resp.headers.get("content-type"),
+                    )
             except (httpx.HTTPError, OSError, TimeoutError) as exc:
                 error = f"{type(exc).__name__}: {exc}"
                 await self._mark(url)
                 await asyncio.sleep(backoff_delay(attempt, base=0.5, cap=_BACKOFF_CAP))
                 continue
-            await self._mark(url)
-            if resp.status_code == 304:
-                self._relieve(url)
-                return FetchOutcome(url=url, status="unchanged")
-            if resp.status_code == 404 or resp.status_code == 410:
-                self._relieve(url)
-                return FetchOutcome(
-                    url=url, status="absent", error=f"HTTP {resp.status_code}"
-                )
-            if resp.status_code >= 500 or resp.status_code in _RETRYABLE_STATUS:
-                error = f"HTTP {resp.status_code}"
-                self._penalize(
-                    url, retry_after_seconds(resp.headers.get("retry-after"))
-                )
-                await asyncio.sleep(
-                    compute_retry_delay(resp, attempt, base=0.5, cap=_BACKOFF_CAP)
-                )
-                continue
-            if resp.status_code >= 400:
-                self._relieve(url)
-                return FetchOutcome(
-                    url=url, status="failed", error=f"HTTP {resp.status_code}"
-                )
-            self._relieve(url)
-            return FetchOutcome(
-                url=url,
-                status="ok",
-                content=resp.text,
-                etag=resp.headers.get("etag"),
-                last_modified=resp.headers.get("last-modified"),
-                content_type=resp.headers.get("content-type"),
-            )
         return FetchOutcome(url=url, status="failed", error=error)
+
+    async def _read_capped(self, resp: httpx.Response) -> tuple[str | None, str | None]:
+        """Read the body with declared and actual length guards; over-budget returns a reason instead of retrying."""
+        budget = self._max_body_bytes
+        if budget is not None:
+            declared = (resp.headers.get("content-length") or "").strip()
+            if declared.isdigit() and int(declared) > budget:
+                return (
+                    None,
+                    f"body over budget: declared {declared} over {budget} bytes",
+                )
+        parts: list[bytes] = []
+        size = 0
+        async for piece in resp.aiter_bytes(8192):
+            parts.append(piece)
+            size += len(piece)
+            if budget is not None and size > budget:
+                return None, f"body over budget: over {budget} bytes"
+        raw = b"".join(parts)
+        try:
+            return raw.decode(resp.charset_encoding or "utf-8", errors="replace"), None
+        except LookupError:
+            return raw.decode("utf-8", errors="replace"), None
 
     def penalized_hosts(self) -> list[str]:
         """Hosts currently under rate-limit penalty; observability only."""
@@ -121,7 +153,9 @@ class HttpFetcher:
         level = self._penalty_level.get(host, 0) + 1
         self._penalty_level[host] = level
         backoff = min(0.5 * (2**level), _BACKOFF_CAP)
-        self._penalty_until[host] = time.monotonic() + max(backoff, retry_after)
+        self._penalty_until[host] = (
+            time.monotonic() + max(backoff, retry_after) + random.uniform(0.0, 0.1)
+        )
 
     def _relieve(self, url: str) -> None:
         host = urlsplit(url).netloc.lower()

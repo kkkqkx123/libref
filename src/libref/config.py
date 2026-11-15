@@ -56,6 +56,7 @@ class LibrefSettings(BaseSettings):
     fetch_concurrency: int = Field(default=4, ge=1)
     request_timeout: float = Field(default=30.0, gt=0)
     fetch_max_retries: int = Field(default=3, ge=0)
+    fetch_max_bytes: int = Field(default=5242880, ge=1)
     crawl_delay_default: float = Field(default=1.0, ge=0)
     robots_cache_ttl_days: float = Field(default=7.0, ge=0)
     ingest_clean_cache_cap: int = Field(default=512, ge=1)
@@ -271,6 +272,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "fetch_concurrency",
             "request_timeout",
             "fetch_max_retries",
+            "fetch_max_bytes",
             "crawl_delay_default",
             "robots_cache_ttl_days",
             "user_agent",

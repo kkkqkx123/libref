@@ -26,6 +26,7 @@
 | fetch_concurrency | 整数（≥1） | 4 | LIBREF_FETCH_CONCURRENCY | 抓取并发数 |
 | request_timeout | 浮点（>0） | 30.0 | LIBREF_REQUEST_TIMEOUT | 抓取超时，秒 |
 | fetch_max_retries | 整数（≥0） | 3 | LIBREF_FETCH_MAX_RETRIES | 抓取重试上限 |
+| fetch_max_bytes | 整数（≥1） | 5242880 | LIBREF_FETCH_MAX_BYTES | 单页响应体上限，字节，超限记失败 |
 | crawl_delay_default | 浮点（≥0） | 1.0 | LIBREF_CRAWL_DELAY_DEFAULT | 默认抓取间隔，秒 |
 | robots_cache_ttl_days | 浮点（≥0） | 7.0 | LIBREF_ROBOTS_CACHE_TTL_DAYS | robots 缓存有效期，天 |
 | user_agent | 字符串 | libref-crawler/0.1 | LIBREF_USER_AGENT | 抓取请求头标识 |

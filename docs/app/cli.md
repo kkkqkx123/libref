@@ -236,7 +236,7 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 完整参数定义见同目录 `config.md`（真相源），以下为按功能归纳。命令行行为由配置文件与环境变量共同决定，优先级为显式参数、环境变量、配置文件、内置默认。密钥只走环境变量，不可写入文件。`config-show` 打印脱敏后的有效快照。
 
 * 服务：`db_path` 库路径，`heartbeat_timeout` 任务心跳超时。
-* 抓取：`fetch_concurrency/request_timeout/fetch_max_retries/crawl_delay_default/robots_cache_ttl_days/user_agent`，代理 `http_proxy/no_proxy`，浏览器 `render_js_default/render_wait_for/render_timeout_ms`，`seeder_cache_ttl_hours/follow_links_default`，`ingest_clean_cache_cap/ingest_batch_pages/index_batch_files/probe_sample_limit/probe_cache_ttl_hours/probe_fetch_sample_limit/probe_fetch_timeout`。
+* 抓取：`fetch_concurrency/request_timeout/fetch_max_retries/fetch_max_bytes/crawl_delay_default/robots_cache_ttl_days/user_agent`，代理 `http_proxy/no_proxy`，浏览器 `render_js_default/render_wait_for/render_timeout_ms`，`seeder_cache_ttl_hours/follow_links_default`，`ingest_clean_cache_cap/ingest_batch_pages/index_batch_files/probe_sample_limit/probe_cache_ttl_hours/probe_fetch_sample_limit/probe_fetch_timeout`。
 * 存储：`vector_backend` 取 `simvec/qdrant`，`simvec_dir/simvec_lib` 本地引擎位置，`qdrant_url/vector_collection/qdrant_timeout` 远端集合。
 * 分块：`chunk_embed_*` 嵌入轨道分块预算，`chunk_bm25_*` 全文轨道分块预算，`chunk_reserve_ratio` 预留比。
 * 嵌入：`embedding_model/embedding_dim/embedding_api_base/embed_batch`，密钥 `embedding_api_key` 只走环境。

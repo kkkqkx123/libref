@@ -403,6 +403,7 @@ class IngestService:
                     client,
                     max_retries=self._settings.fetch_max_retries,
                     default_delay=self._settings.crawl_delay_default,
+                    max_body_bytes=self._settings.fetch_max_bytes,
                 )
                 discover_start = _time.monotonic()
                 # Refresh intent re-discovers: reusing seeds within TTL would hide
@@ -461,6 +462,10 @@ class IngestService:
                 policy = build_scope(start_url, scope)
                 visited: set[str] = set(accepted)
                 pending: list[tuple[str, int]] = []
+                if follow and max_pages is None:
+                    raise BudgetExceeded(
+                        "follow_links requires max_pages: set a page budget for bounded follow"
+                    )
                 edge_accum: dict[str, set[tuple[str, str]]] = {}
 
                 async def process(url: str, depth: int) -> None:
@@ -549,16 +554,17 @@ class IngestService:
                                 )
                         _beat()
 
-                from libref.crawler.scope import BudgetExceeded
                 from libref.services.infra.progress import (
                     DOCS_KIND,
                     clear_progress,
                     load_pending,
                     load_progress,
+                    load_visited,
                     resume_offset,
                     save_pending,
                     save_progress,
                     save_vector_watermark,
+                    save_visited,
                 )
 
                 batch_size = max(
@@ -610,6 +616,8 @@ class IngestService:
                     counts["vector_done"] = new_done
                     _beat()
                 if follow and not fresh:
+                    for saved_url in load_visited(self._conn, version_id, DOCS_KIND):
+                        visited.add(saved_url)
                     for saved_url in load_pending(self._conn, version_id, DOCS_KIND):
                         key = crawl_key(saved_url)
                         if key not in visited:
@@ -623,20 +631,22 @@ class IngestService:
                             )
                         batch = pending
                         pending = []
-                        save_pending(
-                            self._conn,
-                            version_id,
-                            DOCS_KIND,
-                            [u for u, _d in batch],
-                        )
                         counts["deep_discovered"] += len(batch)
                         for start in range(0, len(batch), batch_size):
+                            save_pending(
+                                self._conn,
+                                version_id,
+                                DOCS_KIND,
+                                [u for u, _d in batch[start:]]
+                                + [u for u, _d in pending],
+                            )
                             await asyncio.gather(
                                 *(
                                     process(u, d)
                                     for u, d in batch[start : start + batch_size]
                                 )
                             )
+                            save_visited(self._conn, version_id, DOCS_KIND, visited)
                             _beat()
                         if max_pages is not None and len(visited) > max_pages:
                             raise BudgetExceeded(

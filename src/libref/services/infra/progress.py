@@ -29,6 +29,10 @@ def ensure_progress_table(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE ingest_progress ADD COLUMN pending TEXT NOT NULL DEFAULT '[]'"
         )
+    if "visited" not in cols:
+        conn.execute(
+            "ALTER TABLE ingest_progress ADD COLUMN visited TEXT NOT NULL DEFAULT '[]'"
+        )
     conn.commit()
 
 
@@ -178,3 +182,41 @@ def resume_offset(
         return 0, fingerprint
     done = max(0, min(int(saved["done"]), len(items)))
     return done, fingerprint
+
+
+def save_visited(
+    conn: sqlite3.Connection, version_id: int, kind: str, visited: set[str] | list[str]
+) -> None:
+    """Persist the follow visited set alongside the queue; sorted for a stable snapshot."""
+    import json as _json
+
+    from libref.db.conn import write_lock
+
+    ensure_progress_table(conn)
+    with write_lock(conn):
+        conn.execute(
+            "INSERT INTO ingest_progress(version_id, kind, visited)"
+            " VALUES(?, ?, ?)"
+            " ON CONFLICT(version_id, kind) DO UPDATE"
+            " SET visited=excluded.visited, updated_at=datetime('now')",
+            (version_id, kind, _json.dumps(sorted(set(visited)))),
+        )
+        conn.commit()
+
+
+def load_visited(conn: sqlite3.Connection, version_id: int, kind: str) -> list[str]:
+    """Visited set saved by the previous attempt; empty when nothing was saved."""
+    import json as _json
+
+    ensure_progress_table(conn)
+    row = conn.execute(
+        "SELECT visited FROM ingest_progress WHERE version_id=? AND kind=?",
+        (version_id, kind),
+    ).fetchone()
+    if row is None:
+        return []
+    try:
+        items = _json.loads(str(row[0] or "[]"))
+    except ValueError:
+        return []
+    return [str(u) for u in items] if isinstance(items, list) else []

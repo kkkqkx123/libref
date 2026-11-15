@@ -389,12 +389,25 @@ def acquire_remote(
         raise RuntimeError(f"probe clone failed for {source}: {last}") from last
     tmp = Path(tempfile.mkdtemp(prefix="libref-probe-"))
     try:
+        import random as _random
+        import time as _time
+
         from dulwich import porcelain
 
-        try:
-            porcelain.clone(source, str(tmp / "repo"), depth=1)
-        except Exception as exc:
-            raise RuntimeError(f"probe clone failed for {source}: {exc}") from exc
+        last: Exception | None = None
+        for attempt in range(3):
+            try:
+                shutil.rmtree(tmp / "repo", ignore_errors=True)
+                porcelain.clone(source, str(tmp / "repo"), depth=1)
+                break
+            except Exception as exc:  # noqa: BLE001 — probe clone retries then surfaces as RuntimeError
+                last = exc
+                if attempt >= 2:
+                    raise RuntimeError(
+                        f"probe clone failed for {source}: {last}"
+                    ) from last
+                _time.sleep(min(0.5 * (2**attempt), 8.0) + _random.uniform(0.0, 0.1))
+                continue
         census = describe_source_files(
             tmp / "repo", suffixes, subdir=subdir, exclude_patterns=exclude_patterns
         )

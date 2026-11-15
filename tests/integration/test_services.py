@@ -523,12 +523,25 @@ def test_follow_discovers_deep_page(conn, monkeypatch, tmp_path) -> None:
             "docs",
             "1.0",
             "https://d.example/",
+            max_pages=10,
             scope={"follow_links": True},
         )
     assert counts["stored"] == 2
     assert counts["deep_discovered"] == 1
     hits = SearchService(conn).search_docs("Deep body")
     assert hits and hits[0]["url"].endswith("/deep.html")
+
+
+def test_follow_requires_max_pages(conn, monkeypatch, tmp_path) -> None:
+    _SEED_CACHE.clear()
+    settings = make_crawler_settings(monkeypatch, tmp_path)
+    with mock_ingest(_follow_handler), pytest.raises(Exception, match="max_pages"):
+        IngestService(settings, conn).scrape_docs(
+            "docs",
+            "1.0",
+            "https://d.example/",
+            scope={"follow_links": True},
+        )
 
 
 def test_follow_respects_max_pages(conn, monkeypatch, tmp_path) -> None:

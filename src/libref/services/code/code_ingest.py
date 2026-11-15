@@ -185,6 +185,17 @@ async def _index_repo_inner(
         from libref.services.ops.retention import check_quota
 
         check_quota(settings_dir, int(repos_quota_mb), "repos")
+    def _beat() -> None:
+        if heartbeat is None:
+            return
+        try:
+            maybe = heartbeat()
+            if asyncio.iscoroutine(maybe):
+                asyncio.get_running_loop().create_task(maybe)
+        except Exception:  # noqa: BLE001, S110 — heartbeat only aims to renew
+            pass
+
+    _beat()
     manager = RepoManager(settings_dir)
     repo_name = f"{ecosystem}/{library}/{version}"
     existing = conn.execute(
@@ -199,6 +210,7 @@ async def _index_repo_inner(
                 f"version already indexed from different source: {old_url}"
             )
     root, commit = manager.ensure(conn, repo_name, source, update=update)
+    _beat()
     conn.commit()
     from libref.crawler.scope import BudgetExceeded
 
@@ -242,16 +254,6 @@ async def _index_repo_inner(
         from libref.store.document_store import DocumentStore as _DocumentStore
 
         _doc_store = _DocumentStore(conn)
-
-    def _beat() -> None:
-        if heartbeat is None:
-            return
-        try:
-            maybe = heartbeat()
-            if asyncio.iscoroutine(maybe):
-                asyncio.get_running_loop().create_task(maybe)
-        except Exception:  # noqa: BLE001, S110 — heartbeat only aims to renew
-            pass
 
     all_decls, file_aliases, collect_counts, live = _collect_decl_index(
         conn,
