@@ -13,7 +13,9 @@ import threading
 import time
 
 
-def version_key(ecosystem: str, library: str, version: str, tenant_id: str = "default") -> str:
+def version_key(
+    ecosystem: str, library: str, version: str, tenant_id: str = "default"
+) -> str:
     """Identity of one library version inside one tenant."""
     tenant = (tenant_id or "default").strip() or "default"
     return f"{tenant}\0{ecosystem}\0{library}\0{version}"
@@ -55,7 +57,14 @@ def _sync_lock(key: str) -> threading.Lock:
 class VersionGuard:
     """Async guard for one version; stale owners are stolen after the timeout."""
 
-    def __init__(self, conn, key: str, stale_after: float = 600.0, *, instance_id: str = "libref-1") -> None:
+    def __init__(
+        self,
+        conn,
+        key: str,
+        stale_after: float = 600.0,
+        *,
+        instance_id: str = "libref-1",
+    ) -> None:
         self._conn = conn
         self._key = key
         self._stale_after = stale_after
@@ -132,7 +141,9 @@ class VersionGuard:
                     self._conn.commit()
                 if cur.rowcount > 0:
                     return
-            backoff = min(1.0, 0.05 * (2.0**min(attempt, 5))) + random.uniform(0, 0.05)
+            backoff = min(1.0, 0.05 * (2.0 ** min(attempt, 5))) + random.uniform(
+                0, 0.05
+            )
             attempt += 1
             await asyncio.sleep(backoff)
 
@@ -158,7 +169,14 @@ class VersionGuard:
 class VersionGuardSync:
     """Synchronous guard for short operations; no heartbeat, stale owners are stolen."""
 
-    def __init__(self, conn, key: str, stale_after: float = 600.0, *, instance_id: str = "libref-1") -> None:
+    def __init__(
+        self,
+        conn,
+        key: str,
+        stale_after: float = 600.0,
+        *,
+        instance_id: str = "libref-1",
+    ) -> None:
         self._conn = conn
         self._key = key
         self._stale_after = stale_after
@@ -231,7 +249,9 @@ class VersionGuardSync:
                     self._conn.commit()
                 if cur.rowcount > 0:
                     return
-            backoff = min(1.0, 0.05 * (2.0**min(attempt, 5))) + random.uniform(0, 0.05)
+            backoff = min(1.0, 0.05 * (2.0 ** min(attempt, 5))) + random.uniform(
+                0, 0.05
+            )
             attempt += 1
             time.sleep(backoff)
 

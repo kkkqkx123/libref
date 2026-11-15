@@ -1,0 +1,33 @@
+# Example reverse proxy: TLS termination + request limits + MCP streamable-http headers.
+# The libref service itself never terminates TLS.
+server {
+    listen 443 ssl;
+    server_name libref.example.com;
+
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    # Request-body cap guards ingestion endpoints from oversized payloads.
+    client_max_body_size 32m;
+    proxy_read_timeout  300s;
+    proxy_send_timeout  300s;
+
+    location / {
+        proxy_pass http://127.0.0.1:8931;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        # Required for MCP streamable-http long-lived responses:
+        proxy_buffering off;
+        proxy_set_header Connection "";
+        proxy_read_timeout 3600s;
+    }
+}
+
+server {
+    listen 80;
+    server_name libref.example.com;
+    return 301 https://$host$request_uri;
+}

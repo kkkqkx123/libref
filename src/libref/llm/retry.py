@@ -49,7 +49,7 @@ def parse_retry_after_ms(value: str | None) -> int | None:
         pass
     try:
         deadline = parsedate_to_datetime(text)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
     if deadline is None:
         return None

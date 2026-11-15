@@ -106,7 +106,10 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                     "fresh": bool(getattr(args, "fresh", False)),
                     "subdir": getattr(args, "subdir", None),
                     "only_files": list(getattr(args, "only_file", None) or []) or None,
-                    "exclude_patterns": list(getattr(args, "exclude_pattern", None) or []) or None,
+                    "exclude_patterns": list(
+                        getattr(args, "exclude_pattern", None) or []
+                    )
+                    or None,
                     "max_files": getattr(args, "max_files", None),
                 },
             )
@@ -141,7 +144,8 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                 fresh=bool(getattr(args, "fresh", False)),
                 subdir=getattr(args, "subdir", None),
                 only_files=list(getattr(args, "only_file", None) or []) or None,
-                exclude_patterns=list(getattr(args, "exclude_pattern", None) or []) or None,
+                exclude_patterns=list(getattr(args, "exclude_pattern", None) or [])
+                or None,
                 max_files=getattr(args, "max_files", None),
             )
         except ValueError as exc:

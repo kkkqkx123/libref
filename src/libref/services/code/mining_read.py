@@ -550,15 +550,29 @@ class MiningReadService:
         from libref.mining.idiom import reuse_diversity
 
         patterns = self.list_patterns(
-            library=library, version=version, ecosystem=ecosystem, limit=100000, tenant_id=tenant_id
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            limit=100000,
+            tenant_id=tenant_id,
         )
         clusters = self.api_clusters(
-            library=library, version=version, ecosystem=ecosystem, limit=100000, tenant_id=tenant_id
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            limit=100000,
+            tenant_id=tenant_id,
         )
         health = reuse_diversity(patterns, clusters)
-        health["resolve_kinds"] = self.resolve_distribution(library, version, ecosystem, tenant_id=tenant_id)
-        health["confidence"] = self.confidence_distribution(library, version, ecosystem, tenant_id=tenant_id)
-        health.update(self.quality_rates(library, version, ecosystem, tenant_id=tenant_id))
+        health["resolve_kinds"] = self.resolve_distribution(
+            library, version, ecosystem, tenant_id=tenant_id
+        )
+        health["confidence"] = self.confidence_distribution(
+            library, version, ecosystem, tenant_id=tenant_id
+        )
+        health.update(
+            self.quality_rates(library, version, ecosystem, tenant_id=tenant_id)
+        )
         return health
 
     def resolve_distribution(
@@ -705,7 +719,9 @@ class MiningReadService:
         """Single deterministic assembly shared by evidence and induction."""
         from libref.mining.idiom import format_short_signature
 
-        table = self.signatures_for([api], library, version, ecosystem, tenant_id=tenant_id)
+        table = self.signatures_for(
+            [api], library, version, ecosystem, tenant_id=tenant_id
+        )
         by_kind = table.get(str(api)) or {}
         if not by_kind:
             return {"api": api, "kind": "", "signature": "", "short": api + "()"}
@@ -1291,7 +1307,10 @@ class MiningReadService:
         if view == "health":
             return [
                 self.mining_health(
-                    library=library, version=version, ecosystem=ecosystem, tenant_id=tenant_id
+                    library=library,
+                    version=version,
+                    ecosystem=ecosystem,
+                    tenant_id=tenant_id,
                 )
             ]
         if view == "labels":
@@ -1422,7 +1441,11 @@ class MiningReadService:
         if view == "signature":
             if not api:
                 raise ValueError("signature view requires api")
-            return [self.canonical_signature(api, library, version, ecosystem, tenant_id=tenant_id)]
+            return [
+                self.canonical_signature(
+                    api, library, version, ecosystem, tenant_id=tenant_id
+                )
+            ]
         raise ValueError(f"unsupported symbol view: {view}")
 
     def call_insight(

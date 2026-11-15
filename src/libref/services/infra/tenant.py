@@ -101,11 +101,14 @@ def tenant_snapshot_dir(settings, tenant_id: str | None = None):
     """Per-tenant snapshot root; default tenant keeps the legacy path."""
     from pathlib import Path as _Path
 
-    base = _Path(str(getattr(settings, "snapshot_dir")))
+    base = _Path(str(settings.snapshot_dir))
     tenant = normalize_tenant(tenant_id)
     if tenant == DEFAULT_TENANT:
         return base
-    safe = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in tenant)[:64] or DEFAULT_TENANT
+    safe = (
+        "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in tenant)[:64]
+        or DEFAULT_TENANT
+    )
     target = base / f"tenant-{safe}"
     try:
         target.mkdir(parents=True, exist_ok=True)
@@ -118,11 +121,14 @@ def tenant_repos_dir(settings, tenant_id: str | None = None):
     """Per-tenant repos root; default tenant keeps the legacy path."""
     from pathlib import Path as _Path
 
-    base = _Path(str(getattr(settings, "repos_dir")))
+    base = _Path(str(settings.repos_dir))
     tenant = normalize_tenant(tenant_id)
     if tenant == DEFAULT_TENANT:
         return base
-    safe = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in tenant)[:64] or DEFAULT_TENANT
+    safe = (
+        "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in tenant)[:64]
+        or DEFAULT_TENANT
+    )
     target = base / f"tenant-{safe}"
     try:
         target.mkdir(parents=True, exist_ok=True)
@@ -133,8 +139,8 @@ def tenant_repos_dir(settings, tenant_id: str | None = None):
 
 def validate_scrape_target(start_url: str, settings) -> str:
     """Validate a scrape start URL; rejects non-http, loopback and private ranges."""
-    from urllib.parse import urlparse as _urlparse
     import ipaddress as _ip
+    from urllib.parse import urlparse as _urlparse
 
     text = (start_url or "").strip()
     if not text:
@@ -153,22 +159,35 @@ def validate_scrape_target(start_url: str, settings) -> str:
     # Host allowlist gates external fetching when configured.
     allowed = list(getattr(settings, "allowed_hosts", None) or [])
     if allowed:
-        norm_allowed = {str(h).strip().lower().rstrip(".") for h in allowed if str(h).strip()}
+        norm_allowed = {
+            str(h).strip().lower().rstrip(".") for h in allowed if str(h).strip()
+        }
         if lowered.rstrip(".") not in norm_allowed and not any(
             lowered.endswith("." + a) for a in norm_allowed if a
         ):
             raise ValueError(f"scrape host not allowlisted: {host}")
     # Loopback and private ranges are rejected except for dev-local loopback.
     auth_mode = str(getattr(settings, "auth_mode", "dev") or "dev")
-    is_loopback_name = lowered in ("localhost", "localhost.", "ip6-localhost") or lowered.endswith(".localhost")
+    is_loopback_name = lowered in (
+        "localhost",
+        "localhost.",
+        "ip6-localhost",
+    ) or lowered.endswith(".localhost")
     try:
         addr = _ip.ip_address(lowered.strip("[]"))
         is_loop = addr.is_loopback
-        is_priv = addr.is_private or addr.is_link_local or addr.is_multicast or addr.is_reserved
+        is_priv = (
+            addr.is_private
+            or addr.is_link_local
+            or addr.is_multicast
+            or addr.is_reserved
+        )
     except ValueError:
         is_loop = is_loopback_name
         # Plain hostnames that resolve to local suffixes are treated as private.
-        is_priv = is_loopback_name or lowered.endswith((".local", ".internal", ".lan", ".home", ".corp"))
+        is_priv = is_loopback_name or lowered.endswith(
+            (".local", ".internal", ".lan", ".home", ".corp")
+        )
     if (is_loop or is_priv) and not (auth_mode == "dev" and is_loop):
         raise ValueError(f"scrape target not allowed: {host}")
     return text

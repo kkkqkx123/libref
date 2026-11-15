@@ -79,7 +79,7 @@ def _tenant_extra(
     for table, alias in tables:
         try:
             has = table_has_tenant(conn, table)
-        except Exception:
+        except Exception:  # noqa: BLE001
             has = False
         if has:
             clause += f" AND {alias}.tenant_id = ?"
@@ -106,9 +106,7 @@ def _version_visible(
         return True
     if library is None or version is None:
         return True
-    if not (
-        table_has_tenant(conn, "libraries") or table_has_tenant(conn, "versions")
-    ):
+    if not (table_has_tenant(conn, "libraries") or table_has_tenant(conn, "versions")):
         return True
     try:
         resolve_version_id(conn, str(tenant_id), library, version, ecosystem)
@@ -134,9 +132,7 @@ class PageService:
         tenant_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Fetch all document blocks for a URL ordered by sort_order."""
-        if not _version_visible(
-            self._conn, library, version, ecosystem, tenant_id
-        ):
+        if not _version_visible(self._conn, library, version, ecosystem, tenant_id):
             return None
         filters = ["p.url = ?"]
         params: list[Any] = [url]
@@ -150,7 +146,9 @@ class PageService:
             filters.append("v.version = ?")
             params.append(version)
         extra, extra_params = _tenant_extra(
-            self._conn, tenant_id, (("libraries", "l"), ("versions", "v"), ("pages", "p"))
+            self._conn,
+            tenant_id,
+            (("libraries", "l"), ("versions", "v"), ("pages", "p")),
         )
         tail = "" if limit is None else " LIMIT ?"
         if limit is not None:
@@ -206,9 +204,7 @@ class PageService:
         tenant_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Fetch neighboring blocks around a sort position for hit expansion."""
-        if not _version_visible(
-            self._conn, library, version, ecosystem, tenant_id
-        ):
+        if not _version_visible(self._conn, library, version, ecosystem, tenant_id):
             return None
         filters = ["p.url = ?"]
         params: list[Any] = [url]
@@ -222,7 +218,9 @@ class PageService:
             filters.append("v.version = ?")
             params.append(version)
         extra, extra_params = _tenant_extra(
-            self._conn, tenant_id, (("libraries", "l"), ("versions", "v"), ("pages", "p"))
+            self._conn,
+            tenant_id,
+            (("libraries", "l"), ("versions", "v"), ("pages", "p")),
         )
         row = self._conn.execute(
             "SELECT p.id, l.name, v.version FROM pages p"
@@ -288,9 +286,7 @@ class PageService:
         tenant_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Fetch a whole source group to trace a sub-block back to its section."""
-        if not _version_visible(
-            self._conn, library, version, ecosystem, tenant_id
-        ):
+        if not _version_visible(self._conn, library, version, ecosystem, tenant_id):
             return None
         filters = ["d.url = ?", "json_extract(d.metadata, '$.source_group_id') = ?"]
         params: list[Any] = [url, source_group_id]

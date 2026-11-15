@@ -51,7 +51,11 @@ def sweep_absent(
                 log_deletion,
             )
 
-            ecosystem, library, version = snapshot_ctx[0], snapshot_ctx[1], snapshot_ctx[2]
+            ecosystem, library, version = (
+                snapshot_ctx[0],
+                snapshot_ctx[1],
+                snapshot_ctx[2],
+            )
             log_deletion(
                 conn,
                 library=library,

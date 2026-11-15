@@ -1,0 +1,13 @@
+# Keep build context small; vendor/ and crates/ are required by the build.
+.git
+.venv
+.ruff_cache
+.mypy_cache
+.pytest_cache
+tests/e2e/repos
+tests/e2e/bench
+ref
+docs
+target
+**/__pycache__
+*.pyc

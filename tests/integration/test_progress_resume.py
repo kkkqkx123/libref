@@ -151,9 +151,7 @@ def test_repo_probe_samples_per_dir(monkeypatch, tmp_path) -> None:
     settings = make_settings(monkeypatch, tmp_path)
     plain = probe_repo(str(repo), settings=settings)
     assert plain.dir_samples == []
-    sampled = probe_repo(
-        str(repo), settings=settings, tree_depth=3, samples_per_dir=2
-    )
+    sampled = probe_repo(str(repo), settings=settings, tree_depth=3, samples_per_dir=2)
     assert sampled.samples_per_dir == 2
     total = sum(len(entry.files) for entry in sampled.dir_samples)
     assert 0 < total <= settings.probe_sample_limit
@@ -176,9 +174,7 @@ def test_index_repo_exclude_matches_probe(conn, monkeypatch, tmp_path) -> None:
     settings = make_settings(
         monkeypatch, tmp_path, index_batch_files=10, repos_dir=tmp_path / "repos"
     )
-    probe = probe_repo(
-        str(repo), settings=settings, exclude_patterns=[r"(^|/)tests/"]
-    )
+    probe = probe_repo(str(repo), settings=settings, exclude_patterns=[r"(^|/)tests/"])
     assert probe.effective_files == 5
     counts = index_repo(
         conn,
@@ -352,18 +348,14 @@ def test_doc_probe_budget_flag_without_raise(conn, monkeypatch, tmp_path) -> Non
     import asyncio
 
     over = asyncio.run(
-        probe_docs_async(
-            conn, settings, "https://d.example/sitemap.xml", max_pages=1
-        )
+        probe_docs_async(conn, settings, "https://d.example/sitemap.xml", max_pages=1)
     )
     assert over.budget_exceeded is True
     assert over.accepted == 2
     assert len(over.samples) == 2
     assert over.max_pages == 1
     fitting = asyncio.run(
-        probe_docs_async(
-            conn, settings, "https://d.example/sitemap.xml", max_pages=5
-        )
+        probe_docs_async(conn, settings, "https://d.example/sitemap.xml", max_pages=5)
     )
     assert fitting.budget_exceeded is False
     assert fitting.accepted == 2
@@ -467,7 +459,9 @@ def test_mcp_probe_tool_schemas(conn, monkeypatch, tmp_path) -> None:
     link_params = by_name["link_stats"].input_schema.get("properties", {})
     assert {"library", "version", "limit", "url"} <= set(link_params)
     repo_params = by_name["repo_probe"].input_schema.get("properties", {})
-    assert {"exclude_patterns", "tree_depth", "only_files", "subdir"} <= set(repo_params)
+    assert {"exclude_patterns", "tree_depth", "only_files", "subdir"} <= set(
+        repo_params
+    )
     assert "samples_per_dir" in set(repo_params)
     doc_params = by_name["doc_probe"].input_schema.get("properties", {})
     assert {"max_pages", "prefilter", "scope", "sample_limit"} <= set(doc_params)

@@ -274,7 +274,14 @@ class DocumentStore:
                 self._conn.commit()
                 return StoreResult(outcome)
             if outcome == "empty":
-                self._upsert_page(version_id, url, etag, last_modified, raw_content, tenant_id=tenant_id)
+                self._upsert_page(
+                    version_id,
+                    url,
+                    etag,
+                    last_modified,
+                    raw_content,
+                    tenant_id=tenant_id,
+                )
                 page = self.get_page(version_id, url)
                 assert page is not None
                 removed = self._delete_documents(page.page_id)
@@ -291,7 +298,9 @@ class DocumentStore:
                     )
                 self._conn.commit()
                 return StoreResult(outcome)
-            self._upsert_page(version_id, url, etag, last_modified, raw_content, tenant_id=tenant_id)
+            self._upsert_page(
+                version_id, url, etag, last_modified, raw_content, tenant_id=tenant_id
+            )
             page = self.get_page(version_id, url)
             assert page is not None
             existing = self.list_page_documents(page.page_id)
@@ -369,10 +378,15 @@ class DocumentStore:
                     )
                 else:
                     try:
-                        from libref.services.infra.tenant import normalize_tenant as _nt2, table_has_tenant as _ht2
+                        from libref.services.infra.tenant import (
+                            normalize_tenant as _nt2,
+                        )
+                        from libref.services.infra.tenant import (
+                            table_has_tenant as _ht2,
+                        )
 
                         _has_doc = _ht2(self._conn, "documents")
-                    except Exception:
+                    except Exception:  # noqa: BLE001
                         _has_doc = False
                     if _has_doc:
                         cur = self._conn.execute(
@@ -436,10 +450,10 @@ class DocumentStore:
         tenant_id: str = "default",
     ) -> None:
         try:
-            from libref.services.infra.tenant import normalize_tenant, table_has_tenant
+            from libref.services.infra.tenant import table_has_tenant
 
             _has = table_has_tenant(self._conn, "pages")
-        except Exception:
+        except Exception:  # noqa: BLE001
             _has = False
             tenant_id = "default"
         if _has:
@@ -452,7 +466,14 @@ class DocumentStore:
                 "ON CONFLICT(version_id, url) DO UPDATE SET "
                 "etag=excluded.etag, last_modified=excluded.last_modified, "
                 "fetched_at=datetime('now'), content_hash=excluded.content_hash",
-                (version_id, url, etag, last_modified, content_hash(raw_content), tenant_id),
+                (
+                    version_id,
+                    url,
+                    etag,
+                    last_modified,
+                    content_hash(raw_content),
+                    tenant_id,
+                ),
             )
         else:
             self._conn.execute(

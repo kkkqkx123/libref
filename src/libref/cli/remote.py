@@ -8,9 +8,7 @@ from typing import Any
 
 def is_remote(args: argparse.Namespace, settings) -> bool:
     """Whether this invocation should go through HTTP instead of the local database."""
-    if bool(getattr(args, "remote", False)):
-        return True
-    return False
+    return bool(getattr(args, "remote", False))
 
 
 def base_url_for(args: argparse.Namespace, settings) -> str:
@@ -46,5 +44,5 @@ def call_json(
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict):
-            raise ValueError("remote server returned a non-object payload")
+            raise TypeError("remote server returned a non-object payload")
         return data

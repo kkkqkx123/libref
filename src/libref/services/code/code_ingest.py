@@ -102,6 +102,7 @@ async def index_repo_async(
 
     _stale_after = float(getattr(settings, "heartbeat_timeout", 600.0) or 600.0)
     from libref.services.infra.tenant import normalize_tenant as _ntc
+
     tenant_id = _ntc(tenant_id)
     async with version_lock(
         conn, ecosystem, library, version, stale_after=_stale_after, tenant_id=tenant_id
@@ -161,11 +162,20 @@ async def _index_repo_inner(
         resume_offset,
         save_progress,
     )
+    from libref.services.infra.tenant import DEFAULT_TENANT as _DT
     from libref.services.registry.libraries import LibraryService
 
-    from libref.services.infra.tenant import DEFAULT_TENANT as _DT
-    _safe_t = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(tenant_id))[:64] or _DT
-    settings_dir = Path(repos_dir) if str(tenant_id or "default") == _DT else (Path(repos_dir) / f"tenant-{_safe_t}")
+    _safe_t = (
+        "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(tenant_id))[
+            :64
+        ]
+        or _DT
+    )
+    settings_dir = (
+        Path(repos_dir)
+        if str(tenant_id or "default") == _DT
+        else (Path(repos_dir) / f"tenant-{_safe_t}")
+    )
     try:
         settings_dir.mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -190,12 +200,40 @@ async def _index_repo_inner(
         repo_url=source,
         resolved_from=resolved_from,
         registry_confirmed=registry_confirmed,
-                tenant_id=tenant_id,
+        tenant_id=tenant_id,
     )
     if repos_quota_mb is not None:
         from libref.services.ops.retention import check_quota
 
         check_quota(settings_dir, int(repos_quota_mb), "repos")
+    if settings is not None and bool(getattr(settings, "quota_enabled", False)):
+        from libref.crawler.scope import BudgetExceeded as _BudgetExceeded
+        from libref.services.infra import metrics as _metrics
+        from libref.services.infra import quota as _quota
+
+        _decision = _quota.check(
+            conn,
+            tenant_id=tenant_id,
+            principal_id=None,
+            resource="repos_bytes",
+            settings=settings,
+        )
+        if not _decision.allowed:
+            _metrics.incr("quota_denied_total{resource=repos_bytes}")
+            _quota.record_event(
+                conn,
+                tenant_id=tenant_id,
+                principal_id=None,
+                resource="repos_bytes",
+                result="denied",
+                used=_decision.used,
+                limit_value=_decision.limit_value,
+            )
+            raise _BudgetExceeded(
+                f"repos_bytes quota exceeded for tenant {tenant_id}:"
+                f" {_decision.used} >= {_decision.limit_value}"
+            )
+
     def _beat() -> None:
         if heartbeat is None:
             return
@@ -221,6 +259,20 @@ async def _index_repo_inner(
                 f"version already indexed from different source: {old_url}"
             )
     root, commit = manager.ensure(conn, repo_name, source, update=update)
+    if settings is not None and bool(getattr(settings, "quota_enabled", False)):
+        from libref.services.infra.quota import add_usage as _add_repo_usage
+        from libref.services.ops.retention import dir_size_bytes as _dir_size
+
+        try:
+            _add_repo_usage(
+                conn,
+                tenant_id=tenant_id,
+                principal_id=None,
+                resource="repos_bytes",
+                amount=_dir_size(Path(root)),
+            )
+        except Exception:  # noqa: BLE001, S110 — accounting must never abort indexing
+            pass
     _beat()
     conn.commit()
     from libref.crawler.scope import BudgetExceeded
@@ -609,7 +661,12 @@ def build_repo_runner(
             except Exception:  # noqa: BLE001, S110 — vector stack is optional; indexing continues without it
                 pass
         from libref.services.infra.tenant import normalize_tenant as _ntr
-        _t = _ntr((p.get("tenant_id") if isinstance(p, dict) else None) or getattr(job, "tenant_id", "default") or "default")
+
+        _t = _ntr(
+            (p.get("tenant_id") if isinstance(p, dict) else None)
+            or getattr(job, "tenant_id", "default")
+            or "default"
+        )
         return await index_repo_async(
             conn,
             p["library"],

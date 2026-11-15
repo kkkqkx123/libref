@@ -11,7 +11,6 @@ from libref.config import LibrefSettings, settings_fingerprint
 from libref.crawler.registry import RegistryError
 from libref.mcp_server.auth import verify_bearer
 from libref.services.code.mining_read import MiningReadService
-from libref.services.docs.ingest import IngestService
 from libref.services.docs.pages import PageService
 from libref.services.docs.search import SearchService
 from libref.services.infra.jobs import JobManager
@@ -76,7 +75,6 @@ def build_web_app(
         request=None,
         authorization: str | None = Header(default=None),
     ):
-        from fastapi import Request as _Request
 
         req = request
         state_principal = getattr(getattr(req, "state", None), "principal", None)
@@ -109,9 +107,13 @@ def build_web_app(
         return principal
 
     def _need(principal, *scopes: str) -> None:
-        missing = [s for s in scopes if s not in set(getattr(principal, "scopes", set()))]
+        missing = [
+            s for s in scopes if s not in set(getattr(principal, "scopes", set()))
+        ]
         if missing:
-            raise HTTPException(status_code=403, detail=f"forbidden: missing {','.join(missing)}")
+            raise HTTPException(
+                status_code=403, detail=f"forbidden: missing {','.join(missing)}"
+            )
 
     def _principal_id(principal) -> int | None:
         pid = getattr(principal, "id", None)
@@ -120,27 +122,88 @@ def build_web_app(
     def _tenant_of(principal) -> str:
         return str(getattr(principal, "tenant_id", "default") or "default")
 
+    def _quota_gate(request: Request, principal, resource: str, cost: int = 1) -> None:
+        """Reject the submission with 429 when the subject is over quota; audit on denial."""
+        est = _eff_settings(request)
+        if not bool(getattr(est, "quota_enabled", False)):
+            return
+        from libref.services.infra import quota as _quota
+        from libref.services.ops.audit import write_audit as _wa
+
+        rc, should_close, _, _bundle = _req_bundle(request, principal)
+        try:
+            decision = _quota.check(
+                rc,
+                tenant_id=_tenant_of(principal),
+                principal_id=_principal_id(principal),
+                resource=resource,
+                cost=cost,
+                settings=est,
+            )
+            if not decision.allowed:
+                rid = str(getattr(getattr(request, "state", None), "request_id", ""))
+                _quota.record_event(
+                    rc,
+                    tenant_id=_tenant_of(principal),
+                    principal_id=_principal_id(principal),
+                    resource=resource,
+                    result="denied",
+                    used=decision.used,
+                    limit_value=decision.limit_value,
+                    request_id=rid,
+                )
+                _wa(
+                    rc,
+                    tenant_id=_tenant_of(principal),
+                    principal_id=_principal_id(principal),
+                    action="quota",
+                    target=resource,
+                    result="denied",
+                    request_id=rid,
+                )
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "error": "quota exceeded",
+                        "resource": resource,
+                        "reset_at": decision.reset_at,
+                        "request_id": rid,
+                    },
+                )
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
     def _eff_settings(request=None):
         try:
-            st = getattr(getattr(getattr(request, "app", None), "state", None), "settings", None)
+            st = getattr(
+                getattr(getattr(request, "app", None), "state", None), "settings", None
+            )
             if st is not None:
                 return st
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
         try:
-            ctx = getattr(getattr(getattr(request, "app", None), "state", None), "context", None)
+            ctx = getattr(
+                getattr(getattr(request, "app", None), "state", None), "context", None
+            )
             if ctx is not None and getattr(ctx, "settings", None) is not None:
                 return ctx.settings
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
         return settings
 
     def _eff_context(request=None):
         try:
-            ctx = getattr(getattr(getattr(request, "app", None), "state", None), "context", None)
+            ctx = getattr(
+                getattr(getattr(request, "app", None), "state", None), "context", None
+            )
             if ctx is not None:
                 return ctx
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
         return context
 
@@ -153,12 +216,6 @@ def build_web_app(
             # Override settings inside bundle with latest effective settings
             return rc, True, est, bundle
         # Fallback single-connection path for tests without context
-        from libref.services.docs.search import SearchService as _SS
-        from libref.services.docs.pages import PageService as _PS
-        from libref.services.registry.libraries import LibraryService as _LS
-        from libref.services.code.mining_read import MiningReadService as _MR
-        from libref.services.ops.review import ReviewService as _RV
-        from libref.services.infra.jobs import JobManager as _JM
         fb = {
             "search": svc,
             "pages": pages,
@@ -177,11 +234,18 @@ def build_web_app(
 
     def _read_guard(principal=Depends(_guard)):
         _need(principal, "read")
-        return None
 
     @app.get("/health")
     def health(request: Request) -> dict[str, Any]:
         return {"ok": True, "fingerprint": settings_fingerprint(_eff_settings(request))}
+
+    @app.get("/metrics")
+    def metrics_route(principal=Depends(_guard)) -> dict[str, Any]:
+        """Read-only process counters: requests, quota denials, token usage, latency."""
+        _need(principal, "read")
+        from libref.services.infra.metrics import snapshot as _snapshot
+
+        return _snapshot()
 
     @app.get("/catalog")
     def catalog_route(
@@ -193,12 +257,16 @@ def build_web_app(
         _need(principal, "read")
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            return envelope(bundle["catalog"].catalog(library, ecosystem, tenant_id=_tenant_of(principal)))
+            return envelope(
+                bundle["catalog"].catalog(
+                    library, ecosystem, tenant_id=_tenant_of(principal)
+                )
+            )
         finally:
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/search")
@@ -245,7 +313,10 @@ def build_web_app(
             out["answerability"] = float(status["answerability"])
             if params.suggest and not results:
                 try:
-                    from libref.services.registry.discovery import DiscoveryService as _DS
+                    from libref.services.registry.discovery import (
+                        DiscoveryService as _DS,
+                    )
+
                     _disc = _DS(rc, est)
                     out["suggestions"] = await _disc.search_async(
                         params.library or params.query,
@@ -263,7 +334,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/library-search")
@@ -341,7 +412,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/read")
@@ -391,7 +462,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/api-insight")
@@ -437,7 +508,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/pattern-insight")
@@ -500,7 +571,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/symbol-insight")
@@ -549,7 +620,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/call-insight")
@@ -607,7 +678,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/import-insight")
@@ -653,7 +724,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/review")
@@ -681,7 +752,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.post("/review")
@@ -712,7 +783,9 @@ def build_web_app(
                 principal_id=_principal_id(principal),
                 action=f"review.{body.action}",
                 target=str(body.entity_id or ""),
-                request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+                request_id=str(
+                    getattr(getattr(request, "state", None), "request_id", "")
+                ),
             )
             if isinstance(result, list):
                 return envelope(result)
@@ -721,7 +794,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.post("/scrape")
@@ -734,6 +807,7 @@ def build_web_app(
         from libref.services.ops.audit import write_audit
 
         rc, should_close, est, bundle = _req_bundle(request, principal)
+        _quota_gate(request, principal, "job_submissions")
         try:
             try:
                 validate_scrape_target(body.start_url, est)
@@ -744,7 +818,9 @@ def build_web_app(
                     principal_id=_principal_id(principal),
                     action="scrape.reject",
                     target=f"{body.library}:{body.version}:{body.start_url}",
-                    request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+                    request_id=str(
+                        getattr(getattr(request, "state", None), "request_id", "")
+                    ),
                 )
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             mgr = bundle["jobs"]
@@ -764,18 +840,22 @@ def build_web_app(
                 principal_id=_principal_id(principal),
                 action="scrape.submit",
                 target=f"{body.library}:{body.version}:{job_id}",
-                request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+                request_id=str(
+                    getattr(getattr(request, "state", None), "request_id", "")
+                ),
             )
             return {"id": job_id, "ok": True}
         finally:
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.post("/doc-probe")
-    async def doc_probe(request: Request, body: DocProbeRequest, principal=Depends(_guard)) -> dict[str, Any]:
+    async def doc_probe(
+        request: Request, body: DocProbeRequest, principal=Depends(_guard)
+    ) -> dict[str, Any]:
         _need(principal, "read")
         from libref.services.docs.probe import probe_docs_async
         from libref.services.infra.tenant import validate_scrape_target
@@ -789,8 +869,17 @@ def build_web_app(
                 validate_scrape_target(body.start_url, est)
             except ValueError as exc:
                 try:
-                    _wa(rc, tenant_id=_tenant_of(principal), principal_id=_principal_id(principal), action="probe.reject", target=body.start_url, request_id=str(getattr(getattr(request, "state", None), "request_id", "")))
-                except Exception:
+                    _wa(
+                        rc,
+                        tenant_id=_tenant_of(principal),
+                        principal_id=_principal_id(principal),
+                        action="probe.reject",
+                        target=body.start_url,
+                        request_id=str(
+                            getattr(getattr(request, "state", None), "request_id", "")
+                        ),
+                    )
+                except Exception:  # noqa: BLE001, S110
                     pass
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             try:
@@ -811,18 +900,21 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.post("/repo-probe")
-    def repo_probe(request: Request, body: RepoProbeRequest, principal=Depends(_guard)) -> dict[str, Any]:
+    def repo_probe(
+        request: Request, body: RepoProbeRequest, principal=Depends(_guard)
+    ) -> dict[str, Any]:
         from libref.services.code.probe import probe_repo
 
         if body.only_files is not None and (
-            not body.only_files
-            or any(not item.strip() for item in body.only_files)
+            not body.only_files or any(not item.strip() for item in body.only_files)
         ):
-            raise HTTPException(status_code=400, detail="only_files must be non-empty strings")
+            raise HTTPException(
+                status_code=400, detail="only_files must be non-empty strings"
+            )
         if body.exclude_patterns is not None and (
             not body.exclude_patterns
             or any(not item.strip() for item in body.exclude_patterns)
@@ -852,7 +944,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/jobs")
@@ -867,9 +959,7 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             mgr = bundle["jobs"]
-            out = mgr.show(
-                params.job_id, params.limit, tenant_id=_tenant_of(principal)
-            )
+            out = mgr.show(params.job_id, params.limit, tenant_id=_tenant_of(principal))
             if "error" in out and "id" not in out:
                 raise HTTPException(status_code=404, detail="job not found")
             return out
@@ -877,11 +967,13 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/jobs/{job_id}")
-    def job_detail(request: Request, job_id: int, principal=Depends(_guard)) -> dict[str, Any]:
+    def job_detail(
+        request: Request, job_id: int, principal=Depends(_guard)
+    ) -> dict[str, Any]:
         _need(principal, "read")
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
@@ -894,7 +986,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/resolve")
@@ -995,15 +1087,29 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
-                from libref.services.infra.tenant import is_global as _isg, resolve_version_id as _rvid, table_has_tenant as _htt
+                from libref.services.infra.tenant import is_global as _isg
+                from libref.services.infra.tenant import resolve_version_id as _rvid
+                from libref.services.infra.tenant import table_has_tenant as _htt
+
                 _ten = _tenant_of(principal)
-                if _ten not in (None, "*") and not _isg(str(_ten)) and (_htt(rc, "libraries") or _htt(rc, "versions")):
+                if (
+                    _ten not in (None, "*")
+                    and not _isg(str(_ten))
+                    and (_htt(rc, "libraries") or _htt(rc, "versions"))
+                ):
                     try:
                         _rvid(rc, str(_ten), library, version, ecosystem)
                     except ValueError:
-                        raise HTTPException(status_code=404, detail="page not found") from None
+                        raise HTTPException(
+                            status_code=404, detail="page not found"
+                        ) from None
                 rows = list_repo_dependencies(
-                    rc, library, version, dep_ecosystem, ecosystem=ecosystem, tenant_id=_ten
+                    rc,
+                    library,
+                    version,
+                    dep_ecosystem,
+                    ecosystem=ecosystem,
+                    tenant_id=_ten,
                 )
             except ValueError as exc:
                 # preserve 404 for tenant-miss vs 400 for bad input
@@ -1015,7 +1121,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/link-stats")
@@ -1056,7 +1162,11 @@ def build_web_app(
                     )
                 return {
                     "summary": version_link_summary(
-                        rc, params.library, params.version, params.ecosystem, tenant_id=_tenant_of(principal)
+                        rc,
+                        params.library,
+                        params.version,
+                        params.ecosystem,
+                        tenant_id=_tenant_of(principal),
                     ),
                     "items": top_referenced(
                         rc,
@@ -1073,7 +1183,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/mining-health")
@@ -1089,7 +1199,10 @@ def build_web_app(
         try:
             try:
                 return bundle["mining"].mining_health(
-                    library=library, version=version, ecosystem=ecosystem, tenant_id=_tenant_of(principal)
+                    library=library,
+                    version=version,
+                    ecosystem=ecosystem,
+                    tenant_id=_tenant_of(principal),
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1097,7 +1210,7 @@ def build_web_app(
             if should_close:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
 
     @app.get("/readyz")
@@ -1119,7 +1232,7 @@ def build_web_app(
             if _rc is not None:
                 try:
                     _rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
         try:
             if ectx is not None:
@@ -1181,7 +1294,7 @@ def build_web_app(
         if should_close:
             try:
                 rc.close()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         return {"id": fid, "ok": True}
 
@@ -1198,7 +1311,9 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         svc = FeedbackService(rc)
         items = svc.list_items(
-            tenant_id=_tenant_of(principal), limit=max(1, min(limit, 200)), status=status
+            tenant_id=_tenant_of(principal),
+            limit=max(1, min(limit, 200)),
+            status=status,
         )
         return envelope(items)
 
@@ -1235,6 +1350,7 @@ def build_web_app(
         principal=Depends(_guard),
     ) -> dict[str, Any]:
         _need(principal, "jobs:write")
+        _quota_gate(request, principal, "job_submissions")
         from libref.services.ops.audit import write_audit
 
         rc, should_close, est, bundle = _req_bundle(request, principal)
@@ -1256,7 +1372,7 @@ def build_web_app(
         if should_close:
             try:
                 rc.close()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         return {"id": job_id, "ok": True}
 
@@ -1286,7 +1402,7 @@ def build_web_app(
         if should_close:
             try:
                 rc.close()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         return {"ok": True}
 
@@ -1385,7 +1501,7 @@ def build_web_app(
                 request.app.state.context = updated
                 request.app.state.settings = fresh
             _setup_logging(fresh)
-        except Exception:  # noqa: BLE001 — refresh never breaks running requests
+        except Exception:  # noqa: BLE001, S110 — refresh never breaks running requests
             pass
         write_audit(
             conn,

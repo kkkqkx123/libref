@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -10,7 +10,7 @@ import httpx
 if TYPE_CHECKING:
     from libref.config import LibrefSettings
 
-from libref.llm.chat import ChatClient, ChatConfig, ChatFn, ChatStreamFn
+from libref.llm.chat import ChatClient, ChatConfig, ChatFn, ChatResult, ChatStreamFn
 from libref.llm.embeddings import EmbeddingClient, EmbeddingConfig, EmbedFn
 from libref.llm.rerank import RerankClient, RerankConfig, RerankFn
 from libref.llm.resilience import CircuitBreaker, RateLimiter, Resilience
@@ -149,6 +149,27 @@ class LlmGateway:
                 return await client.complete(messages, client=c)
 
         return chat
+
+    def chat_result_fn(
+        self, transport: httpx.AsyncBaseTransport | None = None
+    ) -> Callable[[list[dict[str, str]]], Awaitable[ChatResult]] | None:
+        """Chat function returning the full ChatResult (text + usage); same gating as chat_fn."""
+        client = self._chat_client()
+        if client is None:
+            return None
+        if transport is None:
+            return client.complete_result
+        owned_transport = transport
+        timeout = self._settings.chat_timeout
+
+        async def chat_result(messages: list[dict[str, str]]) -> ChatResult:
+            async with httpx.AsyncClient(
+                timeout=timeout,
+                transport=owned_transport,
+            ) as c:
+                return await client.complete_result(messages, client=c)
+
+        return chat_result
 
     def chat_stream_fn(
         self, transport: httpx.AsyncBaseTransport | None = None

@@ -18,19 +18,20 @@ from libref.db.schema import (
     INITIAL_SCHEMA_SQL,
     MINING_PROVENANCE_INDEX_SQL,
     MINING_REVIEW_SCHEMA_SQL,
+    MULTI_TENANT_SQL,
     PAGES_CONTENT_HASH_SQL,
     PATTERN_LABEL_SQL,
     PROGRESS_PENDING_SQL,
     PROGRESS_SQL,
     PROGRESS_VECTOR_WATERMARK_SQL,
     QUERY_SUPPORT_SQL,
+    QUOTA_TABLES_SQL,
     REPO_DEPS_SQL,
     REPOS_ASTCACHE_SQL,
     SYMBOL_DETAIL_SQL,
     VEC_VERSION_META_SQL,
     VECTOR_META_SQL,
     VERSION_SITE_EVIDENCE_SQL,
-    MULTI_TENANT_SQL,
 )
 
 
@@ -66,6 +67,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(21, "ingest-progress-pending", PROGRESS_PENDING_SQL),
     Migration(22, "doc-link-edges", DOC_LINK_EDGES_SQL),
     Migration(23, "multi-tenant", MULTI_TENANT_SQL),
+    Migration(24, "quota-tables", QUOTA_TABLES_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

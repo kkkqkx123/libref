@@ -60,6 +60,9 @@ src = ["src", "tests"]
 # 夹具是待解析的源样本，刻意含未定义调用与闲置绑定，不做清理。
 "tests/fixtures/**" = ["F821", "F841"]
 "tests/e2e/fixtures/**" = ["F821", "F841"]
+# Web 层：B008 是 FastAPI 依赖注入的惯用法（Depends 作默认参数）；
+# RUF059 是 _req_bundle 四元组解包的占位变量，按端点取用子集。
+"src/libref/web/**" = ["B008", "RUF059"]
 
 [tool.uv.workspace]
 members = [
@@ -76,7 +79,7 @@ dev = [
     "mypy>=1.11",
     "numpy>=2.5.4",
     "pytest>=8",
-    "ruff>=0.6",
+    "ruff>=0.17,<0.18",
 ]
 
 [build-system]

@@ -138,6 +138,7 @@ def purge_version(
     eco = str(rows[0][1])
     version_id = int(rows[0][0])
     from libref.services.infra.tenant import normalize_tenant as _nt
+
     _ten = _nt(tenant_id) if tenant_id not in (None, "*") else "default"
     with version_lock_sync(conn, eco, library, version, tenant_id=_ten):
         return _purge_inner(
@@ -168,7 +169,7 @@ def _purge_inner(
     from libref.store.snapshots import SnapshotStore
 
     logger.info("purge start %s:%s %s", eco, library, version)
-    _ten2 = (tenant_id or "default")
+    _ten2 = tenant_id or "default"
     if vec_store is not None:
         try:
             try:
@@ -201,10 +202,9 @@ def _purge_inner(
     snapshot_removed = 0
     if snapshot_root is not None:
         try:
-            from libref.services.infra.tenant import tenant_snapshot_dir as _tsd
-            from libref.config import LibrefSettings as _LS
+            pass
             # snapshot_root may already be tenant-scoped; drop handles both layouts
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
         snapshot_removed = SnapshotStore(snapshot_root, quota_mb=0).drop_version(
             eco, library, version
@@ -213,8 +213,10 @@ def _purge_inner(
         if str(_ten2) != "default":
             try:
                 alt = __import__("pathlib").Path(str(snapshot_root)) / f"tenant-{_ten2}"
-                snapshot_removed += SnapshotStore(alt, quota_mb=0).drop_version(eco, library, version)
-            except Exception:
+                snapshot_removed += SnapshotStore(alt, quota_mb=0).drop_version(
+                    eco, library, version
+                )
+            except Exception:  # noqa: BLE001, S110
                 pass
     repos_removed = 0
     if repos_dir is not None:

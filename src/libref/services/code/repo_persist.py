@@ -19,10 +19,12 @@ def _persist_entities(
     for decl in all_decls:
         pending[(decl.qualified_name, decl.kind)] = decl
     try:
-        from libref.services.infra.tenant import normalize_tenant as _nt, table_has_tenant as _htt
+        from libref.services.infra.tenant import normalize_tenant as _nt
+        from libref.services.infra.tenant import table_has_tenant as _htt
+
         _has_ent = _htt(conn, "api_entities")
         _ten = _nt(tenant_id)
-    except Exception:
+    except Exception:  # noqa: BLE001
         _has_ent = False
         _ten = "default"
     if _has_ent:
@@ -65,39 +67,39 @@ def _persist_entities(
     else:
         conn.executemany(
             "INSERT INTO api_entities(entity_uid, library_id, version_id,"
-        " qualified_name, kind, parent, signature, params, bases,"
-        " start_byte, end_byte, depth, file, line_start, line_end,"
-        " param_types, return_type, has_doc) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-        " ON CONFLICT(entity_uid) DO UPDATE SET parent=excluded.parent,"
-        " signature=excluded.signature, params=excluded.params, bases=excluded.bases,"
-        " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
-        " depth=excluded.depth, file=excluded.file, line_start=excluded.line_start,"
-        " line_end=excluded.line_end, param_types=excluded.param_types,"
-        " return_type=excluded.return_type, has_doc=excluded.has_doc",
-        [
-            (
-                entity_uid(version_id, qualified_name, kind),
-                library_id,
-                version_id,
-                qualified_name,
-                kind,
-                decl.parent,
-                decl.signature,
-                _decl_json.dumps(list(decl.params), ensure_ascii=False),
-                _decl_json.dumps(list(decl.bases), ensure_ascii=False),
-                decl.start_byte,
-                decl.end_byte,
-                decl.depth,
-                decl.file,
-                decl.line_start,
-                decl.line_end,
-                _decl_json.dumps(list(decl.param_types), ensure_ascii=False),
-                decl.return_type,
-                1 if decl.has_doc else 0,
-            )
-            for (qualified_name, kind), decl in pending.items()
-        ],
-    )
+            " qualified_name, kind, parent, signature, params, bases,"
+            " start_byte, end_byte, depth, file, line_start, line_end,"
+            " param_types, return_type, has_doc) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(entity_uid) DO UPDATE SET parent=excluded.parent,"
+            " signature=excluded.signature, params=excluded.params, bases=excluded.bases,"
+            " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
+            " depth=excluded.depth, file=excluded.file, line_start=excluded.line_start,"
+            " line_end=excluded.line_end, param_types=excluded.param_types,"
+            " return_type=excluded.return_type, has_doc=excluded.has_doc",
+            [
+                (
+                    entity_uid(version_id, qualified_name, kind),
+                    library_id,
+                    version_id,
+                    qualified_name,
+                    kind,
+                    decl.parent,
+                    decl.signature,
+                    _decl_json.dumps(list(decl.params), ensure_ascii=False),
+                    _decl_json.dumps(list(decl.bases), ensure_ascii=False),
+                    decl.start_byte,
+                    decl.end_byte,
+                    decl.depth,
+                    decl.file,
+                    decl.line_start,
+                    decl.line_end,
+                    _decl_json.dumps(list(decl.param_types), ensure_ascii=False),
+                    decl.return_type,
+                    1 if decl.has_doc else 0,
+                )
+                for (qualified_name, kind), decl in pending.items()
+            ],
+        )
     wanted = sorted(entity_uid(version_id, q, k) for q, k in pending)
     keep = set(wanted)
     existing = [

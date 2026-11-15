@@ -42,21 +42,26 @@ class VectorStore(Protocol):
         self, conn: sqlite3.Connection, model: str, dim: int
     ) -> None: ...
 
-    def upsert_batch(
-        self, points: list, *, wait: bool = True
-    ) -> None: ...
+    def upsert_batch(self, points: list, *, wait: bool = True) -> None: ...
 
     def delete_docs(self, doc_ids: list[int]) -> None: ...
 
     def delete_version(self, version_id: int, tenant_id: str | None = None) -> None: ...
 
     def search(
-        self, query_vec: list[float], *, k: int, version_id: int, tenant_id: str | None = None
+        self,
+        query_vec: list[float],
+        *,
+        k: int,
+        version_id: int,
+        tenant_id: str | None = None,
     ) -> list[tuple[int, float]]: ...
 
     def count(self, version_id: int, tenant_id: str | None = None) -> int: ...
 
-    def list_ids(self, version_id: int, *, batch: int = 512, tenant_id: str | None = None) -> list[int]: ...
+    def list_ids(
+        self, version_id: int, *, batch: int = 512, tenant_id: str | None = None
+    ) -> list[int]: ...
 
 
 def _write_vec_meta(conn: sqlite3.Connection, model: str, dim: int) -> None:
@@ -103,7 +108,6 @@ def write_version_meta(
     conn.commit()
 
 
-
 def _tenant_scoped(tenant_id: str | None) -> bool:
     """Whether tenant filtering applies; global and missing mean unfiltered."""
     if tenant_id is None or tenant_id == "*":
@@ -119,7 +123,13 @@ def _split_point(point):
     """Accept 4-tuple legacy points and 5-tuple tenant points."""
     if len(point) == 5:
         doc_id, library_id, version_id, embedding, tenant = point
-        return int(doc_id), int(library_id), int(version_id), list(embedding), _normalize_tenant_id(tenant)
+        return (
+            int(doc_id),
+            int(library_id),
+            int(version_id),
+            list(embedding),
+            _normalize_tenant_id(tenant),
+        )
     doc_id, library_id, version_id, embedding = point
     return int(doc_id), int(library_id), int(version_id), list(embedding), "default"
 
@@ -229,7 +239,7 @@ class QdrantVecStore(VectorStore):
                 field_name="tenant_id",
                 field_schema=models.PayloadSchemaType.KEYWORD,
             )
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     # ── Write ──
@@ -254,7 +264,11 @@ class QdrantVecStore(VectorStore):
                     models.PointStruct(
                         id=doc_id,
                         vector=embedding,
-                        payload={"library_id": library_id, "version_id": version_id, "tenant_id": tenant},
+                        payload={
+                            "library_id": library_id,
+                            "version_id": version_id,
+                            "tenant_id": tenant,
+                        },
                     )
                 )
             self.client.upsert(
@@ -291,7 +305,12 @@ class QdrantVecStore(VectorStore):
     # ── Search and reconciliation ──
 
     def search(
-        self, query_vec: list[float], *, k: int, version_id: int, tenant_id: str | None = None
+        self,
+        query_vec: list[float],
+        *,
+        k: int,
+        version_id: int,
+        tenant_id: str | None = None,
     ) -> list[tuple[int, float]]:
         """Nearest-neighbor search filtered by version; returns document ids and cosine similarity in descending similarity order."""
         filt = self._version_filter(version_id, tenant_id)
@@ -300,7 +319,9 @@ class QdrantVecStore(VectorStore):
             collection_name=self.collection,
             query=query_vec,
             query_filter=filt,
-            limit=max(k, k * 3) if (want_payload and _normalize_tenant_id(tenant_id) == "default") else k,
+            limit=max(k, k * 3)
+            if (want_payload and _normalize_tenant_id(tenant_id) == "default")
+            else k,
             with_payload=want_payload,
         )
         if not want_payload:
@@ -337,7 +358,9 @@ class QdrantVecStore(VectorStore):
         ids = self.list_ids(version_id, tenant_id=tenant_id)
         return len(ids)
 
-    def list_ids(self, version_id: int, *, batch: int = 512, tenant_id: str | None = None) -> list[int]:
+    def list_ids(
+        self, version_id: int, *, batch: int = 512, tenant_id: str | None = None
+    ) -> list[int]:
         """All vector point ids of a version, paged scroll for set-difference repair."""
         if not _tenant_scoped(tenant_id):
             found: list[int] = []
@@ -389,17 +412,22 @@ class QdrantVecStore(VectorStore):
         wanted = _normalize_tenant_id(tenant_id)
         if wanted == "default":
             from qdrant_client.models import IsNullCondition, PayloadField
+
             return models.Filter(
                 must=[version_cond],
                 should=[
-                    models.FieldCondition(key="tenant_id", match=models.MatchValue(value="default")),
+                    models.FieldCondition(
+                        key="tenant_id", match=models.MatchValue(value="default")
+                    ),
                     IsNullCondition(is_null=PayloadField(key="tenant_id")),
                 ],
             )
         return models.Filter(
             must=[
                 version_cond,
-                models.FieldCondition(key="tenant_id", match=models.MatchValue(value=wanted)),
+                models.FieldCondition(
+                    key="tenant_id", match=models.MatchValue(value=wanted)
+                ),
             ]
         )
 
@@ -496,7 +524,9 @@ def simvec_root_for(db_path, simvec_dir=None) -> Path:
     return Path(os.path.abspath(raw) + ".simvec")
 
 
-def _simvec_version_filter(version_id: int, tenant_id: str | None = None) -> dict[str, Any]:
+def _simvec_version_filter(
+    version_id: int, tenant_id: str | None = None
+) -> dict[str, Any]:
     # Match values cross the boundary as strings; numeric payloads compare by decimal form.
     base: dict[str, Any] = {
         "must": [
@@ -508,7 +538,9 @@ def _simvec_version_filter(version_id: int, tenant_id: str | None = None) -> dic
         # Non-default tenants push both keys; default relies on over-fetch plus payload filtering
         # so legacy points without a tenant field stay visible to the default tenant.
         if wanted != "default":
-            base["must"].append({"field": "tenant_id", "condition": {"Match": {"value": wanted}}})
+            base["must"].append(
+                {"field": "tenant_id", "condition": {"Match": {"value": wanted}}}
+            )
     return base
 
 
@@ -564,8 +596,10 @@ class SimvecVecStore(VectorStore):
                 self._engine.create_payload_index(self.collection, field, "integer")
         if "tenant_id" not in indexed:
             try:
-                self._engine.create_payload_index(self.collection, "tenant_id", "keyword")
-            except Exception:
+                self._engine.create_payload_index(
+                    self.collection, "tenant_id", "keyword"
+                )
+            except Exception:  # noqa: BLE001, S110
                 pass
 
     def upsert_batch(
@@ -586,7 +620,11 @@ class SimvecVecStore(VectorStore):
                     {
                         "id": _simvec_id(doc_id),
                         "vector": list(embedding),
-                        "payload": {"library_id": library_id, "version_id": version_id, "tenant_id": tenant},
+                        "payload": {
+                            "library_id": library_id,
+                            "version_id": version_id,
+                            "tenant_id": tenant,
+                        },
                     }
                 )
             self._engine.upsert_batch(
@@ -622,7 +660,12 @@ class SimvecVecStore(VectorStore):
             self.delete_docs(ids)
 
     def search(
-        self, query_vec: list[float], *, k: int, version_id: int, tenant_id: str | None = None
+        self,
+        query_vec: list[float],
+        *,
+        k: int,
+        version_id: int,
+        tenant_id: str | None = None,
     ) -> list[tuple[int, float]]:
         """Nearest-neighbor search filtered by version; returns document ids and cosine similarity in descending similarity order."""
         if not _tenant_scoped(tenant_id):
@@ -687,7 +730,9 @@ class SimvecVecStore(VectorStore):
             )
         return len(self.list_ids(version_id, tenant_id=tenant_id))
 
-    def list_ids(self, version_id: int, *, batch: int = 512, tenant_id: str | None = None) -> list[int]:
+    def list_ids(
+        self, version_id: int, *, batch: int = 512, tenant_id: str | None = None
+    ) -> list[int]:
         """All vector point ids of a version, paged scroll for set-difference repair."""
         if not _tenant_scoped(tenant_id):
             found: list[int] = []

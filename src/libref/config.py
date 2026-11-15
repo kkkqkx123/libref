@@ -216,6 +216,12 @@ class LibrefSettings(BaseSettings):
     )
     repos_quota_mb: int = Field(default=2048, ge=0)
     deletion_log_ttl_days: float = Field(default=30.0, ge=0)
+    # Per-subject quota governance: DB policies take precedence; these global fields are the
+    # final fallback limit when no policy row matches. 0 disables that resource's limit.
+    quota_enabled: bool = False
+    quota_http_requests_per_hour: int = Field(default=0, ge=0)
+    quota_llm_tokens_per_day: int = Field(default=0, ge=0)
+    quota_job_submissions_per_hour: int = Field(default=0, ge=0)
     # Runtime logging: level and file sink; stderr-only and quiet by default.
     log_level: str = "WARNING"
     log_file: Path | None = None
@@ -434,6 +440,14 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "allowed_hosts",
             "allowed_origins",
             "bootstrap_admin_key",
+        }
+    ),
+    "quota": frozenset(
+        {
+            "quota_enabled",
+            "quota_http_requests_per_hour",
+            "quota_llm_tokens_per_day",
+            "quota_job_submissions_per_hour",
         }
     ),
     "client": frozenset({"base_url", "client_api_key"}),

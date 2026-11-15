@@ -35,7 +35,7 @@ def write_audit(
                 ),
             )
             conn.commit()
-    except Exception:  # noqa: BLE001, S110 — audit must not break business
+    except Exception:  # noqa: BLE001 — audit must not break business
         try:
             conn.rollback()
         except Exception:  # noqa: BLE001, S110 — best effort only

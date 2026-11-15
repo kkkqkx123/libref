@@ -48,7 +48,79 @@ def _empty_answer(degraded: bool, reasons: list[str]) -> dict[str, Any]:
     }
 
 
-def _pattern_labels(conn, settings, results, library, version, ecosystem, preset, tenant_id=None):
+def _meter_llm_usage(
+    conn, settings, completion: str, usage: dict[str, int] | None, prompt_chars: int
+) -> None:
+    """Accumulate llm token usage for the authenticated principal; best effort only.
+
+    Provider usage wins when present; otherwise tokens are estimated at ~4 chars/token
+    and the estimate source is marked in the metrics counter.
+    """
+    if not bool(getattr(settings, "quota_enabled", False)):
+        return
+    try:
+        from libref.services.infra import metrics as _metrics
+        from libref.services.infra import quota as _quota
+        from libref.services.infra.auth import current_principal
+
+        principal = current_principal.get()
+        if principal is None:
+            return
+        if usage and (usage.get("prompt_tokens") or usage.get("completion_tokens")):
+            prompt_tokens = int(usage.get("prompt_tokens") or 0)
+            completion_tokens = int(usage.get("completion_tokens") or 0)
+            source = "provider"
+        else:
+            prompt_tokens = max(1, prompt_chars // 4)
+            completion_tokens = max(1, len(completion) // 4)
+            source = "estimate"
+        tenant_id = str(principal.tenant_id or "default")
+        _quota.add_usage(
+            conn,
+            tenant_id=tenant_id,
+            principal_id=principal.id,
+            resource="llm_prompt_tokens",
+            amount=prompt_tokens,
+            window_type="day",
+        )
+        _quota.add_usage(
+            conn,
+            tenant_id=tenant_id,
+            principal_id=principal.id,
+            resource="llm_completion_tokens",
+            amount=completion_tokens,
+            window_type="day",
+        )
+        _metrics.incr(
+            f"llm_tokens_total{{source={source}}}", prompt_tokens + completion_tokens
+        )
+    except Exception:  # noqa: BLE001, S110 — metering must never break answering
+        pass
+
+
+def _gate_principal_id() -> int | None:
+    try:
+        from libref.services.infra.auth import current_principal
+
+        principal = current_principal.get()
+        return None if principal is None else principal.id
+    except Exception:  # noqa: BLE001 — quota gating must never break imports
+        return None
+
+
+def _gate_tenant_id() -> str:
+    try:
+        from libref.services.infra.auth import current_principal
+
+        principal = current_principal.get()
+        return "default" if principal is None else str(principal.tenant_id or "default")
+    except Exception:  # noqa: BLE001 — quota gating must never break imports
+        return "default"
+
+
+def _pattern_labels(
+    conn, settings, results, library, version, ecosystem, preset, tenant_id=None
+):
     """Pick up to three mined labels overlapping the recalled entities; precise stays mining-free."""
     if preset == "precise":
         return []
@@ -58,7 +130,11 @@ def _pattern_labels(conn, settings, results, library, version, ecosystem, preset
     from libref.services.code.mining_read import MiningReadService
 
     candidates = MiningReadService(conn, settings).list_labels(
-        library=library, version=version, ecosystem=ecosystem, limit=20, tenant_id=tenant_id
+        library=library,
+        version=version,
+        ecosystem=ecosystem,
+        limit=20,
+        tenant_id=tenant_id,
     )
     ranked = sorted(
         enumerate(candidates),
@@ -101,6 +177,12 @@ async def answer_query_async(
     answer_chat = chat if chat is not None else build_chat_fn(settings)
     if answer_chat is None:
         raise LlmConfigError("chat is not enabled: enable chat and set an api key")
+    # Prefer the usage-returning variant so token metering uses provider numbers.
+    answer_chat_result = None
+    if chat is None and bool(getattr(settings, "quota_enabled", False)):
+        from libref.services.factory import build_gateway
+
+        answer_chat_result = build_gateway(settings).chat_result_fn()
     search = SearchService(
         conn, settings, vec_store=vec_store, embed=embed, rerank=rerank
     )
@@ -139,7 +221,31 @@ async def answer_query_async(
     messages = build_messages(
         query, kept, bodies, per_limit, omitted=omitted, labels=labels
     )
-    answer = await answer_chat(messages)
+    prompt_chars = sum(len(str(m.get("content") or "")) for m in messages)
+    if answer_chat_result is not None:
+        # Quota gate before paying for generation; over-limit degrades to retrieval-only.
+        from libref.services.infra import quota as _quota
+
+        decision = _quota.check(
+            conn,
+            tenant_id=_gate_tenant_id(),
+            principal_id=_gate_principal_id(),
+            resource="llm_prompt_tokens",
+            cost=max(1, prompt_chars // 4),
+            settings=settings,
+        )
+        if not decision.allowed:
+            from libref.services.infra import metrics as _metrics
+
+            _metrics.incr("quota_denied_total{resource=llm_tokens}")
+            return _empty_answer(True, [*reasons, "llm_quota_exceeded"])
+        result = await answer_chat_result(messages)
+        answer = result.text
+        _meter_llm_usage(conn, settings, answer, dict(result.usage or {}), prompt_chars)
+    else:
+        prompt_chars_for_estimate = prompt_chars
+        answer = await answer_chat(messages)
+        _meter_llm_usage(conn, settings, answer, None, prompt_chars_for_estimate)
     cited_results, cited = filter_citations_by_answer(kept, answer)
     return {
         "answer": answer,

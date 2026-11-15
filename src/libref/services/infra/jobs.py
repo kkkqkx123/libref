@@ -50,9 +50,7 @@ def ensure_jobs_table(conn: sqlite3.Connection) -> None:
             "ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0"
         )
     if "attempts" not in cols:
-        conn.execute(
-            "ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
-        )
+        conn.execute("ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
     conn.commit()
 
 
@@ -193,7 +191,9 @@ class JobManager:
             owner=row[9] if has_tenant else None,
         )
 
-    def list_recent(self, limit: int = 20, *, tenant_id: str | None = None) -> list[Job]:
+    def list_recent(
+        self, limit: int = 20, *, tenant_id: str | None = None
+    ) -> list[Job]:
         cols = _table_columns(self._conn, "jobs")
         has_tenant = "tenant_id" in cols
         scoped = has_tenant and tenant_id not in (None, "*")
@@ -202,7 +202,10 @@ class JobManager:
                 "SELECT id, kind, params, status, error, result, finished_at,"
                 " tenant_id, principal_id, owner"
                 " FROM jobs WHERE tenant_id=? ORDER BY id DESC LIMIT ?",
-                (tenant_id, limit,),
+                (
+                    tenant_id,
+                    limit,
+                ),
             ).fetchall()
         elif has_tenant:
             rows = self._conn.execute(
@@ -312,7 +315,7 @@ class JobManager:
                 job = self.claim_next()
                 if job is None:
                     idle += 1
-                    backoff = min(2.0, poll_interval * (1.5**min(idle, 6)))
+                    backoff = min(2.0, poll_interval * (1.5 ** min(idle, 6)))
                     await asyncio.sleep(backoff)
                     continue
                 idle = 0
@@ -368,7 +371,7 @@ class JobManager:
             interval = 5.0
             try:
                 interval = max(1.0, float(self._stale_after) / 6.0)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 pass
             while True:
                 await asyncio.sleep(min(interval, 5.0))

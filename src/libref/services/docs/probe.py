@@ -74,10 +74,17 @@ def _doc_cache_key(
         scope_text = _json.dumps(
             scope or {}, sort_keys=True, ensure_ascii=False, default=str
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         scope_text = str(scope)
     return "\0".join(
-        (start_url, scope_text, str(limit), str(fetch_limit), str(max_pages), str(bool(prefilter)))
+        (
+            start_url,
+            scope_text,
+            str(limit),
+            str(fetch_limit),
+            str(max_pages),
+            str(bool(prefilter)),
+        )
     )
 
 
@@ -187,10 +194,15 @@ async def _fetch_sample_heads(
                     head_truncated=len(head) >= _HEAD_READ_LIMIT,
                 )
             except Exception as exc:  # noqa: BLE001 — per-URL failures are recorded, never raised
-                slots[index] = SampleFetch(url=url, error=f"{type(exc).__name__}: {exc}")
+                slots[index] = SampleFetch(
+                    url=url, error=f"{type(exc).__name__}: {exc}"
+                )
 
     await asyncio.gather(*(_one(i, u) for i, u in enumerate(urls)))
-    return [item if item is not None else SampleFetch(url=url) for item, url in zip(slots, urls)]
+    return [
+        item if item is not None else SampleFetch(url=url)
+        for item, url in zip(slots, urls)
+    ]
 
 
 def _prefix_groups(urls: list[str], limit: int = 20) -> list[PrefixGroup]:
@@ -232,7 +244,9 @@ async def probe_docs_async(
 
     if not start_url.strip():
         raise ValueError("start_url is empty")
-    if max_pages is not None and (not isinstance(max_pages, int) or isinstance(max_pages, bool) or max_pages < 1):
+    if max_pages is not None and (
+        not isinstance(max_pages, int) or isinstance(max_pages, bool) or max_pages < 1
+    ):
         raise ValueError("max_pages must be a positive integer")
     limit = sample_limit if sample_limit is not None else settings.probe_sample_limit
     fetch_total = (
@@ -240,7 +254,9 @@ async def probe_docs_async(
         if fetch_sample_limit is not None
         else settings.probe_fetch_sample_limit
     )
-    cache_key = _doc_cache_key(start_url, scope, int(limit), int(fetch_total), max_pages, prefilter)
+    cache_key = _doc_cache_key(
+        start_url, scope, int(limit), int(fetch_total), max_pages, prefilter
+    )
     cached = _doc_cache_get(
         cache_key, float(getattr(settings, "probe_cache_ttl_hours", 1.0) or 0.0)
     )

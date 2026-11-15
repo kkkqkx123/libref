@@ -20,9 +20,7 @@ def is_loopback_host(host: str) -> bool:
 
 def auth_required(host: str, *, auth_mode: str = "enforced") -> bool:
     """Whether per-request authentication applies for this startup mode."""
-    if (auth_mode or "enforced") == "dev":
-        return False
-    return True
+    return (auth_mode or "enforced") != "dev"
 
 
 def check_startup(

@@ -166,9 +166,7 @@ def test_probe_routes(tmp_path, monkeypatch) -> None:
             )
         raise AssertionError(path)
 
-    client_transport = httpx.AsyncClient(
-        transport=httpx.MockTransport(handler)
-    )
+    client_transport = httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
     @contextlib.asynccontextmanager
     async def fake(_settings):
@@ -237,7 +235,9 @@ def test_link_stats_routes(tmp_path, monkeypatch) -> None:
     conn = _open(tmp_path, "links.db")
     try:
         conn.execute("INSERT INTO libraries(id, name) VALUES(1, 'docs')")
-        conn.execute("INSERT INTO versions(id, library_id, version) VALUES(1, 1, '1.0')")
+        conn.execute(
+            "INSERT INTO versions(id, library_id, version) VALUES(1, 1, '1.0')"
+        )
         conn.commit()
         replace_version_edges(
             conn,

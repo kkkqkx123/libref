@@ -108,7 +108,7 @@ async def _host_get(
     for attempt in range(3):
         try:
             resp = await client.get(url, params=params)
-        except (httpx.HTTPError, OSError, TimeoutError):
+        except httpx.HTTPError, OSError, TimeoutError:
             if attempt >= 2:
                 return None
             await asyncio.sleep(backoff_delay(attempt, base=0.05, cap=0.4))
@@ -394,7 +394,7 @@ def acquire_remote(
 
         from dulwich import porcelain
 
-        last: Exception | None = None
+        last = None
         for attempt in range(3):
             try:
                 shutil.rmtree(tmp / "repo", ignore_errors=True)

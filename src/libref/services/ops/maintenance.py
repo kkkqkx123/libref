@@ -55,7 +55,9 @@ def sqlite_embeddable_count(conn, version_id: int) -> int:
     return int(row[0])
 
 
-async def _embed_rows(rows, settings, embed, tenant_id: str | None = None) -> list[tuple]:
+async def _embed_rows(
+    rows, settings, embed, tenant_id: str | None = None
+) -> list[tuple]:
     """Encode truth rows into vector points in configured batches."""
     hard = int(settings.chunk_embed_max_tokens)
     batch = max(1, int(settings.embed_batch))
@@ -170,7 +172,9 @@ def _record_version(conn, version_id: int, model: str, dim: int) -> None:
     write_version_meta(conn, version_id, model, dim)
 
 
-async def reconcile_version(conn, settings, vec_store, embed, version_id: int, tenant_id: str | None = None) -> dict:
+async def reconcile_version(
+    conn, settings, vec_store, embed, version_id: int, tenant_id: str | None = None
+) -> dict:
     """Repair one version by set difference; model drift rebuilds only that version.
 
     Returns repair statistics; raises when the vector pair is missing.
@@ -186,10 +190,17 @@ async def reconcile_version(conn, settings, vec_store, embed, version_id: int, t
         except TypeError:
             vec_store.delete_version(version_id)
         try:
-            has_tenant_col = any(r[1] == "tenant_id" for r in conn.execute("PRAGMA table_info(documents)").fetchall())
-        except Exception:
+            has_tenant_col = any(
+                r[1] == "tenant_id"
+                for r in conn.execute("PRAGMA table_info(documents)").fetchall()
+            )
+        except Exception:  # noqa: BLE001
             has_tenant_col = False
-        sel = "SELECT id, library_id, version_id, content, metadata" + (", tenant_id" if has_tenant_col else "") + f" FROM documents WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION} ORDER BY id"
+        sel = (
+            "SELECT id, library_id, version_id, content, metadata"
+            + (", tenant_id" if has_tenant_col else "")
+            + f" FROM documents WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION} ORDER BY id"
+        )
         rows = conn.execute(sel, (version_id,)).fetchall()
         if tenant_id not in (None, "*") and has_tenant_col:
             rows = [r for r in rows if str(r[5] or "default") == str(tenant_id)]
@@ -207,11 +218,17 @@ async def reconcile_version(conn, settings, vec_store, embed, version_id: int, t
             "rebuilt": 1,
         }
     try:
-        _has_t = any(r[1] == "tenant_id" for r in conn.execute("PRAGMA table_info(documents)").fetchall())
-    except Exception:
+        _has_t = any(
+            r[1] == "tenant_id"
+            for r in conn.execute("PRAGMA table_info(documents)").fetchall()
+        )
+    except Exception:  # noqa: BLE001
         _has_t = False
     if tenant_id not in (None, "*") and _has_t:
-        _rows = conn.execute(f"SELECT id FROM documents WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION} AND tenant_id=? ORDER BY id", (version_id, str(tenant_id))).fetchall()
+        _rows = conn.execute(
+            f"SELECT id FROM documents WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION} AND tenant_id=? ORDER BY id",
+            (version_id, str(tenant_id)),
+        ).fetchall()
         want = {int(r[0]) for r in _rows}
     else:
         want = set(embeddable_doc_ids(conn, version_id))
@@ -227,11 +244,21 @@ async def reconcile_version(conn, settings, vec_store, embed, version_id: int, t
     if missing:
         marks = ",".join("?" for _ in missing)
         try:
-            _hc = any(r[1] == "tenant_id" for r in conn.execute("PRAGMA table_info(documents)").fetchall())
-        except Exception:
+            _hc = any(
+                r[1] == "tenant_id"
+                for r in conn.execute("PRAGMA table_info(documents)").fetchall()
+            )
+        except Exception:  # noqa: BLE001
             _hc = False
-        _sel2 = "SELECT id, library_id, version_id, content, metadata" + (", tenant_id" if _hc else "") + f" FROM documents WHERE id IN ({marks})"
-        rows = conn.execute(_sel2, missing,).fetchall()
+        _sel2 = (
+            "SELECT id, library_id, version_id, content, metadata"
+            + (", tenant_id" if _hc else "")
+            + f" FROM documents WHERE id IN ({marks})"
+        )
+        rows = conn.execute(
+            _sel2,
+            missing,
+        ).fetchall()
         by_id = {int(r[0]): r for r in rows}
         ordered = [by_id[i] for i in missing if i in by_id]
         points = await _embed_rows(ordered, settings, embed, tenant_id)
@@ -317,7 +344,14 @@ async def sync_vectors_for_docs(
     if not removed and not inserted:
         if version_id is not None and verify:
             await _verify_version(
-                conn, settings, vec_store, embed, counts, version_id, repair=repair, tenant_id=tenant_id
+                conn,
+                settings,
+                vec_store,
+                embed,
+                counts,
+                version_id,
+                repair=repair,
+                tenant_id=tenant_id,
             )
         return
     try:
@@ -330,16 +364,22 @@ async def sync_vectors_for_docs(
         return
     try:
         try:
-            _ht3 = any(r[1] == "tenant_id" for r in conn.execute("PRAGMA table_info(documents)").fetchall())
-        except Exception:
+            _ht3 = any(
+                r[1] == "tenant_id"
+                for r in conn.execute("PRAGMA table_info(documents)").fetchall()
+            )
+        except Exception:  # noqa: BLE001
             _ht3 = False
         _id_to_tenant: dict[int, str] = {}
         if _ht3 and inserted:
             try:
                 _marks = ",".join("?" for _ in inserted)
-                for _rid, _rt in conn.execute(f"SELECT id, tenant_id FROM documents WHERE id IN ({_marks})", inserted).fetchall():
+                for _rid, _rt in conn.execute(
+                    f"SELECT id, tenant_id FROM documents WHERE id IN ({_marks})",
+                    inserted,
+                ).fetchall():
                     _id_to_tenant[int(_rid)] = str(_rt or "default")
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
         docs = [
             d
@@ -347,7 +387,12 @@ async def sync_vectors_for_docs(
             if is_embeddable_metadata(d["metadata"])
         ]
         if tenant_id not in (None, "*"):
-            docs = [d for d in docs if _id_to_tenant.get(int(d["id"]), tenant_id or "default") == str(tenant_id)]
+            docs = [
+                d
+                for d in docs
+                if _id_to_tenant.get(int(d["id"]), tenant_id or "default")
+                == str(tenant_id)
+            ]
         rows = [
             (
                 d["id"],
@@ -371,12 +416,21 @@ async def sync_vectors_for_docs(
     if version_id is not None:
         if verify:
             await _verify_version(
-                conn, settings, vec_store, embed, counts, version_id, repair=repair, tenant_id=tenant_id
+                conn,
+                settings,
+                vec_store,
+                embed,
+                counts,
+                version_id,
+                repair=repair,
+                tenant_id=tenant_id,
             )
         else:
             try:
                 try:
-                    counts["vector_count"] = int(vec_store.count(version_id, tenant_id=tenant_id))
+                    counts["vector_count"] = int(
+                        vec_store.count(version_id, tenant_id=tenant_id)
+                    )
                 except TypeError:
                     counts["vector_count"] = int(vec_store.count(version_id))
             except Exception as exc:  # noqa: BLE001 — read-back failure counts, repair is deferred
@@ -385,16 +439,32 @@ async def sync_vectors_for_docs(
 
 
 async def _verify_version(
-    conn, settings, vec_store, embed, counts, version_id: int, *, repair: bool = True, tenant_id: str | None = None
+    conn,
+    settings,
+    vec_store,
+    embed,
+    counts,
+    version_id: int,
+    *,
+    repair: bool = True,
+    tenant_id: str | None = None,
 ) -> None:
     """Verify by count then id set; mismatch falls through to set-difference repair."""
     try:
         try:
-            _hc4 = any(r[1] == "tenant_id" for r in conn.execute("PRAGMA table_info(documents)").fetchall())
-        except Exception:
+            _hc4 = any(
+                r[1] == "tenant_id"
+                for r in conn.execute("PRAGMA table_info(documents)").fetchall()
+            )
+        except Exception:  # noqa: BLE001
             _hc4 = False
         if tenant_id not in (None, "*") and _hc4:
-            want_count = int(conn.execute(f"SELECT count(*) FROM documents WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION} AND tenant_id=?", (version_id, str(tenant_id))).fetchone()[0])
+            want_count = int(
+                conn.execute(
+                    f"SELECT count(*) FROM documents WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION} AND tenant_id=?",
+                    (version_id, str(tenant_id)),
+                ).fetchone()[0]
+            )
         else:
             want_count = sqlite_embeddable_count(conn, version_id)
         try:
@@ -408,15 +478,26 @@ async def _verify_version(
     if want_count == have_count:
         try:
             try:
-                _hc5 = any(r[1] == "tenant_id" for r in conn.execute("PRAGMA table_info(documents)").fetchall())
-            except Exception:
+                _hc5 = any(
+                    r[1] == "tenant_id"
+                    for r in conn.execute("PRAGMA table_info(documents)").fetchall()
+                )
+            except Exception:  # noqa: BLE001
                 _hc5 = False
             if tenant_id not in (None, "*") and _hc5:
-                want_ids = {int(r[0]) for r in conn.execute(f"SELECT id FROM documents WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION} AND tenant_id=?", (version_id, str(tenant_id))).fetchall()}
+                want_ids = {
+                    int(r[0])
+                    for r in conn.execute(
+                        f"SELECT id FROM documents WHERE version_id=? AND {EMBEDDABLE_SQL_CONDITION} AND tenant_id=?",
+                        (version_id, str(tenant_id)),
+                    ).fetchall()
+                }
             else:
                 want_ids = set(embeddable_doc_ids(conn, version_id))
             try:
-                have_ids = {int(i) for i in vec_store.list_ids(version_id, tenant_id=tenant_id)}
+                have_ids = {
+                    int(i) for i in vec_store.list_ids(version_id, tenant_id=tenant_id)
+                }
             except TypeError:
                 have_ids = {int(i) for i in vec_store.list_ids(version_id)}
         except Exception as exc:  # noqa: BLE001 — verification failure counts, repair is skipped
@@ -433,7 +514,9 @@ async def _verify_version(
         )
         return
     try:
-        stats = await reconcile_version(conn, settings, vec_store, embed, version_id, tenant_id)
+        stats = await reconcile_version(
+            conn, settings, vec_store, embed, version_id, tenant_id
+        )
     except Exception as exc:  # noqa: BLE001 — vector failures are recorded, not fatal
         counts["vector_failed"] = counts.get("vector_failed", 0) + abs(
             want_count - have_count

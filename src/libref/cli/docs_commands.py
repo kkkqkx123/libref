@@ -221,14 +221,29 @@ def cmd_smoke(args: argparse.Namespace) -> int:
 
 def _remote_ingest(args: argparse.Namespace, settings) -> int:
     import time as _time
+
     import httpx as _httpx3
-    from libref.cli.remote import auth_headers as _ah3, base_url_for as _buf3
+
+    from libref.cli.remote import auth_headers as _ah3
+    from libref.cli.remote import base_url_for as _buf3
+
     base = _buf3(args, settings)
     # Resolve mode not supported remotely; explicit form only
-    if getattr(args, "ecosystem", None) is not None or getattr(args, "start_url", None) is None:
-        print("remote ingest requires explicit library version start_url (resolve locally first)", file=__import__("sys").stderr)
+    if (
+        getattr(args, "ecosystem", None) is not None
+        or getattr(args, "start_url", None) is None
+    ):
+        print(
+            "remote ingest requires explicit library version start_url (resolve locally first)",
+            file=__import__("sys").stderr,
+        )
         return 2
-    payload = {"library": args.library, "version": args.version, "start_url": args.start_url, "ecosystem": "custom"}
+    payload = {
+        "library": args.library,
+        "version": args.version,
+        "start_url": args.start_url,
+        "ecosystem": "custom",
+    }
     if getattr(args, "max_pages", None) is not None:
         payload["max_pages"] = int(args.max_pages)
     if getattr(args, "max_pages", None) is not None:
@@ -239,7 +254,7 @@ def _remote_ingest(args: argparse.Namespace, settings) -> int:
             _r = _c.post(f"{base}/scrape", json=payload, headers=_ah3(settings))
             _r.raise_for_status()
             data = _r.json()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"remote failed: {exc}", file=__import__("sys").stderr)
         return 1
     job_id = data.get("id")
@@ -252,11 +267,14 @@ def _remote_ingest(args: argparse.Namespace, settings) -> int:
                 _q = _c2.get(f"{base}/jobs/{int(job_id)}", headers=_ah3(settings))
                 _q.raise_for_status()
                 info = _q.json()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             print(f"remote poll failed: {exc}", file=__import__("sys").stderr)
             return 1
         status = info.get("status")
-        print(f"job {info.get('id')} {status}" + (f" error={info.get('error')}" if info.get("error") else ""))
+        print(
+            f"job {info.get('id')} {status}"
+            + (f" error={info.get('error')}" if info.get("error") else "")
+        )
         if status in ("done", "failed"):
             return 0 if status == "done" else 1
         if _time.monotonic() >= deadline:
@@ -268,6 +286,7 @@ def _remote_ingest(args: argparse.Namespace, settings) -> int:
 def cmd_ingest(args: argparse.Namespace) -> int:
     settings = _load_settings(args, _registry_overrides(args))
     from libref.cli.remote import is_remote as _is_remote3
+
     if _is_remote3(args, settings):
         return _remote_ingest(args, settings)
     conn = _connect(settings)
@@ -373,11 +392,14 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 
 def _remote_search(args: argparse.Namespace, settings) -> int:
-    import json as _json
-    from libref.cli.remote import base_url_for, call_json, is_remote
+    from libref.cli.remote import base_url_for
 
     base = base_url_for(args, settings)
-    params = {"query": args.query, "limit": int(args.limit), "preset": getattr(args, "preset", "balanced")}
+    params = {
+        "query": args.query,
+        "limit": int(args.limit),
+        "preset": getattr(args, "preset", "balanced"),
+    }
     for _k in ("library", "version", "ecosystem"):
         _v = getattr(args, _k, None)
         if _v is not None:
@@ -387,20 +409,27 @@ def _remote_search(args: argparse.Namespace, settings) -> int:
     if getattr(args, "include_prerelease", False):
         params["include_prerelease"] = "true"
     import httpx as _httpx
+
     from libref.cli.remote import auth_headers as _ah
+
     try:
         with _httpx.Client(timeout=30.0) as _c:
             _r = _c.get(f"{base}/search", params=params, headers=_ah(settings))
             _r.raise_for_status()
             data = _r.json()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"remote failed: {exc}", file=__import__("sys").stderr)
         return 1
-    for r in (data.get("items") or []):
-        print(f"[{r.get('score', 0):.3f}] {r.get('title') or '(untitled)'} — {r.get('url')}")
+    for r in data.get("items") or []:
+        print(
+            f"[{r.get('score', 0):.3f}] {r.get('title') or '(untitled)'} — {r.get('url')}"
+        )
         print(f"    {r.get('snippet')}")
     if data.get("degraded"):
-        print(f"(degraded: {','.join(data.get('reasons', []) or [])})", file=__import__("sys").stderr)
+        print(
+            f"(degraded: {','.join(data.get('reasons', []) or [])})",
+            file=__import__("sys").stderr,
+        )
     if not (data.get("items") or []):
         print("(no results)")
     return 0
@@ -412,6 +441,7 @@ def cmd_search(args: argparse.Namespace) -> int:
 
     settings = _load_settings(args, _window_overrides(args))
     from libref.cli.remote import is_remote as _is_remote
+
     if _is_remote(args, settings):
         return _remote_search(args, settings)
     conn = _connect(settings)
@@ -503,10 +533,18 @@ def cmd_answer(args: argparse.Namespace) -> int:
 
 def _remote_read(args: argparse.Namespace, settings) -> int:
     import json as _json
-    from libref.cli.remote import auth_headers as _ah2, base_url_for as _buf
+
     import httpx as _httpx2
+
+    from libref.cli.remote import auth_headers as _ah2
+    from libref.cli.remote import base_url_for as _buf
+
     base = _buf(args, settings)
-    params = {"url": args.url, "mode": args.mode, "radius": int(getattr(args, "radius", 1) or 1)}
+    params = {
+        "url": args.url,
+        "mode": args.mode,
+        "radius": int(getattr(args, "radius", 1) or 1),
+    }
     for _k in ("sort_order", "source_group_id", "library", "version", "ecosystem"):
         _v = getattr(args, _k, None)
         if _v is not None:
@@ -519,7 +557,7 @@ def _remote_read(args: argparse.Namespace, settings) -> int:
                 return 1
             _r.raise_for_status()
             page = _r.json()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"remote failed: {exc}", file=__import__("sys").stderr)
         return 1
     if args.mode == "page":
@@ -534,6 +572,7 @@ def cmd_read(args: argparse.Namespace) -> int:
 
     _st = _load_settings(args)
     from libref.cli.remote import is_remote as _is_remote2
+
     if _is_remote2(args, _st):
         return _remote_read(args, _st)
     conn = _connect(_st)

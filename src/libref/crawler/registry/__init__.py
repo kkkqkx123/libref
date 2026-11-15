@@ -207,7 +207,7 @@ def _is_private_host(host: str) -> bool:
             second = int(h.split(".")[1])
             if 16 <= second <= 31:
                 return True
-        except (IndexError, ValueError):
+        except IndexError, ValueError:
             pass
     return False
 

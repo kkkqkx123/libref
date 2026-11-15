@@ -396,13 +396,19 @@ class IngestService:
             getattr(self._settings, "heartbeat_timeout", 600.0) or 600.0
         )
         from libref.services.infra.tenant import normalize_tenant as _nt
+
         tenant_id = _nt(tenant_id)
         try:
             self._pipeline.set_tenant(tenant_id)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
         async with _version_lock(
-            self._conn, ecosystem, library, version, stale_after=_stale_after, tenant_id=tenant_id
+            self._conn,
+            ecosystem,
+            library,
+            version,
+            stale_after=_stale_after,
+            tenant_id=tenant_id,
         ):
             removed_all: list[int] = []
             inserted_all: list[int] = []

@@ -145,31 +145,50 @@ def cmd_review(args: argparse.Namespace) -> int:
 
 def _remote_job_show(args: argparse.Namespace, settings) -> int:
     import json as _json2
+
     import httpx as _httpx2
-    from libref.cli.remote import auth_headers as _ah2, base_url_for as _buf2
+
+    from libref.cli.remote import auth_headers as _ah2
+    from libref.cli.remote import base_url_for as _buf2
+
     base = _buf2(args, settings)
     try:
         with _httpx2.Client(timeout=30.0) as _c:
-            if getattr(args, "job_id", None) is not None and not getattr(args, "list", False):
+            if getattr(args, "job_id", None) is not None and not getattr(
+                args, "list", False
+            ):
                 _r = _c.get(f"{base}/jobs/{int(args.job_id)}", headers=_ah2(settings))
                 _r.raise_for_status()
                 out = _r.json()
                 if "error" in out and "id" not in out:
                     import sys as _sys
+
                     print(f"(unknown job: {args.job_id})", file=_sys.stderr)
                     return 1
-                print(f"job {out.get('id')} {out.get('status')}" + (f" error={out.get('error')}" if out.get("error") else ""))
+                print(
+                    f"job {out.get('id')} {out.get('status')}"
+                    + (f" error={out.get('error')}" if out.get("error") else "")
+                )
                 if out.get("result"):
-                    print(f"result: {_json2.dumps(out.get('result'), ensure_ascii=False)[:2000]}")
+                    print(
+                        f"result: {_json2.dumps(out.get('result'), ensure_ascii=False)[:2000]}"
+                    )
                 return 0
-            _r = _c.get(f"{base}/jobs", params={"limit": int(getattr(args, "limit", 20) or 20)}, headers=_ah2(settings))
+            _r = _c.get(
+                f"{base}/jobs",
+                params={"limit": int(getattr(args, "limit", 20) or 20)},
+                headers=_ah2(settings),
+            )
             _r.raise_for_status()
             out = _r.json()
-            for job in (out.get("jobs") or []):
-                print(f"{job.get('id')} {job.get('kind')} {job.get('status')} {job.get('finished_at') or ''}")
+            for job in out.get("jobs") or []:
+                print(
+                    f"{job.get('id')} {job.get('kind')} {job.get('status')} {job.get('finished_at') or ''}"
+                )
             return 0
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         import sys as _sys2
+
         print(f"remote failed: {exc}", file=_sys2.stderr)
         return 1
 
@@ -179,6 +198,7 @@ def cmd_job_show(args: argparse.Namespace) -> int:
 
     _st2 = _load_settings(args)
     from libref.cli.remote import is_remote as _is_remote2
+
     if _is_remote2(args, _st2):
         return _remote_job_show(args, _st2)
     conn = _connect(_st2)
@@ -327,16 +347,14 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
         except ValueError as exc:
             print(f"config error: {exc}", file=sys.stderr)
             return 2
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     mcp = build_mcp_server(conn, settings)
     if args.http:
         host = args.host or settings.mcp_host
         port = args.port or settings.mcp_port
         path = args.path or settings.mcp_path
-        mcp.run(
-            "streamable-http", host=host, port=port, streamable_http_path=path
-        )
+        mcp.run("streamable-http", host=host, port=port, streamable_http_path=path)
     else:
         mcp.run("stdio")
     conn.close()
@@ -360,13 +378,12 @@ def cmd_serve_web(args: argparse.Namespace) -> int:
         except ValueError as exc:
             print(f"config error: {exc}", file=sys.stderr)
             return 2
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
     import uvicorn
 
-    from libref.web import build_web_app
-
     from libref.services.factory import build_gateway
+    from libref.web import build_web_app
 
     gateway = build_gateway(settings)
     vec_store, embed = _build_vector(settings, gateway)
@@ -451,7 +468,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         routes.append(Mount("/", app=mcp_starlette))
         from contextlib import asynccontextmanager as _acm
 
-        @ _acm
+        @_acm
         async def _lifespan(_app):
             async with mcp.session_manager.run():
                 worker_conn = ctx.connect(check_same_thread=False)
@@ -459,12 +476,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
                     from libref.services.docs.scrape_jobs import build_scrape_runner
                     from libref.services.infra.jobs import JobManager
 
-                    mgr = JobManager(
-                        worker_conn, instance_id=str(settings.instance_id)
-                    )
+                    mgr = JobManager(worker_conn, instance_id=str(settings.instance_id))
                     mgr.recover(requeue=True)
                     runner = build_scrape_runner(
-                        settings, worker_conn, vec_store=ctx.vec_store, embed=ctx.embed, mgr=mgr
+                        settings,
+                        worker_conn,
+                        vec_store=ctx.vec_store,
+                        embed=ctx.embed,
+                        mgr=mgr,
                     )
                     mgr.start_worker(runner)
                     try:
@@ -485,7 +504,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
             CORSMiddleware,
             allow_origins=origins,
             allow_methods=["*"],
-            allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "Mcp-*", "*"],
+            allow_headers=[
+                "Authorization",
+                "Content-Type",
+                "Last-Event-ID",
+                "Mcp-*",
+                "*",
+            ],
             expose_headers=["Mcp-Session-Id", "x-request-id"],
         )
         combined.add_middleware(AuthMiddleware, context=ctx)
@@ -497,16 +522,23 @@ def cmd_serve(args: argparse.Namespace) -> int:
         except Exception:  # noqa: BLE001, S110 — best effort
             pass
 
+
 def _remote_job_cancel(args: argparse.Namespace, settings) -> int:
     import httpx as _httpx3
-    from libref.cli.remote import auth_headers as _ah3, base_url_for as _buf3
+
+    from libref.cli.remote import auth_headers as _ah3
+    from libref.cli.remote import base_url_for as _buf3
+
     base = _buf3(args, settings)
     try:
         with _httpx3.Client(timeout=30.0) as _c:
-            _r = _c.post(f"{base}/jobs/{int(args.job_id)}/cancel", headers=_ah3(settings))
+            _r = _c.post(
+                f"{base}/jobs/{int(args.job_id)}/cancel", headers=_ah3(settings)
+            )
             _r.raise_for_status()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         import sys as _sys3
+
         print(f"remote failed: {exc}", file=_sys3.stderr)
         return 1
     print("ok")
@@ -515,16 +547,19 @@ def _remote_job_cancel(args: argparse.Namespace, settings) -> int:
 
 def cmd_job_cancel(args: argparse.Namespace) -> int:
     import sys as _sys4
+
     _st3 = _load_settings(args)
     from libref.cli.remote import is_remote as _is_remote3
+
     if _is_remote3(args, _st3):
         return _remote_job_cancel(args, _st3)
     from libref.services.infra.jobs import JobManager as _JM
+
     conn = _connect(_st3)
     try:
         try:
             _JM(conn).cancel(int(args.job_id))
-        except ValueError as exc:
+        except ValueError:
             print(f"(unknown job: {args.job_id})", file=_sys4.stderr)
             return 1
     finally:

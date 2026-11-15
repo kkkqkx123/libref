@@ -33,10 +33,16 @@ def _version_ids(
     ecosystem: str | None,
     tenant_id: str | None = None,
 ) -> list[int]:
-    from libref.services.infra.tenant import is_global, resolve_version_id, table_has_tenant
+    from libref.services.infra.tenant import (
+        is_global,
+        resolve_version_id,
+        table_has_tenant,
+    )
 
     scoped = tenant_id not in (None, "*") and not is_global(str(tenant_id or ""))
-    if scoped and not (table_has_tenant(conn, "libraries") or table_has_tenant(conn, "versions")):
+    if scoped and not (
+        table_has_tenant(conn, "libraries") or table_has_tenant(conn, "versions")
+    ):
         scoped = False
     if scoped and library is not None and version is not None:
         try:
@@ -101,12 +107,24 @@ def fts_search(
     safe = safe_fts_query(query)
     if not safe or budget <= 0:
         return []
-    from libref.services.infra.tenant import is_global as _is_global_t, table_has_tenant as _has_tenant_t
+    from libref.services.infra.tenant import is_global as _is_global_t
+    from libref.services.infra.tenant import table_has_tenant as _has_tenant_t
 
-    _tenant_scoped = tenant_id not in (None, "*") and not _is_global_t(str(tenant_id or ""))
-    if _tenant_scoped and not (_has_tenant_t(conn, "libraries") or _has_tenant_t(conn, "versions") or _has_tenant_t(conn, "documents")):
+    _tenant_scoped = tenant_id not in (None, "*") and not _is_global_t(
+        str(tenant_id or "")
+    )
+    if _tenant_scoped and not (
+        _has_tenant_t(conn, "libraries")
+        or _has_tenant_t(conn, "versions")
+        or _has_tenant_t(conn, "documents")
+    ):
         _tenant_scoped = False
-    scoped = library is not None or version is not None or ecosystem is not None or _tenant_scoped
+    scoped = (
+        library is not None
+        or version is not None
+        or ecosystem is not None
+        or _tenant_scoped
+    )
     if not scoped:
         rows = conn.execute(
             f"SELECT documents_fts.rowid, {_bm25_expr(weights)} FROM documents_fts "
@@ -115,7 +133,9 @@ def fts_search(
             [safe, budget],
         ).fetchall()
         return [(int(r[0]), float(r[1])) for r in rows]
-    vids = _version_ids(conn, library, version, ecosystem, tenant_id if _tenant_scoped else None)
+    vids = _version_ids(
+        conn, library, version, ecosystem, tenant_id if _tenant_scoped else None
+    )
     if not vids:
         return []
     marks = ",".join("?" for _ in vids)
@@ -384,7 +404,9 @@ def _current_vids(conn, settings, vids: list[int]) -> tuple[list[int], bool]:
     return current, skipped
 
 
-def _vec_search_scoped(vec, query_vec, *, k: int, version_id: int, tenant_id: str | None = None):
+def _vec_search_scoped(
+    vec, query_vec, *, k: int, version_id: int, tenant_id: str | None = None
+):
     try:
         return vec.search(query_vec, k=k, version_id=version_id, tenant_id=tenant_id)
     except TypeError:
@@ -444,7 +466,14 @@ class HybridRetriever:
             float(setting_or_default(self._settings, "fts_w_path")),
         )
         fts_ids = _fts_candidates(
-            self._conn, query, library, version, ecosystem, need, weights=weights, tenant_id=tenant_id
+            self._conn,
+            query,
+            library,
+            version,
+            ecosystem,
+            need,
+            weights=weights,
+            tenant_id=tenant_id,
         )
         vec_ids: list[int] = []
         vids = _version_ids(self._conn, library, version, ecosystem, tenant_id)
@@ -467,7 +496,11 @@ class HybridRetriever:
                             vec_ids = [
                                 doc_id
                                 for doc_id, _ in _vec_search_scoped(
-                                    self._vec, query_vec, k=need, version_id=vids[0], tenant_id=tenant_id
+                                    self._vec,
+                                    query_vec,
+                                    k=need,
+                                    version_id=vids[0],
+                                    tenant_id=tenant_id,
                                 )
                             ]
                         except Exception:  # noqa: BLE001 -- vector failure marks degraded, fall back to FTS-only

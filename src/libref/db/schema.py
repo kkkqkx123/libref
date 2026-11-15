@@ -588,3 +588,47 @@ CREATE TABLE IF NOT EXISTS audit_log(
 );
 CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log(tenant_id, id);
 """
+
+# ── Per-principal quota governance: policies, aggregated usage, deny/degrade events ──
+QUOTA_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS quota_policies(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  principal_id INTEGER,                     -- NULL = tenant default policy
+  resource TEXT NOT NULL,                   -- http_requests / llm_prompt_tokens / ...
+  limit_value INTEGER NOT NULL,             -- 0 = unlimited
+  window_type TEXT NOT NULL DEFAULT 'hour'  -- hour / day / month
+      CHECK (window_type IN ('hour','day','month')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(tenant_id, principal_id, resource, window_type)
+);
+CREATE INDEX IF NOT EXISTS idx_quota_policies_subject
+  ON quota_policies(tenant_id, principal_id, resource);
+
+CREATE TABLE IF NOT EXISTS usage_counters(
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  principal_id INTEGER,
+  resource TEXT NOT NULL,
+  period_key TEXT NOT NULL,                 -- e.g. 2026-11-15T14 (hour bucket, UTC)
+  used INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(tenant_id, principal_id, resource, period_key)
+);
+
+CREATE TABLE IF NOT EXISTS quota_events(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  principal_id INTEGER,
+  resource TEXT NOT NULL,
+  result TEXT NOT NULL,                     -- denied / degraded
+  used INTEGER NOT NULL DEFAULT 0,
+  limit_value INTEGER NOT NULL DEFAULT 0,
+  request_id TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_quota_events_subject
+  ON quota_events(tenant_id, principal_id, created_at);
+"""
+
+# ── Quota tables alone for runtime ensure without touching other groups ──
+QUOTA_RUNTIME_SQL = QUOTA_TABLES_SQL

@@ -69,7 +69,12 @@ def test_probe_repo_exclude_and_tree_depth_cli() -> None:
 
 def test_link_stats_cli() -> None:
     args = build_parser().parse_args(["link-stats", "docs", "1.0", "--limit", "5"])
-    assert (args.library, args.version, args.limit, args.url) == ("docs", "1.0", 5, None)
+    assert (args.library, args.version, args.limit, args.url) == (
+        "docs",
+        "1.0",
+        5,
+        None,
+    )
     singled = build_parser().parse_args(
         ["link-stats", "docs", "1.0", "--url", "https://d.example/a"]
     )

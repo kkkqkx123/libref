@@ -95,7 +95,7 @@ def _annotate(rows: list[dict]) -> list[dict]:
 def _popularity(value: object) -> float:
     try:
         return float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0.0
 
 

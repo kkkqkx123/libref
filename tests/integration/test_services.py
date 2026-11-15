@@ -347,7 +347,7 @@ def test_scrape_persists_link_edges_and_refcounts(conn, monkeypatch, tmp_path):
     def page(title: str, body_links: str) -> str:
         return (
             f"<html><head><title>{title}</title></head><body>"
-            f"<nav><a href=\"/nav.html\">Nav</a></nav>"
+            f'<nav><a href="/nav.html">Nav</a></nav>'
             f"<main><h1>{title}</h1><p>quetzal link body {title}</p>"
             f"{body_links}</main></body></html>"
         )
@@ -360,10 +360,7 @@ def test_scrape_persists_link_edges_and_refcounts(conn, monkeypatch, tmp_path):
         if p == "/llms.txt":
             return httpx.Response(
                 200,
-                text=(
-                    f"- [A](https://{host}/a.html)\n"
-                    f"- [B](https://{host}/b.html)\n"
-                ),
+                text=(f"- [A](https://{host}/a.html)\n- [B](https://{host}/b.html)\n"),
             )
         if p == "/llms-full.txt":
             return httpx.Response(404)

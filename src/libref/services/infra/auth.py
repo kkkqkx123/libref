@@ -193,9 +193,7 @@ def dev_principal(settings) -> Principal:
         kind="human",
         name=name,
         roles=["sys_admin", "kb_admin", "developer"],
-        scopes=set().union(
-            scopes_for_roles(["sys_admin", "kb_admin", "developer"])
-        ),
+        scopes=set().union(scopes_for_roles(["sys_admin", "kb_admin", "developer"])),
     )
 
 
@@ -234,6 +232,6 @@ def bootstrap_admin(conn: sqlite3.Connection, raw_key: str) -> Principal:
 
 import contextvars as _contextvars
 
-current_principal: _contextvars.ContextVar["Principal | None"] = _contextvars.ContextVar(
+current_principal: _contextvars.ContextVar[Principal | None] = _contextvars.ContextVar(
     "libref_current_principal", default=None
 )

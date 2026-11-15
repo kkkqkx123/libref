@@ -153,17 +153,33 @@ def build_mcp_server(
             except Exception:
                 try:
                     rc.close()
-                except Exception:
+                except Exception:  # noqa: BLE001, S110
                     pass
                 raise
             return rc, bundle, True
-        return conn, {"search": search_svc, "pages": pages, "catalog": catalog_svc, "mining": mining, "review": review_svc, "vec_store": vec_store, "embed": embed_fn, "rerank": rerank_fn, "chat": chat_fn, "gateway": gateway, "settings": resolve_settings}, False
+        return (
+            conn,
+            {
+                "search": search_svc,
+                "pages": pages,
+                "catalog": catalog_svc,
+                "mining": mining,
+                "review": review_svc,
+                "vec_store": vec_store,
+                "embed": embed_fn,
+                "rerank": rerank_fn,
+                "chat": chat_fn,
+                "gateway": gateway,
+                "settings": resolve_settings,
+            },
+            False,
+        )
 
     def _close(rc, should_close: bool):
         if should_close:
             try:
                 rc.close()
-            except Exception:
+            except Exception:  # noqa: BLE001, S110
                 pass
 
     async def search(
@@ -387,7 +403,11 @@ def build_mcp_server(
         _rc4, _bundle4, _should_close4 = _make_bundle()
         try:
             try:
-                return _items(_bundle4["catalog"].catalog(library, ecosystem, tenant_id=_tenant(_principal())))
+                return _items(
+                    _bundle4["catalog"].catalog(
+                        library, ecosystem, tenant_id=_tenant(_principal())
+                    )
+                )
             finally:
                 _close(_rc4, _should_close4)
         except ValueError as exc:
@@ -464,7 +484,10 @@ def build_mcp_server(
         if exclude_patterns is not None and (
             not isinstance(exclude_patterns, list)
             or not exclude_patterns
-            or any(not isinstance(item, str) or not item.strip() for item in exclude_patterns)
+            or any(
+                not isinstance(item, str) or not item.strip()
+                for item in exclude_patterns
+            )
         ):
             return _invalid("exclude_patterns must be a non-empty string list")
         bad = _check_limit(tree_depth, low=1, high=10)
@@ -547,11 +570,29 @@ def build_mcp_server(
         try:
             try:
                 if url:
-                    return page_link_stats(_rcl, url, library, version, ecosystem, tenant_id=_tenant(_principal()))
+                    return page_link_stats(
+                        _rcl,
+                        url,
+                        library,
+                        version,
+                        ecosystem,
+                        tenant_id=_tenant(_principal()),
+                    )
                 return {
-                    "summary": version_link_summary(_rcl, library, version, ecosystem, tenant_id=_tenant(_principal())),
+                    "summary": version_link_summary(
+                        _rcl,
+                        library,
+                        version,
+                        ecosystem,
+                        tenant_id=_tenant(_principal()),
+                    ),
                     "items": top_referenced(
-                        _rcl, library, version, ecosystem, limit=limit, tenant_id=_tenant(_principal())
+                        _rcl,
+                        library,
+                        version,
+                        ecosystem,
+                        limit=limit,
+                        tenant_id=_tenant(_principal()),
                     ),
                 }
             finally:
@@ -799,7 +840,10 @@ def build_mcp_server(
         try:
             try:
                 return _bundleh["mining"].mining_health(
-                    library=library, version=version, ecosystem=ecosystem, tenant_id=_tenant(_principal())
+                    library=library,
+                    version=version,
+                    ecosystem=ecosystem,
+                    tenant_id=_tenant(_principal()),
                 )
             finally:
                 _close(_rch, _sch)
@@ -872,9 +916,12 @@ def build_mcp_server(
         _rcj, _bundlej, _scj = _make_bundle()
         try:
             try:
-                return _bundlej.get("jobs", __import__("libref.services.infra.jobs", fromlist=["JobManager"]).JobManager(_rcj)).show(
-                    job_id, limit, tenant_id=_tenant(principal)
-                )
+                return _bundlej.get(
+                    "jobs",
+                    __import__(
+                        "libref.services.infra.jobs", fromlist=["JobManager"]
+                    ).JobManager(_rcj),
+                ).show(job_id, limit, tenant_id=_tenant(principal))
             finally:
                 _close(_rcj, _scj)
         except ValueError as exc:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +28,7 @@ class AppContext:
         conn = open_db(self.db_path, check_same_thread=check_same_thread)
         try:
             apply_migrations(conn)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
         return conn
 
@@ -44,14 +44,18 @@ class AppContext:
         gateway = self.gateway
         try:
             rerank = gateway.rerank_fn() if gateway is not None else None
-        except Exception:
+        except Exception:  # noqa: BLE001
             rerank = None
         try:
             chat = gateway.chat_fn() if gateway is not None else None
-        except Exception:
+        except Exception:  # noqa: BLE001
             chat = None
         search = SearchService(
-            conn, self.settings, vec_store=self.vec_store, embed=self.embed, rerank=rerank
+            conn,
+            self.settings,
+            vec_store=self.vec_store,
+            embed=self.embed,
+            rerank=rerank,
         )
         return {
             "search": search,
@@ -59,7 +63,12 @@ class AppContext:
             "catalog": LibraryService(conn),
             "mining": MiningReadService(conn, self.settings),
             "review": ReviewService(conn),
-            "jobs": JobManager(conn, instance_id=str(getattr(self.settings, "instance_id", "libref-1") or "libref-1")),
+            "jobs": JobManager(
+                conn,
+                instance_id=str(
+                    getattr(self.settings, "instance_id", "libref-1") or "libref-1"
+                ),
+            ),
             "rerank": rerank,
             "chat": chat,
             "gateway": gateway,
@@ -73,7 +82,6 @@ class AppContext:
 def build_context(settings) -> AppContext:
     """Assemble gateway, vectors, and job state for one settings snapshot."""
     from libref.services.factory import build_gateway
-    from libref.services.infra.jobs import JobManager
     from libref.services.infra.vectors import build_vector
 
     gateway = build_gateway(settings)
@@ -92,9 +100,9 @@ def build_context(settings) -> AppContext:
 
 def refresh_context(ctx: AppContext, settings) -> AppContext:
     """Rebuild derived dependencies for a new frozen snapshot."""
+    from libref.observe import setup_logging
     from libref.services.factory import build_gateway
     from libref.services.infra.vectors import build_vector
-    from libref.observe import setup_logging
 
     gateway = build_gateway(settings)
     vec_store, embed, gateway = build_vector(settings, gateway)

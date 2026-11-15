@@ -122,7 +122,7 @@ def retry_after_seconds(value: str | None) -> float:
         pass
     try:
         deadline = parsedate_to_datetime(text)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0.0
     if deadline is None:
         return 0.0

@@ -141,11 +141,13 @@ def probe_repo(
         else getattr(settings, "probe_sample_limit", 20)
     )
     try:
-        only_text = _json.dumps(only_list, sort_keys=True, ensure_ascii=False, default=str)
+        only_text = _json.dumps(
+            only_list, sort_keys=True, ensure_ascii=False, default=str
+        )
         exclude_text = _json.dumps(
             exclude_list, sort_keys=True, ensure_ascii=False, default=str
         )
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         only_text = str(only_list)
         exclude_text = str(exclude_list)
     cache_key = "\0".join(
@@ -167,7 +169,10 @@ def probe_repo(
     if maybe_local.is_dir():
         root = maybe_local.resolve()
         census = describe_source_files(
-            root, ast_config.all_suffixes(), subdir=subdir, exclude_patterns=exclude_list
+            root,
+            ast_config.all_suffixes(),
+            subdir=subdir,
+            exclude_patterns=exclude_list,
         )
         probe = _assemble(
             source,
@@ -340,7 +345,9 @@ def _assemble(
         subdir=subdir,
         only_files=list(only_files) if only_files is not None else None,
         unmatched_only_files=unmatched,
-        exclude_patterns=list(exclude_patterns) if exclude_patterns is not None else None,
+        exclude_patterns=list(exclude_patterns)
+        if exclude_patterns is not None
+        else None,
         tree_depth=tree_depth,
         dir_tree=dir_tree,
         tree_truncated=tree_truncated,

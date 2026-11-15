@@ -40,11 +40,12 @@ class PagePipeline:
         self._scrape_cache: dict[str, ScrapeResult] = {}
         self._snapshots = None
         if bool(settings.snapshot_enabled):
-            from libref.store.snapshots import SnapshotStore
             from libref.services.infra.tenant import tenant_snapshot_dir as _tsd
+            from libref.store.snapshots import SnapshotStore
+
             try:
                 _root = _tsd(settings, tenant_id)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 _root = Path(settings.snapshot_dir)
             self._snapshots = SnapshotStore(
                 _root,
@@ -54,14 +55,77 @@ class PagePipeline:
     def set_tenant(self, tenant_id: str) -> None:
         self._tenant_id = tenant_id
         if bool(self._settings.snapshot_enabled):
-            from libref.store.snapshots import SnapshotStore
             from libref.services.infra.tenant import tenant_snapshot_dir as _tsd2
+            from libref.store.snapshots import SnapshotStore
+
             try:
                 _root2 = _tsd2(self._settings, tenant_id)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 from pathlib import Path as _P
+
                 _root2 = _P(self._settings.snapshot_dir)
-            self._snapshots = SnapshotStore(_root2, quota_mb=int(self._settings.snapshot_quota_mb))
+            self._snapshots = SnapshotStore(
+                _root2, quota_mb=int(self._settings.snapshot_quota_mb)
+            )
+
+    def _gate_snapshot_write(self, store, tenant_id: str, size: int) -> bool:
+        """Return False when the subject is over snapshot_bytes quota; records the denial."""
+        if not bool(getattr(self._settings, "quota_enabled", False)):
+            return True
+        try:
+            from libref.services.infra import metrics as _metrics
+            from libref.services.infra import quota as _quota
+
+            conn = getattr(store, "_conn", None)
+            if conn is None:
+                return True
+            decision = _quota.check(
+                conn,
+                tenant_id=tenant_id,
+                principal_id=None,
+                resource="snapshot_bytes",
+                cost=size,
+                settings=self._settings,
+            )
+            if not decision.allowed:
+                _metrics.incr("quota_denied_total{resource=snapshot_bytes}")
+                _quota.record_event(
+                    conn,
+                    tenant_id=tenant_id,
+                    principal_id=None,
+                    resource="snapshot_bytes",
+                    result="denied",
+                    used=decision.used,
+                    limit_value=decision.limit_value,
+                )
+                return False
+        except Exception:  # noqa: BLE001 — quota gating must never abort ingestion
+            return True
+        return True
+
+    def _account_page(self, store, tenant_id: str, *, snapshot_bytes: int) -> None:
+        """Accumulate scrape_pages and written snapshot bytes for the tenant; best effort."""
+        if not bool(getattr(self._settings, "quota_enabled", False)):
+            return
+        try:
+            from libref.services.infra import quota as _quota
+
+            conn = getattr(store, "_conn", None)
+            if conn is None:
+                return
+            _quota.add_usage(
+                conn, tenant_id=tenant_id, principal_id=None, resource="scrape_pages"
+            )
+            if snapshot_bytes > 0:
+                _quota.add_usage(
+                    conn,
+                    tenant_id=tenant_id,
+                    principal_id=None,
+                    resource="snapshot_bytes",
+                    amount=snapshot_bytes,
+                )
+        except Exception:  # noqa: BLE001, S110 — metering must never abort ingestion
+            pass
 
     def clean_with_cache(self, kind: str, raw: str, url: str) -> str:
         """Cleaning cache: same content and same budget fingerprint hit reuses directly; evict the oldest entry over the cap."""
@@ -139,7 +203,9 @@ class PagePipeline:
         if result.status == "unchanged":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)
             return (
-                store.store_page(version_id, library_id, url, "unchanged", tenant_id=tenant_id),
+                store.store_page(
+                    version_id, library_id, url, "unchanged", tenant_id=tenant_id
+                ),
                 0,
                 False,
                 stage_ms,
@@ -148,7 +214,9 @@ class PagePipeline:
         if result.status == "absent":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)
             return (
-                store.store_page(version_id, library_id, url, "absent", tenant_id=tenant_id),
+                store.store_page(
+                    version_id, library_id, url, "absent", tenant_id=tenant_id
+                ),
                 0,
                 False,
                 stage_ms,
@@ -157,7 +225,9 @@ class PagePipeline:
         if result.status == "failed":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)
             return (
-                store.store_page(version_id, library_id, url, "failed", tenant_id=tenant_id),
+                store.store_page(
+                    version_id, library_id, url, "failed", tenant_id=tenant_id
+                ),
                 0,
                 False,
                 stage_ms,
@@ -169,18 +239,23 @@ class PagePipeline:
                     ecosystem, library, version, _t = snapshot_ctx
                 else:
                     ecosystem, library, version = snapshot_ctx
-                _, written = self._snapshots.put(
-                    ecosystem,
-                    library,
-                    version,
-                    url,
-                    result.content.encode("utf-8", errors="ignore"),
-                    result.content_type,
-                )
-                if written:
-                    stage_ms["snapshot_written"] = 1
-                else:
+                body = result.content.encode("utf-8", errors="ignore")
+                if not self._gate_snapshot_write(store, tenant_id, len(body)):
                     stage_ms["snapshot_quota_skipped"] = 1
+                else:
+                    _, written = self._snapshots.put(
+                        ecosystem,
+                        library,
+                        version,
+                        url,
+                        body,
+                        result.content_type,
+                    )
+                    if written:
+                        stage_ms["snapshot_written"] = 1
+                        self._account_page(store, tenant_id, snapshot_bytes=len(body))
+                    else:
+                        stage_ms["snapshot_quota_skipped"] = 1
             except Exception:  # noqa: BLE001, S110 — snapshot quota bookkeeping must not abort ingestion
                 pass
 
@@ -199,9 +274,7 @@ class PagePipeline:
                 structure_links=[]
                 if scraped.nofollow
                 else list(scraped.structure_links),
-                external_links=[]
-                if scraped.nofollow
-                else list(scraped.external_links),
+                external_links=[] if scraped.nofollow else list(scraped.external_links),
             )
             if scraped.noindex:
                 stage_ms["fetch_ms"] = int((clean_start - fetch_start) * 1000)
@@ -290,13 +363,16 @@ class PagePipeline:
         if outcome == "unchanged":
             stage_ms["store_ms"] = int((_time.monotonic() - store_start) * 1000)
             return (
-                store.store_page(version_id, library_id, url, "unchanged", tenant_id=tenant_id),
+                store.store_page(
+                    version_id, library_id, url, "unchanged", tenant_id=tenant_id
+                ),
                 0,
                 render_attempted,
                 stage_ms,
                 detail,
             )
         split_start = _time.monotonic()
+        self._account_page(store, tenant_id, snapshot_bytes=0)
         dual = split_markdown_dual(markdown, url, budgets=self._budgets)
         split_end = _time.monotonic()
         stage_ms["split_ms"] = int((split_end - split_start) * 1000)

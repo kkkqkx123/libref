@@ -45,9 +45,7 @@ class ReviewService:
             raise ValueError("limit must be positive")
         if entity_type != "call_instance":
             raise ValueError(f"unsupported entity_type: {entity_type}")
-        use_tenant = (
-            tenant_id not in (None, "*") and self._has_tenant()
-        )
+        use_tenant = tenant_id not in (None, "*") and self._has_tenant()
         if use_tenant:
             rows = self._conn.execute(
                 "SELECT rs.entity_id, rs.status, rs.updated_at, ci.callee_name,"
@@ -187,15 +185,15 @@ class ReviewService:
     ) -> Any:
         """Unified review entry; tenant filtering applies to listing only."""
         if action == "list":
-            return self.list_pending(
-                limit=limit, tenant_id=tenant_id
-            )
+            return self.list_pending(limit=limit, tenant_id=tenant_id)
         if entity_id is None:
             raise ValueError(f"{action} requires entity_id")
         if action == "approve":
             self.approve(entity_id, tenant_id=tenant_id, principal_id=principal_id)
         elif action == "conflict":
-            self.mark_conflict(entity_id, tenant_id=tenant_id, principal_id=principal_id)
+            self.mark_conflict(
+                entity_id, tenant_id=tenant_id, principal_id=principal_id
+            )
         elif action == "reopen":
             self.reopen(entity_id, tenant_id=tenant_id, principal_id=principal_id)
         else:

@@ -111,8 +111,13 @@ def list_repo_dependencies(
         query += " AND d.ecosystem = ?"
         params.append(dep)
     if tenant_id not in (None, "*"):
-        from libref.services.infra.tenant import is_global as _isg, resolve_version_id as _rvid, table_has_tenant as _htt
-        if not _isg(str(tenant_id)) and (_htt(conn, "libraries") or _htt(conn, "versions")):
+        from libref.services.infra.tenant import is_global as _isg
+        from libref.services.infra.tenant import resolve_version_id as _rvid
+        from libref.services.infra.tenant import table_has_tenant as _htt
+
+        if not _isg(str(tenant_id)) and (
+            _htt(conn, "libraries") or _htt(conn, "versions")
+        ):
             try:
                 _vid = _rvid(conn, str(tenant_id), library, version, owner)
             except ValueError:

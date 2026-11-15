@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse
 
 from libref import observe
 from libref.mcp_server.auth import is_allowed_origin, parse_bearer
+from libref.services.infra import metrics as request_metrics
 from libref.services.infra.auth import current_principal
 
 
@@ -25,6 +26,79 @@ class AuthMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: Any, context) -> None:
         super().__init__(app)
         self._context = context
+
+    def _quota_gate(self, request: Request, principal) -> JSONResponse | None:
+        """Count the request and enforce http_requests quota; None means allowed."""
+        settings = self._context.settings
+        if not bool(getattr(settings, "quota_enabled", False)):
+            return None
+        from libref.services.infra import quota
+        from libref.services.ops.audit import write_audit
+
+        tenant_id = str(principal.tenant_id or "default")
+        try:
+            conn = self._context.connect(check_same_thread=False)
+        except Exception:  # noqa: BLE001
+            return None  # fail open: bookkeeping never becomes an outage
+        try:
+            decision = quota.check(
+                conn,
+                tenant_id=tenant_id,
+                principal_id=principal.id,
+                resource="http_requests",
+                settings=settings,
+            )
+            if not decision.allowed:
+                request_metrics.incr("quota_denied_total{resource=http_requests}")
+                quota.record_event(
+                    conn,
+                    tenant_id=tenant_id,
+                    principal_id=principal.id,
+                    resource="http_requests",
+                    result="denied",
+                    used=decision.used,
+                    limit_value=decision.limit_value,
+                    request_id=str(getattr(request.state, "request_id", "")),
+                )
+                write_audit(
+                    conn,
+                    tenant_id=tenant_id,
+                    principal_id=principal.id,
+                    action="quota",
+                    target="http_requests",
+                    result="denied",
+                    request_id=str(getattr(request.state, "request_id", "")),
+                )
+                return JSONResponse(
+                    {
+                        "error": "quota exceeded",
+                        "resource": decision.resource,
+                        "reset_at": decision.reset_at,
+                        "request_id": str(getattr(request.state, "request_id", "")),
+                    },
+                    status_code=429,
+                    headers={
+                        "x-request-id": str(getattr(request.state, "request_id", ""))
+                    },
+                )
+            quota.add_usage(
+                conn,
+                tenant_id=tenant_id,
+                principal_id=principal.id,
+                resource="http_requests",
+            )
+            return None
+        except Exception:  # noqa: BLE001 — quota bookkeeping must not block serving
+            return None
+        finally:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001, S110 — best effort close
+                pass
+
+    def _record_metrics(self, route: str, status: int, elapsed_ms: int) -> None:
+        request_metrics.incr(f"http_requests_total{{route={route},status={status}}}")
+        request_metrics.record_duration(elapsed_ms)
 
     async def dispatch(self, request: Request, call_next):
         started = time.monotonic()
@@ -47,6 +121,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             observe.status_var.set(int(getattr(response, "status_code", 0) or 0))
             observe.duration_var.set(int((time.monotonic() - started) * 1000))
+            self._record_metrics(
+                observe.route_var.get(""),
+                observe.status_var.get(0),
+                observe.duration_var.get(0),
+            )
             response.headers["x-request-id"] = request_id
             return response
         if auth_mode == "dev":
@@ -57,9 +136,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
             observe.principal_var.set(str(principal.id or principal.name))
             observe.tenant_var.set(principal.tenant_id)
             current_principal.set(principal)
+            gate = self._quota_gate(request, principal)
+            if gate is not None:
+                observe.status_var.set(429)
+                self._record_metrics(
+                    request.url.path, 429, int((time.monotonic() - started) * 1000)
+                )
+                return gate
             response = await call_next(request)
             observe.status_var.set(int(getattr(response, "status_code", 0) or 0))
             observe.duration_var.set(int((time.monotonic() - started) * 1000))
+            self._record_metrics(
+                request.url.path,
+                int(getattr(response, "status_code", 0) or 0),
+                int((time.monotonic() - started) * 1000),
+            )
             response.headers["x-request-id"] = request_id
             return response
         origin = request.headers.get("origin")
@@ -83,7 +174,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             def _lookup() -> Any:
                 try:
                     conn = self._context.connect(check_same_thread=False)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     return None
                 try:
                     from libref.services.infra.auth import lookup_principal
@@ -96,7 +187,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                         pass
 
             principal = await _anyio.to_thread.run_sync(_lookup)
-        except Exception:
+        except Exception:  # noqa: BLE001
             return JSONResponse(
                 {"error": "unavailable", "request_id": request_id},
                 status_code=503,
@@ -112,9 +203,21 @@ class AuthMiddleware(BaseHTTPMiddleware):
         observe.principal_var.set(str(principal.id or principal.name))
         observe.tenant_var.set(principal.tenant_id)
         current_principal.set(principal)
+        gate = self._quota_gate(request, principal)
+        if gate is not None:
+            observe.status_var.set(429)
+            self._record_metrics(
+                request.url.path, 429, int((time.monotonic() - started) * 1000)
+            )
+            return gate
         response = await call_next(request)
         observe.status_var.set(int(getattr(response, "status_code", 0) or 0))
         observe.duration_var.set(int((time.monotonic() - started) * 1000))
+        self._record_metrics(
+            request.url.path,
+            int(getattr(response, "status_code", 0) or 0),
+            int((time.monotonic() - started) * 1000),
+        )
         response.headers["x-request-id"] = request_id
         elapsed_ms = int((time.monotonic() - started) * 1000)
         response.headers["x-elapsed-ms"] = str(elapsed_ms)

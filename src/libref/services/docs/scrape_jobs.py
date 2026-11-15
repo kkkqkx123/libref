@@ -122,6 +122,7 @@ def build_scrape_runner(settings, conn, *, vec_store=None, embed=None, mgr=None)
         params = job.params
         heartbeat = (lambda: mgr.heartbeat(job.id)) if mgr is not None else None
         from libref.services.infra.tenant import normalize_tenant as _ntj
+
         _jt = _ntj(getattr(job, "tenant_id", "default") or "default")
         return await service.scrape_docs_async(
             params["library"],
