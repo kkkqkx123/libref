@@ -8,13 +8,15 @@ synchronous purge path shares threading locks.
 from __future__ import annotations
 
 import asyncio
+import random
 import threading
 import time
 
 
-def version_key(ecosystem: str, library: str, version: str) -> str:
-    """Identity of one library version across ecosystems."""
-    return f"{ecosystem}\0{library}\0{version}"
+def version_key(ecosystem: str, library: str, version: str, tenant_id: str = "default") -> str:
+    """Identity of one library version inside one tenant."""
+    tenant = (tenant_id or "default").strip() or "default"
+    return f"{tenant}\0{ecosystem}\0{library}\0{version}"
 
 
 def ensure_version_locks(conn) -> None:
@@ -53,11 +55,11 @@ def _sync_lock(key: str) -> threading.Lock:
 class VersionGuard:
     """Async guard for one version; stale owners are stolen after the timeout."""
 
-    def __init__(self, conn, key: str, stale_after: float = 600.0) -> None:
+    def __init__(self, conn, key: str, stale_after: float = 600.0, *, instance_id: str = "libref-1") -> None:
         self._conn = conn
         self._key = key
         self._stale_after = stale_after
-        self._owner = f"{__import__('os').getpid()}-{time.time_ns()}"
+        self._owner = f"{instance_id}-{__import__('os').getpid()}-{time.time_ns()}"
         self._mem = _mem_lock(key)
         self._beat_task = None
 
@@ -96,6 +98,7 @@ class VersionGuard:
         from libref.db.conn import write_lock as _guard
 
         ensure_version_locks(self._conn)
+        attempt = 0
         while True:
             now = time.time()
             try:
@@ -129,7 +132,9 @@ class VersionGuard:
                     self._conn.commit()
                 if cur.rowcount > 0:
                     return
-            await asyncio.sleep(0.2)
+            backoff = min(1.0, 0.05 * (2.0**min(attempt, 5))) + random.uniform(0, 0.05)
+            attempt += 1
+            await asyncio.sleep(backoff)
 
     async def _beat_loop(self) -> None:
         from libref.db.conn import write_lock as _guard
@@ -153,11 +158,11 @@ class VersionGuard:
 class VersionGuardSync:
     """Synchronous guard for short operations; no heartbeat, stale owners are stolen."""
 
-    def __init__(self, conn, key: str, stale_after: float = 600.0) -> None:
+    def __init__(self, conn, key: str, stale_after: float = 600.0, *, instance_id: str = "libref-1") -> None:
         self._conn = conn
         self._key = key
         self._stale_after = stale_after
-        self._owner = f"{__import__('os').getpid()}-{time.time_ns()}"
+        self._owner = f"{instance_id}-{__import__('os').getpid()}-{time.time_ns()}"
         self._mem = _sync_lock(key)
 
     def __enter__(self):
@@ -192,6 +197,7 @@ class VersionGuardSync:
         from libref.db.conn import write_lock as _guard
 
         ensure_version_locks(self._conn)
+        attempt = 0
         while True:
             now = time.time()
             try:
@@ -225,22 +231,44 @@ class VersionGuardSync:
                     self._conn.commit()
                 if cur.rowcount > 0:
                     return
-            time.sleep(0.2)
+            backoff = min(1.0, 0.05 * (2.0**min(attempt, 5))) + random.uniform(0, 0.05)
+            attempt += 1
+            time.sleep(backoff)
 
 
 def version_lock(
-    conn, ecosystem: str, library: str, version: str, *, stale_after: float = 600.0
+    conn,
+    ecosystem: str,
+    library: str,
+    version: str,
+    *,
+    stale_after: float = 600.0,
+    tenant_id: str = "default",
+    instance_id: str = "libref-1",
 ):
-    """Async guard for one version."""
+    """Async guard for one tenant version."""
     return VersionGuard(
-        conn, version_key(ecosystem, library, version), stale_after=stale_after
+        conn,
+        version_key(ecosystem, library, version, tenant_id),
+        stale_after=stale_after,
+        instance_id=instance_id,
     )
 
 
 def version_lock_sync(
-    conn, ecosystem: str, library: str, version: str, *, stale_after: float = 600.0
+    conn,
+    ecosystem: str,
+    library: str,
+    version: str,
+    *,
+    stale_after: float = 600.0,
+    tenant_id: str = "default",
+    instance_id: str = "libref-1",
 ):
-    """Synchronous guard for one version."""
+    """Synchronous guard for one tenant version."""
     return VersionGuardSync(
-        conn, version_key(ecosystem, library, version), stale_after=stale_after
+        conn,
+        version_key(ecosystem, library, version, tenant_id),
+        stale_after=stale_after,
+        instance_id=instance_id,
     )

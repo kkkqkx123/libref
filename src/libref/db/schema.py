@@ -451,3 +451,140 @@ ALTER TABLE versions ADD COLUMN site_version_sample TEXT;
 PROGRESS_PENDING_SQL = """
 ALTER TABLE ingest_progress ADD COLUMN pending TEXT NOT NULL DEFAULT '[]';
 """
+
+# ── Multi-tenant identity and isolation: shared library with tenant filtering ──
+MULTI_TENANT_SQL = """
+CREATE TABLE IF NOT EXISTS principals(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  kind TEXT NOT NULL DEFAULT 'human',
+  name TEXT NOT NULL,
+  roles JSON NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(tenant_id, name)
+);
+CREATE TABLE IF NOT EXISTS api_keys(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  principal_id INTEGER NOT NULL REFERENCES principals(id) ON DELETE CASCADE,
+  key_hash TEXT NOT NULL UNIQUE,
+  key_prefix TEXT NOT NULL,
+  scopes JSON NOT NULL DEFAULT '[]',
+  expires_at REAL,
+  revoked_at REAL,
+  last_used_at REAL,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix);
+CREATE TABLE IF NOT EXISTS feedback(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  principal_id INTEGER,
+  entity_type TEXT NOT NULL DEFAULT 'call_instance',
+  entity_id INTEGER NOT NULL DEFAULT 0,
+  kind TEXT NOT NULL DEFAULT 'general',
+  body TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open'
+      CHECK (status IN ('open','acknowledged','resolved')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_by INTEGER,
+  resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_tenant ON feedback(tenant_id, status, id);
+CREATE TABLE IF NOT EXISTS audit_log(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  principal_id INTEGER,
+  action TEXT NOT NULL,
+  target TEXT NOT NULL DEFAULT '',
+  result TEXT NOT NULL DEFAULT 'ok',
+  request_id TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log(tenant_id, id);
+ALTER TABLE libraries ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE versions ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE pages ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE documents ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE api_entities ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE call_instances ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE seq_patterns ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE review_status ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE repos ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE ast_cache ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE vec_version_meta ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE feature_nodes ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE api_clusters ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE discovery_cache ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE repo_dependencies ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE pattern_labels ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE ingest_progress ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE import_edges ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE doc_link_edges ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE jobs ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE jobs ADD COLUMN principal_id INTEGER;
+ALTER TABLE jobs ADD COLUMN owner TEXT;
+ALTER TABLE jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE deletion_log ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE deletion_log ADD COLUMN principal_id INTEGER;
+ALTER TABLE version_locks ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default';
+CREATE INDEX IF NOT EXISTS idx_libraries_tenant ON libraries(tenant_id, ecosystem, name);
+CREATE INDEX IF NOT EXISTS idx_versions_tenant ON versions(tenant_id, library_id);
+CREATE INDEX IF NOT EXISTS idx_jobs_tenant ON jobs(tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_feedback_resolve ON feedback(status, resolved_at);
+"""
+
+# ── Identity tables alone for runtime ensure without column alters ──
+AUTH_TABLES_SQL = """
+CREATE TABLE IF NOT EXISTS principals(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  kind TEXT NOT NULL DEFAULT 'human',
+  name TEXT NOT NULL,
+  roles JSON NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(tenant_id, name)
+);
+CREATE TABLE IF NOT EXISTS api_keys(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  principal_id INTEGER NOT NULL REFERENCES principals(id) ON DELETE CASCADE,
+  key_hash TEXT NOT NULL UNIQUE,
+  key_prefix TEXT NOT NULL,
+  scopes JSON NOT NULL DEFAULT '[]',
+  expires_at REAL,
+  revoked_at REAL,
+  last_used_at REAL,
+  created_by INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(key_prefix);
+CREATE TABLE IF NOT EXISTS feedback(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  principal_id INTEGER,
+  entity_type TEXT NOT NULL DEFAULT 'call_instance',
+  entity_id INTEGER NOT NULL DEFAULT 0,
+  kind TEXT NOT NULL DEFAULT 'general',
+  body TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'open'
+      CHECK (status IN ('open','acknowledged','resolved')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_by INTEGER,
+  resolved_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_tenant ON feedback(tenant_id, status, id);
+CREATE TABLE IF NOT EXISTS audit_log(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  principal_id INTEGER,
+  action TEXT NOT NULL,
+  target TEXT NOT NULL DEFAULT '',
+  result TEXT NOT NULL DEFAULT 'ok',
+  request_id TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_tenant ON audit_log(tenant_id, id);
+"""

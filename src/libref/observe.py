@@ -1,7 +1,8 @@
-"""Runtime logging assembly: initialize the root logger from the effective config; failures do not block business."""
+"""Runtime logging with request context; secrets and query bodies never log."""
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import logging.handlers
@@ -10,6 +11,25 @@ import time
 from pathlib import Path
 
 _configured_fingerprint: str | None = None
+
+request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "libref_request_id", default=""
+)
+principal_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "libref_principal", default=""
+)
+tenant_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "libref_tenant", default=""
+)
+route_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "libref_route", default=""
+)
+status_var: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "libref_status", default=0
+)
+duration_var: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "libref_duration_ms", default=0
+)
 
 
 def _normalize_level(raw: object) -> int:
@@ -33,6 +53,12 @@ class _JsonFormatter(logging.Formatter):
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
+            "request_id": request_id_var.get(""),
+            "principal_id": principal_var.get(""),
+            "tenant_id": tenant_var.get(""),
+            "route": route_var.get(""),
+            "status": status_var.get(0),
+            "duration_ms": duration_var.get(0),
         }
         try:
             return json.dumps(payload, ensure_ascii=False)

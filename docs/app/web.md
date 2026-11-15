@@ -1,14 +1,18 @@
 # Web 功能总览
 
-Web 出口是只读查询面，另带精简抓取写入。实现在 `src/libref/web/`，路由在 `app.py`，请求形状在 `api.py`。所有路由只做参数校验、服务调用与结果透传，业务逻辑在 `services/` 层。请求参数经由数据模型校验，取值范围与必填关系明确。
+Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现在 `src/libref/web/`，路由在 `app.py`，请求形状在 `api.py`。所有路由只做参数校验、服务调用与结果透传，业务逻辑在 `services/` 层。请求参数经由数据模型校验，取值范围与必填关系明确。
 
-健康检查无需鉴权，其余路由统一做令牌鉴权：携带配置令牌的请求放行，未携带返回未授权，鉴权要求开启但令牌缺失返回服务端配置错误。列表类查询统一使用条目加总数包络，检索另带降级标记与原因。参数错误返回请求错误，资源缺失返回未找到，审核流转失败按冲突与参数错误区分返回，注册表缺地址按未找到与网关错误区分返回。
+健康检查无需鉴权，其余路由统一经顶层中间件鉴权：dev 模式注入固定主体，enforced 模式按 API Key 解析主体并按 scope 授权，未授权与缺 scope 分别返回未授权与禁止。列表类查询统一使用条目加总数包络，检索另带降级标记与原因。参数错误返回请求错误，资源缺失返回未找到，审核流转失败按冲突与参数错误区分返回，注册表缺地址按未找到与网关错误区分返回。
 
 ## 健康与目录
 
 ### GET /health
 
 返回可用标记与配置指纹，不鉴权。
+
+### GET /readyz
+
+就绪探针，检查库可读写、向量与嵌入问答可用性，不鉴权。
 
 ### GET /catalog
 
@@ -109,15 +113,51 @@ Web 出口是只读查询面，另带精简抓取写入。实现在 `src/libref/
 
 ### GET /review
 
-只支持列表动作。`action` 恒为 `list`，`limit` 默认 50。返回待定项包络。
+只支持列表动作，需 `review:read`。`action` 恒为 `list`，`limit` 默认 50，按调用方租户过滤。返回待定项包络。
 
 ### POST /review
 
-请求体含 `action/entity_id/limit`。`action` 四选一：`list/approve/conflict/reopen`，非列表动作要求 `entity_id`。列表返回包络，非列表返回流转结果。非法流转返回冲突，缺参返回请求错误。
+请求体含 `action/entity_id/limit`，需 `review:write`。`action` 四选一：`list/approve/conflict/reopen`，非列表动作要求 `entity_id`。写操作校验行租户归属，跨租户按未找到拒绝。列表返回包络，非列表返回流转结果。非法流转返回冲突，缺参返回请求错误。
+
+### POST /feedback
+
+提交开发者反馈，需 `feedback:write`。请求体 `body` 必填，只记录不改审核状态。
+
+### GET /feedback
+
+查看本租户反馈，需 `feedback:read`。`limit` 上限 200，`status` 可选过滤。
+
+### POST /feedback/{feedback_id}/resolve
+
+处置单条反馈，需 `feedback:resolve`。重复处置按未找到拒绝。
 
 ### GET /jobs / GET /jobs/{job_id}
 
-`job_id` 缺省列最近任务，`limit` 取 1 到 200 默认 20。未知编号返回未找到。本出口不提交任务。
+`job_id` 缺省列最近任务，`limit` 取 1 到 200 默认 20，需 `read`，按调用方租户过滤。未知编号返回未找到。本节只读。
+
+### POST /jobs
+
+提交任务，需 `jobs:write`。请求体 `kind/params`，返回任务编号。
+
+### POST /jobs/{job_id}/cancel
+
+取消任务，需 `jobs:write`。未知编号返回未找到。
+
+### GET /admin/keys
+
+列出凭据，需 `admin:keys`。密钥明文不回显。
+
+### POST /admin/keys
+
+签发凭据，需 `admin:keys`。明文仅返回一次。
+
+### DELETE /admin/keys/{key_id}
+
+吊销凭据，需 `admin:keys`。未知编号返回未找到。
+
+### POST /admin/config/refresh
+
+重建冻结快照，需 `admin:config`。返回新旧指纹；上游密钥改环境变量后调本接口生效。
 
 ## 探查
 
@@ -135,13 +175,13 @@ Web 出口是只读查询面，另带精简抓取写入。实现在 `src/libref/
 
 ### POST /scrape
 
-精简抓取，为命令行抓取的子集，不含范围限定与断点续抓参数。请求体 `library/version/start_url` 必填，`ecosystem` 默认 `custom`，`max_pages` 可选。返回各结局计数。写入面仅此一处，索引、挖掘与向量运维均不在本出口开放。
+提交抓取任务，为命令行抓取的子集，需 `ingest:write`。请求体 `library/version/start_url` 必填，`ecosystem` 默认 `custom`，`max_pages` 可选。返回任务编号，执行由后台认领 worker 完成。归属按调用方租户标记。
 
 ## 可配置项
 
 完整参数定义见同目录 `config.md`（真相源），以下为按功能归纳。行为由配置决定，优先级为显式参数、环境变量、配置文件、内置默认。密钥只走环境变量。
 
-* 服务暴露：`web_host/web_port` 监听地址，鉴权复用 `mcp_token/mcp_require_auth`（令牌只走环境；鉴权要求开启但令牌缺失返回服务端配置错误）。
+* 服务暴露：`web_host/web_port` 为组合 `serve` 的唯一监听，`mcp_path` 为 `/mcp` 挂载路径；`serve-mcp --http` 仍用 `mcp_host/mcp_port`。鉴权走顶层中间件，健康检查除外；`[mcp.auth]` 旧令牌为过渡保留。
 * 检索问答：同 MCP 的向量、嵌入、精排、融合、片段、窗口、问答与发现注册表各键，详尽预设强制开窗口。
 * 洞察：`evidence_per_file_limit/evidence_dedup` 证据默认，`cluster_threshold/cluster_min_size` 分组默认。
 * 写入：抓取并发与超时、范围、分块、嵌入与向量后端各键，`snapshot_*` 快照与 `repos_dir/repos_quota_mb` 配额。

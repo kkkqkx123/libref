@@ -10,6 +10,8 @@
 # 未知节与未知键会直接报错，便于发现拼写错误。
 
 [server]
+# instance_id identifies one process in DB-claimed jobs and version locks
+# instance_id = "libref-1"
 # SQLite 真源库路径（示例为文件相对路径，实际按本文件所在目录解析）
 db_path = "data/libref.db"
 
@@ -138,6 +140,18 @@ mcp_path = "/mcp"
 # 数组与逗号写法均可，大小写不敏感；未知名启动即报错。
 # mcp_enabled_tools = ["search", "read_doc", "catalog"]
 # mcp_disabled_tools = ["web_search", "github_search"]
+
+[auth]
+# Staged auth config, validated only until P1; enforcement lands with services rollout.
+# auth_mode = "enforced"
+# dev_principal = "dev-operator"
+# allowed_hosts = ["libref.internal"]
+# allowed_origins = ["https://app.internal"]
+# bootstrap_admin_key must come from env, never here.
+
+[client]
+# base_url = "https://libref.internal"
+# client_api_key must come from env, never here.
 
 [mcp.auth]
 # 接口鉴权：令牌只走环境变量 LIBREF_MCP_TOKEN，不进文件；

@@ -1,0 +1,42 @@
+"""Append-only audit trail for privileged writes."""
+
+from __future__ import annotations
+
+import sqlite3
+
+
+def write_audit(
+    conn: sqlite3.Connection,
+    *,
+    tenant_id: str,
+    principal_id: int | None,
+    action: str,
+    target: str = "",
+    result: str = "ok",
+    request_id: str = "",
+) -> None:
+    """Record one privileged action; audit writes never raise."""
+    try:
+        from libref.db.conn import write_lock as _guard
+        from libref.services.infra.auth import ensure_auth_tables
+
+        ensure_auth_tables(conn)
+        with _guard(conn):
+            conn.execute(
+                "INSERT INTO audit_log(tenant_id, principal_id, action, target,"
+                " result, request_id) VALUES(?,?,?,?,?,?)",
+                (
+                    tenant_id or "default",
+                    principal_id,
+                    action,
+                    target,
+                    result,
+                    request_id,
+                ),
+            )
+            conn.commit()
+    except Exception:  # noqa: BLE001, S110 — audit must not break business
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001, S110 — best effort only
+            pass

@@ -251,23 +251,49 @@ def cmd_config_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def _startup_auth_state(settings, conn) -> bool:
+    """Whether identity rows already exist for enforced boot checks."""
+    try:
+        row = conn.execute("SELECT id FROM principals LIMIT 1").fetchone()
+        return row is not None
+    except Exception:  # noqa: BLE001 — missing tables count as no principals
+        return False
+
+
+def _ensure_bootstrap(settings, conn) -> None:
+    """Idempotently create the platform administrator from the bootstrap key."""
+    if str(getattr(settings, "auth_mode", "dev") or "dev") != "enforced":
+        return
+    raw = getattr(settings, "bootstrap_admin_key", None)
+    if _startup_auth_state(settings, conn):
+        return
+    if not raw:
+        return
+    from libref.services.infra.auth import bootstrap_admin
+
+    bootstrap_admin(conn, str(raw))
+
+
 def cmd_serve_mcp(args: argparse.Namespace) -> int:
-    from libref.mcp_server import build_mcp_server, check_startup
+    from libref.mcp_server import build_mcp_server
+    from libref.mcp_server.auth import check_startup
 
     settings = _load_settings(args, _mcp_tools_overrides(args))
-    if args.http:
-        host = args.host or settings.mcp_host
+    conn = _connect(settings, check_same_thread=False)
+    try:
+        _ensure_bootstrap(settings, conn)
         try:
             check_startup(
-                host,
-                require_auth=bool(settings.mcp_require_auth),
-                token=settings.mcp_token,
+                args.host or settings.mcp_host,
+                auth_mode=str(getattr(settings, "auth_mode", "dev") or "dev"),
+                bootstrap_key=getattr(settings, "bootstrap_admin_key", None),
+                has_principals=_startup_auth_state(settings, conn),
             )
         except ValueError as exc:
             print(f"config error: {exc}", file=sys.stderr)
             return 2
-    # MCPServer runs tools in a worker thread; the connection must be reusable across threads.
-    conn = _connect(settings, check_same_thread=False)
+    except Exception:
+        pass
     mcp = build_mcp_server(conn, settings)
     if args.http:
         host = args.host or settings.mcp_host
@@ -275,9 +301,9 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
         path = args.path or settings.mcp_path
         mcp.run(
             "streamable-http", host=host, port=port, streamable_http_path=path
-        )  # blocks until the process exits
+        )
     else:
-        mcp.run("stdio")  # blocks until stdio closes
+        mcp.run("stdio")
     conn.close()
     return 0
 
@@ -286,22 +312,25 @@ def cmd_serve_web(args: argparse.Namespace) -> int:
     from libref.mcp_server.auth import check_startup
 
     settings = _load_settings(args)
-    host = args.host or settings.web_host
-    port = args.port or settings.web_port
+    conn = _connect(settings, check_same_thread=False)
     try:
-        check_startup(
-            host,
-            require_auth=bool(settings.mcp_require_auth),
-            token=settings.mcp_token,
-        )
-    except ValueError as exc:
-        print(f"config error: {exc}", file=sys.stderr)
-        return 2
+        _ensure_bootstrap(settings, conn)
+        try:
+            check_startup(
+                args.host or settings.web_host,
+                auth_mode=str(getattr(settings, "auth_mode", "dev") or "dev"),
+                bootstrap_key=getattr(settings, "bootstrap_admin_key", None),
+                has_principals=_startup_auth_state(settings, conn),
+            )
+        except ValueError as exc:
+            print(f"config error: {exc}", file=sys.stderr)
+            return 2
+    except Exception:
+        pass
     import uvicorn
 
     from libref.web import build_web_app
 
-    conn = _connect(settings, check_same_thread=False)
     from libref.services.factory import build_gateway
 
     gateway = build_gateway(settings)
@@ -314,6 +343,121 @@ def cmd_serve_web(args: argparse.Namespace) -> int:
         rerank=gateway.rerank_fn(),
         chat=gateway.chat_fn(),
     )
+    host = args.host or settings.web_host
+    port = args.port or settings.web_port
     uvicorn.run(app, host=host, port=port, log_level="warning")
     conn.close()
     return 0
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Single combined serving: Web routes plus MCP mounted at the same port."""
+    import uvicorn
+    from starlette.middleware.cors import CORSMiddleware
+    from starlette.routing import Mount
+
+    from libref.mcp_server.auth import check_startup
+    from libref.services.infra.context import build_context
+    from libref.web.middleware import AuthMiddleware
+
+    settings = _load_settings(args, _mcp_tools_overrides(args))
+    host = getattr(args, "host", None) or settings.web_host
+    port = getattr(args, "port", None) or settings.web_port
+    conn = _connect(settings, check_same_thread=False)
+    try:
+        _ensure_bootstrap(settings, conn)
+        try:
+            check_startup(
+                host,
+                auth_mode=str(getattr(settings, "auth_mode", "dev") or "dev"),
+                bootstrap_key=getattr(settings, "bootstrap_admin_key", None),
+                has_principals=_startup_auth_state(settings, conn),
+            )
+        except ValueError as exc:
+            print(f"config error: {exc}", file=sys.stderr)
+            return 2
+        ctx = build_context(settings)
+        if getattr(args, "stdio", False):
+            from libref.mcp_server import build_mcp_server as _build_mcp
+
+            mcp = _build_mcp(conn, settings)
+            mcp.run("stdio")
+            return 0
+        from libref.mcp_server import build_mcp_server as _build_mcp
+        from libref.web import build_web_app as _build_web
+
+        gateway = ctx.gateway
+        web_app = _build_web(
+            conn,
+            settings,
+            vec_store=ctx.vec_store,
+            embed=ctx.embed,
+            rerank=gateway.rerank_fn() if gateway else None,
+            chat=gateway.chat_fn() if gateway else None,
+            context=ctx,
+        )
+        mcp = _build_mcp(conn, settings)
+        transport_kwargs: dict = {}
+        allowed_hosts = list(getattr(settings, "allowed_hosts", None) or [])
+        allowed_origins = list(getattr(settings, "allowed_origins", None) or [])
+        if allowed_hosts or allowed_origins:
+            from mcp.server.transport_security import TransportSecuritySettings
+
+            transport_kwargs["transport_security"] = TransportSecuritySettings(
+                allowed_hosts=allowed_hosts,
+                allowed_origins=allowed_origins,
+            )
+        transport_kwargs["host"] = host
+        mcp_path = str(getattr(settings, "mcp_path", "/mcp") or "/mcp")
+        mcp_starlette = mcp.streamable_http_app(
+            streamable_http_path=mcp_path, **transport_kwargs
+        )
+        routes = list(getattr(web_app, "routes", []))
+        routes.append(Mount("/", app=mcp_starlette))
+        from contextlib import asynccontextmanager as _acm
+
+        @ _acm
+        async def _lifespan(_app):
+            async with mcp.session_manager.run():
+                worker_conn = ctx.connect(check_same_thread=False)
+                try:
+                    from libref.services.docs.scrape_jobs import build_scrape_runner
+                    from libref.services.infra.jobs import JobManager
+
+                    mgr = JobManager(
+                        worker_conn, instance_id=str(settings.instance_id)
+                    )
+                    mgr.recover(requeue=True)
+                    runner = build_scrape_runner(
+                        settings, worker_conn, vec_store=ctx.vec_store, embed=ctx.embed, mgr=mgr
+                    )
+                    mgr.start_worker(runner)
+                    try:
+                        yield
+                    finally:
+                        mgr.stop_worker()
+                finally:
+                    try:
+                        worker_conn.close()
+                    except Exception:  # noqa: BLE001, S110 — best effort
+                        pass
+
+        from starlette.applications import Starlette as _Starlette
+
+        origins = allowed_origins or ["*"]
+        combined = _Starlette(routes=routes, lifespan=_lifespan)
+        combined.add_middleware(
+            CORSMiddleware,
+            allow_origins=origins,
+            allow_methods=["*"],
+            allow_headers=["Authorization", "Content-Type", "Last-Event-ID", "Mcp-*", "*"],
+            expose_headers=["Mcp-Session-Id", "x-request-id"],
+        )
+        combined.add_middleware(AuthMiddleware, context=ctx)
+        uvicorn.run(combined, host=host, port=port, log_level="warning")
+        return 0
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001, S110 — best effort
+            pass

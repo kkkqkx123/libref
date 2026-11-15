@@ -52,6 +52,6 @@ cp deploy/libref.toml.example libref.toml
 - 修改上游密钥后调用 `POST /admin/config/refresh` 重建冻结快照；不做热更新。
 - `config-show` 打印脱敏快照，`/health` 只回配置指纹，均不泄露密钥。
 
-## 启动命令（目标形态）
+## 启动命令
 
-本阶段把 `serve-mcp --http` 与 `serve-web` 合并为单一 `libref serve`，同进程同时提供 Web 路由与 `/mcp`。当前仓库尚未落地该命令（见主方案 §9.2、§11.1 的 P0/P1），示例配置先行提供，待代码落地后按 `docs/app/cli.md` 更新。
+单一组合 `libref serve` 同进程提供 Web 路由与 `/mcp`（Web 在前、`Mount("/")` 在后，顶层 `lifespan` 持有 `session_manager`）；`--stdio` 切到标准输入输出供本地客户端。旧 `serve-mcp/serve-web` 保留兼容，其中 `serve-mcp --http` 使用 `[mcp]` 的监听配置，组合 `serve` 使用 `[web]` 的监听配置。详见 `docs/app/cli.md`。

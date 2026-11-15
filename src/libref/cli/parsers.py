@@ -37,6 +37,7 @@ from libref.cli.ops_commands import (
     cmd_reconcile,
     cmd_reembed,
     cmd_review,
+    cmd_serve,
     cmd_serve_mcp,
     cmd_serve_web,
 )
@@ -432,6 +433,30 @@ def build_parser() -> argparse.ArgumentParser:
     p_web.add_argument("--host", default=None, help="HTTP listen address")
     p_web.add_argument("--port", type=int, default=None, help="HTTP listen port")
     p_web.set_defaults(func=cmd_serve_web)
+
+    p_serve = sub.add_parser(
+        "serve",
+        help="Start combined Web plus MCP serving on one port",
+        parents=[_config_parent],
+    )
+    p_serve.add_argument("--host", default=None, help="HTTP listen address")
+    p_serve.add_argument("--port", type=int, default=None, help="HTTP listen port")
+    p_serve.add_argument(
+        "--stdio",
+        action="store_true",
+        help="Run MCP over stdio instead of combined HTTP serving",
+    )
+    p_serve.add_argument(
+        "--enabled-tools",
+        default=None,
+        help="Comma-separated MCP tool allowlist for combined serving",
+    )
+    p_serve.add_argument(
+        "--disabled-tools",
+        default=None,
+        help="Comma-separated MCP tool denylist for combined serving",
+    )
+    p_serve.set_defaults(func=cmd_serve)
 
     p_repo = sub.add_parser(
         "index-repo",

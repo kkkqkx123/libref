@@ -175,8 +175,24 @@ class LibrefSettings(BaseSettings):
         list[str], NoDecode, BeforeValidator(_split_tool_names)
     ] = Field(default_factory=list)
     # API auth: token only via env var, never files; a token must be set before external exposure.
+    # Retained until the api_keys table lands; removal happens with the multi-tenant auth rollout.
     mcp_token: str | None = None
     mcp_require_auth: bool = False
+    # Staged multi-tenant auth fields: recognized early so deploy/ examples load.
+    # Enforcement (middleware, per-request Principal) lands with the services rollout;
+    # for now they are validated configuration only and do not change request handling.
+    auth_mode: Literal["dev", "enforced"] = "dev"
+    dev_principal: str = "dev-operator"
+    bootstrap_admin_key: str | None = None
+    client_api_key: str | None = None
+    base_url: str | None = None
+    allowed_hosts: Annotated[
+        list[str] | None, NoDecode, BeforeValidator(_split_tool_names)
+    ] = None
+    allowed_origins: Annotated[
+        list[str] | None, NoDecode, BeforeValidator(_split_tool_names)
+    ] = None
+    instance_id: str = "libref-1"
     # Web exit: loopback-only by default; external exposure requires fronting auth.
     web_host: str = "127.0.0.1"
     web_port: int = Field(default=8001, ge=1, le=65535)
@@ -252,7 +268,14 @@ class LibrefSettings(BaseSettings):
 
 
 SECRET_FIELDS = frozenset(
-    {"embedding_api_key", "chat_api_key", "mcp_token", "discovery_github_token"}
+    {
+        "embedding_api_key",
+        "chat_api_key",
+        "mcp_token",
+        "discovery_github_token",
+        "bootstrap_admin_key",
+        "client_api_key",
+    }
 )
 
 
@@ -266,7 +289,7 @@ def setting_or_default(settings: LibrefSettings | None, name: str):
 CONFIG_FILE_NAME = "libref.toml"
 
 SECTION_FIELDS: dict[str, frozenset[str]] = {
-    "server": frozenset({"db_path", "heartbeat_timeout"}),
+    "server": frozenset({"db_path", "heartbeat_timeout", "instance_id"}),
     "crawler": frozenset(
         {
             "fetch_concurrency",
@@ -404,6 +427,16 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
         }
     ),
     "mcp.auth": frozenset({"mcp_token", "mcp_require_auth"}),
+    "auth": frozenset(
+        {
+            "auth_mode",
+            "dev_principal",
+            "allowed_hosts",
+            "allowed_origins",
+            "bootstrap_admin_key",
+        }
+    ),
+    "client": frozenset({"base_url", "client_api_key"}),
     "web": frozenset({"web_host", "web_port"}),
     "retention": frozenset(
         {

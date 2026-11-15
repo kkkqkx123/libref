@@ -180,3 +180,27 @@ class HealthResponse(BaseModel):
 
 def envelope(items: list[dict[str, Any]], *, degraded: bool = False) -> dict[str, Any]:
     return {"items": items, "degraded": degraded, "count": len(items)}
+
+
+class FeedbackCreate(BaseModel):
+    entity_type: str = Field(default="call_instance", min_length=1)
+    entity_id: int = Field(default=0, ge=0)
+    kind: str = Field(default="general", min_length=1)
+    body: str = Field(min_length=1)
+
+
+class FeedbackResolve(BaseModel):
+    pass
+
+
+class JobCreate(BaseModel):
+    kind: str = Field(min_length=1)
+    params: dict[str, Any] = Field(default_factory=dict)
+
+
+class KeyCreate(BaseModel):
+    name: str = Field(min_length=1)
+    kind: str = Field(default="human")
+    tenant_id: str = Field(default="default", min_length=1)
+    roles: list[str] = Field(default_factory=list)
+    scopes: list[str] = Field(default_factory=list)

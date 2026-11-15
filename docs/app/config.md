@@ -174,7 +174,7 @@
 | material_limit | 整数（≥1） | 1500 | LIBREF_MATERIAL_LIMIT | 单材料上限 |
 | answer_total_budget | 整数（≥1） | 6000 | LIBREF_ANSWER_TOTAL_BUDGET | 回答材料总预算（硬上限），按排序分配，超出部分整条丢弃并以省略标记告知模型 |
 
-## 服务暴露（[mcp]、[mcp.auth]、[web]）
+## 服务暴露（[mcp]、[mcp.auth]、[auth]、[client]、[web]）
 
 | 字段 | 类型 | 默认 | 环境变量 | 影响 |
 |---|---|---|---|---|
@@ -183,8 +183,16 @@
 | mcp_path | 字符串 | /mcp | LIBREF_MCP_PATH | MCP 端点路径 |
 | mcp_enabled_tools | 名单/空 | 空（全量） | LIBREF_MCP_ENABLED_TOOLS | 工具白名单，空数组表示零工具 |
 | mcp_disabled_tools | 名单 | 空 | LIBREF_MCP_DISABLED_TOOLS | 工具黑名单，优先于白名单 |
-| mcp_token | 密钥/空 | 空 | LIBREF_MCP_TOKEN | 鉴权令牌，非回环监听时必填 |
-| mcp_require_auth | 布尔 | 关 | LIBREF_MCP_REQUIRE_AUTH | 强制鉴权开关 |
+| mcp_token | 密钥/空 | 空 | LIBREF_MCP_TOKEN | 过渡保留的旧令牌，enforced 下建议只用 API Key |
+| mcp_require_auth | 布尔 | 关 | LIBREF_MCP_REQUIRE_AUTH | 旧强制鉴权开关，过渡保留 |
+| auth_mode | 字面量 | dev | LIBREF_AUTH_MODE | `dev/enforced`，dev 非回环拒绝启动 |
+| dev_principal | 字符串 | dev-operator | LIBREF_DEV_PRINCIPAL | dev 模式注入主体名 |
+| allowed_hosts | 名单/空 | 空 | LIBREF_ALLOWED_HOSTS | 非回环部署的传输安全主机表 |
+| allowed_origins | 名单/空 | 空 | LIBREF_ALLOWED_ORIGINS | 非回环部署的传输安全来源表 |
+| bootstrap_admin_key | 密钥/空 | 空 | LIBREF_BOOTSTRAP_ADMIN_KEY | 首次引导系统管理员，明文不落文件 |
+| base_url | 字符串/空 | 空 | LIBREF_BASE_URL | 远程模式服务端地址 |
+| client_api_key | 密钥/空 | 空 | LIBREF_CLIENT_API_KEY | 远程模式 Bearer Key，只走环境 |
+| instance_id | 字符串 | libref-1 | LIBREF_INSTANCE_ID | DB 认领与版本锁的进程标识 |
 | web_host | 字符串 | 127.0.0.1 | LIBREF_WEB_HOST | Web 监听地址 |
 | web_port | 整数（1–65535） | 8001 | LIBREF_WEB_PORT | Web 监听端口 |
 

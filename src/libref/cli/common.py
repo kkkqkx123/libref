@@ -31,6 +31,16 @@ _config_parent.add_argument(
     default=None,
     help="Log format: text/json; defaults to the config value",
 )
+_config_parent.add_argument(
+    "--remote",
+    action="store_true",
+    help="Send the request to a running server instead of opening the local database",
+)
+_config_parent.add_argument(
+    "--base-url",
+    default=None,
+    help="Server base URL for --remote; defaults to the client.base_url setting",
+)
 
 
 def _load_settings(args: argparse.Namespace, overrides: dict | None = None):

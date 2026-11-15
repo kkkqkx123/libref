@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from typing import Any, Literal
 
@@ -76,6 +77,7 @@ ALL_MCP_TOOLS: frozenset[str] = frozenset(
         "review",
         "job_show",
         "resolve",
+        "submit_feedback",
     }
 )
 
@@ -119,6 +121,27 @@ def build_mcp_server(
     catalog_svc = LibraryService(conn)
     mining = MiningReadService(conn, resolve_settings)
     review_svc = ReviewService(conn)
+
+    def _principal():
+        from libref.services.infra.auth import current_principal, dev_principal
+
+        found = current_principal.get()
+        if found is not None:
+            return found
+        if str(getattr(resolve_settings, "auth_mode", "dev") or "dev") == "dev":
+            return dev_principal(resolve_settings)
+        return None
+
+    def _deny(principal, *scopes: str):
+        if principal is None:
+            return {"error": "unauthorized", "message": "missing credentials"}
+        missing = [s for s in scopes if s not in set(principal.scopes)]
+        if missing:
+            return {"error": "forbidden", "message": f"missing {','.join(missing)}"}
+        return None
+
+    def _tenant(principal) -> str:
+        return str(getattr(principal, "tenant_id", "default") or "default")
 
     async def search(
         query: str,
@@ -711,6 +734,11 @@ def build_mcp_server(
         limit: int = 50,
     ) -> dict[str, Any]:
         """Review workflow: list pending items or transition one item."""
+        principal = _principal()
+        need = "review:read" if action == "list" else "review:write"
+        denied = _deny(principal, need)
+        if denied is not None:
+            return denied
         if action not in ("list", "approve", "conflict", "reopen"):
             return _invalid(f"unsupported review action: {action}")
         bad = _check_limit(limit, low=1, high=500)
@@ -719,7 +747,24 @@ def build_mcp_server(
         if action != "list" and entity_id is None:
             return _invalid(f"{action} requires entity_id")
         try:
-            result = review_svc.apply(action, entity_id, limit)
+            result = review_svc.apply(
+                action,
+                entity_id,
+                limit,
+                tenant_id=_tenant(principal),
+                principal_id=getattr(principal, "id", None),
+            )
+            if action != "list":
+                from libref.services.ops.audit import write_audit
+
+                write_audit(
+                    conn,
+                    tenant_id=_tenant(principal),
+                    principal_id=getattr(principal, "id", None),
+                    action=f"review.{action}",
+                    target=str(entity_id or ""),
+                    request_id="",
+                )
         except ValueError as exc:
             text = str(exc)
             if "cannot transition" in text or "cannot reopen" in text:
@@ -735,11 +780,17 @@ def build_mcp_server(
         """Show job results, listing recent jobs when no id is given."""
         from libref.services.infra.jobs import JobManager
 
+        principal = _principal()
+        denied = _deny(principal, "read")
+        if denied is not None:
+            return denied
         bad = _check_limit(limit, low=1, high=200)
         if bad is not None:
             return _invalid(bad)
         try:
-            return JobManager(conn).show(job_id, limit)
+            return JobManager(conn).show(
+                job_id, limit, tenant_id=_tenant(principal)
+            )
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -792,6 +843,95 @@ def build_mcp_server(
             return {"error": "failed", "message": str(exc)}
         return resolution.model_dump()
 
+    def submit_feedback(
+        body: str,
+        entity_type: str | None = None,
+        entity_id: int | None = None,
+        kind: str | None = None,
+    ) -> dict[str, Any]:
+        """Submit developer feedback without touching review state."""
+        principal = _principal()
+        denied = _deny(principal, "feedback:write")
+        if denied is not None:
+            return denied
+        if not (body or "").strip():
+            return _invalid("body is empty")
+        try:
+            from libref.services.ops.audit import write_audit
+            from libref.services.ops.feedback import FeedbackService
+
+            svc = FeedbackService(conn)
+            fid = svc.submit(
+                tenant_id=_tenant(principal),
+                principal_id=getattr(principal, "id", None),
+                entity_type=entity_type or "call_instance",
+                entity_id=int(entity_id or 0),
+                kind=kind or "general",
+                body=body,
+            )
+            write_audit(
+                conn,
+                tenant_id=_tenant(principal),
+                principal_id=getattr(principal, "id", None),
+                action="feedback.create",
+                target=str(fid),
+                request_id="",
+            )
+        except ValueError as exc:
+            return _invalid(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            return _failed(str(exc))
+        return {"id": fid, "ok": True}
+
+    _read_tools = frozenset(
+        {
+            "search",
+            "library_search",
+            "web_search",
+            "github_search",
+            "answer",
+            "read_doc",
+            "catalog",
+            "doc_probe",
+            "repo_probe",
+            "repo_dependencies",
+            "link_stats",
+            "api_insight",
+            "pattern_insight",
+            "symbol_insight",
+            "call_insight",
+            "import_insight",
+            "mining_health",
+            "resolve",
+            "job_show",
+        }
+    )
+
+    def _wrap(name: str, func: Any) -> Any:
+        if name in ("review", "submit_feedback"):
+            return func
+        if name not in _read_tools:
+            return func
+        if asyncio.iscoroutinefunction(func):
+
+            async def _guarded(*args: Any, **kwargs: Any) -> Any:
+                principal = _principal()
+                denied = _deny(principal, "read")
+                if denied is not None:
+                    return denied
+                return await func(*args, **kwargs)
+
+            return _guarded
+
+        def _guarded_sync(*args: Any, **kwargs: Any) -> Any:
+            principal = _principal()
+            denied = _deny(principal, "read")
+            if denied is not None:
+                return denied
+            return func(*args, **kwargs)
+
+        return _guarded_sync
+
     visible: dict[str, Any] = {
         "search": search,
         "library_search": library_search,
@@ -813,9 +953,10 @@ def build_mcp_server(
         "review": review,
         "job_show": job_show,
         "resolve": resolve,
+        "submit_feedback": submit_feedback,
     }
     for name, func in visible.items():
         if name in enabled:
-            mcp.tool()(func)
+            mcp.tool()(_wrap(name, func))
 
     return mcp

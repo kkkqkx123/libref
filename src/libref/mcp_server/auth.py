@@ -1,12 +1,14 @@
-"""MCP/HTTP auth: token verification and exposure hardening; routes stay free of business logic."""
+"""Request authentication for combined serving; routes stay free of business logic."""
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import ipaddress
 
 
 def is_loopback_host(host: str) -> bool:
-    """Whether the listen address is a local loopback; resolution failure is treated as externally exposed."""
+    """Whether the listen address is a local loopback; failures count as exposed."""
     name = (host or "").strip().lower()
     if name in ("localhost",):
         return True
@@ -16,40 +18,72 @@ def is_loopback_host(host: str) -> bool:
         return False
 
 
-def auth_required(host: str, *, require_auth: bool, has_token: bool) -> bool:
-    """Auth is required when externally exposed or explicitly enabled; loopback without a token is allowed."""
-    return bool(require_auth or not is_loopback_host(host))
+def auth_required(host: str, *, auth_mode: str = "enforced") -> bool:
+    """Whether per-request authentication applies for this startup mode."""
+    if (auth_mode or "enforced") == "dev":
+        return False
+    return True
 
 
-def check_startup(host: str, *, require_auth: bool, token: str | None) -> None:
-    """Pre-start hardening check: refuse to start when auth is required but no token is set, never fall back to no auth."""
-    if (
-        auth_required(host, require_auth=require_auth, has_token=bool(token))
-        and not token
-    ):
-        raise ValueError(
-            f"refusing to expose on {host} without a token: "
-            "set LIBREF_MCP_TOKEN or keep the loopback default"
-        )
+def check_startup(
+    host: str,
+    *,
+    auth_mode: str = "enforced",
+    bootstrap_key: str | None = None,
+    has_principals: bool = False,
+) -> None:
+    """Refuse unsafe startups: dev on non-loopback, or enforced with no bootstrap."""
+    mode = (auth_mode or "enforced").strip() or "enforced"
+    if mode == "dev":
+        if not is_loopback_host(host):
+            raise ValueError(
+                f"refusing dev mode on non-loopback {host}: "
+                "use enforced mode with API keys"
+            )
+        return
+    if mode == "enforced":
+        if not bootstrap_key and not has_principals:
+            raise ValueError(
+                "refusing enforced startup with no bootstrap key and no principals: "
+                "set LIBREF_BOOTSTRAP_ADMIN_KEY for first boot"
+            )
+        return
+    raise ValueError(f"unknown auth_mode: {mode}")
+
+
+def parse_bearer(authorization: str | None) -> str | None:
+    """Extract a bearer token; malformed headers miss."""
+    if not authorization:
+        return None
+    scheme, _, credential = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not credential.strip():
+        return None
+    return credential.strip()
 
 
 def verify_bearer(authorization: str | None, token: str | None) -> bool:
-    """Verify a Bearer token; reject if either side is missing; equal-length comparison avoids timing leaks."""
-    if not authorization or not token:
+    """Legacy static token check kept for direct unit coverage."""
+    raw = parse_bearer(authorization)
+    if not raw or not token:
         return False
-    scheme, _, credential = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not credential:
-        return False
-    if len(credential) != len(token):
+    if len(raw) != len(token):
         return False
     different = 0
-    for left, right in zip(credential, token):
+    for left, right in zip(raw, token):
         different |= ord(left) ^ ord(right)
     return different == 0
 
 
+def verify_key(raw: str | None, stored_hash: str | None) -> bool:
+    """Compare a presented key against its stored hash in constant time."""
+    if not raw or not stored_hash:
+        return False
+    candidate = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(candidate, stored_hash)
+
+
 def is_allowed_origin(origin: str | None, *, host: str) -> bool:
-    """Origin check: allow when no Origin header (non-browser calls); with a header it must match the listen surface."""
+    """Origin check for browser callers; non-browser calls without Origin pass."""
     if not origin:
         return True
     lowered = origin.strip().lower()

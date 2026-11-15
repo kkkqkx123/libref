@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 
 from libref.config import LibrefSettings, settings_fingerprint
 from libref.crawler.registry import RegistryError
@@ -22,8 +22,11 @@ from libref.web.api import (
     ApiInsightQuery,
     CallInsightQuery,
     DocProbeRequest,
+    FeedbackCreate,
     ImportInsightQuery,
+    JobCreate,
     JobQuery,
+    KeyCreate,
     LinkStatsQuery,
     PatternInsightQuery,
     ReadQuery,
@@ -54,8 +57,9 @@ def build_web_app(
     embed=None,
     rerank=None,
     chat=None,
+    context=None,
 ) -> FastAPI:
-    """Assemble the web app; the caller manages the connection lifecycle."""
+    """Assemble the web app; per-request connections avoid single-conn blocking."""
     from libref.services.registry.discovery import DiscoveryService
 
     svc = SearchService(conn, settings, vec_store=vec_store, embed=embed, rerank=rerank)
@@ -65,14 +69,60 @@ def build_web_app(
     mining = MiningReadService(conn, settings)
     review = ReviewService(conn)
     app = FastAPI(title="libref")
+    app.state.context = context
+    app.state.settings = settings
 
-    def _guard(authorization: str | None = Header(default=None)) -> None:
+    def _guard(
+        request=None,
+        authorization: str | None = Header(default=None),
+    ):
+        from fastapi import Request as _Request
+
+        req = request
+        state_principal = getattr(getattr(req, "state", None), "principal", None)
+        if state_principal is not None:
+            return state_principal
+        from libref.mcp_server.auth import parse_bearer
+        from libref.services.infra.auth import dev_principal, lookup_principal
+
         token = getattr(settings, "mcp_token", None)
         required = bool(getattr(settings, "mcp_require_auth", False))
-        if token and not verify_bearer(authorization, token):
-            raise HTTPException(status_code=401, detail="unauthorized")
-        if required and not token:
+        auth_mode = str(getattr(settings, "auth_mode", "dev") or "dev")
+        if token:
+            if not verify_bearer(authorization, token):
+                # In dev mode without a header, fall through to dev principal
+                # only when no legacy token is configured; otherwise enforce.
+                raise HTTPException(status_code=401, detail="unauthorized")
+            legacy = dev_principal(settings)
+            legacy.name = "legacy-token"
+            return legacy
+        if required and not token and auth_mode == "dev":
             raise HTTPException(status_code=500, detail="auth misconfigured")
+        if auth_mode == "dev":
+            return dev_principal(settings)
+        raw = parse_bearer(authorization)
+        if not raw:
+            raise HTTPException(status_code=401, detail="unauthorized")
+        principal = lookup_principal(conn, raw)
+        if principal is None:
+            raise HTTPException(status_code=401, detail="unauthorized")
+        return principal
+
+    def _need(principal, *scopes: str) -> None:
+        missing = [s for s in scopes if s not in set(getattr(principal, "scopes", set()))]
+        if missing:
+            raise HTTPException(status_code=403, detail=f"forbidden: missing {','.join(missing)}")
+
+    def _principal_id(principal) -> int | None:
+        pid = getattr(principal, "id", None)
+        return int(pid) if isinstance(pid, int) else None
+
+    def _tenant_of(principal) -> str:
+        return str(getattr(principal, "tenant_id", "default") or "default")
+
+    def _read_guard(principal=Depends(_guard)):
+        _need(principal, "read")
+        return None
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -82,7 +132,7 @@ def build_web_app(
     def catalog_route(
         library: str | None = None,
         ecosystem: str | None = None,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         return envelope(catalog.catalog(library, ecosystem))
 
@@ -96,7 +146,7 @@ def build_web_app(
         preset: Literal["precise", "balanced", "thorough"] = "balanced",
         suggest: bool = False,
         include_prerelease: bool = False,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         params = SearchQuery(
             query=query,
@@ -144,7 +194,7 @@ def build_web_app(
         ecosystem: str | None = None,
         limit: int = 10,
         include_prerelease: bool = False,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         from libref.web.api import LibrarySearchQuery
 
@@ -175,7 +225,7 @@ def build_web_app(
         ecosystem: str | None = None,
         limit: int = 5,
         preset: Literal["precise", "balanced", "thorough"] = "balanced",
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         from libref.services.docs.answer import answer_query_async
 
@@ -215,7 +265,7 @@ def build_web_app(
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         params = ReadQuery(
             url=url,
@@ -253,7 +303,7 @@ def build_web_app(
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int | None = None,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         params = ApiInsightQuery(
             view=view,
@@ -299,7 +349,7 @@ def build_web_app(
         limit: int | None = None,
         per_file_limit: int | None = None,
         dedup: bool | None = None,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         params = PatternInsightQuery(
             view=view,
@@ -341,7 +391,7 @@ def build_web_app(
         ecosystem: str | None = None,
         limit: int | None = None,
         offset: int = 0,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         params = SymbolInsightQuery(
             view=view,
@@ -382,7 +432,7 @@ def build_web_app(
         resolve_kinds: str | None = None,
         min_args: int | None = None,
         max_args: int | None = None,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         params = CallInsightQuery(
             view=view,
@@ -425,7 +475,7 @@ def build_web_app(
         ecosystem: str | None = None,
         limit: int | None = None,
         offset: int = 0,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         params = ImportInsightQuery(
             view=view,
@@ -455,42 +505,94 @@ def build_web_app(
     def review_list(
         action: Literal["list"] = "list",
         limit: int = 50,
-        _: None = Depends(_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
+        _need(principal, "review:read")
         params = ReviewQuery(action=action, limit=limit)
         try:
-            items = review.apply(params.action, None, params.limit)
+            items = review.apply(
+                params.action,
+                None,
+                params.limit,
+                tenant_id=_tenant_of(principal),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return envelope(items)
 
     @app.post("/review")
-    def review_apply(body: ReviewAction, _: None = Depends(_guard)) -> dict[str, Any]:
+    def review_apply(
+        body: ReviewAction, request: Request, principal=Depends(_guard)
+    ) -> dict[str, Any]:
+        _need(principal, "review:write")
+        from libref.services.ops.audit import write_audit
+
         try:
-            result = review.apply(body.action, body.entity_id, body.limit)
+            result = review.apply(
+                body.action,
+                body.entity_id,
+                body.limit,
+                tenant_id=_tenant_of(principal),
+                principal_id=_principal_id(principal),
+            )
         except ValueError as exc:
             text = str(exc)
             if "cannot transition" in text or "cannot reopen" in text:
                 raise HTTPException(status_code=409, detail=text) from exc
             raise HTTPException(status_code=400, detail=text) from exc
+        write_audit(
+            conn,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+            action=f"review.{body.action}",
+            target=str(body.entity_id or ""),
+            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+        )
         if isinstance(result, list):
             return envelope(result)
         return result
 
     @app.post("/scrape")
-    def scrape(body: ScrapeRequest, _: None = Depends(_guard)) -> dict[str, Any]:
-        service = IngestService(settings, conn, vec_store=vec_store, embed=embed)
-        counts = service.scrape_docs(
+    def scrape(
+        body: ScrapeRequest, request: Request, principal=Depends(_guard)
+    ) -> dict[str, Any]:
+        _need(principal, "ingest:write")
+        from libref.services.docs.scrape_jobs import start_scrape_job
+        from libref.services.ops.audit import write_audit
+
+        mgr = JobManager(conn)
+        job_id = start_scrape_job(
+            mgr,
             body.library,
             body.version,
             body.start_url,
             max_pages=body.max_pages,
             ecosystem=body.ecosystem,
         )
-        return {"counts": counts}
+        # Stamp ownership for cross-tenant filtering when the column exists.
+        try:
+            conn.execute(
+                "UPDATE jobs SET tenant_id=?, principal_id=? WHERE id=?",
+                (_tenant_of(principal), _principal_id(principal), job_id),
+            )
+            conn.commit()
+        except Exception:  # noqa: BLE001 — legacy tables without new columns
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001, S110 — best effort
+                pass
+        write_audit(
+            conn,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+            action="scrape.submit",
+            target=f"{body.library}:{body.version}:{job_id}",
+            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+        )
+        return {"id": job_id, "ok": True}
 
     @app.post("/doc-probe")
-    async def doc_probe(body: DocProbeRequest, _: None = Depends(_guard)) -> dict[str, Any]:
+    async def doc_probe(body: DocProbeRequest, _: None = Depends(_read_guard)) -> dict[str, Any]:
         from libref.services.docs.probe import probe_docs_async
 
         if body.scope is not None and not isinstance(body.scope, dict):
@@ -511,7 +613,7 @@ def build_web_app(
         return probe.model_dump()
 
     @app.post("/repo-probe")
-    def repo_probe(body: RepoProbeRequest, _: None = Depends(_guard)) -> dict[str, Any]:
+    def repo_probe(body: RepoProbeRequest, _: None = Depends(_read_guard)) -> dict[str, Any]:
         from libref.services.code.probe import probe_repo
 
         if body.only_files is not None and (
@@ -546,19 +648,23 @@ def build_web_app(
     def jobs(
         job_id: int | None = None,
         limit: int = 20,
-        _: None = Depends(_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
+        _need(principal, "read")
         params = JobQuery(job_id=job_id, limit=limit)
         mgr = JobManager(conn)
-        out = mgr.show(params.job_id, params.limit)
+        out = mgr.show(
+            params.job_id, params.limit, tenant_id=_tenant_of(principal)
+        )
         if "error" in out and "id" not in out:
             raise HTTPException(status_code=404, detail="job not found")
         return out
 
     @app.get("/jobs/{job_id}")
-    def job_detail(job_id: int, _: None = Depends(_guard)) -> dict[str, Any]:
+    def job_detail(job_id: int, principal=Depends(_guard)) -> dict[str, Any]:
+        _need(principal, "read")
         mgr = JobManager(conn)
-        out = mgr.show(job_id)
+        out = mgr.show(job_id, tenant_id=_tenant_of(principal))
         if "error" in out and "id" not in out:
             raise HTTPException(status_code=404, detail="job not found")
         return out
@@ -570,7 +676,7 @@ def build_web_app(
         version: str | None = None,
         target: Literal["docs", "repo"] = "docs",
         include_prerelease: bool = False,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         from libref.crawler.http import build_async_client
         from libref.services.registry.resolver import resolve as _resolve
@@ -606,7 +712,7 @@ def build_web_app(
     async def web_search(
         query: str,
         limit: int = 10,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         if not query.strip():
             raise HTTPException(status_code=400, detail="query is empty")
@@ -626,7 +732,7 @@ def build_web_app(
     async def github_search(
         query: str,
         limit: int = 10,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         if not query.strip():
             raise HTTPException(status_code=400, detail="query is empty")
@@ -648,7 +754,7 @@ def build_web_app(
         version: str,
         ecosystem: str | None = None,
         dep_ecosystem: str | None = None,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         from libref.services.code.code_ingest import list_repo_dependencies
 
@@ -671,7 +777,7 @@ def build_web_app(
         ecosystem: str | None = None,
         limit: int | None = None,
         url: str | None = None,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         from libref.services.docs.links import (
             page_link_stats,
@@ -715,7 +821,7 @@ def build_web_app(
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
-        _: None = Depends(_guard),
+        _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         try:
             return mining.mining_health(
@@ -723,5 +829,262 @@ def build_web_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.get("/readyz")
+    def readyz() -> dict[str, Any]:
+        checks: dict[str, Any] = {}
+        try:
+            conn.execute("SELECT 1").fetchone()
+            checks["sqlite"] = "ok"
+        except Exception as exc:  # noqa: BLE001 — readiness reports degraded
+            checks["sqlite"] = f"unavailable: {exc}"
+        try:
+            from libref.services.infra.vectors import build_vector as _build_vector
+
+            vec, _embed, _gw = _build_vector(settings)
+            checks["vector"] = "disabled" if vec is None else "ok"
+            checks["embed"] = "disabled" if _embed is None else "ok"
+            chat_fn = _gw.chat_fn() if _gw is not None else None
+            checks["chat"] = "disabled" if chat_fn is None else "ok"
+        except Exception as exc:  # noqa: BLE001 — vector optional
+            checks["vector"] = f"unavailable: {exc}"
+        degraded = any(v != "ok" and v != "disabled" for v in checks.values())
+        out: dict[str, Any] = {
+            "ok": not degraded,
+            "checks": checks,
+            "fingerprint": settings_fingerprint(settings),
+        }
+        if degraded:
+            out["degraded"] = True
+        return out
+
+    @app.post("/feedback")
+    def feedback_create(
+        body: FeedbackCreate,
+        request: Request,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "feedback:write")
+        from libref.services.ops.audit import write_audit
+        from libref.services.ops.feedback import FeedbackService
+
+        svc = FeedbackService(conn)
+        try:
+            fid = svc.submit(
+                tenant_id=_tenant_of(principal),
+                principal_id=_principal_id(principal),
+                entity_type=body.entity_type,
+                entity_id=body.entity_id,
+                kind=body.kind,
+                body=body.body,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        write_audit(
+            conn,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+            action="feedback.create",
+            target=str(fid),
+            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+        )
+        return {"id": fid, "ok": True}
+
+    @app.get("/feedback")
+    def feedback_list(
+        limit: int = 50,
+        status: str | None = None,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "feedback:read")
+        from libref.services.ops.feedback import FeedbackService
+
+        svc = FeedbackService(conn)
+        items = svc.list_items(
+            tenant_id=_tenant_of(principal), limit=max(1, min(limit, 200)), status=status
+        )
+        return envelope(items)
+
+    @app.post("/feedback/{feedback_id}/resolve")
+    def feedback_resolve(
+        feedback_id: int,
+        request: Request,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "feedback:resolve")
+        from libref.services.ops.audit import write_audit
+        from libref.services.ops.feedback import FeedbackService
+
+        svc = FeedbackService(conn)
+        try:
+            svc.resolve(feedback_id, resolved_by=_principal_id(principal))
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        write_audit(
+            conn,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+            action="feedback.resolve",
+            target=str(feedback_id),
+            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+        )
+        return {"ok": True}
+
+    @app.post("/jobs")
+    def jobs_create(
+        body: JobCreate,
+        request: Request,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "jobs:write")
+        from libref.services.ops.audit import write_audit
+
+        mgr = JobManager(conn)
+        job_id = mgr.submit(
+            body.kind,
+            body.params,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+        )
+        write_audit(
+            conn,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+            action="jobs.create",
+            target=f"{body.kind}:{job_id}",
+            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+        )
+        return {"id": job_id, "ok": True}
+
+    @app.post("/jobs/{job_id}/cancel")
+    def jobs_cancel(
+        job_id: int,
+        request: Request,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "jobs:write")
+        from libref.services.ops.audit import write_audit
+
+        mgr = JobManager(conn)
+        try:
+            mgr.cancel(job_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        write_audit(
+            conn,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+            action="jobs.cancel",
+            target=str(job_id),
+            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+        )
+        return {"ok": True}
+
+    @app.get("/admin/keys")
+    def admin_keys_list(principal=Depends(_guard)) -> dict[str, Any]:
+        _need(principal, "admin:keys")
+        rows = conn.execute(
+            "SELECT id, principal_id, key_prefix, scopes, expires_at,"
+            " revoked_at, last_used_at, created_at FROM api_keys ORDER BY id"
+        ).fetchall()
+        items = [
+            {
+                "id": int(r[0]),
+                "principal_id": r[1],
+                "key_prefix": str(r[2]),
+                "scopes": str(r[3]),
+                "expires_at": r[4],
+                "revoked_at": r[5],
+                "last_used_at": r[6],
+                "created_at": r[7],
+            }
+            for r in rows
+        ]
+        return envelope(items)
+
+    @app.post("/admin/keys")
+    def admin_keys_create(
+        body: KeyCreate, request: Request, principal=Depends(_guard)
+    ) -> dict[str, Any]:
+        _need(principal, "admin:keys")
+        from libref.services.infra.auth import create_principal, issue_api_key
+        from libref.services.ops.audit import write_audit
+
+        pid = create_principal(
+            conn,
+            tenant_id=body.tenant_id,
+            kind=body.kind,
+            name=body.name,
+            roles=list(body.roles),
+        )
+        key_id, raw = issue_api_key(
+            conn,
+            principal_id=pid,
+            scopes=list(body.scopes),
+            created_by=_principal_id(principal),
+        )
+        write_audit(
+            conn,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+            action="keys.issue",
+            target=str(key_id),
+            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+        )
+        return {"id": key_id, "key": raw, "prefix": raw[:12]}
+
+    @app.delete("/admin/keys/{key_id}")
+    def admin_keys_revoke(
+        key_id: int, request: Request, principal=Depends(_guard)
+    ) -> dict[str, Any]:
+        _need(principal, "admin:keys")
+        from libref.services.infra.auth import revoke_api_key
+        from libref.services.ops.audit import write_audit
+
+        try:
+            revoke_api_key(conn, key_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        write_audit(
+            conn,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+            action="keys.revoke",
+            target=str(key_id),
+            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+        )
+        return {"ok": True}
+
+    @app.post("/admin/config/refresh")
+    def admin_config_refresh(
+        request: Request, principal=Depends(_guard)
+    ) -> dict[str, Any]:
+        _need(principal, "admin:config")
+        from libref.config import load_settings as _load_settings
+        from libref.observe import setup_logging as _setup_logging
+        from libref.services.infra.context import refresh_context as _refresh_ctx
+        from libref.services.ops.audit import write_audit
+
+        old_fp = settings_fingerprint(settings)
+        fresh = _load_settings()
+        new_fp = settings_fingerprint(fresh)
+        try:
+            ctx = getattr(request.app.state, "context", None)
+            if ctx is not None:
+                updated = _refresh_ctx(ctx, fresh)
+                request.app.state.context = updated
+                request.app.state.settings = fresh
+            _setup_logging(fresh)
+        except Exception:  # noqa: BLE001 — refresh never breaks running requests
+            pass
+        write_audit(
+            conn,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+            action="config.refresh",
+            target=f"{old_fp[:12]}->{new_fp[:12]}",
+            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+        )
+        return {"ok": True, "old_fingerprint": old_fp, "fingerprint": new_fp}
 
     return app

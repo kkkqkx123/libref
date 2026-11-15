@@ -1,4 +1,4 @@
-"""Review workflow: pending list ranked by confidence; terminal transitions explicitly reject illegal moves."""
+"""Review workflow: pending list ranked by confidence; tenant-aware listing."""
 
 from __future__ import annotations
 
@@ -21,27 +21,62 @@ class ReviewService:
     def __init__(self, conn) -> None:
         self._conn = conn
 
+    def _has_tenant(self) -> bool:
+        try:
+            cols = {
+                row[1]
+                for row in self._conn.execute(
+                    "PRAGMA table_info(review_status)"
+                ).fetchall()
+            }
+        except Exception:  # noqa: BLE001 — without table info, run unfiltered
+            return False
+        return "tenant_id" in cols
+
     def list_pending(
-        self, limit: int = 50, *, entity_type: str = "call_instance"
+        self,
+        limit: int = 50,
+        *,
+        entity_type: str = "call_instance",
+        tenant_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """List pending items, lowest confidence first, then by update time."""
+        """List pending items inside one tenant when the column exists."""
         if limit <= 0:
             raise ValueError("limit must be positive")
         if entity_type != "call_instance":
             raise ValueError(f"unsupported entity_type: {entity_type}")
-        rows = self._conn.execute(
-            "SELECT rs.entity_id, rs.status, rs.updated_at, ci.callee_name,"
-            " ci.caller_file, ci.caller, ci.confidence, ci.args,"
-            " ci.line_start, ci.line_end"
-            " FROM review_status rs"
-            " JOIN call_instances ci ON ci.id = rs.entity_id"
-            " WHERE rs.entity_type='call_instance' AND rs.status='pending'"
-            " ORDER BY CASE ci.confidence"
-            " WHEN 'AMBIGUOUS' THEN 0 WHEN 'INFERRED' THEN 1"
-            " WHEN 'EXTRACTED' THEN 2 ELSE 9 END,"
-            " rs.updated_at, rs.entity_id LIMIT ?",
-            (max(1, int(limit)),),
-        ).fetchall()
+        use_tenant = (
+            tenant_id not in (None, "*") and self._has_tenant()
+        )
+        if use_tenant:
+            rows = self._conn.execute(
+                "SELECT rs.entity_id, rs.status, rs.updated_at, ci.callee_name,"
+                " ci.caller_file, ci.caller, ci.confidence, ci.args,"
+                " ci.line_start, ci.line_end"
+                " FROM review_status rs"
+                " JOIN call_instances ci ON ci.id = rs.entity_id"
+                " WHERE rs.entity_type='call_instance' AND rs.status='pending'"
+                " AND rs.tenant_id=?"
+                " ORDER BY CASE ci.confidence"
+                " WHEN 'AMBIGUOUS' THEN 0 WHEN 'INFERRED' THEN 1"
+                " WHEN 'EXTRACTED' THEN 2 ELSE 9 END,"
+                " rs.updated_at, rs.entity_id LIMIT ?",
+                (tenant_id, max(1, int(limit))),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT rs.entity_id, rs.status, rs.updated_at, ci.callee_name,"
+                " ci.caller_file, ci.caller, ci.confidence, ci.args,"
+                " ci.line_start, ci.line_end"
+                " FROM review_status rs"
+                " JOIN call_instances ci ON ci.id = rs.entity_id"
+                " WHERE rs.entity_type='call_instance' AND rs.status='pending'"
+                " ORDER BY CASE ci.confidence"
+                " WHEN 'AMBIGUOUS' THEN 0 WHEN 'INFERRED' THEN 1"
+                " WHEN 'EXTRACTED' THEN 2 ELSE 9 END,"
+                " rs.updated_at, rs.entity_id LIMIT ?",
+                (max(1, int(limit)),),
+            ).fetchall()
         out = []
         for r in rows:
             raw = r[7]
@@ -65,20 +100,61 @@ class ReviewService:
             )
         return out
 
-    def approve(self, entity_id: int, *, entity_type: str = "call_instance") -> None:
+    def _row_tenant(self, entity_id: int) -> str | None:
+        if not self._has_tenant():
+            return None
+        row = self._conn.execute(
+            "SELECT tenant_id FROM review_status"
+            " WHERE entity_type='call_instance' AND entity_id=?",
+            (entity_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return str(row[0])
+
+    def _require_ownership(self, entity_id: int, tenant_id: str | None) -> None:
+        if tenant_id is None or tenant_id == "*":
+            return
+        owner = self._row_tenant(entity_id)
+        if owner is not None and owner != tenant_id:
+            raise ValueError(f"unknown review: {entity_id}")
+
+    def approve(
+        self,
+        entity_id: int,
+        *,
+        entity_type: str = "call_instance",
+        tenant_id: str | None = None,
+        principal_id: int | None = None,
+    ) -> None:
         """Pending to approved; non-pending is rejected."""
+        self._require_ownership(entity_id, tenant_id)
         self._transition(entity_id, "approved", entity_type=entity_type)
 
     def mark_conflict(
-        self, entity_id: int, *, entity_type: str = "call_instance"
+        self,
+        entity_id: int,
+        *,
+        entity_type: str = "call_instance",
+        tenant_id: str | None = None,
+        principal_id: int | None = None,
     ) -> None:
         """Pending to conflict; non-pending is rejected."""
+        self._require_ownership(entity_id, tenant_id)
         self._transition(entity_id, "conflict", entity_type=entity_type)
 
-    def reopen(self, entity_id: int, *, entity_type: str = "call_instance") -> None:
+    def reopen(
+        self,
+        entity_id: int,
+        *,
+        entity_type: str = "call_instance",
+        tenant_id: str | None = None,
+        principal_id: int | None = None,
+    ) -> None:
         """Reopen conflict to pending; non-conflict is rejected."""
         if entity_type != "call_instance":
             raise ValueError(f"unsupported entity_type: {entity_type}")
+        self._require_ownership(entity_id, tenant_id)
         cur = self._conn.execute(
             "UPDATE review_status SET status='pending', updated_at=datetime('now')"
             " WHERE entity_type='call_instance' AND entity_id=? AND status='conflict'",
@@ -100,18 +176,28 @@ class ReviewService:
         if cur.rowcount == 0:
             raise ValueError(f"cannot transition review row to {target}: {entity_id}")
 
-    def apply(self, action: str, entity_id: int | None = None, limit: int = 50) -> Any:
-        """Unified review: list pending items or transition one item."""
+    def apply(
+        self,
+        action: str,
+        entity_id: int | None = None,
+        limit: int = 50,
+        *,
+        tenant_id: str | None = None,
+        principal_id: int | None = None,
+    ) -> Any:
+        """Unified review entry; tenant filtering applies to listing only."""
         if action == "list":
-            return self.list_pending(limit=limit)
+            return self.list_pending(
+                limit=limit, tenant_id=tenant_id
+            )
         if entity_id is None:
             raise ValueError(f"{action} requires entity_id")
         if action == "approve":
-            self.approve(entity_id)
+            self.approve(entity_id, tenant_id=tenant_id, principal_id=principal_id)
         elif action == "conflict":
-            self.mark_conflict(entity_id)
+            self.mark_conflict(entity_id, tenant_id=tenant_id, principal_id=principal_id)
         elif action == "reopen":
-            self.reopen(entity_id)
+            self.reopen(entity_id, tenant_id=tenant_id, principal_id=principal_id)
         else:
             raise ValueError(f"unsupported review action: {action}")
         return {"ok": True}

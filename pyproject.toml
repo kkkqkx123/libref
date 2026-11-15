@@ -13,7 +13,7 @@ dependencies = [
     "httpx[http2]>=0.27",
     "jieba>=0.42.1",
     "markdownify>=0.13",
-    "mcp>=1.2",
+    "mcp>=2.3.0",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
     "qdrant-client>=1.20.0",
@@ -49,6 +49,12 @@ markers = [
     "requires_simvec: needs built libsimvec from crates/simvec",
     "requires_binary: needs built libref entrypoint",
 ]
+
+[tool.ruff]
+# Explicit main config; target-version is inferred from requires-python.
+# Do not set target-version = "py314": ruff 0.6.9 rejects the unknown variant.
+line-length = 88
+src = ["src", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
 # 夹具是待解析的源样本，刻意含未定义调用与闲置绑定，不做清理。

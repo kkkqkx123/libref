@@ -30,6 +30,7 @@ from libref.db.schema import (
     VEC_VERSION_META_SQL,
     VECTOR_META_SQL,
     VERSION_SITE_EVIDENCE_SQL,
+    MULTI_TENANT_SQL,
 )
 
 
@@ -64,6 +65,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(20, "version-site-evidence", VERSION_SITE_EVIDENCE_SQL),
     Migration(21, "ingest-progress-pending", PROGRESS_PENDING_SQL),
     Migration(22, "doc-link-edges", DOC_LINK_EDGES_SQL),
+    Migration(23, "multi-tenant", MULTI_TENANT_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """
