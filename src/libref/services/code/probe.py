@@ -145,7 +145,7 @@ def probe_repo(
         exclude_text = _json.dumps(
             exclude_list, sort_keys=True, ensure_ascii=False, default=str
         )
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         only_text = str(only_list)
         exclude_text = str(exclude_list)
     cache_key = "\0".join(

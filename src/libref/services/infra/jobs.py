@@ -223,7 +223,7 @@ class JobManager:
             interval = 5.0
             try:
                 interval = max(1.0, float(self._stale_after) / 6.0)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 pass
             while True:
                 await asyncio.sleep(min(interval, 5.0))

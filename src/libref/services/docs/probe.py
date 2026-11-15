@@ -74,7 +74,7 @@ def _doc_cache_key(
         scope_text = _json.dumps(
             scope or {}, sort_keys=True, ensure_ascii=False, default=str
         )
-    except TypeError, ValueError:
+    except (TypeError, ValueError):
         scope_text = str(scope)
     return "\0".join(
         (start_url, scope_text, str(limit), str(fetch_limit), str(max_pages), str(bool(prefilter)))

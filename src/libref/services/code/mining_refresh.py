@@ -79,7 +79,7 @@ def _load_kept_calls(
             continue
         try:
             argc = int(r[9] or 0)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             argc = 0
         if min_args is not None and argc < int(min_args):
             continue

@@ -1,0 +1,31 @@
+# Non-secret configuration example for libref.
+# Copy to the project root as libref.toml and adjust values.
+# Secrets (API keys, LLM keys, bootstrap key) must stay in the environment;
+# writing them into this file is rejected at load time.
+
+[server]
+db_path = "/var/lib/libref/libref.db"
+
+[auth]
+auth_mode = "enforced"
+dev_principal = "dev-operator"
+allowed_hosts = ["libref.internal"]
+allowed_origins = ["https://app.internal"]
+
+[client]
+base_url = "https://libref.internal"
+
+[mcp]
+# mcp_path is the mount path of the MCP Streamable HTTP app.
+# mcp_host / mcp_port are retired: the combined app listens once on [web].
+mcp_path = "/mcp"
+# mcp_enabled_tools = ["search", "read_doc", "catalog", "submit_feedback"]
+# mcp_disabled_tools = ["web_search", "github_search"]
+
+[web]
+web_host = "127.0.0.1"
+web_port = 8001
+
+[logging]
+log_level = "INFO"
+log_format = "json"

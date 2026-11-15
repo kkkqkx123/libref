@@ -36,7 +36,7 @@ class _JsonFormatter(logging.Formatter):
         }
         try:
             return json.dumps(payload, ensure_ascii=False)
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return json.dumps(
                 {
                     "time": payload["time"],
