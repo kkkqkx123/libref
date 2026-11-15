@@ -18,7 +18,7 @@
 | 频次统计 | 自研（借鉴 EpiCoder `extract_frequency_count.py` 层级聚合 + top-N 剪枝、"结构树/频次表"分离存储） | EpiCoder 该部分为纯静态代码，可直接改写复用；其特征抽取靠 LLM，必须替换为 tree-sitter 静态抽取。 |
 | Embedding | **主后端 SiliconFlow 免费 `BAAI/bge-m3`**（OpenAI 兼容 `/v1/embeddings`，1024 维；2026-11 用户决策，暂定策略），接口抽象预留多后端（本地 llama-server 等同协议端点可切换，`tools/hurl/` 已有示范） | 免本地权重分发，密钥经 `.env` 注入不入库；集合维度与模型记在 `schema_meta`，维度变化才重建集合，模型名变化按版本懒重嵌（`vec_version_meta`，见 docs/plan/vec-sync-hardening.md）。 |
 | MCP 出口 | **官方 `mcp` Python SDK**（FastMCP），stdio + Streamable HTTP 传输，令牌鉴权 | init-req 指定 MCP 官方 servers 为协议参考；Python SDK 的 FastMCP 覆盖 tools/resources 两类能力，与 docs-mcp-server 工具面（search_docs / read_page / list_libraries…）一一对应。 |
-| Web 出口 | **FastAPI + uvicorn**，前端 **Vue 3 + Vite + Element Plus**（§7 决策点 1 已定） | docs-mcp-server 的三出口架构中 Web 层仅是服务层调用方；Python 侧 FastAPI 生态与 MCP SDK 的 HTTP transport 均基于 ASGI，可同进程部署。 |
+| Web 出口 | **FastAPI + uvicorn**，前端 **svelte** | docs-mcp-server 的三出口架构中 Web 层仅是服务层调用方；Python 侧 FastAPI 生态与 MCP SDK 的 HTTP transport 均基于 ASGI，可同进程部署。 |
 | 数据校验 | **pydantic v2**（贯穿：抽取结果 schema、MCP 工具参数、API 模型） | graphify 的 validate.py 与 MCP SDK 的参数校验均需要统一 schema 层。 |
 | 溯源与置信 | 自研字段：文档条目绑 URL；代码条目绑文件+**行范围**+实参列表；边带 EXTRACTED/INFERRED/AMBIGUOUS 置信标签 | overview 差异化创新点 3、4；graphify 的置信标签直接沿用作为审核优先级依据。 |
 | 测试 | **pytest + pytest-asyncio**；检索质量基准（MRR/Recall@k）做成 CI 门禁 | docs-mcp-server 的检索基准模式被列为"重写时照搬防退化"。 |
@@ -202,24 +202,6 @@ dependencies += [
     # 不再引入 sentence-transformers——免本地权重分发
 ]
 ```
-
-### P4 质量门禁
-
-```toml
-[dependency-groups] dev += ["pytest-cov", "hypothesis"]
-```
-
----
-
-## 7. 待用户决策点
-
-1. **Web 前端** ✅ 已定（2026-11）：**Vue 3 + Vite + Element Plus**。
-2. **Embedding 模型** ✅ 已定（2026-11，暂定策略）：**SiliconFlow 免费 `BAAI/bge-m3` API**
-   （OpenAI 兼容 `/v1/embeddings`，1024 维，key 经 `.env` 注入）；接口抽象预留多后端，
-   本地 llama-server 等同协议端点已示范可切（`tools/hurl/`）；
-   SiliconFlow `/v1/rerank`（bge-reranker-v2-m3）留作检索精排可选档，不入 P3 验收。
-3. **MCP 传输范围**：P3 先做 stdio（本地助手场景）还是 stdio+HTTP 同步上（需要令牌鉴权与 Origin/SSRF 校验）。默认建议先 stdio，HTTP 放 P3.5。
-4. **PrefixSpan 对拍基准**：自研复刻（蓝本 ref/PrefixSpan-py）后，对拍基准用纯 Python 参考实现还是 README 黄金样例集。默认建议两者都用：README 示例做单元测试黄金样例，纯 Python 参考实现做随机数据对拍。
 
 ---
 
