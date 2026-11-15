@@ -97,7 +97,7 @@ def _effective_tools(settings: LibrefSettings) -> set[str]:
 
 
 def build_mcp_server(
-    conn: sqlite3.Connection, settings: LibrefSettings | None = None
+    conn: sqlite3.Connection, settings: LibrefSettings | None = None, context=None
 ) -> MCPServer:
     """Build the MCPServer instance and register only the visible tools."""
     resolve_settings = settings or load_settings()
@@ -143,6 +143,29 @@ def build_mcp_server(
     def _tenant(principal) -> str:
         return str(getattr(principal, "tenant_id", "default") or "default")
 
+    def _make_bundle():
+        ectx = context
+        # Prefer app-level context when set via middleware state? MCP has no request, use build-time context.
+        if ectx is not None:
+            rc = ectx.connect(check_same_thread=False)
+            try:
+                bundle = ectx.services_for(rc)
+            except Exception:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
+                raise
+            return rc, bundle, True
+        return conn, {"search": search_svc, "pages": pages, "catalog": catalog_svc, "mining": mining, "review": review_svc, "vec_store": vec_store, "embed": embed_fn, "rerank": rerank_fn, "chat": chat_fn, "gateway": gateway, "settings": resolve_settings}, False
+
+    def _close(rc, should_close: bool):
+        if should_close:
+            try:
+                rc.close()
+            except Exception:
+                pass
+
     async def search(
         query: str,
         library: str | None = None,
@@ -160,14 +183,19 @@ def build_mcp_server(
         if bad is not None:
             return _invalid(bad)
         try:
-            results, status = await search_svc.search_with_mode(
-                query,
-                preset,
-                library=library,
-                version=version,
-                ecosystem=ecosystem,
-                limit=limit,
-            )
+            _rc, _bundle, _should_close = _make_bundle()
+            try:
+                results, status = await _bundle["search"].search_with_mode(
+                    query,
+                    preset,
+                    library=library,
+                    version=version,
+                    ecosystem=ecosystem,
+                    limit=limit,
+                    tenant_id=_tenant(_principal()),
+                )
+            finally:
+                _close(_rc, _should_close)
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -277,25 +305,30 @@ def build_mcp_server(
         bad = _check_limit(limit, low=1, high=50)
         if bad is not None:
             return _invalid(bad)
+        _rc2, _bundle2, _should_close2 = _make_bundle()
         try:
-            return await answer_query_async(
-                conn,
-                resolve_settings,
-                query,
-                library=library,
-                version=version,
-                ecosystem=ecosystem,
-                limit=limit,
-                vec_store=vec_store,
-                embed=embed_fn,
-                rerank=rerank_fn,
-                chat=chat_fn,
-                preset=preset,
-            )
-        except ValueError as exc:
-            return {"error": "unavailable", "message": str(exc)}
-        except Exception as exc:  # noqa: BLE001
-            return {"error": "failed", "message": str(exc)}
+            try:
+                return await answer_query_async(
+                    _rc2,
+                    _bundle2.get("settings", resolve_settings),
+                    query,
+                    library=library,
+                    version=version,
+                    ecosystem=ecosystem,
+                    limit=limit,
+                    vec_store=_bundle2.get("vec_store"),
+                    embed=_bundle2.get("embed"),
+                    rerank=_bundle2.get("rerank"),
+                    chat=_bundle2.get("chat"),
+                    preset=preset,
+                    tenant_id=_tenant(_principal()),
+                )
+            except ValueError as exc:
+                return {"error": "unavailable", "message": str(exc)}
+            except Exception as exc:  # noqa: BLE001
+                return {"error": "failed", "message": str(exc)}
+        finally:
+            _close(_rc2, _should_close2)
 
     def read_doc(
         url: str,
@@ -323,21 +356,26 @@ def build_mcp_server(
             return _invalid("window mode requires sort_order")
         if mode == "section" and not source_group_id:
             return _invalid("section mode requires source_group_id")
+        _rc3, _bundle3, _should_close3 = _make_bundle()
         try:
-            page = pages.read_doc(
-                url,
-                mode,
-                sort_order=sort_order,
-                radius=radius,
-                source_group_id=source_group_id,
-                library=library,
-                version=version,
-                ecosystem=ecosystem,
-            )
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+            try:
+                page = _bundle3["pages"].read_doc(
+                    url,
+                    mode,
+                    sort_order=sort_order,
+                    radius=radius,
+                    source_group_id=source_group_id,
+                    library=library,
+                    version=version,
+                    ecosystem=ecosystem,
+                    tenant_id=_tenant(_principal()),
+                )
+            except ValueError as exc:
+                return _invalid(str(exc))
+            except Exception as exc:  # noqa: BLE001
+                return _failed(str(exc))
+        finally:
+            _close(_rc3, _should_close3)
         if page is None:
             return _not_found(f"page not found: {url}")
         return page
@@ -346,8 +384,12 @@ def build_mcp_server(
         library: str | None = None, ecosystem: str | None = None
     ) -> dict[str, Any]:
         """Browse the catalog: libraries when no name is given, versions otherwise."""
+        _rc4, _bundle4, _should_close4 = _make_bundle()
         try:
-            return _items(catalog_svc.catalog(library, ecosystem))
+            try:
+                return _items(_bundle4["catalog"].catalog(library, ecosystem, tenant_id=_tenant(_principal())))
+            finally:
+                _close(_rc4, _should_close4)
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -460,16 +502,21 @@ def build_mcp_server(
             return _invalid("library is empty")
         if not version.strip():
             return _invalid("version is empty")
+        _rcd, _bundled, _scd = _make_bundle()
         try:
-            return _items(
-                list_repo_dependencies(
-                    conn,
-                    library,
-                    version,
-                    dep_ecosystem,
-                    ecosystem=ecosystem,
+            try:
+                return _items(
+                    list_repo_dependencies(
+                        _rcd,
+                        library,
+                        version,
+                        dep_ecosystem,
+                        ecosystem=ecosystem,
+                        tenant_id=_tenant(_principal()),
+                    )
                 )
-            )
+            finally:
+                _close(_rcd, _scd)
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -496,15 +543,19 @@ def build_mcp_server(
         bad = _check_limit(limit, low=1, high=500)
         if bad is not None:
             return _invalid(bad)
+        _rcl, _bundlel, _scl = _make_bundle()
         try:
-            if url:
-                return page_link_stats(conn, url, library, version, ecosystem)
-            return {
-                "summary": version_link_summary(conn, library, version, ecosystem),
-                "items": top_referenced(
-                    conn, library, version, ecosystem, limit=limit
-                ),
-            }
+            try:
+                if url:
+                    return page_link_stats(_rcl, url, library, version, ecosystem, tenant_id=_tenant(_principal()))
+                return {
+                    "summary": version_link_summary(_rcl, library, version, ecosystem, tenant_id=_tenant(_principal())),
+                    "items": top_referenced(
+                        _rcl, library, version, ecosystem, limit=limit, tenant_id=_tenant(_principal())
+                    ),
+                }
+            finally:
+                _close(_rcl, _scl)
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -529,18 +580,23 @@ def build_mcp_server(
         bad = _check_limit(limit, low=1, high=500)
         if bad is not None:
             return _invalid(bad)
+        _rca, _bundlea, _sca = _make_bundle()
         try:
-            return _items(
-                mining.api_insight(
-                    view,
-                    api,
-                    apis=apis,
-                    library=library,
-                    version=version,
-                    ecosystem=ecosystem,
-                    limit=limit,
+            try:
+                return _items(
+                    _bundlea["mining"].api_insight(
+                        view,
+                        api,
+                        apis=apis,
+                        library=library,
+                        version=version,
+                        ecosystem=ecosystem,
+                        limit=limit,
+                        tenant_id=_tenant(_principal()),
+                    )
                 )
-            )
+            finally:
+                _close(_rca, _sca)
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -579,21 +635,26 @@ def build_mcp_server(
         bad = _check_limit(per_file_limit, low=1, high=20)
         if bad is not None:
             return _invalid(bad)
+        _rcp, _bundlep, _scp = _make_bundle()
         try:
-            return _items(
-                mining.pattern_insight(
-                    view,
-                    pattern=pattern,
-                    containing=containing,
-                    prefix=prefix,
-                    library=library,
-                    version=version,
-                    ecosystem=ecosystem,
-                    limit=limit,
-                    per_file_limit=per_file_limit,
-                    dedup=dedup,
+            try:
+                return _items(
+                    _bundlep["mining"].pattern_insight(
+                        view,
+                        pattern=pattern,
+                        containing=containing,
+                        prefix=prefix,
+                        library=library,
+                        version=version,
+                        ecosystem=ecosystem,
+                        limit=limit,
+                        per_file_limit=per_file_limit,
+                        dedup=dedup,
+                        tenant_id=_tenant(_principal()),
+                    )
                 )
-            )
+            finally:
+                _close(_rcp, _scp)
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -619,19 +680,24 @@ def build_mcp_server(
         bad = _check_limit(limit, low=1, high=500)
         if bad is not None:
             return _invalid(bad)
+        _rcs, _bundles, _scs = _make_bundle()
         try:
-            return _items(
-                mining.symbol_insight(
-                    view,
-                    api,
-                    apis=apis,
-                    library=library,
-                    version=version,
-                    ecosystem=ecosystem,
-                    limit=limit,
-                    offset=offset,
+            try:
+                return _items(
+                    _bundles["mining"].symbol_insight(
+                        view,
+                        api,
+                        apis=apis,
+                        library=library,
+                        version=version,
+                        ecosystem=ecosystem,
+                        limit=limit,
+                        offset=offset,
+                        tenant_id=_tenant(_principal()),
+                    )
                 )
-            )
+            finally:
+                _close(_rcs, _scs)
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -658,22 +724,27 @@ def build_mcp_server(
         bad = _check_limit(limit, low=1, high=500)
         if bad is not None:
             return _invalid(bad)
+        _rcc, _bundlec, _scc = _make_bundle()
         try:
-            return _items(
-                mining.call_insight(
-                    view,
-                    api,
-                    library=library,
-                    version=version,
-                    ecosystem=ecosystem,
-                    limit=limit,
-                    offset=offset,
-                    include_ambiguous=include_ambiguous,
-                    resolve_kinds=resolve_kinds,
-                    min_args=min_args,
-                    max_args=max_args,
+            try:
+                return _items(
+                    _bundlec["mining"].call_insight(
+                        view,
+                        api,
+                        library=library,
+                        version=version,
+                        ecosystem=ecosystem,
+                        limit=limit,
+                        offset=offset,
+                        include_ambiguous=include_ambiguous,
+                        resolve_kinds=resolve_kinds,
+                        min_args=min_args,
+                        max_args=max_args,
+                        tenant_id=_tenant(_principal()),
+                    )
                 )
-            )
+            finally:
+                _close(_rcc, _scc)
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -696,18 +767,23 @@ def build_mcp_server(
         bad = _check_limit(limit, low=1, high=500)
         if bad is not None:
             return _invalid(bad)
+        _rci, _bundlei, _sci = _make_bundle()
         try:
-            return _items(
-                mining.import_insight(
-                    view,
-                    api,
-                    library=library,
-                    version=version,
-                    ecosystem=ecosystem,
-                    limit=limit,
-                    offset=offset,
+            try:
+                return _items(
+                    _bundlei["mining"].import_insight(
+                        view,
+                        api,
+                        library=library,
+                        version=version,
+                        ecosystem=ecosystem,
+                        limit=limit,
+                        offset=offset,
+                        tenant_id=_tenant(_principal()),
+                    )
                 )
-            )
+            finally:
+                _close(_rci, _sci)
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -719,10 +795,14 @@ def build_mcp_server(
         ecosystem: str | None = None,
     ) -> dict[str, Any]:
         """Reuse and diversity health signals computed from derived tables."""
+        _rch, _bundleh, _sch = _make_bundle()
         try:
-            return mining.mining_health(
-                library=library, version=version, ecosystem=ecosystem
-            )
+            try:
+                return _bundleh["mining"].mining_health(
+                    library=library, version=version, ecosystem=ecosystem, tenant_id=_tenant(_principal())
+                )
+            finally:
+                _close(_rch, _sch)
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -746,40 +826,42 @@ def build_mcp_server(
             return _invalid(bad)
         if action != "list" and entity_id is None:
             return _invalid(f"{action} requires entity_id")
+        _rcr, _bundler, _scr = _make_bundle()
         try:
-            result = review_svc.apply(
-                action,
-                entity_id,
-                limit,
-                tenant_id=_tenant(principal),
-                principal_id=getattr(principal, "id", None),
-            )
-            if action != "list":
-                from libref.services.ops.audit import write_audit
-
-                write_audit(
-                    conn,
+            try:
+                result = _bundler["review"].apply(
+                    action,
+                    entity_id,
+                    limit,
                     tenant_id=_tenant(principal),
                     principal_id=getattr(principal, "id", None),
-                    action=f"review.{action}",
-                    target=str(entity_id or ""),
-                    request_id="",
                 )
-        except ValueError as exc:
-            text = str(exc)
-            if "cannot transition" in text or "cannot reopen" in text:
-                return {"error": "conflict", "message": text}
-            return _invalid(text)
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+                if action != "list":
+                    from libref.services.ops.audit import write_audit
+
+                    write_audit(
+                        _rcr,
+                        tenant_id=_tenant(principal),
+                        principal_id=getattr(principal, "id", None),
+                        action=f"review.{action}",
+                        target=str(entity_id or ""),
+                        request_id="",
+                    )
+            except ValueError as exc:
+                text = str(exc)
+                if "cannot transition" in text or "cannot reopen" in text:
+                    return {"error": "conflict", "message": text}
+                return _invalid(text)
+            except Exception as exc:  # noqa: BLE001
+                return _failed(str(exc))
+        finally:
+            _close(_rcr, _scr)
         if isinstance(result, list):
             return _items(result)
         return result
 
     def job_show(job_id: int | None = None, limit: int = 20) -> dict[str, Any]:
         """Show job results, listing recent jobs when no id is given."""
-        from libref.services.infra.jobs import JobManager
-
         principal = _principal()
         denied = _deny(principal, "read")
         if denied is not None:
@@ -787,10 +869,14 @@ def build_mcp_server(
         bad = _check_limit(limit, low=1, high=200)
         if bad is not None:
             return _invalid(bad)
+        _rcj, _bundlej, _scj = _make_bundle()
         try:
-            return JobManager(conn).show(
-                job_id, limit, tenant_id=_tenant(principal)
-            )
+            try:
+                return _bundlej.get("jobs", __import__("libref.services.infra.jobs", fromlist=["JobManager"]).JobManager(_rcj)).show(
+                    job_id, limit, tenant_id=_tenant(principal)
+                )
+            finally:
+                _close(_rcj, _scj)
         except ValueError as exc:
             return _invalid(str(exc))
         except Exception as exc:  # noqa: BLE001
@@ -912,8 +998,11 @@ def build_mcp_server(
             return func
         if name not in _read_tools:
             return func
+        import functools as _ft
+
         if asyncio.iscoroutinefunction(func):
 
+            @_ft.wraps(func)
             async def _guarded(*args: Any, **kwargs: Any) -> Any:
                 principal = _principal()
                 denied = _deny(principal, "read")
@@ -921,8 +1010,10 @@ def build_mcp_server(
                     return denied
                 return await func(*args, **kwargs)
 
+            _guarded.__name__ = name
             return _guarded
 
+        @_ft.wraps(func)
         def _guarded_sync(*args: Any, **kwargs: Any) -> Any:
             principal = _principal()
             denied = _deny(principal, "read")
@@ -930,6 +1021,7 @@ def build_mcp_server(
                 return denied
             return func(*args, **kwargs)
 
+        _guarded_sync.__name__ = name
         return _guarded_sync
 
     visible: dict[str, Any] = {

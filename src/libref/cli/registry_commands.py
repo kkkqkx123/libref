@@ -82,12 +82,40 @@ def cmd_search_github(args: argparse.Namespace) -> int:
         conn.close()
 
 
+def _remote_catalog(args: argparse.Namespace, settings) -> int:
+    import json as _json
+    import httpx as _httpx
+    from libref.cli.remote import auth_headers as _ah, base_url_for as _buf
+    base = _buf(args, settings)
+    params = {}
+    if getattr(args, "library", None) is not None:
+        params["library"] = args.library
+    if getattr(args, "ecosystem", None) is not None:
+        params["ecosystem"] = args.ecosystem
+    try:
+        with _httpx.Client(timeout=30.0) as _c:
+            _r = _c.get(f"{base}/catalog", params=params, headers=_ah(settings))
+            _r.raise_for_status()
+            data = _r.json()
+    except Exception as exc:
+        import sys as _sys
+        print(f"remote failed: {exc}", file=_sys.stderr)
+        return 1
+    for r in (data.get("items") or []):
+        print(_json.dumps(r, ensure_ascii=False))
+    return 0
+
+
 def cmd_catalog(args: argparse.Namespace) -> int:
     import json
 
     from libref.services.registry.libraries import LibraryService
 
-    conn = _connect(_load_settings(args))
+    _st = _load_settings(args)
+    from libref.cli.remote import is_remote as _is_remote
+    if _is_remote(args, _st):
+        return _remote_catalog(args, _st)
+    conn = _connect(_st)
     try:
         rows = LibraryService(conn).catalog(
             getattr(args, "library", None),

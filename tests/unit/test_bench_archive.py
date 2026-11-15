@@ -275,7 +275,7 @@ def test_source_payload_keeps_only_what_the_spec_indexes(tmp_path):
     (tree / "pkg" / "impl_test.go").write_text("package pkg\n", encoding="utf-8")
     payload = tmp_path / "source.tar.gz"
     stats = bench_archive.write_source(
-        payload, tree, prefix="pkg/", exclude=("*_test.go",)
+        payload, tree, prefix="pkg/", exclude=(r".*_test\.go$",)
     )
     assert stats["files"] == 1
     extracted = bench_archive.extract_source(payload, tmp_path / "out")
@@ -285,8 +285,8 @@ def test_source_payload_keeps_only_what_the_spec_indexes(tmp_path):
 
 
 def test_recipe_records_the_exclusions(monkeypatch, tmp_path):
-    entry = _source(exclude_globs=["*_test.go"])
+    entry = _source(exclude_patterns=[r".*_test\.go$"])
     entry.pop("version")
     monkeypatch.setattr(bench_archive, "SPEC", _spec(tmp_path, entry))
     loaded = bench_archive.load_spec()[0]
-    assert bench_archive.recipe(loaded)["exclude_globs"] == ["*_test.go"]
+    assert bench_archive.recipe(loaded)["exclude_patterns"] == [r".*_test\.go$"]

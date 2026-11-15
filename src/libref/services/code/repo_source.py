@@ -83,6 +83,7 @@ def list_repo_dependencies(
     dep_ecosystem: str | None = None,
     *,
     ecosystem: str | None = None,
+    tenant_id: str | None = None,
 ) -> list[dict]:
     """Read model over manifest-declared dependency edges for one library version.
 
@@ -109,6 +110,15 @@ def list_repo_dependencies(
     if dep is not None:
         query += " AND d.ecosystem = ?"
         params.append(dep)
+    if tenant_id not in (None, "*"):
+        from libref.services.infra.tenant import is_global as _isg, resolve_version_id as _rvid, table_has_tenant as _htt
+        if not _isg(str(tenant_id)) and (_htt(conn, "libraries") or _htt(conn, "versions")):
+            try:
+                _vid = _rvid(conn, str(tenant_id), library, version, owner)
+            except ValueError:
+                raise ValueError(f"unknown library version: {library} {version}")
+            query += " AND d.version_id = ?"
+            params.append(str(_vid))
     rows = conn.execute(query + " ORDER BY d.ecosystem, d.name", params).fetchall()
     return [
         {

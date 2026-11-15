@@ -38,6 +38,7 @@ class SearchService:
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 8,
+        tenant_id: str | None = None,
     ) -> list[dict[str, Any]]:
         """Exact full-text query: the FTS single path used by the precise preset."""
         from libref.config import setting_or_default
@@ -51,6 +52,24 @@ class SearchService:
         )
         radius = int(setting_or_default(self._settings, "snippet_radius"))
         cap = int(setting_or_default(self._settings, "snippet_cap"))
+        if tenant_id not in (None, "*") and library is not None and version is not None:
+            from libref.services.infra.tenant import (
+                is_global,
+                resolve_version_id,
+                table_has_tenant,
+            )
+
+            scoped = not is_global(str(tenant_id)) and (
+                table_has_tenant(self._conn, "libraries")
+                or table_has_tenant(self._conn, "versions")
+            )
+            if scoped:
+                try:
+                    resolve_version_id(
+                        self._conn, str(tenant_id), library, version, ecosystem
+                    )
+                except ValueError:
+                    return []
         # Extra picks compensate rows folded away by group dedup below.
         budget = max(limit, min(limit * 5, 500))
         pairs = fts_search(
@@ -61,10 +80,21 @@ class SearchService:
             ecosystem=ecosystem,
             weights=weights,
             budget=budget,
+            tenant_id=tenant_id,
         )
         if not pairs:
             return []
         marks = ",".join("?" for _ in pairs)
+        from libref.services.infra.tenant import is_global as _is_g
+        from libref.services.infra.tenant import table_has_tenant as _has_t
+
+        scoped_doc = (
+            tenant_id not in (None, "*")
+            and not _is_g(str(tenant_id or ""))
+            and _has_t(self._conn, "documents")
+        )
+        extra = " AND d.tenant_id = ?" if scoped_doc else ""
+        extra_params: list[Any] = [str(tenant_id)] if scoped_doc else []
         rows = self._conn.execute(
             "SELECT d.id, d.url, d.content, "
             "json_extract(d.metadata, '$.title') AS title, "
@@ -74,8 +104,8 @@ class SearchService:
             "FROM documents d "
             "JOIN versions v ON v.id = d.version_id "
             "JOIN libraries l ON l.id = d.library_id "
-            f"WHERE d.id IN ({marks})",
-            [doc_id for doc_id, _ in pairs],
+            f"WHERE d.id IN ({marks}){extra}",
+            [doc_id for doc_id, _ in pairs] + extra_params,
         ).fetchall()
         by_id = {int(r[0]): r for r in rows}
         scores = {doc_id: -score for doc_id, score in pairs}
@@ -133,6 +163,7 @@ class SearchService:
         ecosystem: str | None = None,
         limit: int = 8,
         expand_window: bool | None = None,
+        tenant_id: str | None = None,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Route presets: precise keeps the exact full-text path, the others fuse recall.
 
@@ -150,6 +181,7 @@ class SearchService:
                 version=version,
                 ecosystem=ecosystem,
                 limit=limit,
+                tenant_id=tenant_id,
             )
             pool = pool_texts(self._conn, [int(r["id"]) for r in results])
             # The lexical lane cannot answer a query whose script the corpus never
@@ -191,4 +223,5 @@ class SearchService:
             ecosystem=ecosystem,
             limit=limit,
             expand_window=expand,
+            tenant_id=tenant_id,
         )

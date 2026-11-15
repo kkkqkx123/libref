@@ -49,7 +49,7 @@ def prune_version_urls(conn, version_id: int, src_urls: list[str]) -> int:
 
 
 def _resolve_version(
-    conn, library: str, version: str, ecosystem: str | None
+    conn, library: str, version: str, ecosystem: str | None, tenant_id: str | None = None
 ) -> tuple[int, int]:
     query = (
         "SELECT l.id, v.id FROM versions v JOIN libraries l ON l.id = v.library_id"
@@ -59,6 +59,16 @@ def _resolve_version(
     if ecosystem is not None:
         query += " AND l.ecosystem=?"
         params.append(ecosystem)
+    if tenant_id not in (None, "*"):
+        from libref.services.infra.tenant import is_global, resolve_version_id, table_has_tenant
+        if not is_global(str(tenant_id)) and (table_has_tenant(conn, "libraries") or table_has_tenant(conn, "versions")):
+            try:
+                vid = resolve_version_id(conn, str(tenant_id), library, version, ecosystem)
+            except ValueError:
+                raise ValueError(f"unknown library version: {library} {version}")
+            # library id for callers that need it
+            row = conn.execute("SELECT library_id FROM versions WHERE id=?", (vid,)).fetchone()
+            return int(row[0]) if row else 0, int(vid)
     rows = conn.execute(query, params).fetchall()
     if not rows:
         raise ValueError(f"unknown library version: {library} {version}")
@@ -68,10 +78,10 @@ def _resolve_version(
 
 
 def version_link_summary(
-    conn, library: str, version: str, ecosystem: str | None = None
+    conn, library: str, version: str, ecosystem: str | None = None, tenant_id: str | None = None
 ) -> dict[str, Any]:
     """Edge totals plus per-kind distribution for one library version."""
-    _library_id, version_id = _resolve_version(conn, library, version, ecosystem)
+    _library_id, version_id = _resolve_version(conn, library, version, ecosystem, tenant_id)
     rows = conn.execute(
         "SELECT kind, COUNT(*) FROM doc_link_edges WHERE version_id=? GROUP BY kind",
         (version_id,),
@@ -98,9 +108,10 @@ def top_referenced(
     version: str,
     ecosystem: str | None = None,
     limit: int | None = None,
+    tenant_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Most referenced target URLs within one library version, by inlink count."""
-    _library_id, version_id = _resolve_version(conn, library, version, ecosystem)
+    _library_id, version_id = _resolve_version(conn, library, version, ecosystem, tenant_id)
     bound = f" LIMIT {max(1, int(limit))}" if limit is not None else ""
     rows = conn.execute(
         "SELECT dst_url, COUNT(DISTINCT src_url) AS inlinks FROM doc_link_edges"
@@ -111,10 +122,10 @@ def top_referenced(
 
 
 def page_link_stats(
-    conn, url: str, library: str, version: str, ecosystem: str | None = None
+    conn, url: str, library: str, version: str, ecosystem: str | None = None, tenant_id: str | None = None
 ) -> dict[str, Any]:
     """Outlink and inlink counts for one page, plus sampled inlink sources."""
-    _library_id, version_id = _resolve_version(conn, library, version, ecosystem)
+    _library_id, version_id = _resolve_version(conn, library, version, ecosystem, tenant_id)
     out = conn.execute(
         "SELECT COUNT(*), SUM(kind='external') FROM doc_link_edges"
         " WHERE version_id=? AND src_url=?",

@@ -48,7 +48,7 @@ def _empty_answer(degraded: bool, reasons: list[str]) -> dict[str, Any]:
     }
 
 
-def _pattern_labels(conn, settings, results, library, version, ecosystem, preset):
+def _pattern_labels(conn, settings, results, library, version, ecosystem, preset, tenant_id=None):
     """Pick up to three mined labels overlapping the recalled entities; precise stays mining-free."""
     if preset == "precise":
         return []
@@ -58,7 +58,7 @@ def _pattern_labels(conn, settings, results, library, version, ecosystem, preset
     from libref.services.code.mining_read import MiningReadService
 
     candidates = MiningReadService(conn, settings).list_labels(
-        library=library, version=version, ecosystem=ecosystem, limit=20
+        library=library, version=version, ecosystem=ecosystem, limit=20, tenant_id=tenant_id
     )
     ranked = sorted(
         enumerate(candidates),
@@ -87,6 +87,7 @@ async def answer_query_async(
     rerank=None,
     chat: ChatFn | None = None,
     preset: str = "balanced",
+    tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """Retrieve candidates then generate an answer grounded in those materials."""
     from libref.services.docs.search import SearchService, normalize_preset
@@ -111,6 +112,7 @@ async def answer_query_async(
         ecosystem=ecosystem,
         limit=limit,
         expand_window=False,
+        tenant_id=tenant_id,
     )
     degraded = bool(status.get("degraded", False))
     reasons = list(status.get("reasons", []) or [])
@@ -132,7 +134,7 @@ async def answer_query_async(
     if not kept:
         return _empty_answer(degraded, reasons)
     labels = _pattern_labels(
-        conn, settings, kept, library, version, ecosystem, use_preset
+        conn, settings, kept, library, version, ecosystem, use_preset, tenant_id
     )
     messages = build_messages(
         query, kept, bodies, per_limit, omitted=omitted, labels=labels
@@ -164,6 +166,7 @@ def answer_query(
     rerank=None,
     chat: ChatFn | None = None,
     preset: str = "balanced",
+    tenant_id: str | None = None,
 ) -> dict[str, Any]:
     """Synchronous entry for command-line use."""
     return _run_coro(
@@ -180,5 +183,6 @@ def answer_query(
             rerank=rerank,
             chat=chat,
             preset=preset,
+            tenant_id=tenant_id,
         )
     )

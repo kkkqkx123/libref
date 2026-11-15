@@ -21,7 +21,7 @@ def sweep_absent(
     *,
     truncated: bool,
     counts: dict[str, int],
-    snapshot_ctx: tuple[str, str, str] | None = None,
+    snapshot_ctx: tuple | None = None,
 ) -> list[int]:
     if seed.source == "none":
         return []
@@ -51,7 +51,7 @@ def sweep_absent(
                 log_deletion,
             )
 
-            ecosystem, library, version = snapshot_ctx
+            ecosystem, library, version = snapshot_ctx[0], snapshot_ctx[1], snapshot_ctx[2]
             log_deletion(
                 conn,
                 library=library,
@@ -86,6 +86,7 @@ async def sync_vectors(
     counts: dict[str, int],
     removed: list[int],
     inserted: list[int],
+    tenant_id: str | None = None,
     *,
     version_id: int | None = None,
     repair: bool = True,
@@ -102,6 +103,7 @@ async def sync_vectors(
         counts,
         removed,
         inserted,
+        tenant_id,
         version_id=version_id,
         repair=repair,
         verify=verify,

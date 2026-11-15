@@ -175,10 +175,11 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int | None = None,
         include_ambiguous: bool = False,
     ) -> list[dict[str, Any]]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -210,10 +211,11 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 10,
         include_ambiguous: bool = False,
     ) -> list[dict[str, Any]]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -244,10 +246,11 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 10,
         include_ambiguous: bool = False,
     ) -> list[dict[str, Any]]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -282,12 +285,13 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         containing: list[str] | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         from libref.mining.scoring import pattern_contains_all
 
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -322,6 +326,7 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 10,
         include_ambiguous: bool = False,
     ) -> list[dict[str, Any]]:
@@ -330,7 +335,7 @@ class MiningReadService:
         wanted = sorted({a for a in apis if a})
         if not wanted:
             return []
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -405,6 +410,7 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 5,
         include_ambiguous: bool = False,
         per_file_limit: int | None = None,
@@ -413,7 +419,7 @@ class MiningReadService:
     ) -> list[dict[str, Any]]:
         if not pattern:
             return []
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -539,19 +545,20 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         from libref.mining.idiom import reuse_diversity
 
         patterns = self.list_patterns(
-            library=library, version=version, ecosystem=ecosystem, limit=100000
+            library=library, version=version, ecosystem=ecosystem, limit=100000, tenant_id=tenant_id
         )
         clusters = self.api_clusters(
-            library=library, version=version, ecosystem=ecosystem, limit=100000
+            library=library, version=version, ecosystem=ecosystem, limit=100000, tenant_id=tenant_id
         )
         health = reuse_diversity(patterns, clusters)
-        health["resolve_kinds"] = self.resolve_distribution(library, version, ecosystem)
-        health["confidence"] = self.confidence_distribution(library, version, ecosystem)
-        health.update(self.quality_rates(library, version, ecosystem))
+        health["resolve_kinds"] = self.resolve_distribution(library, version, ecosystem, tenant_id=tenant_id)
+        health["confidence"] = self.confidence_distribution(library, version, ecosystem, tenant_id=tenant_id)
+        health.update(self.quality_rates(library, version, ecosystem, tenant_id=tenant_id))
         return health
 
     def resolve_distribution(
@@ -559,8 +566,9 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, int]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return {}
         placeholders = ",".join("?" for _ in vids)
@@ -580,8 +588,9 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, int]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return {}
         placeholders = ",".join("?" for _ in vids)
@@ -601,9 +610,10 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         """Quality face: unresolved share, caller linkage, missing signatures."""
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return {
                 "unresolved_rate": 0.0,
@@ -661,8 +671,9 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, dict[str, Any]]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids or not apis:
             return {}
         placeholders = ",".join("?" for _ in vids)
@@ -689,11 +700,12 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any]:
         """Single deterministic assembly shared by evidence and induction."""
         from libref.mining.idiom import format_short_signature
 
-        table = self.signatures_for([api], library, version, ecosystem)
+        table = self.signatures_for([api], library, version, ecosystem, tenant_id=tenant_id)
         by_kind = table.get(str(api)) or {}
         if not by_kind:
             return {"api": api, "kind": "", "signature": "", "short": api + "()"}
@@ -780,10 +792,11 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids or not target:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -804,10 +817,11 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids or not importer_file:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -845,11 +859,12 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """Batch symbol lookup with deterministic kind ordering."""
         wanted = sorted({str(a) for a in (apis or []) if str(a).strip()})
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids or not wanted:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -879,10 +894,11 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 200,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids or not importer_file:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -902,10 +918,11 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 200,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids or not parent:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -945,6 +962,7 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
         include_ambiguous: bool = False,
@@ -953,7 +971,7 @@ class MiningReadService:
         max_args: int | None = None,
     ) -> list[dict[str, Any]]:
         """Who calls me: deterministic caller listing for one callee."""
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids or not callee:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -979,6 +997,7 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
         include_ambiguous: bool = False,
@@ -987,7 +1006,7 @@ class MiningReadService:
         max_args: int | None = None,
     ) -> list[dict[str, Any]]:
         """Who I call: deterministic callee listing for one caller."""
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids or not caller:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -1013,6 +1032,7 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int = 100,
         offset: int = 0,
         include_ambiguous: bool = False,
@@ -1020,7 +1040,7 @@ class MiningReadService:
         min_args: int | None = None,
         max_args: int | None = None,
     ) -> list[dict[str, Any]]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids or not importer_file:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -1045,10 +1065,11 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         containing: list[str] | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -1118,10 +1139,11 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         prefix: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -1160,10 +1182,11 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         containing: list[str] | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        vids = mining_version_ids(self._conn, library, version, ecosystem)
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
@@ -1201,6 +1224,7 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Unified API view: frequency ranking, co-occurring APIs, argument shapes."""
@@ -1214,6 +1238,7 @@ class MiningReadService:
                 version=version,
                 ecosystem=ecosystem,
                 limit=limit if limit is not None else 10,
+                tenant_id=tenant_id,
             )
         if view == "usage":
             return self.api_usage_counts(
@@ -1221,6 +1246,7 @@ class MiningReadService:
                 version=version,
                 ecosystem=ecosystem,
                 limit=limit if limit is not None else 20,
+                tenant_id=tenant_id,
             )
         if view == "related":
             if not api:
@@ -1231,6 +1257,7 @@ class MiningReadService:
                 version=version,
                 ecosystem=ecosystem,
                 limit=limit if limit is not None else 10,
+                tenant_id=tenant_id,
             )
         if view == "args":
             if not api:
@@ -1241,6 +1268,7 @@ class MiningReadService:
                 version=version,
                 ecosystem=ecosystem,
                 limit=limit if limit is not None else 10,
+                tenant_id=tenant_id,
             )
         raise ValueError(f"unsupported api view: {view}")
 
@@ -1254,6 +1282,7 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int | None = None,
         per_file_limit: int | None = None,
         dedup: bool | None = None,
@@ -1262,7 +1291,7 @@ class MiningReadService:
         if view == "health":
             return [
                 self.mining_health(
-                    library=library, version=version, ecosystem=ecosystem
+                    library=library, version=version, ecosystem=ecosystem, tenant_id=tenant_id
                 )
             ]
         if view == "labels":
@@ -1272,6 +1301,7 @@ class MiningReadService:
                 ecosystem=ecosystem,
                 containing=containing,
                 limit=limit if limit is not None else 50,
+                tenant_id=tenant_id,
             )
         if view == "snippets":
             if not pattern:
@@ -1285,6 +1315,7 @@ class MiningReadService:
                 per_file_limit=per_file_limit,
                 dedup=dedup,
                 with_snippet=True,
+                tenant_id=tenant_id,
             )
             return [
                 {
@@ -1302,6 +1333,7 @@ class MiningReadService:
                 ecosystem=ecosystem,
                 containing=containing,
                 limit=limit if limit is not None else 50,
+                tenant_id=tenant_id,
             )
         if view == "evidence":
             if not pattern:
@@ -1315,6 +1347,7 @@ class MiningReadService:
                 per_file_limit=per_file_limit,
                 dedup=dedup,
                 with_snippet=True,
+                tenant_id=tenant_id,
             )
         if view == "tree":
             return self.feature_tree(
@@ -1323,6 +1356,7 @@ class MiningReadService:
                 ecosystem=ecosystem,
                 prefix=prefix,
                 limit=limit if limit is not None else 100,
+                tenant_id=tenant_id,
             )
         if view == "clusters":
             return self.api_clusters(
@@ -1331,6 +1365,7 @@ class MiningReadService:
                 ecosystem=ecosystem,
                 containing=containing,
                 limit=limit if limit is not None else 50,
+                tenant_id=tenant_id,
             )
         raise ValueError(f"unsupported pattern view: {view}")
 
@@ -1343,6 +1378,7 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -1357,6 +1393,7 @@ class MiningReadService:
                 version,
                 ecosystem,
                 limit=limit if limit is not None else 100,
+                tenant_id=tenant_id,
             )
         if view == "file":
             if not api:
@@ -1368,6 +1405,7 @@ class MiningReadService:
                 ecosystem,
                 limit=limit if limit is not None else 200,
                 offset=offset,
+                tenant_id=tenant_id,
             )
         if view == "children":
             if not api:
@@ -1379,11 +1417,12 @@ class MiningReadService:
                 ecosystem,
                 limit=limit if limit is not None else 200,
                 offset=offset,
+                tenant_id=tenant_id,
             )
         if view == "signature":
             if not api:
                 raise ValueError("signature view requires api")
-            return [self.canonical_signature(api, library, version, ecosystem)]
+            return [self.canonical_signature(api, library, version, ecosystem, tenant_id=tenant_id)]
         raise ValueError(f"unsupported symbol view: {view}")
 
     def call_insight(
@@ -1394,6 +1433,7 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int | None = None,
         offset: int = 0,
         include_ambiguous: bool = False,
@@ -1417,6 +1457,7 @@ class MiningReadService:
                 resolve_kinds=resolve_kinds,
                 min_args=min_args,
                 max_args=max_args,
+                tenant_id=tenant_id,
             )
         if view == "caller":
             if not api:
@@ -1432,6 +1473,7 @@ class MiningReadService:
                 resolve_kinds=resolve_kinds,
                 min_args=min_args,
                 max_args=max_args,
+                tenant_id=tenant_id,
             )
         if view == "file":
             if not api:
@@ -1447,6 +1489,7 @@ class MiningReadService:
                 resolve_kinds=resolve_kinds,
                 min_args=min_args,
                 max_args=max_args,
+                tenant_id=tenant_id,
             )
         raise ValueError(f"unsupported call view: {view}")
 
@@ -1458,6 +1501,7 @@ class MiningReadService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
         limit: int | None = None,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -1472,6 +1516,7 @@ class MiningReadService:
                 ecosystem,
                 limit=limit if limit is not None else 50,
                 offset=offset,
+                tenant_id=tenant_id,
             )
         if view == "imports":
             if not api:
@@ -1483,5 +1528,6 @@ class MiningReadService:
                 ecosystem,
                 limit=limit if limit is not None else 100,
                 offset=offset,
+                tenant_id=tenant_id,
             )
         raise ValueError(f"unsupported import view: {view}")

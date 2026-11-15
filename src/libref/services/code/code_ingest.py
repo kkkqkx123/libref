@@ -95,13 +95,16 @@ async def index_repo_async(
     exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
     heartbeat=None,
+    tenant_id: str = "default",
 ) -> dict[str, int]:
     """Lock one version across doc and code writers, then run the ingest."""
     from libref.services.infra.version_lock import version_lock
 
     _stale_after = float(getattr(settings, "heartbeat_timeout", 600.0) or 600.0)
+    from libref.services.infra.tenant import normalize_tenant as _ntc
+    tenant_id = _ntc(tenant_id)
     async with version_lock(
-        conn, ecosystem, library, version, stale_after=_stale_after
+        conn, ecosystem, library, version, stale_after=_stale_after, tenant_id=tenant_id
     ):
         return await _index_repo_inner(
             conn,
@@ -147,6 +150,7 @@ async def _index_repo_inner(
     exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
     heartbeat=None,
+    tenant_id: str = "default",
 ) -> dict[str, int]:
     from libref.astminer import cache as ast_cache
     from libref.astminer import config as ast_config
@@ -159,7 +163,13 @@ async def _index_repo_inner(
     )
     from libref.services.registry.libraries import LibraryService
 
-    settings_dir = Path(repos_dir)
+    from libref.services.infra.tenant import DEFAULT_TENANT as _DT
+    _safe_t = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in str(tenant_id))[:64] or _DT
+    settings_dir = Path(repos_dir) if str(tenant_id or "default") == _DT else (Path(repos_dir) / f"tenant-{_safe_t}")
+    try:
+        settings_dir.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
     if not source:
         hit = lookup_index_source_cached(conn, ecosystem, library, version, settings)
         if hit is None:
@@ -180,6 +190,7 @@ async def _index_repo_inner(
         repo_url=source,
         resolved_from=resolved_from,
         registry_confirmed=registry_confirmed,
+                tenant_id=tenant_id,
     )
     if repos_quota_mb is not None:
         from libref.services.ops.retention import check_quota
@@ -401,6 +412,7 @@ def index_repo(
     exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
     heartbeat=None,
+    tenant_id: str = "default",
 ) -> dict[str, int]:
     return asyncio.run(
         index_repo_async(
@@ -423,6 +435,7 @@ def index_repo(
             exclude_patterns=exclude_patterns,
             max_files=max_files,
             heartbeat=heartbeat,
+            tenant_id=tenant_id,
         )
     )
 
@@ -444,6 +457,7 @@ def index_repo_by_name(
     exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
     heartbeat=None,
+    tenant_id: str = "default",
 ) -> dict[str, int]:
     return asyncio.run(
         index_repo_by_name_async(
@@ -462,6 +476,7 @@ def index_repo_by_name(
             exclude_patterns=exclude_patterns,
             max_files=max_files,
             heartbeat=heartbeat,
+            tenant_id=tenant_id,
         )
     )
 
@@ -483,6 +498,7 @@ async def index_repo_by_name_async(
     exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
     heartbeat=None,
+    tenant_id: str = "default",
 ) -> dict[str, int]:
     from libref.services.registry.resolver import resolve_repo
 
@@ -523,6 +539,7 @@ async def index_repo_by_name_async(
             exclude_patterns=exclude_patterns,
             max_files=max_files,
             heartbeat=heartbeat,
+            tenant_id=tenant_id,
         )
     async with _client(settings) as client:
         resolution = await resolve_repo(
@@ -591,6 +608,8 @@ def build_repo_runner(
                     local_embed = built_embed
             except Exception:  # noqa: BLE001, S110 — vector stack is optional; indexing continues without it
                 pass
+        from libref.services.infra.tenant import normalize_tenant as _ntr
+        _t = _ntr((p.get("tenant_id") if isinstance(p, dict) else None) or getattr(job, "tenant_id", "default") or "default")
         return await index_repo_async(
             conn,
             p["library"],
@@ -602,6 +621,7 @@ def build_repo_runner(
             resolved_from=p.get("resolved_from"),
             registry_confirmed=bool(p.get("registry_confirmed", True)),
             repos_quota_mb=int(settings.repos_quota_mb),
+            tenant_id=_t,
             settings=settings,
             vec_store=local_vec,
             embed=local_embed,

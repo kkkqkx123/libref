@@ -146,6 +146,7 @@ class IngestService:
         repo_url: str | None = None,
         fresh: bool = False,
         heartbeat=None,
+        tenant_id: str = "default",
     ) -> dict[str, int]:
         """Sync entry: discover, fetch, clean, chunk, store; returns outcome counts by kind."""
         return asyncio.run(
@@ -163,6 +164,7 @@ class IngestService:
                 repo_url=repo_url,
                 fresh=fresh,
                 heartbeat=heartbeat,
+                tenant_id=tenant_id,
             )
         )
 
@@ -182,6 +184,7 @@ class IngestService:
         repo_url: str | None = None,
         fresh: bool = False,
         heartbeat=None,
+        tenant_id: str = "default",
     ) -> dict[str, int]:
         """Async entry, reused by the job worker, to avoid nested loop startup inside a running event loop."""
         return await self._scrape_async(
@@ -198,6 +201,7 @@ class IngestService:
             repo_url=repo_url,
             fresh=fresh,
             heartbeat=heartbeat,
+            tenant_id=tenant_id,
         )
 
     def refresh_version(
@@ -212,6 +216,7 @@ class IngestService:
         ecosystem: str = "custom",
         fresh: bool = False,
         heartbeat=None,
+        tenant_id: str = "default",
     ) -> dict[str, int]:
         """Refresh-intent entry: reuses the scrape path's incremental semantics, only expressing refresh intent."""
         return self.scrape_docs(
@@ -226,6 +231,7 @@ class IngestService:
             registry_confirmed=True,
             fresh=fresh,
             heartbeat=heartbeat,
+            tenant_id=tenant_id,
         )
 
     async def refresh_version_async(
@@ -240,6 +246,7 @@ class IngestService:
         ecosystem: str = "custom",
         fresh: bool = False,
         heartbeat=None,
+        tenant_id: str = "default",
     ) -> dict[str, int]:
         """Refresh async entry, for job reuse."""
         return await self.scrape_docs_async(
@@ -254,6 +261,7 @@ class IngestService:
             registry_confirmed=True,
             fresh=fresh,
             heartbeat=heartbeat,
+            tenant_id=tenant_id,
         )
 
     def scrape_by_name(
@@ -266,6 +274,7 @@ class IngestService:
         prefilter: bool = False,
         scope: dict[str, Any] | None = None,
         include_prerelease: bool = False,
+        tenant_id: str = "default",
     ) -> dict[str, int]:
         """Scrape after resolving by name: resolve the address and version first, then run the standard scrape path."""
         return asyncio.run(
@@ -277,6 +286,7 @@ class IngestService:
                 prefilter=prefilter,
                 scope=scope,
                 include_prerelease=include_prerelease,
+                tenant_id=tenant_id,
             )
         )
 
@@ -290,6 +300,7 @@ class IngestService:
         prefilter: bool = False,
         scope: dict[str, Any] | None = None,
         include_prerelease: bool = False,
+        tenant_id: str = "default",
     ) -> dict[str, int]:
         """Async entry for scraping after name resolution, reused by the job worker."""
         from libref.services.registry.resolver import resolve_package
@@ -312,6 +323,7 @@ class IngestService:
             max_pages=max_pages,
             prefilter=prefilter,
             scope=scope,
+            tenant_id=tenant_id,
             ecosystem=resolution.ecosystem,
             resolved_from=resolution.source,
             registry_confirmed=resolution.registry_confirmed,
@@ -335,6 +347,7 @@ class IngestService:
         repo_url: str | None = None,
         fresh: bool = False,
         heartbeat=None,
+        tenant_id: str = "default",
     ) -> dict[str, int]:
         import time as _time
 
@@ -382,8 +395,14 @@ class IngestService:
         _stale_after = float(
             getattr(self._settings, "heartbeat_timeout", 600.0) or 600.0
         )
+        from libref.services.infra.tenant import normalize_tenant as _nt
+        tenant_id = _nt(tenant_id)
+        try:
+            self._pipeline.set_tenant(tenant_id)
+        except Exception:
+            pass
         async with _version_lock(
-            self._conn, ecosystem, library, version, stale_after=_stale_after
+            self._conn, ecosystem, library, version, stale_after=_stale_after, tenant_id=tenant_id
         ):
             removed_all: list[int] = []
             inserted_all: list[int] = []
@@ -452,6 +471,7 @@ class IngestService:
                     resolved_from=resolved_from
                     or ("explicit" if ecosystem == "custom" else None),
                     registry_confirmed=registry_confirmed,
+                    tenant_id=tenant_id,
                 )
 
                 sem = asyncio.Semaphore(self._settings.fetch_concurrency)
@@ -487,7 +507,8 @@ class IngestService:
                                 url,
                                 page,
                                 scope=scope,
-                                snapshot_ctx=(ecosystem, library, version),
+                                snapshot_ctx=(ecosystem, library, version, tenant_id),
+                                tenant_id=tenant_id,
                             )
                         except Exception as exc:  # noqa: BLE001 — a single page's failure is recorded as an outcome and does not block the batch
                             logger.debug("page failed url=%s: %s", url, exc)
@@ -595,6 +616,7 @@ class IngestService:
                         counts,
                         removed_all[prev_removed:],
                         inserted_all[prev_inserted:],
+                        tenant_id,
                         version_id=version_id,
                         verify=False,
                     )
@@ -675,7 +697,7 @@ class IngestService:
                         list(visited),
                         truncated=truncated,
                         counts=counts,
-                        snapshot_ctx=(ecosystem, library, version),
+                        snapshot_ctx=(ecosystem, library, version, tenant_id),
                     )
                 )
                 vectors_start = _time.monotonic()
@@ -688,6 +710,7 @@ class IngestService:
                     counts,
                     removed_all[sweep_prev:],
                     [],
+                    tenant_id,
                     version_id=version_id,
                     repair=False,
                 )

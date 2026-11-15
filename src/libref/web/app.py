@@ -120,24 +120,90 @@ def build_web_app(
     def _tenant_of(principal) -> str:
         return str(getattr(principal, "tenant_id", "default") or "default")
 
+    def _eff_settings(request=None):
+        try:
+            st = getattr(getattr(getattr(request, "app", None), "state", None), "settings", None)
+            if st is not None:
+                return st
+        except Exception:
+            pass
+        try:
+            ctx = getattr(getattr(getattr(request, "app", None), "state", None), "context", None)
+            if ctx is not None and getattr(ctx, "settings", None) is not None:
+                return ctx.settings
+        except Exception:
+            pass
+        return settings
+
+    def _eff_context(request=None):
+        try:
+            ctx = getattr(getattr(getattr(request, "app", None), "state", None), "context", None)
+            if ctx is not None:
+                return ctx
+        except Exception:
+            pass
+        return context
+
+    def _req_bundle(request, principal):
+        est = _eff_settings(request)
+        ectx = _eff_context(request)
+        if ectx is not None:
+            rc = ectx.connect(check_same_thread=False)
+            bundle = ectx.services_for(rc)
+            # Override settings inside bundle with latest effective settings
+            return rc, True, est, bundle
+        # Fallback single-connection path for tests without context
+        from libref.services.docs.search import SearchService as _SS
+        from libref.services.docs.pages import PageService as _PS
+        from libref.services.registry.libraries import LibraryService as _LS
+        from libref.services.code.mining_read import MiningReadService as _MR
+        from libref.services.ops.review import ReviewService as _RV
+        from libref.services.infra.jobs import JobManager as _JM
+        fb = {
+            "search": svc,
+            "pages": pages,
+            "catalog": catalog,
+            "mining": mining,
+            "review": review,
+            "jobs": JobManager(conn),
+            "rerank": rerank,
+            "chat": chat,
+            "gateway": None,
+            "vec_store": vec_store,
+            "embed": embed,
+            "settings": est,
+        }
+        return conn, False, est, fb
+
     def _read_guard(principal=Depends(_guard)):
         _need(principal, "read")
         return None
 
     @app.get("/health")
-    def health() -> dict[str, Any]:
-        return {"ok": True, "fingerprint": settings_fingerprint(settings)}
+    def health(request: Request) -> dict[str, Any]:
+        return {"ok": True, "fingerprint": settings_fingerprint(_eff_settings(request))}
 
     @app.get("/catalog")
     def catalog_route(
+        request: Request,
         library: str | None = None,
         ecosystem: str | None = None,
-        _: None = Depends(_read_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
-        return envelope(catalog.catalog(library, ecosystem))
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            return envelope(bundle["catalog"].catalog(library, ecosystem, tenant_id=_tenant_of(principal)))
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/search")
     async def search(
+        request: Request,
         query: str,
         library: str | None = None,
         version: str | None = None,
@@ -146,7 +212,7 @@ def build_web_app(
         preset: Literal["precise", "balanced", "thorough"] = "balanced",
         suggest: bool = False,
         include_prerelease: bool = False,
-        _: None = Depends(_read_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
         params = SearchQuery(
             query=query,
@@ -158,35 +224,47 @@ def build_web_app(
             suggest=suggest,
             include_prerelease=include_prerelease,
         )
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            results, status = await svc.search_with_mode(
-                params.query,
-                params.preset,
-                library=params.library,
-                version=params.version,
-                ecosystem=params.ecosystem,
-                limit=params.limit,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        out = envelope(results, degraded=bool(status.get("degraded", False)))
-        out["reasons"] = list(status.get("reasons", []) or [])
-        out["answerable"] = bool(status["answerable"])
-        out["answerability"] = float(status["answerability"])
-        if params.suggest and not results:
             try:
-                out["suggestions"] = await discovery.search_async(
-                    params.library or params.query,
-                    params.ecosystem,
-                    params.limit,
-                    include_prerelease=params.include_prerelease,
+                results, status = await bundle["search"].search_with_mode(
+                    params.query,
+                    params.preset,
+                    library=params.library,
+                    version=params.version,
+                    ecosystem=params.ecosystem,
+                    limit=params.limit,
+                    tenant_id=_tenant_of(principal),
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except RegistryError as exc:
-                out["suggestions"] = []
-                out["suggest_error"] = f"{exc.kind}: {exc}"
-        return out
+            out = envelope(results, degraded=bool(status.get("degraded", False)))
+            out["reasons"] = list(status.get("reasons", []) or [])
+            out["answerable"] = bool(status["answerable"])
+            out["answerability"] = float(status["answerability"])
+            if params.suggest and not results:
+                try:
+                    from libref.services.registry.discovery import DiscoveryService as _DS
+                    _disc = _DS(rc, est)
+                    out["suggestions"] = await _disc.search_async(
+                        params.library or params.query,
+                        params.ecosystem,
+                        params.limit,
+                        include_prerelease=params.include_prerelease,
+                    )
+                except ValueError as exc:
+                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                except RegistryError as exc:
+                    out["suggestions"] = []
+                    out["suggest_error"] = f"{exc.kind}: {exc}"
+            return out
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/library-search")
     async def library_search(
@@ -219,13 +297,14 @@ def build_web_app(
 
     @app.get("/answer")
     async def answer(
+        request: Request,
         query: str,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int = 5,
         preset: Literal["precise", "balanced", "thorough"] = "balanced",
-        _: None = Depends(_read_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
         from libref.services.docs.answer import answer_query_async
 
@@ -237,26 +316,37 @@ def build_web_app(
             limit=limit,
             preset=preset,
         )
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            return await answer_query_async(
-                conn,
-                settings,
-                params.query,
-                library=params.library,
-                version=params.version,
-                ecosystem=params.ecosystem,
-                limit=params.limit,
-                vec_store=vec_store,
-                embed=embed,
-                rerank=rerank,
-                chat=chat,
-                preset=params.preset,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            try:
+                return await answer_query_async(
+                    rc,
+                    est,
+                    params.query,
+                    library=params.library,
+                    version=params.version,
+                    ecosystem=params.ecosystem,
+                    limit=params.limit,
+                    vec_store=bundle.get("vec_store"),
+                    embed=bundle.get("embed"),
+                    rerank=bundle.get("rerank"),
+                    chat=bundle.get("chat"),
+                    preset=params.preset,
+                    tenant_id=_tenant_of(principal),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/read")
     def read(
+        request: Request,
         url: str,
         mode: Literal["page", "window", "section"] = "page",
         sort_order: int | None = None,
@@ -265,7 +355,7 @@ def build_web_app(
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
-        _: None = Depends(_read_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
         params = ReadQuery(
             url=url,
@@ -277,25 +367,36 @@ def build_web_app(
             version=version,
             ecosystem=ecosystem,
         )
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            page = pages.read_doc(
-                params.url,
-                params.mode,
-                sort_order=params.sort_order,
-                radius=params.radius,
-                source_group_id=params.source_group_id,
-                library=params.library,
-                version=params.version,
-                ecosystem=params.ecosystem,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if page is None:
-            raise HTTPException(status_code=404, detail="page not found")
-        return page
+            try:
+                page = bundle["pages"].read_doc(
+                    params.url,
+                    params.mode,
+                    sort_order=params.sort_order,
+                    radius=params.radius,
+                    source_group_id=params.source_group_id,
+                    library=params.library,
+                    version=params.version,
+                    ecosystem=params.ecosystem,
+                    tenant_id=_tenant_of(principal),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if page is None:
+                raise HTTPException(status_code=404, detail="page not found")
+            return page
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/api-insight")
     def api_insight(
+        request: Request,
         view: Literal["usage", "related", "args", "common"],
         api: str | None = None,
         apis: str | None = None,
@@ -303,7 +404,7 @@ def build_web_app(
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int | None = None,
-        _: None = Depends(_read_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
         params = ApiInsightQuery(
             view=view,
@@ -314,23 +415,34 @@ def build_web_app(
             ecosystem=ecosystem,
             limit=limit,
         )
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            return envelope(
-                mining.api_insight(
-                    params.view,
-                    params.api,
-                    apis=_split_list(params.apis),
-                    library=params.library,
-                    version=params.version,
-                    ecosystem=params.ecosystem,
-                    limit=params.limit,
+            try:
+                return envelope(
+                    bundle["mining"].api_insight(
+                        params.view,
+                        params.api,
+                        apis=_split_list(params.apis),
+                        library=params.library,
+                        version=params.version,
+                        ecosystem=params.ecosystem,
+                        limit=params.limit,
+                        tenant_id=_tenant_of(principal),
+                    )
                 )
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/pattern-insight")
     def pattern_insight(
+        request: Request,
         view: Literal[
             "patterns",
             "evidence",
@@ -349,7 +461,7 @@ def build_web_app(
         limit: int | None = None,
         per_file_limit: int | None = None,
         dedup: bool | None = None,
-        _: None = Depends(_read_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
         params = PatternInsightQuery(
             view=view,
@@ -363,26 +475,37 @@ def build_web_app(
             per_file_limit=per_file_limit,
             dedup=dedup,
         )
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            return envelope(
-                mining.pattern_insight(
-                    params.view,
-                    pattern=_split_list(params.pattern),
-                    containing=_split_list(params.containing),
-                    prefix=params.prefix,
-                    library=params.library,
-                    version=params.version,
-                    ecosystem=params.ecosystem,
-                    limit=params.limit,
-                    per_file_limit=params.per_file_limit,
-                    dedup=params.dedup,
+            try:
+                return envelope(
+                    bundle["mining"].pattern_insight(
+                        params.view,
+                        pattern=_split_list(params.pattern),
+                        containing=_split_list(params.containing),
+                        prefix=params.prefix,
+                        library=params.library,
+                        version=params.version,
+                        ecosystem=params.ecosystem,
+                        limit=params.limit,
+                        per_file_limit=params.per_file_limit,
+                        dedup=params.dedup,
+                        tenant_id=_tenant_of(principal),
+                    )
                 )
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/symbol-insight")
     def symbol_insight(
+        request: Request,
         view: Literal["detail", "file", "children", "signature"],
         api: str | None = None,
         apis: str | None = None,
@@ -391,7 +514,7 @@ def build_web_app(
         ecosystem: str | None = None,
         limit: int | None = None,
         offset: int = 0,
-        _: None = Depends(_read_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
         params = SymbolInsightQuery(
             view=view,
@@ -403,24 +526,35 @@ def build_web_app(
             limit=limit,
             offset=offset,
         )
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            return envelope(
-                mining.symbol_insight(
-                    params.view,
-                    params.api,
-                    apis=_split_list(params.apis),
-                    library=params.library,
-                    version=params.version,
-                    ecosystem=params.ecosystem,
-                    limit=params.limit,
-                    offset=params.offset,
+            try:
+                return envelope(
+                    bundle["mining"].symbol_insight(
+                        params.view,
+                        params.api,
+                        apis=_split_list(params.apis),
+                        library=params.library,
+                        version=params.version,
+                        ecosystem=params.ecosystem,
+                        limit=params.limit,
+                        offset=params.offset,
+                        tenant_id=_tenant_of(principal),
+                    )
                 )
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/call-insight")
     def call_insight(
+        request: Request,
         view: Literal["callee", "caller", "file"],
         api: str | None = None,
         library: str | None = None,
@@ -432,7 +566,7 @@ def build_web_app(
         resolve_kinds: str | None = None,
         min_args: int | None = None,
         max_args: int | None = None,
-        _: None = Depends(_read_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
         params = CallInsightQuery(
             view=view,
@@ -447,27 +581,38 @@ def build_web_app(
             min_args=min_args,
             max_args=max_args,
         )
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            return envelope(
-                mining.call_insight(
-                    params.view,
-                    params.api,
-                    library=params.library,
-                    version=params.version,
-                    ecosystem=params.ecosystem,
-                    limit=params.limit,
-                    offset=params.offset,
-                    include_ambiguous=params.include_ambiguous,
-                    resolve_kinds=_split_list(params.resolve_kinds),
-                    min_args=params.min_args,
-                    max_args=params.max_args,
+            try:
+                return envelope(
+                    bundle["mining"].call_insight(
+                        params.view,
+                        params.api,
+                        library=params.library,
+                        version=params.version,
+                        ecosystem=params.ecosystem,
+                        limit=params.limit,
+                        offset=params.offset,
+                        include_ambiguous=params.include_ambiguous,
+                        resolve_kinds=_split_list(params.resolve_kinds),
+                        min_args=params.min_args,
+                        max_args=params.max_args,
+                        tenant_id=_tenant_of(principal),
+                    )
                 )
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/import-insight")
     def import_insight(
+        request: Request,
         view: Literal["importers", "imports"],
         api: str | None = None,
         library: str | None = None,
@@ -475,7 +620,7 @@ def build_web_app(
         ecosystem: str | None = None,
         limit: int | None = None,
         offset: int = 0,
-        _: None = Depends(_read_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
         params = ImportInsightQuery(
             view=view,
@@ -486,39 +631,58 @@ def build_web_app(
             limit=limit,
             offset=offset,
         )
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            return envelope(
-                mining.import_insight(
-                    params.view,
-                    params.api,
-                    library=params.library,
-                    version=params.version,
-                    ecosystem=params.ecosystem,
-                    limit=params.limit,
-                    offset=params.offset,
+            try:
+                return envelope(
+                    bundle["mining"].import_insight(
+                        params.view,
+                        params.api,
+                        library=params.library,
+                        version=params.version,
+                        ecosystem=params.ecosystem,
+                        limit=params.limit,
+                        offset=params.offset,
+                        tenant_id=_tenant_of(principal),
+                    )
                 )
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/review")
     def review_list(
+        request: Request,
         action: Literal["list"] = "list",
         limit: int = 50,
         principal=Depends(_guard),
     ) -> dict[str, Any]:
         _need(principal, "review:read")
         params = ReviewQuery(action=action, limit=limit)
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            items = review.apply(
-                params.action,
-                None,
-                params.limit,
-                tenant_id=_tenant_of(principal),
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return envelope(items)
+            try:
+                items = bundle["review"].apply(
+                    params.action,
+                    None,
+                    params.limit,
+                    tenant_id=_tenant_of(principal),
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return envelope(items)
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.post("/review")
     def review_apply(
@@ -527,30 +691,38 @@ def build_web_app(
         _need(principal, "review:write")
         from libref.services.ops.audit import write_audit
 
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            result = review.apply(
-                body.action,
-                body.entity_id,
-                body.limit,
+            try:
+                result = bundle["review"].apply(
+                    body.action,
+                    body.entity_id,
+                    body.limit,
+                    tenant_id=_tenant_of(principal),
+                    principal_id=_principal_id(principal),
+                )
+            except ValueError as exc:
+                text = str(exc)
+                if "cannot transition" in text or "cannot reopen" in text:
+                    raise HTTPException(status_code=409, detail=text) from exc
+                raise HTTPException(status_code=400, detail=text) from exc
+            write_audit(
+                rc,
                 tenant_id=_tenant_of(principal),
                 principal_id=_principal_id(principal),
+                action=f"review.{body.action}",
+                target=str(body.entity_id or ""),
+                request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
             )
-        except ValueError as exc:
-            text = str(exc)
-            if "cannot transition" in text or "cannot reopen" in text:
-                raise HTTPException(status_code=409, detail=text) from exc
-            raise HTTPException(status_code=400, detail=text) from exc
-        write_audit(
-            conn,
-            tenant_id=_tenant_of(principal),
-            principal_id=_principal_id(principal),
-            action=f"review.{body.action}",
-            target=str(body.entity_id or ""),
-            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
-        )
-        if isinstance(result, list):
-            return envelope(result)
-        return result
+            if isinstance(result, list):
+                return envelope(result)
+            return result
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.post("/scrape")
     def scrape(
@@ -558,62 +730,92 @@ def build_web_app(
     ) -> dict[str, Any]:
         _need(principal, "ingest:write")
         from libref.services.docs.scrape_jobs import start_scrape_job
+        from libref.services.infra.tenant import validate_scrape_target
         from libref.services.ops.audit import write_audit
 
-        mgr = JobManager(conn)
-        job_id = start_scrape_job(
-            mgr,
-            body.library,
-            body.version,
-            body.start_url,
-            max_pages=body.max_pages,
-            ecosystem=body.ecosystem,
-        )
-        # Stamp ownership for cross-tenant filtering when the column exists.
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            conn.execute(
-                "UPDATE jobs SET tenant_id=?, principal_id=? WHERE id=?",
-                (_tenant_of(principal), _principal_id(principal), job_id),
-            )
-            conn.commit()
-        except Exception:  # noqa: BLE001 — legacy tables without new columns
             try:
-                conn.rollback()
-            except Exception:  # noqa: BLE001, S110 — best effort
-                pass
-        write_audit(
-            conn,
-            tenant_id=_tenant_of(principal),
-            principal_id=_principal_id(principal),
-            action="scrape.submit",
-            target=f"{body.library}:{body.version}:{job_id}",
-            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
-        )
-        return {"id": job_id, "ok": True}
+                validate_scrape_target(body.start_url, est)
+            except ValueError as exc:
+                write_audit(
+                    rc,
+                    tenant_id=_tenant_of(principal),
+                    principal_id=_principal_id(principal),
+                    action="scrape.reject",
+                    target=f"{body.library}:{body.version}:{body.start_url}",
+                    request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+                )
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            mgr = bundle["jobs"]
+            job_id = start_scrape_job(
+                mgr,
+                body.library,
+                body.version,
+                body.start_url,
+                max_pages=body.max_pages,
+                ecosystem=body.ecosystem,
+                tenant_id=_tenant_of(principal),
+                principal_id=_principal_id(principal),
+            )
+            write_audit(
+                rc,
+                tenant_id=_tenant_of(principal),
+                principal_id=_principal_id(principal),
+                action="scrape.submit",
+                target=f"{body.library}:{body.version}:{job_id}",
+                request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+            )
+            return {"id": job_id, "ok": True}
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.post("/doc-probe")
-    async def doc_probe(body: DocProbeRequest, _: None = Depends(_read_guard)) -> dict[str, Any]:
+    async def doc_probe(request: Request, body: DocProbeRequest, principal=Depends(_guard)) -> dict[str, Any]:
+        _need(principal, "read")
         from libref.services.docs.probe import probe_docs_async
+        from libref.services.infra.tenant import validate_scrape_target
+        from libref.services.ops.audit import write_audit as _wa
 
         if body.scope is not None and not isinstance(body.scope, dict):
             raise HTTPException(status_code=400, detail="scope must be an object")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            probe = await probe_docs_async(
-                conn,
-                settings,
-                body.start_url,
-                scope=body.scope,
-                sample_limit=body.sample_limit,
-                fetch_sample_limit=body.fetch_sample_limit,
-                max_pages=body.max_pages,
-                prefilter=body.prefilter,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return probe.model_dump()
+            try:
+                validate_scrape_target(body.start_url, est)
+            except ValueError as exc:
+                try:
+                    _wa(rc, tenant_id=_tenant_of(principal), principal_id=_principal_id(principal), action="probe.reject", target=body.start_url, request_id=str(getattr(getattr(request, "state", None), "request_id", "")))
+                except Exception:
+                    pass
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            try:
+                probe = await probe_docs_async(
+                    rc,
+                    est,
+                    body.start_url,
+                    scope=body.scope,
+                    sample_limit=body.sample_limit,
+                    fetch_sample_limit=body.fetch_sample_limit,
+                    max_pages=body.max_pages,
+                    prefilter=body.prefilter,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return probe.model_dump()
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.post("/repo-probe")
-    def repo_probe(body: RepoProbeRequest, _: None = Depends(_read_guard)) -> dict[str, Any]:
+    def repo_probe(request: Request, body: RepoProbeRequest, principal=Depends(_guard)) -> dict[str, Any]:
         from libref.services.code.probe import probe_repo
 
         if body.only_files is not None and (
@@ -628,46 +830,72 @@ def build_web_app(
             raise HTTPException(
                 status_code=400, detail="exclude_patterns must be non-empty strings"
             )
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            probe = probe_repo(
-                body.source,
-                settings=settings,
-                subdir=body.subdir,
-                max_files=body.max_files,
-                sample_limit=body.sample_limit,
-                only_files=body.only_files,
-                exclude_patterns=body.exclude_patterns,
-                tree_depth=body.tree_depth,
-                samples_per_dir=body.samples_per_dir,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return probe.model_dump()
+            try:
+                probe = probe_repo(
+                    body.source,
+                    settings=est,
+                    subdir=body.subdir,
+                    max_files=body.max_files,
+                    sample_limit=body.sample_limit,
+                    only_files=body.only_files,
+                    exclude_patterns=body.exclude_patterns,
+                    tree_depth=body.tree_depth,
+                    samples_per_dir=body.samples_per_dir,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return probe.model_dump()
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/jobs")
     def jobs(
+        request: Request,
         job_id: int | None = None,
         limit: int = 20,
         principal=Depends(_guard),
     ) -> dict[str, Any]:
         _need(principal, "read")
         params = JobQuery(job_id=job_id, limit=limit)
-        mgr = JobManager(conn)
-        out = mgr.show(
-            params.job_id, params.limit, tenant_id=_tenant_of(principal)
-        )
-        if "error" in out and "id" not in out:
-            raise HTTPException(status_code=404, detail="job not found")
-        return out
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            mgr = bundle["jobs"]
+            out = mgr.show(
+                params.job_id, params.limit, tenant_id=_tenant_of(principal)
+            )
+            if "error" in out and "id" not in out:
+                raise HTTPException(status_code=404, detail="job not found")
+            return out
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/jobs/{job_id}")
-    def job_detail(job_id: int, principal=Depends(_guard)) -> dict[str, Any]:
+    def job_detail(request: Request, job_id: int, principal=Depends(_guard)) -> dict[str, Any]:
         _need(principal, "read")
-        mgr = JobManager(conn)
-        out = mgr.show(job_id, tenant_id=_tenant_of(principal))
-        if "error" in out and "id" not in out:
-            raise HTTPException(status_code=404, detail="job not found")
-        return out
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            mgr = bundle["jobs"]
+            out = mgr.show(job_id, tenant_id=_tenant_of(principal))
+            if "error" in out and "id" not in out:
+                raise HTTPException(status_code=404, detail="job not found")
+            return out
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/resolve")
     async def resolve_route(
@@ -750,11 +978,12 @@ def build_web_app(
 
     @app.get("/repo-deps")
     def repo_deps(
+        request: Request,
         library: str,
         version: str,
         ecosystem: str | None = None,
         dep_ecosystem: str | None = None,
-        _: None = Depends(_read_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
         from libref.services.code.code_ingest import list_repo_dependencies
 
@@ -762,22 +991,42 @@ def build_web_app(
             raise HTTPException(status_code=400, detail="library is empty")
         if not version.strip():
             raise HTTPException(status_code=400, detail="version is empty")
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            rows = list_repo_dependencies(
-                conn, library, version, dep_ecosystem, ecosystem=ecosystem
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return envelope(rows)
+            try:
+                from libref.services.infra.tenant import is_global as _isg, resolve_version_id as _rvid, table_has_tenant as _htt
+                _ten = _tenant_of(principal)
+                if _ten not in (None, "*") and not _isg(str(_ten)) and (_htt(rc, "libraries") or _htt(rc, "versions")):
+                    try:
+                        _rvid(rc, str(_ten), library, version, ecosystem)
+                    except ValueError:
+                        raise HTTPException(status_code=404, detail="page not found") from None
+                rows = list_repo_dependencies(
+                    rc, library, version, dep_ecosystem, ecosystem=ecosystem, tenant_id=_ten
+                )
+            except ValueError as exc:
+                # preserve 404 for tenant-miss vs 400 for bad input
+                if "unknown" in str(exc).lower() or "not found" in str(exc).lower():
+                    raise HTTPException(status_code=404, detail=str(exc)) from exc
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            return envelope(rows)
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/link-stats")
     def link_stats(
+        request: Request,
         library: str,
         version: str,
         ecosystem: str | None = None,
         limit: int | None = None,
         url: str | None = None,
-        _: None = Depends(_read_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
         from libref.services.docs.links import (
             page_link_stats,
@@ -792,59 +1041,98 @@ def build_web_app(
             limit=limit,
             url=url,
         )
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            if params.url:
-                return page_link_stats(
-                    conn,
-                    params.url,
-                    params.library,
-                    params.version,
-                    params.ecosystem,
-                )
-            return {
-                "summary": version_link_summary(
-                    conn, params.library, params.version, params.ecosystem
-                ),
-                "items": top_referenced(
-                    conn,
-                    params.library,
-                    params.version,
-                    params.ecosystem,
-                    limit=params.limit,
-                ),
-            }
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            try:
+                if params.url:
+                    return page_link_stats(
+                        rc,
+                        params.url,
+                        params.library,
+                        params.version,
+                        params.ecosystem,
+                        tenant_id=_tenant_of(principal),
+                    )
+                return {
+                    "summary": version_link_summary(
+                        rc, params.library, params.version, params.ecosystem, tenant_id=_tenant_of(principal)
+                    ),
+                    "items": top_referenced(
+                        rc,
+                        params.library,
+                        params.version,
+                        params.ecosystem,
+                        limit=params.limit,
+                        tenant_id=_tenant_of(principal),
+                    ),
+                }
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/mining-health")
     def mining_health(
+        request: Request,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
-        _: None = Depends(_read_guard),
+        principal=Depends(_guard),
     ) -> dict[str, Any]:
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            return mining.mining_health(
-                library=library, version=version, ecosystem=ecosystem
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            try:
+                return bundle["mining"].mining_health(
+                    library=library, version=version, ecosystem=ecosystem, tenant_id=_tenant_of(principal)
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:
+                    pass
 
     @app.get("/readyz")
-    def readyz() -> dict[str, Any]:
+    def readyz(request: Request) -> dict[str, Any]:
+        est = _eff_settings(request)
+        ectx = _eff_context(request)
         checks: dict[str, Any] = {}
+        _rc = None
         try:
-            conn.execute("SELECT 1").fetchone()
+            if ectx is not None:
+                _rc = ectx.connect(check_same_thread=False)
+                _rc.execute("SELECT 1").fetchone()
+            else:
+                conn.execute("SELECT 1").fetchone()
             checks["sqlite"] = "ok"
         except Exception as exc:  # noqa: BLE001 — readiness reports degraded
             checks["sqlite"] = f"unavailable: {exc}"
+        finally:
+            if _rc is not None:
+                try:
+                    _rc.close()
+                except Exception:
+                    pass
         try:
-            from libref.services.infra.vectors import build_vector as _build_vector
+            if ectx is not None:
+                vec = ectx.vec_store
+                emb = ectx.embed
+                gw = ectx.gateway
+            else:
+                from libref.services.infra.vectors import build_vector as _build_vector
 
-            vec, _embed, _gw = _build_vector(settings)
+                vec, emb, gw = _build_vector(est)
             checks["vector"] = "disabled" if vec is None else "ok"
-            checks["embed"] = "disabled" if _embed is None else "ok"
-            chat_fn = _gw.chat_fn() if _gw is not None else None
+            checks["embed"] = "disabled" if emb is None else "ok"
+            chat_fn = gw.chat_fn() if gw is not None else None
             checks["chat"] = "disabled" if chat_fn is None else "ok"
         except Exception as exc:  # noqa: BLE001 — vector optional
             checks["vector"] = f"unavailable: {exc}"
@@ -852,7 +1140,8 @@ def build_web_app(
         out: dict[str, Any] = {
             "ok": not degraded,
             "checks": checks,
-            "fingerprint": settings_fingerprint(settings),
+            "fingerprint": settings_fingerprint(est),
+            "generation": getattr(ectx, "generation", 0) if ectx is not None else 0,
         }
         if degraded:
             out["degraded"] = True
@@ -868,7 +1157,8 @@ def build_web_app(
         from libref.services.ops.audit import write_audit
         from libref.services.ops.feedback import FeedbackService
 
-        svc = FeedbackService(conn)
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        svc = FeedbackService(rc)
         try:
             fid = svc.submit(
                 tenant_id=_tenant_of(principal),
@@ -881,17 +1171,23 @@ def build_web_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         write_audit(
-            conn,
+            rc,
             tenant_id=_tenant_of(principal),
             principal_id=_principal_id(principal),
             action="feedback.create",
             target=str(fid),
             request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
         )
+        if should_close:
+            try:
+                rc.close()
+            except Exception:
+                pass
         return {"id": fid, "ok": True}
 
     @app.get("/feedback")
     def feedback_list(
+        request: Request,
         limit: int = 50,
         status: str | None = None,
         principal=Depends(_guard),
@@ -899,7 +1195,8 @@ def build_web_app(
         _need(principal, "feedback:read")
         from libref.services.ops.feedback import FeedbackService
 
-        svc = FeedbackService(conn)
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        svc = FeedbackService(rc)
         items = svc.list_items(
             tenant_id=_tenant_of(principal), limit=max(1, min(limit, 200)), status=status
         )
@@ -915,7 +1212,8 @@ def build_web_app(
         from libref.services.ops.audit import write_audit
         from libref.services.ops.feedback import FeedbackService
 
-        svc = FeedbackService(conn)
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        svc = FeedbackService(rc)
         try:
             svc.resolve(feedback_id, resolved_by=_principal_id(principal))
         except ValueError as exc:
@@ -939,7 +1237,8 @@ def build_web_app(
         _need(principal, "jobs:write")
         from libref.services.ops.audit import write_audit
 
-        mgr = JobManager(conn)
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        mgr = bundle["jobs"]
         job_id = mgr.submit(
             body.kind,
             body.params,
@@ -947,13 +1246,18 @@ def build_web_app(
             principal_id=_principal_id(principal),
         )
         write_audit(
-            conn,
+            rc,
             tenant_id=_tenant_of(principal),
             principal_id=_principal_id(principal),
             action="jobs.create",
             target=f"{body.kind}:{job_id}",
             request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
         )
+        if should_close:
+            try:
+                rc.close()
+            except Exception:
+                pass
         return {"id": job_id, "ok": True}
 
     @app.post("/jobs/{job_id}/cancel")
@@ -965,19 +1269,25 @@ def build_web_app(
         _need(principal, "jobs:write")
         from libref.services.ops.audit import write_audit
 
-        mgr = JobManager(conn)
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        mgr = bundle["jobs"]
         try:
             mgr.cancel(job_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         write_audit(
-            conn,
+            rc,
             tenant_id=_tenant_of(principal),
             principal_id=_principal_id(principal),
             action="jobs.cancel",
             target=str(job_id),
             request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
         )
+        if should_close:
+            try:
+                rc.close()
+            except Exception:
+                pass
         return {"ok": True}
 
     @app.get("/admin/keys")

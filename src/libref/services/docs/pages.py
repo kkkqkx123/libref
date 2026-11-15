@@ -65,6 +65,58 @@ def _parse_meta(raw: object) -> dict[str, Any]:
         return {}
 
 
+def _tenant_extra(
+    conn, tenant_id: str | None, tables: tuple[tuple[str, str], ...]
+) -> tuple[str, list[Any]]:
+    from libref.services.infra.tenant import is_global, table_has_tenant
+
+    if tenant_id is None or tenant_id == "*":
+        return "", []
+    if is_global(str(tenant_id)):
+        return "", []
+    clause = ""
+    params: list[Any] = []
+    for table, alias in tables:
+        try:
+            has = table_has_tenant(conn, table)
+        except Exception:
+            has = False
+        if has:
+            clause += f" AND {alias}.tenant_id = ?"
+            params.append(str(tenant_id))
+    return clause, params
+
+
+def _version_visible(
+    conn,
+    library: str | None,
+    version: str | None,
+    ecosystem: str | None,
+    tenant_id: str | None,
+) -> bool:
+    if tenant_id is None or tenant_id == "*":
+        return True
+    from libref.services.infra.tenant import (
+        is_global,
+        resolve_version_id,
+        table_has_tenant,
+    )
+
+    if is_global(str(tenant_id)):
+        return True
+    if library is None or version is None:
+        return True
+    if not (
+        table_has_tenant(conn, "libraries") or table_has_tenant(conn, "versions")
+    ):
+        return True
+    try:
+        resolve_version_id(conn, str(tenant_id), library, version, ecosystem)
+    except ValueError:
+        return False
+    return True
+
+
 class PageService:
     """Read-only page and section access over pages and documents tables."""
 
@@ -79,8 +131,13 @@ class PageService:
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Fetch all document blocks for a URL ordered by sort_order."""
+        if not _version_visible(
+            self._conn, library, version, ecosystem, tenant_id
+        ):
+            return None
         filters = ["p.url = ?"]
         params: list[Any] = [url]
         if library is not None:
@@ -92,6 +149,9 @@ class PageService:
         if version is not None:
             filters.append("v.version = ?")
             params.append(version)
+        extra, extra_params = _tenant_extra(
+            self._conn, tenant_id, (("libraries", "l"), ("versions", "v"), ("pages", "p"))
+        )
         tail = "" if limit is None else " LIMIT ?"
         if limit is not None:
             params.append(max(1, int(limit)))
@@ -103,8 +163,8 @@ class PageService:
             "LEFT JOIN documents d ON d.page_id = p.id "
             "AND (json_extract(d.metadata, '$.chunk_path') IS NULL "
             "OR json_extract(d.metadata, '$.chunk_path') != 'bm25') "
-            f"WHERE {' AND '.join(filters)} ORDER BY d.sort_order{tail}",
-            params,
+            f"WHERE {' AND '.join(filters)}{extra} ORDER BY d.sort_order{tail}",
+            params + extra_params,
         ).fetchall()
         if not rows:
             return None
@@ -143,8 +203,13 @@ class PageService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Fetch neighboring blocks around a sort position for hit expansion."""
+        if not _version_visible(
+            self._conn, library, version, ecosystem, tenant_id
+        ):
+            return None
         filters = ["p.url = ?"]
         params: list[Any] = [url]
         if library is not None:
@@ -156,12 +221,15 @@ class PageService:
         if version is not None:
             filters.append("v.version = ?")
             params.append(version)
+        extra, extra_params = _tenant_extra(
+            self._conn, tenant_id, (("libraries", "l"), ("versions", "v"), ("pages", "p"))
+        )
         row = self._conn.execute(
             "SELECT p.id, l.name, v.version FROM pages p"
             " JOIN versions v ON v.id = p.version_id "
             "JOIN libraries l ON l.id = v.library_id "
-            f"WHERE {' AND '.join(filters)}",
-            params,
+            f"WHERE {' AND '.join(filters)}{extra}",
+            params + extra_params,
         ).fetchone()
         if row is None:
             return None
@@ -217,8 +285,13 @@ class PageService:
         version: str | None = None,
         ecosystem: str | None = None,
         limit: int | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Fetch a whole source group to trace a sub-block back to its section."""
+        if not _version_visible(
+            self._conn, library, version, ecosystem, tenant_id
+        ):
+            return None
         filters = ["d.url = ?", "json_extract(d.metadata, '$.source_group_id') = ?"]
         params: list[Any] = [url, source_group_id]
         if library is not None:
@@ -234,6 +307,11 @@ class PageService:
             "(json_extract(d.metadata, '$.chunk_path') IS NULL"
             " OR json_extract(d.metadata, '$.chunk_path') != 'bm25')"
         )
+        extra, extra_params = _tenant_extra(
+            self._conn,
+            tenant_id,
+            (("libraries", "l"), ("versions", "v"), ("documents", "d")),
+        )
         tail = "" if limit is None else " LIMIT ?"
         if limit is not None:
             params.append(max(1, int(limit)))
@@ -241,8 +319,8 @@ class PageService:
             "SELECT d.content, d.metadata, d.sort_order FROM documents d "
             "JOIN versions v ON v.id = d.version_id "
             "JOIN libraries l ON l.id = d.library_id "
-            f"WHERE {' AND '.join(filters)} ORDER BY d.sort_order{tail}",
-            params,
+            f"WHERE {' AND '.join(filters)}{extra} ORDER BY d.sort_order{tail}",
+            params + extra_params,
         ).fetchall()
         if not rows:
             return None
@@ -278,11 +356,16 @@ class PageService:
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        tenant_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Unified read: full page, neighboring window, or whole section by mode."""
         if mode == "page":
             return self.read_page(
-                url, library=library, version=version, ecosystem=ecosystem
+                url,
+                library=library,
+                version=version,
+                ecosystem=ecosystem,
+                tenant_id=tenant_id,
             )
         if mode == "window":
             if sort_order is None:
@@ -294,6 +377,7 @@ class PageService:
                 library=library,
                 version=version,
                 ecosystem=ecosystem,
+                tenant_id=tenant_id,
             )
         if mode == "section":
             if not source_group_id:
@@ -304,5 +388,6 @@ class PageService:
                 library=library,
                 version=version,
                 ecosystem=ecosystem,
+                tenant_id=tenant_id,
             )
         raise ValueError(f"unsupported read mode: {mode}")

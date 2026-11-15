@@ -31,8 +31,9 @@ logger = logging.getLogger(__name__)
 class PagePipeline:
     """Owns chunk budgets, cleaning caches, and snapshots for one scrape."""
 
-    def __init__(self, settings) -> None:
+    def __init__(self, settings, tenant_id: str = "default") -> None:
         self._settings = settings
+        self._tenant_id = tenant_id
         self._budgets = doc_budgets(settings)
         self._clean_fingerprint = budget_fingerprint(self._budgets)
         self._clean_cache: dict[str, str] = {}
@@ -40,11 +41,27 @@ class PagePipeline:
         self._snapshots = None
         if bool(settings.snapshot_enabled):
             from libref.store.snapshots import SnapshotStore
-
+            from libref.services.infra.tenant import tenant_snapshot_dir as _tsd
+            try:
+                _root = _tsd(settings, tenant_id)
+            except Exception:
+                _root = Path(settings.snapshot_dir)
             self._snapshots = SnapshotStore(
-                Path(settings.snapshot_dir),
+                _root,
                 quota_mb=int(settings.snapshot_quota_mb),
             )
+
+    def set_tenant(self, tenant_id: str) -> None:
+        self._tenant_id = tenant_id
+        if bool(self._settings.snapshot_enabled):
+            from libref.store.snapshots import SnapshotStore
+            from libref.services.infra.tenant import tenant_snapshot_dir as _tsd2
+            try:
+                _root2 = _tsd2(self._settings, tenant_id)
+            except Exception:
+                from pathlib import Path as _P
+                _root2 = _P(self._settings.snapshot_dir)
+            self._snapshots = SnapshotStore(_root2, quota_mb=int(self._settings.snapshot_quota_mb))
 
     def clean_with_cache(self, kind: str, raw: str, url: str) -> str:
         """Cleaning cache: same content and same budget fingerprint hit reuses directly; evict the oldest entry over the cap."""
@@ -99,7 +116,8 @@ class PagePipeline:
         page,
         *,
         scope: dict[str, Any] | None = None,
-        snapshot_ctx: tuple[str, str, str] | None = None,
+        snapshot_ctx: tuple | None = None,
+        tenant_id: str = "default",
     ) -> tuple[StoreResult, int, bool, dict[str, int], FetchDetail]:
         import time as _time
 
@@ -121,7 +139,7 @@ class PagePipeline:
         if result.status == "unchanged":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)
             return (
-                store.store_page(version_id, library_id, url, "unchanged"),
+                store.store_page(version_id, library_id, url, "unchanged", tenant_id=tenant_id),
                 0,
                 False,
                 stage_ms,
@@ -130,7 +148,7 @@ class PagePipeline:
         if result.status == "absent":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)
             return (
-                store.store_page(version_id, library_id, url, "absent"),
+                store.store_page(version_id, library_id, url, "absent", tenant_id=tenant_id),
                 0,
                 False,
                 stage_ms,
@@ -139,7 +157,7 @@ class PagePipeline:
         if result.status == "failed":
             stage_ms["fetch_ms"] = int((_time.monotonic() - fetch_start) * 1000)
             return (
-                store.store_page(version_id, library_id, url, "failed"),
+                store.store_page(version_id, library_id, url, "failed", tenant_id=tenant_id),
                 0,
                 False,
                 stage_ms,
@@ -147,7 +165,10 @@ class PagePipeline:
             )
         if self._snapshots is not None and snapshot_ctx is not None and result.content:
             try:
-                ecosystem, library, version = snapshot_ctx
+                if len(snapshot_ctx) == 4:
+                    ecosystem, library, version, _t = snapshot_ctx
+                else:
+                    ecosystem, library, version = snapshot_ctx
                 _, written = self._snapshots.put(
                     ecosystem,
                     library,
@@ -251,6 +272,7 @@ class PagePipeline:
                     library_id,
                     url,
                     "empty",
+                    tenant_id=tenant_id,
                     raw_content=result.content,
                     etag=result.etag,
                     last_modified=result.last_modified,
@@ -268,7 +290,7 @@ class PagePipeline:
         if outcome == "unchanged":
             stage_ms["store_ms"] = int((_time.monotonic() - store_start) * 1000)
             return (
-                store.store_page(version_id, library_id, url, "unchanged"),
+                store.store_page(version_id, library_id, url, "unchanged", tenant_id=tenant_id),
                 0,
                 render_attempted,
                 stage_ms,
@@ -289,6 +311,7 @@ class PagePipeline:
             raw_content=markdown,
             etag=result.etag,
             last_modified=result.last_modified,
+            tenant_id=tenant_id,
         )
         stage_ms["store_ms"] = int((_time.monotonic() - split_end) * 1000)
         return stored, dual.empty_dropped, render_attempted, stage_ms, detail

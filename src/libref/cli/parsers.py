@@ -32,6 +32,7 @@ from libref.cli.ops_commands import (
     cmd_fts_check,
     cmd_fts_rebuild,
     cmd_init_db,
+    cmd_job_cancel,
     cmd_job_show,
     cmd_purge,
     cmd_reconcile,
@@ -889,6 +890,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_job.add_argument("--limit", type=int, default=20)
     p_job.add_argument("--full", action="store_true", help="Print the full outcome")
     p_job.set_defaults(func=cmd_job_show)
+
+    p_cancel = sub.add_parser(
+        "job-cancel", help="Request cancellation of a job", parents=[_config_parent]
+    )
+    p_cancel.add_argument("job_id", type=int)
+    p_cancel.set_defaults(func=cmd_job_cancel)
 
     p_config = sub.add_parser(
         "config-show",

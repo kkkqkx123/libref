@@ -53,6 +53,8 @@ def start_scrape_job(
     resolved_from: str | None = None,
     registry_confirmed: bool = True,
     fresh: bool = False,
+    tenant_id: str = "default",
+    principal_id: int | None = None,
 ) -> int:
     """Submit a scrape job to the queue and return its id; execution is done by the worker plus runner."""
     return mgr.submit(
@@ -69,6 +71,8 @@ def start_scrape_job(
             registry_confirmed=registry_confirmed,
             fresh=fresh,
         ),
+        tenant_id=tenant_id,
+        principal_id=principal_id,
     )
 
 
@@ -83,6 +87,8 @@ def start_refresh_job(
     scope: dict[str, Any] | None = None,
     ecosystem: str = "custom",
     fresh: bool = False,
+    tenant_id: str = "default",
+    principal_id: int | None = None,
 ) -> int:
     """Submit a refresh job to the queue, reusing the scrape job kind for incremental semantics."""
     return mgr.submit(
@@ -99,6 +105,8 @@ def start_refresh_job(
             registry_confirmed=True,
             fresh=fresh,
         ),
+        tenant_id=tenant_id,
+        principal_id=principal_id,
     )
 
 
@@ -113,6 +121,8 @@ def build_scrape_runner(settings, conn, *, vec_store=None, embed=None, mgr=None)
             raise ValueError(f"unsupported job kind: {job.kind}")
         params = job.params
         heartbeat = (lambda: mgr.heartbeat(job.id)) if mgr is not None else None
+        from libref.services.infra.tenant import normalize_tenant as _ntj
+        _jt = _ntj(getattr(job, "tenant_id", "default") or "default")
         return await service.scrape_docs_async(
             params["library"],
             params["version"],
@@ -125,6 +135,7 @@ def build_scrape_runner(settings, conn, *, vec_store=None, embed=None, mgr=None)
             registry_confirmed=params.get("registry_confirmed", True),
             fresh=bool(params.get("fresh", False)),
             heartbeat=heartbeat,
+            tenant_id=_jt,
         )
 
     return runner

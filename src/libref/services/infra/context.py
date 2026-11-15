@@ -22,10 +22,52 @@ class AppContext:
 
     def connect(self, *, check_same_thread: bool = True) -> sqlite3.Connection:
         """Open a short-lived connection; migrations run once at startup."""
-        from libref.db import open_db
+        from libref.db import apply_migrations, open_db
 
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        return open_db(self.db_path, check_same_thread=check_same_thread)
+        conn = open_db(self.db_path, check_same_thread=check_same_thread)
+        try:
+            apply_migrations(conn)
+        except Exception:
+            pass
+        return conn
+
+    def services_for(self, conn):
+        """Build request-scoped services from the current generation dependencies."""
+        from libref.services.code.mining_read import MiningReadService
+        from libref.services.docs.pages import PageService
+        from libref.services.docs.search import SearchService
+        from libref.services.infra.jobs import JobManager
+        from libref.services.ops.review import ReviewService
+        from libref.services.registry.libraries import LibraryService
+
+        gateway = self.gateway
+        try:
+            rerank = gateway.rerank_fn() if gateway is not None else None
+        except Exception:
+            rerank = None
+        try:
+            chat = gateway.chat_fn() if gateway is not None else None
+        except Exception:
+            chat = None
+        search = SearchService(
+            conn, self.settings, vec_store=self.vec_store, embed=self.embed, rerank=rerank
+        )
+        return {
+            "search": search,
+            "pages": PageService(conn),
+            "catalog": LibraryService(conn),
+            "mining": MiningReadService(conn, self.settings),
+            "review": ReviewService(conn),
+            "jobs": JobManager(conn, instance_id=str(getattr(self.settings, "instance_id", "libref-1") or "libref-1")),
+            "rerank": rerank,
+            "chat": chat,
+            "gateway": gateway,
+            "vec_store": self.vec_store,
+            "embed": self.embed,
+            "generation": self.generation,
+            "settings": self.settings,
+        }
 
 
 def build_context(settings) -> AppContext:

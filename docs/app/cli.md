@@ -232,7 +232,22 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 * `serve-mcp`：`--http` 切换为流式 HTTP（默认标准输入输出），`--host/--port/--path` 缺省取 `[mcp]` 配置，`--enabled-tools/--disabled-tools` 为逗号分隔的工具白名单与黑名单。启动校验与组合服务同口径。
 * `serve-web`：`--host/--port` 缺省取 `[web]` 配置，鉴权语义与组合服务一致。
 
-全局 `--remote/--base-url` 声明远程模式意向，传输层实现于 `cli/remote.py`；各命令的远端分发为后续任务，本轮未逐命令接线，本地直连仍为默认路径。
+## 远程模式
+
+`--remote` 经 HTTP 走服务器，`--base-url` 覆盖地址（缺省取 `client.base_url`，再缺省取 `web_host/web_port` 回环地址）。鉴权经 `client_api_key` 携带 Bearer；dev 服务端无 key 放行，enforced 无 key 返回未授权。本地直连保留为本机运维路径。
+
+已接线命令（本地与远端结果一致，出口只做参数映射）：
+
+| 命令 | 远端映射 | 说明 |
+|---|---|---|
+| search | GET /search | 查询、阅读类只读 |
+| read | GET /read | 同上 |
+| catalog | GET /catalog | 同上 |
+| job-show | GET /jobs 或 GET /jobs/{id} | 任务查看 |
+| ingest | POST /scrape 后轮询 GET /jobs/{id} | 抓取提交，显式形态，轮询复用等待语义 |
+| job-cancel | POST /jobs/{id}/cancel | 任务取消 |
+
+未列命令均为本地专用（解析、索引、挖掘、探查、运维等仍走本地库）。
 
 ## 可配置项
 

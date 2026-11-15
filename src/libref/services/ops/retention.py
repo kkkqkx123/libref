@@ -113,6 +113,7 @@ def purge_version(
     repos_dir: Path | None = None,
     snapshot_root: Path | None = None,
     vec_store: Any | None = None,
+    tenant_id: str | None = None,
 ) -> dict[str, int]:
     """Resolve the version, hold the version lock, then purge."""
     from libref.services.infra.version_lock import version_lock_sync
@@ -136,7 +137,9 @@ def purge_version(
         raise ValueError("library version must resolve to a single version")
     eco = str(rows[0][1])
     version_id = int(rows[0][0])
-    with version_lock_sync(conn, eco, library, version):
+    from libref.services.infra.tenant import normalize_tenant as _nt
+    _ten = _nt(tenant_id) if tenant_id not in (None, "*") else "default"
+    with version_lock_sync(conn, eco, library, version, tenant_id=_ten):
         return _purge_inner(
             conn,
             library,
@@ -146,6 +149,7 @@ def purge_version(
             repos_dir=repos_dir,
             snapshot_root=snapshot_root,
             vec_store=vec_store,
+            tenant_id=_ten,
         )
 
 
@@ -159,13 +163,18 @@ def _purge_inner(
     repos_dir: Path | None = None,
     snapshot_root: Path | None = None,
     vec_store: Any | None = None,
+    tenant_id: str | None = None,
 ) -> dict[str, int]:
     from libref.store.snapshots import SnapshotStore
 
     logger.info("purge start %s:%s %s", eco, library, version)
+    _ten2 = (tenant_id or "default")
     if vec_store is not None:
         try:
-            vec_store.delete_version(version_id)
+            try:
+                vec_store.delete_version(version_id, tenant_id=_ten2)
+            except TypeError:
+                vec_store.delete_version(version_id)
         except Exception as exc:  # noqa: BLE001 — pre-clean failure retries after the truth commit
             logger.warning(
                 "purge vector pre-clean failed for version %d: %s",
@@ -191,9 +200,22 @@ def _purge_inner(
     conn.execute("DELETE FROM ast_cache WHERE repo=?", (f"{eco}/{library}/{version}",))
     snapshot_removed = 0
     if snapshot_root is not None:
+        try:
+            from libref.services.infra.tenant import tenant_snapshot_dir as _tsd
+            from libref.config import LibrefSettings as _LS
+            # snapshot_root may already be tenant-scoped; drop handles both layouts
+        except Exception:
+            pass
         snapshot_removed = SnapshotStore(snapshot_root, quota_mb=0).drop_version(
             eco, library, version
         )
+        # Also drop tenant-subdir variant when tenant is non-default
+        if str(_ten2) != "default":
+            try:
+                alt = __import__("pathlib").Path(str(snapshot_root)) / f"tenant-{_ten2}"
+                snapshot_removed += SnapshotStore(alt, quota_mb=0).drop_version(eco, library, version)
+            except Exception:
+                pass
     repos_removed = 0
     if repos_dir is not None:
         repo_name = f"{eco}/{library}/{version}"
@@ -215,7 +237,10 @@ def _purge_inner(
     conn.commit()
     if vec_store is not None:
         try:
-            vec_store.delete_version(version_id)
+            try:
+                vec_store.delete_version(version_id, tenant_id=_ten2)
+            except TypeError:
+                vec_store.delete_version(version_id)
         except Exception as exc:  # noqa: BLE001 — truth deletion already committed; retry covers the crash window
             logger.warning(
                 "purge vector version failed for version %d: %s", version_id, exc

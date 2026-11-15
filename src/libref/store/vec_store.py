@@ -43,20 +43,20 @@ class VectorStore(Protocol):
     ) -> None: ...
 
     def upsert_batch(
-        self, points: list[tuple[int, int, int, list[float]]], *, wait: bool = True
+        self, points: list, *, wait: bool = True
     ) -> None: ...
 
     def delete_docs(self, doc_ids: list[int]) -> None: ...
 
-    def delete_version(self, version_id: int) -> None: ...
+    def delete_version(self, version_id: int, tenant_id: str | None = None) -> None: ...
 
     def search(
-        self, query_vec: list[float], *, k: int, version_id: int
+        self, query_vec: list[float], *, k: int, version_id: int, tenant_id: str | None = None
     ) -> list[tuple[int, float]]: ...
 
-    def count(self, version_id: int) -> int: ...
+    def count(self, version_id: int, tenant_id: str | None = None) -> int: ...
 
-    def list_ids(self, version_id: int, *, batch: int = 512) -> list[int]: ...
+    def list_ids(self, version_id: int, *, batch: int = 512, tenant_id: str | None = None) -> list[int]: ...
 
 
 def _write_vec_meta(conn: sqlite3.Connection, model: str, dim: int) -> None:
@@ -101,6 +101,27 @@ def write_version_meta(
         (version_id, model, dim),
     )
     conn.commit()
+
+
+
+def _tenant_scoped(tenant_id: str | None) -> bool:
+    """Whether tenant filtering applies; global and missing mean unfiltered."""
+    if tenant_id is None or tenant_id == "*":
+        return False
+    return str(tenant_id) != "*"
+
+
+def _normalize_tenant_id(tenant_id: str | None) -> str:
+    return (tenant_id or "default").strip() or "default"
+
+
+def _split_point(point):
+    """Accept 4-tuple legacy points and 5-tuple tenant points."""
+    if len(point) == 5:
+        doc_id, library_id, version_id, embedding, tenant = point
+        return int(doc_id), int(library_id), int(version_id), list(embedding), _normalize_tenant_id(tenant)
+    doc_id, library_id, version_id, embedding = point
+    return int(doc_id), int(library_id), int(version_id), list(embedding), "default"
 
 
 def paired_vector(
@@ -202,12 +223,20 @@ class QdrantVecStore(VectorStore):
             field_name="library_id",
             field_schema=models.PayloadSchemaType.INTEGER,
         )
+        try:
+            self.client.create_payload_index(
+                collection_name=self.collection,
+                field_name="tenant_id",
+                field_schema=models.PayloadSchemaType.KEYWORD,
+            )
+        except Exception:
+            pass
 
     # ── Write ──
 
     def upsert_batch(
         self,
-        points: list[tuple[int, int, int, list[float]]],
+        points: list,
         *,
         wait: bool = True,
     ) -> None:
@@ -218,16 +247,19 @@ class QdrantVecStore(VectorStore):
             return
         for start in range(0, len(points), _WRITE_BATCH):
             chunk = points[start : start + _WRITE_BATCH]
-            self.client.upsert(
-                collection_name=self.collection,
-                points=[
+            payload_points = []
+            for point in chunk:
+                doc_id, library_id, version_id, embedding, tenant = _split_point(point)
+                payload_points.append(
                     models.PointStruct(
                         id=doc_id,
                         vector=embedding,
-                        payload={"library_id": library_id, "version_id": version_id},
+                        payload={"library_id": library_id, "version_id": version_id, "tenant_id": tenant},
                     )
-                    for doc_id, library_id, version_id, embedding in chunk
-                ],
+                )
+            self.client.upsert(
+                collection_name=self.collection,
+                points=payload_points,
                 wait=wait,
             )
 
@@ -245,66 +277,129 @@ class QdrantVecStore(VectorStore):
                 ),
             )
 
-    def delete_version(self, version_id: int) -> None:
+    def delete_version(self, version_id: int, tenant_id: str | None = None) -> None:
         """Delete all vector points of a version, on re-crawl of that version."""
         from qdrant_client import models
 
         self.client.delete(
             collection_name=self.collection,
             points_selector=models.FilterSelector(
-                filter=self._version_filter(version_id)
+                filter=self._version_filter(version_id, tenant_id)
             ),
         )
 
     # ── Search and reconciliation ──
 
     def search(
-        self, query_vec: list[float], *, k: int, version_id: int
+        self, query_vec: list[float], *, k: int, version_id: int, tenant_id: str | None = None
     ) -> list[tuple[int, float]]:
         """Nearest-neighbor search filtered by version; returns document ids and cosine similarity in descending similarity order."""
+        filt = self._version_filter(version_id, tenant_id)
+        want_payload = _tenant_scoped(tenant_id)
         res = self.client.query_points(
             collection_name=self.collection,
             query=query_vec,
-            query_filter=self._version_filter(version_id),
-            limit=k,
-            with_payload=False,
+            query_filter=filt,
+            limit=max(k, k * 3) if (want_payload and _normalize_tenant_id(tenant_id) == "default") else k,
+            with_payload=want_payload,
         )
-        return [(p.id, p.score) for p in res.points]
+        if not want_payload:
+            return [(p.id, p.score) for p in res.points]
+        wanted = _normalize_tenant_id(tenant_id)
+        out: list[tuple[int, float]] = []
+        for p in res.points:
+            payload = getattr(p, "payload", None) or {}
+            seen = str(payload.get("tenant_id") or "default")
+            if wanted == "default":
+                if seen != "default":
+                    continue
+            elif seen != wanted:
+                continue
+            out.append((p.id, p.score))
+            if len(out) >= k:
+                break
+        return out
 
-    def count(self, version_id: int) -> int:
+    def count(self, version_id: int, tenant_id: str | None = None) -> int:
         """Number of vector points in a version, for reconciliation against the embeddable subset."""
-        return self.client.count(
-            collection_name=self.collection,
-            count_filter=self._version_filter(version_id),
-            exact=True,
-        ).count
-
-    def list_ids(self, version_id: int, *, batch: int = 512) -> list[int]:
-        """All vector point ids of a version, paged scroll for set-difference repair."""
-        found: list[int] = []
-        offset = None
-        while True:
-            records, offset = self.client.scroll(
+        if not _tenant_scoped(tenant_id):
+            return self.client.count(
                 collection_name=self.collection,
-                scroll_filter=self._version_filter(version_id),
+                count_filter=self._version_filter(version_id, None),
+                exact=True,
+            ).count
+        if _normalize_tenant_id(tenant_id) != "default":
+            return self.client.count(
+                collection_name=self.collection,
+                count_filter=self._version_filter(version_id, tenant_id),
+                exact=True,
+            ).count
+        ids = self.list_ids(version_id, tenant_id=tenant_id)
+        return len(ids)
+
+    def list_ids(self, version_id: int, *, batch: int = 512, tenant_id: str | None = None) -> list[int]:
+        """All vector point ids of a version, paged scroll for set-difference repair."""
+        if not _tenant_scoped(tenant_id):
+            found: list[int] = []
+            offset = None
+            while True:
+                records, offset = self.client.scroll(
+                    collection_name=self.collection,
+                    scroll_filter=self._version_filter(version_id, None),
+                    limit=max(1, int(batch)),
+                    offset=offset,
+                    with_payload=False,
+                    with_vectors=False,
+                )
+                found.extend(int(r.id) for r in records)
+                if offset is None:
+                    return found
+        wanted = _normalize_tenant_id(tenant_id)
+        found_scoped: list[int] = []
+        offset2 = None
+        while True:
+            records, offset2 = self.client.scroll(
+                collection_name=self.collection,
+                scroll_filter=self._version_filter(version_id, tenant_id),
                 limit=max(1, int(batch)),
-                offset=offset,
-                with_payload=False,
+                offset=offset2,
+                with_payload=True,
                 with_vectors=False,
             )
-            found.extend(int(r.id) for r in records)
-            if offset is None:
-                return found
+            for r in records:
+                payload = getattr(r, "payload", None) or {}
+                seen = str(payload.get("tenant_id") or "default")
+                if wanted == "default" and seen != "default":
+                    continue
+                if wanted != "default" and seen != wanted:
+                    continue
+                found_scoped.append(int(r.id))
+            if offset2 is None:
+                return found_scoped
 
     @staticmethod
-    def _version_filter(version_id: int):
+    def _version_filter(version_id: int, tenant_id: str | None = None):
         from qdrant_client import models
 
+        version_cond = models.FieldCondition(
+            key="version_id", match=models.MatchValue(value=version_id)
+        )
+        if not _tenant_scoped(tenant_id):
+            return models.Filter(must=[version_cond])
+        wanted = _normalize_tenant_id(tenant_id)
+        if wanted == "default":
+            from qdrant_client.models import IsNullCondition, PayloadField
+            return models.Filter(
+                must=[version_cond],
+                should=[
+                    models.FieldCondition(key="tenant_id", match=models.MatchValue(value="default")),
+                    IsNullCondition(is_null=PayloadField(key="tenant_id")),
+                ],
+            )
         return models.Filter(
             must=[
-                models.FieldCondition(
-                    key="version_id", match=models.MatchValue(value=version_id)
-                )
+                version_cond,
+                models.FieldCondition(key="tenant_id", match=models.MatchValue(value=wanted)),
             ]
         )
 
@@ -401,13 +496,28 @@ def simvec_root_for(db_path, simvec_dir=None) -> Path:
     return Path(os.path.abspath(raw) + ".simvec")
 
 
-def _simvec_version_filter(version_id: int) -> dict[str, Any]:
+def _simvec_version_filter(version_id: int, tenant_id: str | None = None) -> dict[str, Any]:
     # Match values cross the boundary as strings; numeric payloads compare by decimal form.
-    return {
+    base: dict[str, Any] = {
         "must": [
             {"field": "version_id", "condition": {"Match": {"value": str(version_id)}}}
         ]
     }
+    if _tenant_scoped(tenant_id):
+        wanted = _normalize_tenant_id(tenant_id)
+        # Non-default tenants push both keys; default relies on over-fetch plus payload filtering
+        # so legacy points without a tenant field stay visible to the default tenant.
+        if wanted != "default":
+            base["must"].append({"field": "tenant_id", "condition": {"Match": {"value": wanted}}})
+    return base
+
+
+def _simvec_tenant_ok(payload: dict | None, tenant_id: str | None) -> bool:
+    if not _tenant_scoped(tenant_id):
+        return True
+    wanted = _normalize_tenant_id(tenant_id)
+    seen = str((payload or {}).get("tenant_id") or "default")
+    return seen == wanted
 
 
 class SimvecVecStore(VectorStore):
@@ -452,10 +562,15 @@ class SimvecVecStore(VectorStore):
         for field in ("version_id", "library_id"):
             if field not in indexed:
                 self._engine.create_payload_index(self.collection, field, "integer")
+        if "tenant_id" not in indexed:
+            try:
+                self._engine.create_payload_index(self.collection, "tenant_id", "keyword")
+            except Exception:
+                pass
 
     def upsert_batch(
         self,
-        points: list[tuple[int, int, int, list[float]]],
+        points: list,
         *,
         wait: bool = True,
     ) -> None:
@@ -464,16 +579,19 @@ class SimvecVecStore(VectorStore):
             return
         for start in range(0, len(points), _WRITE_BATCH):
             chunk = points[start : start + _WRITE_BATCH]
-            self._engine.upsert_batch(
-                self.collection,
-                [
+            payload_batch = []
+            for point in chunk:
+                doc_id, library_id, version_id, embedding, tenant = _split_point(point)
+                payload_batch.append(
                     {
                         "id": _simvec_id(doc_id),
                         "vector": list(embedding),
-                        "payload": {"library_id": library_id, "version_id": version_id},
+                        "payload": {"library_id": library_id, "version_id": version_id, "tenant_id": tenant},
                     }
-                    for doc_id, library_id, version_id, embedding in chunk
-                ],
+                )
+            self._engine.upsert_batch(
+                self.collection,
+                payload_batch,
             )
 
     def delete_docs(self, doc_ids: list[int]) -> None:
@@ -486,49 +604,125 @@ class SimvecVecStore(VectorStore):
                 [_simvec_id(i) for i in doc_ids[start : start + _WRITE_BATCH]],
             )
 
-    def delete_version(self, version_id: int) -> None:
+    def delete_version(self, version_id: int, tenant_id: str | None = None) -> None:
         """Delete all vector points of a version, on re-crawl of that version."""
-        self._engine.delete_by_filter(
-            self.collection, _simvec_version_filter(version_id)
-        )
-
-    def search(
-        self, query_vec: list[float], *, k: int, version_id: int
-    ) -> list[tuple[int, float]]:
-        """Nearest-neighbor search filtered by version; returns document ids and cosine similarity in descending similarity order."""
-        hits = self._engine.search_vector(
-            self.collection,
-            list(query_vec),
-            k,
-            query_filter=_simvec_version_filter(version_id),
-            with_payload=False,
-            with_vector=False,
-        )
-        return [(_doc_id_from_simvec(h["id"]), float(h["score"])) for h in hits]
-
-    def count(self, version_id: int) -> int:
-        """Number of vector points in a version, for reconciliation against the embeddable subset."""
-        return int(
-            self._engine.count_by_filter(
+        if not _tenant_scoped(tenant_id):
+            self._engine.delete_by_filter(
                 self.collection, _simvec_version_filter(version_id)
             )
-        )
+            return
+        wanted = _normalize_tenant_id(tenant_id)
+        if wanted != "default":
+            self._engine.delete_by_filter(
+                self.collection, _simvec_version_filter(version_id, tenant_id)
+            )
+            return
+        ids = self.list_ids(version_id, tenant_id=tenant_id)
+        if ids:
+            self.delete_docs(ids)
 
-    def list_ids(self, version_id: int, *, batch: int = 512) -> list[int]:
-        """All vector point ids of a version, paged scroll for set-difference repair."""
-        found: list[int] = []
-        offset = None
-        while True:
-            page = self._engine.scroll_by_filter(
+    def search(
+        self, query_vec: list[float], *, k: int, version_id: int, tenant_id: str | None = None
+    ) -> list[tuple[int, float]]:
+        """Nearest-neighbor search filtered by version; returns document ids and cosine similarity in descending similarity order."""
+        if not _tenant_scoped(tenant_id):
+            hits = self._engine.search_vector(
                 self.collection,
-                _simvec_version_filter(version_id),
-                max(1, int(batch)),
-                offset,
+                list(query_vec),
+                k,
+                query_filter=_simvec_version_filter(version_id),
                 with_payload=False,
                 with_vector=False,
             )
-            for point in page.get("points", []):
-                found.append(_doc_id_from_simvec(point["id"]))
-            offset = page.get("next_offset")
-            if not offset:
-                return found
+            return [(_doc_id_from_simvec(h["id"]), float(h["score"])) for h in hits]
+        wanted = _normalize_tenant_id(tenant_id)
+        if wanted != "default":
+            hits = self._engine.search_vector(
+                self.collection,
+                list(query_vec),
+                k,
+                query_filter=_simvec_version_filter(version_id, tenant_id),
+                with_payload=True,
+                with_vector=False,
+            )
+            out = []
+            for h in hits:
+                if not _simvec_tenant_ok(h.get("payload"), tenant_id):
+                    continue
+                out.append((_doc_id_from_simvec(h["id"]), float(h["score"])))
+                if len(out) >= k:
+                    break
+            return out
+        fetch_k = max(k * 5, k + 20)
+        hits = self._engine.search_vector(
+            self.collection,
+            list(query_vec),
+            fetch_k,
+            query_filter=_simvec_version_filter(version_id),
+            with_payload=True,
+            with_vector=False,
+        )
+        out2: list[tuple[int, float]] = []
+        for h in hits:
+            if not _simvec_tenant_ok(h.get("payload"), tenant_id):
+                continue
+            out2.append((_doc_id_from_simvec(h["id"]), float(h["score"])))
+            if len(out2) >= k:
+                break
+        return out2
+
+    def count(self, version_id: int, tenant_id: str | None = None) -> int:
+        """Number of vector points in a version, for reconciliation against the embeddable subset."""
+        if not _tenant_scoped(tenant_id):
+            return int(
+                self._engine.count_by_filter(
+                    self.collection, _simvec_version_filter(version_id)
+                )
+            )
+        if _normalize_tenant_id(tenant_id) != "default":
+            return int(
+                self._engine.count_by_filter(
+                    self.collection, _simvec_version_filter(version_id, tenant_id)
+                )
+            )
+        return len(self.list_ids(version_id, tenant_id=tenant_id))
+
+    def list_ids(self, version_id: int, *, batch: int = 512, tenant_id: str | None = None) -> list[int]:
+        """All vector point ids of a version, paged scroll for set-difference repair."""
+        if not _tenant_scoped(tenant_id):
+            found: list[int] = []
+            offset = None
+            while True:
+                page = self._engine.scroll_by_filter(
+                    self.collection,
+                    _simvec_version_filter(version_id),
+                    max(1, int(batch)),
+                    offset,
+                    with_payload=False,
+                    with_vector=False,
+                )
+                for point in page.get("points", []):
+                    found.append(_doc_id_from_simvec(point["id"]))
+                offset = page.get("next_offset")
+                if not offset:
+                    return found
+        filt = _simvec_version_filter(version_id, tenant_id)
+        want_payload = True
+        scoped: list[int] = []
+        off = None
+        while True:
+            pg = self._engine.scroll_by_filter(
+                self.collection,
+                filt,
+                max(1, int(batch)),
+                off,
+                with_payload=want_payload,
+                with_vector=False,
+            )
+            for point in pg.get("points", []):
+                if not _simvec_tenant_ok(point.get("payload"), tenant_id):
+                    continue
+                scoped.append(_doc_id_from_simvec(point["id"]))
+            off = pg.get("next_offset")
+            if not off:
+                return scoped

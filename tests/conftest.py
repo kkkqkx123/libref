@@ -254,18 +254,27 @@ class FakeVecStore:
 
     def upsert_batch(self, points, *, wait: bool = True) -> None:
         self.upserted.extend(points)
-        for doc_id, library_id, version_id, embedding in points:
-            self.points[int(doc_id)] = (int(doc_id), library_id, version_id, embedding)
+        for point in points:
+            if len(point) == 5:
+                doc_id, library_id, version_id, embedding, tenant = point
+            else:
+                doc_id, library_id, version_id, embedding = point
+                tenant = "default"
+            self.points[int(doc_id)] = (int(doc_id), library_id, version_id, embedding, tenant)
 
-    def count(self, version_id: int) -> int:
-        return sum(1 for t in self.points.values() if t[2] == int(version_id))
+    def count(self, version_id: int, tenant_id: str | None = None) -> int:
+        if tenant_id in (None, "*"):
+            return sum(1 for t in self.points.values() if t[2] == int(version_id))
+        return sum(1 for t in self.points.values() if t[2] == int(version_id) and str((t[4] if len(t) > 4 else "default") or "default") == str(tenant_id))
 
-    def list_ids(self, version_id: int, *, batch: int = 512) -> list[int]:
-        return sorted(p for p, t in self.points.items() if t[2] == int(version_id))
+    def list_ids(self, version_id: int, *, batch: int = 512, tenant_id: str | None = None) -> list[int]:
+        if tenant_id in (None, "*"):
+            return sorted(p for p, t in self.points.items() if t[2] == int(version_id))
+        return sorted(p for p, t in self.points.items() if t[2] == int(version_id) and str((t[4] if len(t) > 4 else "default") or "default") == str(tenant_id))
 
-    def search(self, query_vec, *, k: int, version_id: int):
+    def search(self, query_vec, *, k: int, version_id: int, tenant_id: str | None = None):
         self.seen.append(int(version_id))
-        return [(d, 1.0) for d in self.list_ids(version_id)[:k]]
+        return [(d, 1.0) for d in self.list_ids(version_id, tenant_id=tenant_id)[:k]]
 
 
 async def fake_embed_vectors(texts: list[str]) -> list[list[float]]:
