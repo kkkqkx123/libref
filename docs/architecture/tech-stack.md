@@ -10,7 +10,7 @@
 | 层 | 选型 | 理由（对应对标项目核实结论） |
 |---|---|---|
 | 语言 / 包管理 | **Python ≥3.14 + uv**（uv 管依赖、虚拟环境、构建与脚本入口） | 全部核心借鉴对象（graphify、crawl4ai、EpiCoder、APP-Miner）均为 Python；docs-mcp-server 虽为 TS，但 init-req 明确"学习架构、Python 重写"。核心依赖（tree-sitter 0.26、tree-sitter-python 0.25 abi3）均已有兼容 3.14 的 wheel（PyPI 已核实）。 |
-| 存储 | **SQLite（真源）+ simvec 本地向量（默认）/ Qdrant（保留）** | SQLite（sqlite3 标准库 + FTS5 全文）：docs-mcp-server 单机零外部依赖的架构被核实为可行且成熟，FTS5 内置 porter/unicode61 分词，承载全部元数据/正文/审核。Qdrant（qdrant-client 1.20）：sqlite-vec 无 ANN 索引（纯暴力扫描），库文档+库代码全量灌入后容量不足，已迁移至 Qdrant HNSW + payload 版本过滤（决策见 docs/plan/qdrant-migration.md）；Qdrant 定位为可重建派生索引，崩溃后按 SQLite 重灌，不做双写事务。 |
+| 存储 | **SQLite（真源）+ simvec 本地向量（默认，HNSW 档）/ Qdrant（保留）** | SQLite（sqlite3 标准库 + FTS5 全文）：docs-mcp-server 单机零外部依赖的架构被核实为可行且成熟，FTS5 内置 porter/unicode61 分词，承载全部元数据/正文/审核。Qdrant（qdrant-client 1.20）：sqlite-vec 无 ANN 索引（纯暴力扫描），库文档+库代码全量灌入后容量不足，已迁移至 Qdrant HNSW + payload 版本过滤（决策见 docs/plan/qdrant-migration.md）；Qdrant 定位为可重建派生索引，崩溃后按 SQLite 重灌，不做双写事务。集合设置（距离、索引档、建图参数、检索期参数、鉴权）见 docs/plan/vector-storage-settings.md。 |
 | AST 解析 | **tree-sitter（py-tree-sitter）+ 声明式 LanguageConfig** | graphify 已验证"声明式语言配置 + 通用抽取引擎"模式：新增语言只加配置不改引擎，且带文件 hash + grammar fingerprint 增量缓存。 |
 | 文档抓取 | **自研爬虫：httpx + selectolax + 升级备选 Playwright**，借鉴 crawl4ai 的 URL 发现与正文净化算法 | 核实结论：crawl4ai 是通用爬虫框架，依赖重（自带 browser 池、LLM 模块），本课题只需其 robots→sitemap 链式发现、PruningContentFilter 正文净化、robots 缓存三个思路，自研实现量小且可控。 |
 | 分块 | 自研两阶段分块（结构感知切分 + 贪心合并 + 代码围栏平衡） | docs-mcp-server 的 SemanticMarkdownSplitter / GreedySplitter 模式，纯逻辑无依赖。 |
@@ -141,7 +141,7 @@ grammar wheel 与 py-tree-sitter 存在 ABI 兼容窗口，`uv.lock` 钉死全�
   - `review_status`（审核工作流：pending/approved/conflict，挂每条知识条目）
   - `schema_meta`（键值元数据：vec_model/vec_dim，供向量索引失效校验）
 - FTS5：`tokenize='porter unicode61'`，触发器同步（按列收窄的 update 触发器照搬）。
-- 向量：**单集合**（`libref_chunks` 按库文件派生隔离），Point id=documents.id，payload 只存 `library_id`/`version_id` 过滤键，正文命中后回 SQLite 取；模型/维度变更时集合删除重建（元数据记于 schema_meta）。默认本地 simvec 引擎（进程内，Qdrant 语义的本地实现），Qdrant 服务保留为可选后端（`version_id` 整数索引 `is_principal=True` 租户优化）。
+- 向量：**单集合**（`libref_chunks` 按部署身份或库文件派生隔离），Point id=documents.id，payload 只存 `library_id`/`version_id` 过滤键，正文命中后回 SQLite 取；画像拆两段记于 `schema_meta`——**结构档**（后端、距离、向量/payload 落盘位置、分片与副本）漂移即删集合重建，**调优档**（图参数、优化器内存阈值）在 Qdrant 侧就地重写、已有点保留。默认本地 simvec 引擎（进程内，Qdrant 语义的本地实现，默认 HNSW 档：超过 `simvec_full_scan_threshold` 自动建图，`flat` 为永久精确扫描档，`libref vectors-optimize` 可立即发布图），Qdrant 服务保留为可选后端（`version_id` 整数索引 `is_principal=True` 租户优化，检索期 `hnsw_ef`/`exact` 可配，连接支持 gRPC/前缀/连接池）。
 - 检索：FTS5 BM25（四列加权，标题最高、路径次之、正文与地址为基准，权重与融合常数均为配置项）+ 向量 KNN（COSINE，version_id 过滤）两路 → **RRF 融合** → 同源去重 → 可选精排 → 频次特征重排（本课题创新：seq_patterns 支持度作为加权项）→ 段落重组（按页内序号扩展兄弟块）；向量不可用时降级为 FTS-only 单路。
 - **存储后端抽象**（见 docs/plan/storage-backend-abstraction.md）：元数据会话与全文检索收敛为后端中立契约（`db/contract.py`），装配根 `db/assembly.py` 是唯一后端选择点，产出不可变 `StorageBundle`。元数据后端为 SQLite（本地分支）或 PostgreSQL（共享分支，psycopg3 连接池，合并 DDL 面向新部署，不做旧数据迁移）；全文后端为 FTS5（本地）或关系库原生全文（远程，`websearch_to_tsquery` + `ts_rank_cd`，四字段权重映射 A/B/C/D 权重档）；向量沿用 simvec/Qdrant 双分支并补齐后端中立诊断快照。多副本运行时支持 drain 与配置快照指纹核对（`services/infra/runtime.py`）；向量集合名在声明部署身份时按部署标识派生，不再依赖本地数据库文件路径。后端切换即全量重建，不迁移旧数据。
 
@@ -157,7 +157,7 @@ requires-python = ">=3.14"   # tree-sitter cp314 wheel / abi3 grammar wheel 均�
 dependencies = [
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
-    "qdrant-client>=1.20",             # 可选向量后端（保留，默认走本地 simvec，见 docs/plan/simvec-integration.md）
+    "qdrant-client>=1.20",             # 可选向量后端（保留，默认走本地 simvec，见 docs/plan/vector-storage-settings.md）
 ]
 
 [dependency-groups]

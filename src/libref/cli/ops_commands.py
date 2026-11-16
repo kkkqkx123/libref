@@ -114,6 +114,38 @@ def cmd_fts_check(args: argparse.Namespace) -> int:
     return 0 if out["in_sync"] else 1
 
 
+def cmd_vectors_status(args: argparse.Namespace) -> int:
+    import json as _json
+
+    from libref.services.infra.vectors import build_store
+    from libref.store.vec_store import close_simvec_engines
+
+    settings = _load_settings(args)
+    try:
+        info = build_store(settings).diagnostics()
+    finally:
+        close_simvec_engines()
+    print(_json.dumps(info, ensure_ascii=False, indent=2, sort_keys=True))
+    # Reachability is the health signal; a missing collection is a first-run state,
+    # not a failure, so the command reports it without failing the probe.
+    return 0 if info.get("reachable") else 1
+
+
+def cmd_vectors_optimize(args: argparse.Namespace) -> int:
+    import json as _json
+
+    from libref.services.infra.vectors import build_store
+    from libref.store.vec_store import close_simvec_engines
+
+    settings = _load_settings(args)
+    try:
+        out = build_store(settings).optimize(wait=True)
+    finally:
+        close_simvec_engines()
+    print(_json.dumps(out, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
 def cmd_review(args: argparse.Namespace) -> int:
     conn = _connect(_load_settings(args))
     try:

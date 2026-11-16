@@ -233,3 +233,133 @@ def test_snapshot_is_frozen(monkeypatch, tmp_path) -> None:
     s = load_settings()
     with pytest.raises(ValidationError):
         s.fetch_concurrency = 9  # type: ignore[misc]
+
+
+def test_vector_defaults(monkeypatch, tmp_path) -> None:
+    # The local engine defaults to the HNSW tier; every knob has a documented default.
+    _isolated_env(monkeypatch, tmp_path)
+    s = LibrefSettings()
+    assert s.vector_distance == "cosine"
+    assert s.vector_write_batch == 512
+    assert s.simvec_index == "hnsw"
+    assert s.simvec_hnsw_m == 16
+    assert s.simvec_hnsw_ef_construct == 100
+    assert s.simvec_full_scan_threshold == 10000
+    assert s.simvec_hnsw_ef_search == 40
+    assert s.simvec_max_indexing_threads is None
+    assert s.deployment_id == ""
+    assert s.qdrant_api_key is None
+    assert s.qdrant_https is None
+    assert s.qdrant_search_hnsw_ef is None
+    assert s.qdrant_search_exact is False
+
+
+def test_vector_validators(monkeypatch, tmp_path) -> None:
+    _isolated_env(monkeypatch, tmp_path)
+    # ef_construct must cover one node's full neighborhood: max(2*m, 4).
+    with pytest.raises(ValidationError, match="simvec_hnsw_ef_construct"):
+        LibrefSettings(simvec_hnsw_m=32, simvec_hnsw_ef_construct=40)
+    assert (
+        LibrefSettings(simvec_hnsw_m=32, simvec_hnsw_ef_construct=64).simvec_hnsw_m
+        == 32
+    )
+    # The flat tier builds no graph, so the graph parameters are not constrained.
+    flat = LibrefSettings(
+        simvec_index="flat", simvec_hnsw_m=32, simvec_hnsw_ef_construct=40
+    )
+    assert flat.simvec_index == "flat"
+    with pytest.raises(ValidationError, match="qdrant_url"):
+        LibrefSettings(vector_backend="qdrant", qdrant_url="  ")
+
+
+def test_vector_section_keys_and_secret(monkeypatch, tmp_path) -> None:
+    _isolated_env(monkeypatch, tmp_path)
+    conf = tmp_path / "a.toml"
+    conf.write_text(
+        '[server]\ndeployment_id = "prod-a"\n'
+        '[storage]\nvector_distance = "dot"\nsimvec_index = "flat"\n'
+        "vector_write_batch = 64\n",
+        encoding="utf-8",
+    )
+    s = load_settings(conf)
+    assert s.deployment_id == "prod-a"
+    assert s.vector_distance == "dot"
+    assert s.simvec_index == "flat"
+    assert s.vector_write_batch == 64
+    bad = tmp_path / "b.toml"
+    bad.write_text('[storage]\nqdrant_api_key = "k"\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="qdrant_api_key"):
+        load_settings(bad)
+
+
+def test_vector_secrets_and_url_masking(monkeypatch, tmp_path) -> None:
+    _isolated_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("LIBREF_QDRANT_API_KEY", "qdrant-secret")
+    s = LibrefSettings(qdrant_url="http://operator:s3cret@vec.internal:6333")
+    dumped = redacted_dict(s)
+    assert dumped["qdrant_api_key"] == "***"
+    # Credentials embedded in the service URL never reach logs or the fingerprint.
+    assert "s3cret" not in dumped["qdrant_url"]
+    assert dumped["qdrant_url"].startswith("http://operator:***@vec.internal:6333")
+    # Two deployments differing only in the URL password share a fingerprint.
+    other = LibrefSettings(qdrant_url="http://operator:another@vec.internal:6333")
+    assert settings_fingerprint(other) == settings_fingerprint(s)
+
+
+def test_qdrant_structure_defaults(monkeypatch, tmp_path) -> None:
+    # None means "keep the service default", so an unconfigured deployment sends nothing.
+    _isolated_env(monkeypatch, tmp_path)
+    s = LibrefSettings()
+    assert s.qdrant_on_disk_vectors is None
+    assert s.qdrant_on_disk_payload is None
+    assert s.qdrant_shard_number is None
+    assert s.qdrant_replication_factor is None
+    assert s.qdrant_write_consistency_factor is None
+    assert s.qdrant_hnsw_m is None
+    assert s.qdrant_hnsw_ef_construct is None
+    assert s.qdrant_full_scan_threshold is None
+    assert s.qdrant_memmap_threshold_kb is None
+    assert s.qdrant_indexing_threshold_kb is None
+    assert s.qdrant_grpc is False
+    assert s.qdrant_grpc_port == 6334
+    assert s.qdrant_prefix is None
+    assert s.qdrant_pool_size is None
+    assert s.vector_max_points is None
+
+
+def test_qdrant_tuning_validators(monkeypatch, tmp_path) -> None:
+    _isolated_env(monkeypatch, tmp_path)
+    # A lone value is never constrained by a default the operator did not choose.
+    assert LibrefSettings(qdrant_hnsw_m=32).qdrant_hnsw_m == 32
+    with pytest.raises(ValidationError, match="qdrant_hnsw_ef_construct"):
+        LibrefSettings(qdrant_hnsw_m=32, qdrant_hnsw_ef_construct=40)
+    ok = LibrefSettings(qdrant_hnsw_m=32, qdrant_hnsw_ef_construct=64)
+    assert ok.qdrant_hnsw_ef_construct == 64
+    # Quorum cannot exceed the replica count.
+    with pytest.raises(ValidationError, match="write_consistency_factor"):
+        LibrefSettings(qdrant_replication_factor=2, qdrant_write_consistency_factor=3)
+
+
+def test_qdrant_structure_section_keys(monkeypatch, tmp_path) -> None:
+    _isolated_env(monkeypatch, tmp_path)
+    conf = tmp_path / "q.toml"
+    conf.write_text(
+        "[storage]\n"
+        "qdrant_on_disk_payload = false\n"
+        "qdrant_shard_number = 4\n"
+        "qdrant_replication_factor = 2\n"
+        "qdrant_hnsw_m = 32\n"
+        "qdrant_hnsw_ef_construct = 128\n"
+        "qdrant_grpc = true\n"
+        "qdrant_grpc_port = 7334\n"
+        "vector_max_points = 1000000\n",
+        encoding="utf-8",
+    )
+    s = load_settings(conf)
+    assert s.qdrant_on_disk_payload is False
+    assert s.qdrant_shard_number == 4
+    assert s.qdrant_replication_factor == 2
+    assert (s.qdrant_hnsw_m, s.qdrant_hnsw_ef_construct) == (32, 128)
+    assert s.qdrant_grpc is True
+    assert s.qdrant_grpc_port == 7334
+    assert s.vector_max_points == 1_000_000

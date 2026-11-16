@@ -1,5 +1,7 @@
 # Example compose stack: libref service + Qdrant, data on named volumes.
 # Secrets come from an env file, never baked into the image.
+# Qdrant is only required when the service runs with LIBREF_VECTOR_BACKEND=qdrant;
+# the default local simvec backend keeps its index inside the libref-data volume.
 services:
   libref:
     build: .
@@ -11,6 +13,9 @@ services:
       LIBREF_DB_PATH: /data/libref.db
       LIBREF_SNAPSHOT_DIR: /data/snapshots
       LIBREF_REPOS_DIR: /data/repos
+      # Declared deployment identity: hosts sharing it share one Qdrant collection.
+      LIBREF_DEPLOYMENT_ID: ${LIBREF_DEPLOYMENT_ID:-libref-prod}
+      LIBREF_QDRANT_URL: http://qdrant:6333
     volumes:
       - libref-data:/data
     ports:
@@ -25,8 +30,12 @@ services:
       retries: 3
 
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.20.1
     restart: unless-stopped
+    environment:
+      # Enabling the API key also requires LIBREF_QDRANT_API_KEY on the service side;
+      # an empty value keeps the service unauthenticated inside the compose network.
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:-}
     volumes:
       - qdrant-data:/qdrant/storage
     # Not published to the host: reachable only inside the compose network.

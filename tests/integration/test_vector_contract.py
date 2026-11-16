@@ -135,3 +135,114 @@ def test_diagnostics_snapshot_shape(backend, conn, tmp_path, cleanup):
     assert snap["reachable"] is True
     assert snap["collection_exists"] is True
     assert isinstance(snap.get("points", 0), int)
+
+
+def _profile_store(backend: str, tmp_path, *, max_points=None, **shape):
+    """Store bound to an explicit collection profile; the profile shapes the collection."""
+    from libref.store.vec_store import VectorProfile
+
+    profile = VectorProfile(backend=backend, **shape)
+    if backend == "simvec":
+        return SimvecVecStore(
+            tmp_path / "engine", COLLECTION, profile=profile, max_points=max_points
+        )
+    return QdrantVecStore(
+        _QDRANT_URL, COLLECTION, timeout=5.0, profile=profile, max_points=max_points
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", _backend_params)
+def test_profile_change_rebuilds_collection(backend, conn, tmp_path, cleanup):
+    first = _profile_store(backend, tmp_path, distance="cosine")
+    first.ensure_collection(conn, "test/model", 4)
+    first.upsert_batch([_point(1, 41, "default")], wait=True)
+    assert first.count(41) == 1
+
+    # Distance is part of the collection shape, so a change rebuilds and drops points.
+    changed = _profile_store(backend, tmp_path, distance="dot")
+    changed.ensure_collection(conn, "test/model", 4)
+    assert changed.count(41) == 0
+    assert changed.diagnostics()["profile"]["distance"] == "dot"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", _backend_params)
+def test_model_change_keeps_collection(backend, conn, tmp_path, cleanup):
+    store = _profile_store(backend, tmp_path)
+    store.ensure_collection(conn, "model-a", 4)
+    store.upsert_batch([_point(2, 42, "default")], wait=True)
+
+    # Model drift is repaired per version by maintenance, never by wiping the collection.
+    store.ensure_collection(conn, "model-b", 4)
+    assert store.count(42) == 1
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", _backend_params)
+def test_payload_index_replay(backend, conn, tmp_path, cleanup):
+    store = _profile_store(backend, tmp_path)
+    store.ensure_collection(conn, "test/model", 4)
+    assert {"version_id", "library_id", "tenant_id"} <= set(
+        store.diagnostics()["payload_indexes"]
+    )
+
+    # A collection that lost a filter index is repaired on the next governance pass.
+    if backend == "simvec":
+        store._engine.delete_payload_index(COLLECTION, "tenant_id")
+    else:
+        store.client.delete_payload_index(COLLECTION, "tenant_id", wait=True)
+    store.ensure_collection(conn, "test/model", 4)
+    assert "tenant_id" in store.diagnostics()["payload_indexes"]
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", _backend_params)
+def test_capacity_gate_refuses_overflow(backend, conn, tmp_path, cleanup):
+    from libref.store.vec_store import VectorCapacityError
+
+    store = _profile_store(backend, tmp_path, max_points=2)
+    store.ensure_collection(conn, "test/model", 4)
+    store.upsert_batch([_point(1, 43, "default"), _point(2, 43, "default")], wait=True)
+    assert store.count(43) == 2
+
+    # The ceiling is a hard stop: the index is derived, so the batch stays replayable.
+    with pytest.raises(VectorCapacityError, match="vector_max_points"):
+        store.upsert_batch([_point(3, 43, "default")], wait=True)
+    assert store.count(43) == 2
+
+
+@pytest.mark.integration
+@pytest.mark.requires_qdrant
+def test_remote_tuning_applies_without_rebuild(conn, tmp_path, cleanup):
+    first = _profile_store(
+        "qdrant", tmp_path, qdrant_hnsw_m=32, qdrant_hnsw_ef_construct=200
+    )
+    first.ensure_collection(conn, "test/model", 4)
+    first.upsert_batch([_point(1, 44, "default")], wait=True)
+    live = first.client.get_collection(COLLECTION).config.hnsw_config
+    assert (live.m, live.ef_construct) == (32, 200)
+
+    # Tuning lives in its own segment, so graph drift rewrites the live collection.
+    tuned = _profile_store(
+        "qdrant", tmp_path, qdrant_hnsw_m=48, qdrant_hnsw_ef_construct=300
+    )
+    tuned.ensure_collection(conn, "test/model", 4)
+    assert tuned.count(44) == 1
+    live = tuned.client.get_collection(COLLECTION).config.hnsw_config
+    assert (live.m, live.ef_construct) == (48, 300)
+
+
+@pytest.mark.integration
+@pytest.mark.requires_qdrant
+def test_remote_shape_drift_rebuilds(conn, tmp_path, cleanup):
+    first = _profile_store("qdrant", tmp_path, qdrant_shard_number=1)
+    first.ensure_collection(conn, "test/model", 4)
+    first.upsert_batch([_point(1, 45, "default")], wait=True)
+    assert first.count(45) == 1
+
+    # Shard count is creation-only, so it can only be answered by a rebuild.
+    reshaped = _profile_store("qdrant", tmp_path, qdrant_shard_number=2)
+    reshaped.ensure_collection(conn, "test/model", 4)
+    assert reshaped.count(45) == 0
+    assert reshaped.client.get_collection(COLLECTION).config.params.shard_number == 2

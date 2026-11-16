@@ -85,7 +85,7 @@ libref/
 │   │   ├── document_store.py   # [P1/P3] pages/documents 读写、增量结局六态
 │   │   ├── fts5_store.py       # [P0] 全文本地分支：FTS5 契约面（触发器维护由 schema 承担）
 │   │   ├── postgres_fts.py     # [P2] 全文远程分支：关系库原生全文（tsvector 生成列 + ts_rank_cd）
-│   │   ├── vec_store.py        # [P0] 向量双后端（默认本地 simvec，Qdrant 保留）：写入/KNN/集合治理/诊断快照（真源 SQLite 的可重建派生索引）
+│   │   ├── vec_store.py        # [P0] 向量双后端（默认本地 simvec，Qdrant 保留）：写入/KNN/集合画像治理/索引重放/诊断快照（真源 SQLite 的可重建派生索引）
 │   │   ├── evidence.py         # [P3] 证据充分度：候选池与头部词项覆盖 → 可答/弱/不可答
 │   │   └── retriever.py        # [P3] FTS5 BM25 + 向量 KNN → RRF → 频次重排 → 段落重组
 │   │
@@ -177,7 +177,7 @@ mining ──────┘       llm（传输叶，只依赖 httpx；store 经
 3. **mining 纯内存算法**：不 import db/store，输入为纯 Python 数据（`list[list[int]]`），落库由 services 编排——保持算法可单测、可离线批跑。
 4. **astminer 与 crawler 互不依赖**：两条分支仅通过 db 汇合；SourceCode 类网页由 crawler 按 MIME 转投 astminer 的调用点经 services 编排。
 5. **跨包边界的 schema 均为 pydantic 模型**：抽取记录、调用实例、MCP 参数、REST 响应共用 `db/schema` 的定义派生，杜绝字段漂移。
-6. **向量后端仅 store 层可达**：`store/vec_store.py` 是唯一持有 `qdrant_client` 与 simvec 引擎句柄的模块；SQLite 为唯一真源，向量为可重建派生索引（失效后按 SQLite 重灌，不双写事务，见 docs/plan/qdrant-migration.md 与 docs/plan/simvec-integration.md）。
+6. **向量后端仅 store 层可达**：`store/vec_store.py` 是唯一持有 `qdrant_client` 与 simvec 引擎句柄的模块；SQLite 为唯一真源，向量为可重建派生索引（失效后按 SQLite 重灌，不双写事务，见 docs/plan/qdrant-migration.md 与 docs/plan/vector-storage-settings.md）。集合画像随模型与维度写入 `schema_meta`，并拆为两段：结构档（后端/距离/落盘/分片副本）漂移即重建集合，调优档（图参数/优化器阈值）就地重写、点保留。
 
 ## 3. 各阶段最小可运行单元（与 tech-stack.md §8 对齐）
 

@@ -11,6 +11,7 @@ import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import BeforeValidator, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -79,6 +80,53 @@ class LibrefSettings(BaseSettings):
     vector_backend: Literal["qdrant", "simvec"] = "simvec"
     simvec_dir: Path | None = None
     simvec_lib: str | None = None
+    # Vector settings shared by both backends. Distance and index-shape settings
+    # are part of the collection profile: changing any of them rebuilds the
+    # collection instead of migrating points. Search-time and connection
+    # settings never affect the on-disk index shape.
+    vector_distance: Literal["cosine", "euclid", "dot", "manhattan"] = "cosine"
+    vector_write_batch: int = Field(default=512, ge=1)
+    # Remote vector service connection. The API key is a secret and travels
+    # through the environment only; HTTPS defaults to on when a key is set.
+    qdrant_api_key: str | None = None
+    qdrant_https: bool | None = None
+    # Remote search-time knobs: ef widens the graph beam, exact forces a full scan.
+    qdrant_search_hnsw_ef: int | None = Field(default=None, ge=1)
+    qdrant_search_exact: bool = False
+    # Local engine collection shape. The local tier defaults to the crate's
+    # HNSW-first behaviour: exact scan serves until the live-point count crosses
+    # the promotion threshold, then the published graph takes over.
+    simvec_index: Literal["hnsw", "flat"] = "hnsw"
+    simvec_hnsw_m: int = Field(default=16, ge=2)
+    simvec_hnsw_ef_construct: int = Field(default=100, ge=4)
+    simvec_full_scan_threshold: int = Field(default=10000, ge=1)
+    simvec_hnsw_ef_search: int = Field(default=40, ge=1)
+    simvec_max_indexing_threads: int | None = Field(default=None, ge=1)
+    # Ceiling on points held by the derived index, shared by both backends. A write
+    # that would cross it fails instead of filling the disk; the index is derived,
+    # so a refused batch is replayable once capacity is raised.
+    vector_max_points: int | None = Field(default=None, ge=1)
+    # Remote transport. gRPC multiplexes many small batched calls over one
+    # connection; REST stays the default for compatibility with older servers.
+    qdrant_grpc: bool = False
+    qdrant_grpc_port: int = Field(default=6334, ge=1, le=65535)
+    qdrant_prefix: str | None = None
+    qdrant_pool_size: int | None = Field(default=None, ge=1)
+    # Remote collection shape: fixed at creation time, so any change rebuilds the
+    # collection and the points are re-embedded from the source of truth. None
+    # keeps the service default, which is what an unconfigured deployment gets.
+    qdrant_on_disk_vectors: bool | None = None
+    qdrant_on_disk_payload: bool | None = None
+    qdrant_shard_number: int | None = Field(default=None, ge=1)
+    qdrant_replication_factor: int | None = Field(default=None, ge=1)
+    qdrant_write_consistency_factor: int | None = Field(default=None, ge=1)
+    # Remote tuning: rewritten on the live collection, so existing points survive.
+    # Graph parameters and optimizer thresholds decide when a segment leaves memory.
+    qdrant_hnsw_m: int | None = Field(default=None, ge=2)
+    qdrant_hnsw_ef_construct: int | None = Field(default=None, ge=4)
+    qdrant_full_scan_threshold: int | None = Field(default=None, ge=1)
+    qdrant_memmap_threshold_kb: int | None = Field(default=None, ge=1)
+    qdrant_indexing_threshold_kb: int | None = Field(default=None, ge=1)
     # Storage backend selection: metadata/relations and full-text. SQLite and
     # FTS5 are the only wired backends; remote branches are scaffolding that
     # the assembly layer rejects until implemented.
@@ -201,6 +249,10 @@ class LibrefSettings(BaseSettings):
         list[str] | None, NoDecode, BeforeValidator(_split_tool_names)
     ] = None
     instance_id: str = "libref-1"
+    # Deployment identity for shared vector services: hosts that declare the
+    # same identifier derive the same collection name. Empty falls back to the
+    # instance identifier, keeping embedded single-host naming unchanged.
+    deployment_id: str = ""
     # Web exit: loopback-only by default; external exposure requires fronting auth.
     web_host: str = "127.0.0.1"
     web_port: int = Field(default=8001, ge=1, le=65535)
@@ -280,6 +332,37 @@ class LibrefSettings(BaseSettings):
             )
         return self
 
+    @model_validator(mode="after")
+    def _check_vector(self) -> LibrefSettings:
+        """Vector settings are validated here so a bad combination fails at load, not at first write."""
+        if self.vector_backend == "qdrant" and not str(self.qdrant_url or "").strip():
+            raise ValueError("qdrant_url is required when vector_backend is 'qdrant'")
+        if self.simvec_index == "hnsw":
+            floor = max(2 * self.simvec_hnsw_m, 4)
+            if self.simvec_hnsw_ef_construct < floor:
+                raise ValueError(
+                    "simvec_hnsw_ef_construct must be at least max(2*simvec_hnsw_m, 4)"
+                    f" ({floor}) for the hnsw tier"
+                )
+        # The same graph invariant holds remotely, but only when both sides are set:
+        # a lone value must not be constrained by a default the operator never chose.
+        if self.qdrant_hnsw_m is not None and self.qdrant_hnsw_ef_construct is not None:
+            floor = max(2 * self.qdrant_hnsw_m, 4)
+            if self.qdrant_hnsw_ef_construct < floor:
+                raise ValueError(
+                    "qdrant_hnsw_ef_construct must be at least max(2*qdrant_hnsw_m, 4)"
+                    f" ({floor})"
+                )
+        if (
+            self.qdrant_write_consistency_factor is not None
+            and self.qdrant_replication_factor is not None
+            and self.qdrant_write_consistency_factor > self.qdrant_replication_factor
+        ):
+            raise ValueError(
+                "qdrant_write_consistency_factor must not exceed qdrant_replication_factor"
+            )
+        return self
+
 
 SECRET_FIELDS = frozenset(
     {
@@ -290,6 +373,7 @@ SECRET_FIELDS = frozenset(
         "bootstrap_admin_key",
         "client_api_key",
         "postgres_url",
+        "qdrant_api_key",
     }
 )
 
@@ -304,7 +388,9 @@ def setting_or_default(settings: LibrefSettings | None, name: str):
 CONFIG_FILE_NAME = "libref.toml"
 
 SECTION_FIELDS: dict[str, frozenset[str]] = {
-    "server": frozenset({"db_path", "heartbeat_timeout", "instance_id"}),
+    "server": frozenset(
+        {"db_path", "heartbeat_timeout", "instance_id", "deployment_id"}
+    ),
     "crawler": frozenset(
         {
             "fetch_concurrency",
@@ -338,6 +424,33 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "vector_backend",
             "simvec_dir",
             "simvec_lib",
+            "vector_distance",
+            "vector_write_batch",
+            "qdrant_api_key",
+            "qdrant_https",
+            "qdrant_search_hnsw_ef",
+            "qdrant_search_exact",
+            "simvec_index",
+            "simvec_hnsw_m",
+            "simvec_hnsw_ef_construct",
+            "simvec_full_scan_threshold",
+            "simvec_hnsw_ef_search",
+            "simvec_max_indexing_threads",
+            "vector_max_points",
+            "qdrant_grpc",
+            "qdrant_grpc_port",
+            "qdrant_prefix",
+            "qdrant_pool_size",
+            "qdrant_on_disk_vectors",
+            "qdrant_on_disk_payload",
+            "qdrant_shard_number",
+            "qdrant_replication_factor",
+            "qdrant_write_consistency_factor",
+            "qdrant_hnsw_m",
+            "qdrant_hnsw_ef_construct",
+            "qdrant_full_scan_threshold",
+            "qdrant_memmap_threshold_kb",
+            "qdrant_indexing_threshold_kb",
             "metadata_backend",
             "fulltext_backend",
             "postgres_url",
@@ -494,6 +607,23 @@ PATH_FIELDS = frozenset(
 
 MASKED_VALUE = "***"
 
+URL_FIELDS = frozenset({"qdrant_url"})
+"""URL settings whose embedded credentials must never reach logs or fingerprints."""
+
+
+def _mask_url_credentials(value: str) -> str:
+    """Replace the password (or whole userinfo) of a URL, keeping scheme, host and path readable."""
+    parts = urlsplit(value)
+    if parts.username is None and parts.password is None:
+        return value
+    host = parts.hostname or ""
+    if parts.port is not None:
+        host = f"{host}:{parts.port}"
+    auth = f"{parts.username}:{MASKED_VALUE}@" if parts.password else f"{MASKED_VALUE}@"
+    return urlunsplit(
+        (parts.scheme, auth + host, parts.path, parts.query, parts.fragment)
+    )
+
 
 def resolve_config_file(explicit: str | Path | None = None) -> Path | None:
     """Locate the config file by explicit arg, current directory, then user config dir; None if not found."""
@@ -625,6 +755,10 @@ def redacted_dict(settings: LibrefSettings) -> dict[str, Any]:
     for key in SECRET_FIELDS:
         if dumped.get(key):
             dumped[key] = MASKED_VALUE
+    for key in URL_FIELDS:
+        value = dumped.get(key)
+        if isinstance(value, str):
+            dumped[key] = _mask_url_credentials(value)
     for key, value in dumped.items():
         if isinstance(value, Path):
             dumped[key] = str(value)

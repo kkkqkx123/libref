@@ -1,8 +1,9 @@
 """Storage assembly: build a bundle from settings.
 
-Backend selection happens here and only here. Remote branches are rejected at
-assembly time until their implementation lands, matching the project's
-forward-scaffolding convention.
+Backend selection for the metadata session and the full-text store happens here
+and only here. The vector handle is built by the settings-driven factory in the
+services layer and injected, because its construction needs the LLM gateway and
+must not be reached from the database layer.
 """
 
 from __future__ import annotations
@@ -50,14 +51,12 @@ def build_fulltext_store(settings, metadata: MetadataSession) -> FulltextStore:
     )
 
 
-def build_storage_bundle(settings, *, vector=None) -> Bundle:
-    """Assemble all three backends into one bundle."""
+def build_storage_bundle(settings, *, vector) -> Bundle:
+    """Assemble all three backends into one bundle.
+
+    The vector handle is built by the layer that owns settings-driven backend
+    selection and injected here; this module must not reach upward into services.
+    """
     metadata = build_metadata_session(settings)
     fulltext = build_fulltext_store(settings, metadata)
-    if vector is None:
-        from libref.llm import LlmGateway
-        from libref.services.infra.vectors import build_vector
-
-        gateway = LlmGateway(settings)
-        vector, _embed, _gw = build_vector(settings, gateway)
     return Bundle(metadata=metadata, fulltext=fulltext, vector=vector)

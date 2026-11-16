@@ -75,6 +75,8 @@ def test_ensure_collection_and_meta(
     assert store._engine.collection_exists(COLLECTION)
     assert _meta(conn, "vec_model") == "BAAI/bge-small-zh"
     assert _meta(conn, "vec_dim") == "4"
+    # The collection profile is recorded alongside model and dimension.
+    assert '"index": "hnsw"' in (_meta(conn, "vec_profile") or "")
     store.ensure_collection(conn, "BAAI/bge-small-zh", 4)  # idempotent
 
 

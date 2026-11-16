@@ -41,6 +41,8 @@ from libref.cli.ops_commands import (
     cmd_serve,
     cmd_serve_mcp,
     cmd_serve_web,
+    cmd_vectors_optimize,
+    cmd_vectors_status,
 )
 from libref.cli.registry_commands import (
     cmd_catalog,
@@ -867,6 +869,20 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[_config_parent],
     )
     p_fts_check.set_defaults(func=cmd_fts_check)
+
+    p_vectors_status = sub.add_parser(
+        "vectors-status",
+        help="Report vector index health: profile, reachability, points, filter indexes",
+        parents=[_config_parent],
+    )
+    p_vectors_status.set_defaults(func=cmd_vectors_status)
+
+    p_vectors_optimize = sub.add_parser(
+        "vectors-optimize",
+        help="Publish pending index maintenance now instead of waiting for the background pass",
+        parents=[_config_parent],
+    )
+    p_vectors_optimize.set_defaults(func=cmd_vectors_optimize)
 
     p_review = sub.add_parser(
         "review", help="Review pending call instances", parents=[_config_parent]
