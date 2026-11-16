@@ -76,8 +76,11 @@ CREATE TABLE IF NOT EXISTS documents(
   path TEXT GENERATED ALWAYS AS (metadata->>'path') STORED,
   content_tsv TSVECTOR GENERATED ALWAYS AS (
     setweight(to_tsvector('english', coalesce(metadata->>'title', '')), 'A')
-    || setweight(to_tsvector('english', coalesce(metadata->>'path', '')), 'C')
     || setweight(to_tsvector('english', coalesce(content, '')), 'B')
+    || setweight(to_tsvector('english',
+        regexp_replace(coalesce(metadata->>'path', ''), '[^[:alnum:]_]+', ' ', 'g')), 'C')
+    || setweight(to_tsvector('english',
+        regexp_replace(coalesce(url, ''), '[^[:alnum:]_]+', ' ', 'g')), 'D')
   ) STORED,
   tenant_id TEXT NOT NULL DEFAULT 'default',
   UNIQUE(page_id, sort_order)

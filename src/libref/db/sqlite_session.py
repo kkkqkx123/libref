@@ -107,7 +107,9 @@ class SqliteSession:
         return self._guard
 
     def table_columns(self, table: str) -> set[str]:
-        rows = self._conn.execute(f"PRAGMA table_info({table})").fetchall()
+        # table_xinfo includes generated columns (title/path), which table_info
+        # hides on some builds; every consumer only tests membership.
+        rows = self._conn.execute(f"PRAGMA table_xinfo({table})").fetchall()
         return {str(row[1]) for row in rows}
 
     def table_has_tenant(self, table: str) -> bool:

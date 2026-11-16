@@ -36,6 +36,7 @@ class Fts5FulltextStore:
             weights=weights,
             budget=budget,
             tenant_id=tenant_id,
+            version_ids=list(version_ids),
         )
 
     def delete_version(self, version_id: int, tenant_id: str | None = None) -> int:
@@ -49,9 +50,19 @@ class Fts5FulltextStore:
         return int(self.raw.execute(sql, params).rowcount)
 
     def count(self, version_id: int, tenant_id: str | None = None) -> int:
-        row = self.raw.execute(
-            "SELECT count(*) FROM documents WHERE version_id=?", (version_id,)
-        ).fetchone()
+        probe = getattr(self._session, "table_has_tenant", None)
+        scoped = tenant_id not in (None, "", "*") and (
+            probe is None or bool(probe("documents"))
+        )
+        if scoped:
+            row = self.raw.execute(
+                "SELECT count(*) FROM documents WHERE version_id=? AND tenant_id=?",
+                (version_id, tenant_id),
+            ).fetchone()
+        else:
+            row = self.raw.execute(
+                "SELECT count(*) FROM documents WHERE version_id=?", (version_id,)
+            ).fetchone()
         return int(row[0]) if row else 0
 
     def flush(self) -> None:

@@ -27,8 +27,49 @@ def _table_columns(conn: MetadataSession, table: str) -> set[str]:
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
+def _backend_name(conn: MetadataSession) -> str:
+    """Backend selector for DDL ownership; neutral snapshot, never a downcast."""
+    probe = getattr(conn, "diagnostics", None)
+    if not callable(probe):
+        return "sqlite"
+    try:
+        return str(probe().get("backend", "sqlite") or "sqlite")
+    except Exception:  # noqa: BLE001 -- unreadable snapshot means embedded default
+        return "sqlite"
+
+
+def _dialect_now(conn: MetadataSession) -> str:
+    dialect = getattr(conn, "dialect", None)
+    if dialect is not None:
+        return str(dialect.now())
+    return "datetime('now')"
+
+
 def ensure_jobs_table(conn: MetadataSession) -> None:
-    """Create governance tables and backfill job columns for legacy databases."""
+    """Create governance tables and backfill job columns for legacy databases.
+
+    DDL ownership stays with the backend: the shared PostgreSQL branch ships
+    the final shape in its consolidated script, so there is nothing to
+    backfill and a missing column is a schema bug, not a migration step.
+    """
+    if _backend_name(conn) == "postgres":
+        cols = _table_columns(conn, "jobs")
+        missing = {
+            "result",
+            "finished_at",
+            "tenant_id",
+            "principal_id",
+            "owner",
+            "cancel_requested",
+            "attempts",
+        } - cols
+        if missing:
+            from libref.db.contract import DbOperationalError
+
+            raise DbOperationalError(
+                f"postgres jobs table misses columns: {sorted(missing)}"
+            )
+        return
     from libref.db.schema import AUTH_TABLES_SQL, GOVERNANCE_SQL
 
     conn.executescript(GOVERNANCE_SQL)
@@ -58,6 +99,18 @@ def ensure_jobs_table(conn: MetadataSession) -> None:
 
 
 _STALE_AFTER = 600.0
+
+
+def _json_value(raw: Any, default: Any) -> Any:
+    """JSON column read across backends: TEXT on SQLite, parsed value on PostgreSQL."""
+    if raw is None:
+        return default
+    if isinstance(raw, (dict, list)):
+        return raw
+    try:
+        return json.loads(raw)
+    except ValueError, TypeError:
+        return default
 
 
 def summarize_result(value: object) -> object:
@@ -120,19 +173,36 @@ class JobManager:
         from libref.db.conn import write_lock
 
         with write_lock(self._conn):
-            cur = self._conn.execute(
-                "INSERT INTO jobs(kind, params, tenant_id, principal_id)"
-                " VALUES(?, ?, ?, ?)",
-                (
-                    kind,
-                    json.dumps(params or {}, ensure_ascii=False),
-                    tenant_id or "default",
-                    principal_id,
-                ),
-            )
+            # Contract insert returns the id on every backend; the embedded
+            # driver handle predates the contract and only offers lastrowid.
+            inserter = getattr(self._conn, "insert", None)
+            if callable(inserter):
+                job_id = int(
+                    inserter(
+                        "INSERT INTO jobs(kind, params, tenant_id, principal_id)"
+                        " VALUES(?, ?, ?, ?)",
+                        (
+                            kind,
+                            json.dumps(params or {}, ensure_ascii=False),
+                            tenant_id or "default",
+                            principal_id,
+                        ),
+                    )
+                )
+            else:
+                cur = self._conn.execute(
+                    "INSERT INTO jobs(kind, params, tenant_id, principal_id)"
+                    " VALUES(?, ?, ?, ?)",
+                    (
+                        kind,
+                        json.dumps(params or {}, ensure_ascii=False),
+                        tenant_id or "default",
+                        principal_id,
+                    ),
+                )
+                assert cur.lastrowid is not None
+                job_id = int(cur.lastrowid)
             self._conn.commit()
-        assert cur.lastrowid is not None
-        job_id = int(cur.lastrowid)
         logger.debug("job submitted id=%d kind=%s", job_id, kind)
         return job_id
 
@@ -177,14 +247,11 @@ class JobManager:
             ).fetchone()
         if row is None:
             return None
-        try:
-            result = json.loads(row[5]) if row[5] else {}
-        except ValueError:
-            result = {}
+        result = _json_value(row[5], {})
         return Job(
             id=row[0],
             kind=row[1],
-            params=json.loads(row[2]),
+            params=_json_value(row[2], {}),
             status=row[3],
             error=row[4],
             result=result,
@@ -225,15 +292,12 @@ class JobManager:
             ).fetchall()
         out: list[Job] = []
         for row in rows:
-            try:
-                result = json.loads(row[5]) if row[5] else {}
-            except ValueError:
-                result = {}
+            result = _json_value(row[5], {})
             out.append(
                 Job(
                     id=row[0],
                     kind=row[1],
-                    params=json.loads(row[2]),
+                    params=_json_value(row[2], {}),
                     status=row[3],
                     error=row[4],
                     result=result,
@@ -299,7 +363,8 @@ class JobManager:
             if row is not None and row[0] == "pending":
                 self._conn.execute(
                     "UPDATE jobs SET status='failed', error='cancelled',"
-                    " finished_at=datetime('now') WHERE id=? AND status='pending'",
+                    f" finished_at={_dialect_now(self._conn)}"
+                    " WHERE id=? AND status='pending'",
                     (job_id,),
                 )
                 self._conn.commit()

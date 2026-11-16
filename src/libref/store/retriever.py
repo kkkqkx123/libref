@@ -96,16 +96,21 @@ def fts_search(
     weights: tuple[float, float, float, float],
     budget: int,
     tenant_id: str | None = None,
+    version_ids: list[int] | None = None,
 ) -> list[tuple[int, float]]:
     """Single shared full-text read path, returning document ids with raw scores.
 
     Scores are raw match values in ascending order, best first. Without filters
     the database sorts and truncates. With filters the scope resolves to version
     ids first and only scoped candidates are ranked, so large unrelated versions
-    never enter the sort. An empty scope yields nothing.
+    never enter the sort. An empty scope yields nothing. An explicit version_ids
+    list bypasses library/version resolution and filters to those versions
+    directly, matching the full-text contract surface.
     """
     safe = safe_fts_query(query)
     if not safe or budget <= 0:
+        return []
+    if version_ids is not None and not [v for v in version_ids]:
         return []
     from libref.services.infra.tenant import is_global as _is_global_t
     from libref.services.infra.tenant import table_has_tenant as _has_tenant_t
@@ -124,6 +129,7 @@ def fts_search(
         or version is not None
         or ecosystem is not None
         or _tenant_scoped
+        or version_ids is not None
     )
     if not scoped:
         rows = conn.execute(
@@ -133,12 +139,20 @@ def fts_search(
             [safe, budget],
         ).fetchall()
         return [(int(r[0]), float(r[1])) for r in rows]
-    vids = _version_ids(
-        conn, library, version, ecosystem, tenant_id if _tenant_scoped else None
-    )
+    if version_ids is not None:
+        vids = [int(v) for v in version_ids]
+    else:
+        vids = _version_ids(
+            conn, library, version, ecosystem, tenant_id if _tenant_scoped else None
+        )
     if not vids:
         return []
     marks = ",".join("?" for _ in vids)
+    tenant_probe = ""
+    tenant_params: list[Any] = []
+    if _tenant_scoped and _has_tenant_t(conn, "documents"):
+        tenant_probe = " AND d.tenant_id = ?"
+        tenant_params = [str(tenant_id)]
     # The scope predicate is a correlated EXISTS rather than `rowid IN (subquery)`:
     # SQLite materialises an IN subquery into an unindexed list and probes it once per
     # index row, which turns a scoped search over a large corpus quadratic (seconds per
@@ -147,9 +161,9 @@ def fts_search(
         f"SELECT documents_fts.rowid, {_bm25_expr(weights)} FROM documents_fts "
         "WHERE documents_fts MATCH ? "
         "AND EXISTS (SELECT 1 FROM documents d WHERE d.id = documents_fts.rowid "
-        f"AND d.version_id IN ({marks})) "
+        f"AND d.version_id IN ({marks}){tenant_probe}) "
         f"ORDER BY {_bm25_expr(weights)} LIMIT ?",
-        [safe, *vids, budget],
+        [safe, *vids, *tenant_params, budget],
     ).fetchall()
     return [(int(r[0]), float(r[1])) for r in rows]
 
