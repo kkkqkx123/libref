@@ -40,6 +40,10 @@ def build_fulltext_store(settings, metadata: MetadataSession) -> FulltextStore:
         from libref.store.fts5_store import Fts5FulltextStore
 
         return Fts5FulltextStore(metadata)
+    if backend == "postgres":
+        from libref.store.postgres_fts import PostgresFulltextStore
+
+        return PostgresFulltextStore(metadata)
     raise ValueError(
         f"full-text backend {backend!r} is not wired yet; "
         "only 'fts5' is supported in this build"

@@ -190,7 +190,7 @@ def test_trilingual_ingest_end_to_end(conn, tmp_path, monkeypatch):
     assert ("cache.Cache.new", "EXTRACTED", "main") in calls
     assert ("Demo.Greeter.Helper", "EXTRACTED", "Demo.Greeter.Say") in calls
     assert any(
-        callee == "System.Console.WriteLine" and confidence == "AMBIGUOUS"
+        callee == "System.Console.WriteLine" and confidence == "INFERRED"
         for callee, confidence, _caller in calls
     )
     second = index_repo(conn, "tri", "0.1", str(repo), repos_dir=repos_dir)

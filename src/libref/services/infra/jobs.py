@@ -12,19 +12,22 @@ import asyncio
 import json
 import logging
 import os
-import sqlite3
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from libref.db.contract import MetadataSession
+
 logger = logging.getLogger(__name__)
 
 
-def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+def _table_columns(conn: MetadataSession, table: str) -> set[str]:
+    if hasattr(conn, "table_columns"):
+        return conn.table_columns(table)
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
-def ensure_jobs_table(conn: sqlite3.Connection) -> None:
+def ensure_jobs_table(conn: MetadataSession) -> None:
     """Create governance tables and backfill job columns for legacy databases."""
     from libref.db.schema import AUTH_TABLES_SQL, GOVERNANCE_SQL
 
@@ -90,7 +93,7 @@ class JobManager:
 
     def __init__(
         self,
-        conn: sqlite3.Connection,
+        conn: MetadataSession,
         *,
         stale_after: float = _STALE_AFTER,
         instance_id: str = "libref-1",
@@ -414,7 +417,7 @@ class JobManager:
                 "SELECT id FROM jobs WHERE status='running' AND ("
                 "heartbeat_at IS NULL OR ? - heartbeat_at > ?) ORDER BY id",
                 (time.time(), self._stale_after),
-            )
+            ).fetchall()
         ]
         for job_id in stale_ids:
             if requeue:

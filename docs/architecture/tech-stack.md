@@ -143,6 +143,7 @@ grammar wheel 与 py-tree-sitter 存在 ABI 兼容窗口，`uv.lock` 钉死全�
 - FTS5：`tokenize='porter unicode61'`，触发器同步（按列收窄的 update 触发器照搬）。
 - 向量：**单集合**（`libref_chunks` 按库文件派生隔离），Point id=documents.id，payload 只存 `library_id`/`version_id` 过滤键，正文命中后回 SQLite 取；模型/维度变更时集合删除重建（元数据记于 schema_meta）。默认本地 simvec 引擎（进程内，Qdrant 语义的本地实现），Qdrant 服务保留为可选后端（`version_id` 整数索引 `is_principal=True` 租户优化）。
 - 检索：FTS5 BM25（四列加权，标题最高、路径次之、正文与地址为基准，权重与融合常数均为配置项）+ 向量 KNN（COSINE，version_id 过滤）两路 → **RRF 融合** → 同源去重 → 可选精排 → 频次特征重排（本课题创新：seq_patterns 支持度作为加权项）→ 段落重组（按页内序号扩展兄弟块）；向量不可用时降级为 FTS-only 单路。
+- **存储后端抽象**（见 docs/plan/storage-backend-abstraction.md）：元数据会话与全文检索收敛为后端中立契约（`db/contract.py`），装配根 `db/assembly.py` 是唯一后端选择点，产出不可变 `StorageBundle`。元数据后端为 SQLite（本地分支）或 PostgreSQL（共享分支，psycopg3 连接池，合并 DDL 面向新部署，不做旧数据迁移）；全文后端为 FTS5（本地）或关系库原生全文（远程，`websearch_to_tsquery` + `ts_rank_cd`，四字段权重映射 A/B/C/D 权重档）；向量沿用 simvec/Qdrant 双分支并补齐后端中立诊断快照。多副本运行时支持 drain 与配置快照指纹核对（`services/infra/runtime.py`）；向量集合名在声明部署身份时按部署标识派生，不再依赖本地数据库文件路径。后端切换即全量重建，不迁移旧数据。
 
 ---
 

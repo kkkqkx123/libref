@@ -195,7 +195,11 @@ def generic_dotted(node: Any, source: bytes) -> str:
         return ""
     if node.type == "identifier":
         return slice_text(node, source).strip()
-    return slice_text(node, source).replace(" ", "").strip()
+    # Fallback for composite expressions (chained calls, member chains):
+    # strip every whitespace run, including newlines, so multi-line chains
+    # keep a lookup-friendly name instead of carrying a trailing newline
+    # into the alias head.
+    return "".join(slice_text(node, source).split())
 
 
 def _is_literal(node: Any) -> bool:

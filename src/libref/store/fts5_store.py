@@ -39,7 +39,14 @@ class Fts5FulltextStore:
         )
 
     def delete_version(self, version_id: int, tenant_id: str | None = None) -> int:
-        return 0
+        # FTS5 index rows are maintained by the schema triggers, so deleting
+        # document rows is the whole operation.
+        sql = "DELETE FROM documents WHERE version_id=?"
+        params: list[Any] = [version_id]
+        if tenant_id not in (None, "", "*"):
+            sql += " AND tenant_id=?"
+            params.append(tenant_id)
+        return int(self.raw.execute(sql, params).rowcount)
 
     def count(self, version_id: int, tenant_id: str | None = None) -> int:
         row = self.raw.execute(

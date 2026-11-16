@@ -7,7 +7,7 @@ bypasses row filtering but forces audit writes.
 
 from __future__ import annotations
 
-import sqlite3
+from typing import Any
 
 DEFAULT_TENANT = "default"
 DEV_TENANT = "dev"
@@ -29,16 +29,18 @@ def is_global(tenant_id: str) -> bool:
     return tenant_id == GLOBAL_TENANT
 
 
-def table_has_tenant(conn: sqlite3.Connection, table: str) -> bool:
+def table_has_tenant(conn: Any, table: str) -> bool:
     """Whether the given table carries a tenant column in this database."""
     if table in _EXEMPT_TABLES:
         return False
+    if hasattr(conn, "table_has_tenant"):
+        return bool(conn.table_has_tenant(table))
     rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
     return any(row[1] == "tenant_id" for row in rows)
 
 
 def tenant_clause(
-    conn: sqlite3.Connection, table: str, tenant_id: str, alias: str | None = None
+    conn: Any, table: str, tenant_id: str, alias: str | None = None
 ) -> tuple[str, list[str]]:
     """Build a tenant predicate for one table; empty when exempt or global."""
     if is_global(tenant_id):
@@ -58,7 +60,7 @@ def require_tenant(tenant_id: str | None) -> str:
 
 
 def resolve_version_id(
-    conn: sqlite3.Connection,
+    conn: Any,
     tenant_id: str,
     library: str,
     version: str,
@@ -84,7 +86,7 @@ def resolve_version_id(
     return int(row[0])
 
 
-def library_ids(conn: sqlite3.Connection, tenant_id: str) -> list[int] | None:
+def library_ids(conn: Any, tenant_id: str) -> list[int] | None:
     """Version-owning library ids visible to one tenant; None means unfiltered."""
     tenant_id = require_tenant(tenant_id)
     if is_global(tenant_id):

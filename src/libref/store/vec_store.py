@@ -28,6 +28,25 @@ def collection_for(base: str, db_path: str | os.PathLike[str]) -> str:
     return f"{base}_{digest}"
 
 
+def collection_for_deployment(base: str, settings) -> str:
+    """Derive the collection name from deployment identity when declared.
+
+    Remote deployments share one vector service across hosts, so a local
+    database file path is meaningless as identity; the explicit deployment
+    identifier is used instead. Without one, naming falls back to the file
+    identity for embedded single-host runs.
+    """
+    deployment = str(
+        getattr(settings, "deployment_id", "")
+        or getattr(settings, "instance_id", "")
+        or ""
+    ).strip()
+    if deployment:
+        digest = hashlib.sha1(deployment.encode("utf-8")).hexdigest()[:12]
+        return f"{base}_{digest}"
+    return collection_for(base, settings.db_path)
+
+
 _WRITE_BATCH = 512
 """Single backend call carries at most this many points; callers keep one-call semantics."""
 
@@ -62,6 +81,10 @@ class VectorStore(Protocol):
     def list_ids(
         self, version_id: int, *, batch: int = 512, tenant_id: str | None = None
     ) -> list[int]: ...
+
+    def diagnostics(self) -> dict[str, Any]:
+        """Backend-neutral health snapshot: reachability, collection state, point count."""
+        ...
 
 
 def _write_vec_meta(conn: sqlite3.Connection, model: str, dim: int) -> None:
@@ -431,6 +454,27 @@ class QdrantVecStore(VectorStore):
             ]
         )
 
+    def diagnostics(self) -> dict[str, Any]:
+        """Backend-neutral health snapshot for the remote vector service."""
+        info: dict[str, Any] = {
+            "backend": "qdrant",
+            "collection": self.collection,
+        }
+        try:
+            exists = self.client.collection_exists(self.collection)
+            info["collection_exists"] = exists
+            if exists:
+                res = self.client.count(collection_name=self.collection, exact=True)
+                info["points"] = int(getattr(res, "count", 0) or 0)
+                dim = self._collection_dim()
+                if dim is not None:
+                    info["dim"] = dim
+            info["reachable"] = True
+        except Exception as exc:  # noqa: BLE001 — diagnostics must not raise
+            info["reachable"] = False
+            info["error"] = str(exc)
+        return info
+
 
 # ── Local backend over the crates/simvec submodule ──
 
@@ -771,3 +815,21 @@ class SimvecVecStore(VectorStore):
             off = pg.get("next_offset")
             if not off:
                 return scoped
+
+    def diagnostics(self) -> dict[str, Any]:
+        """Backend-neutral health snapshot for the local vector engine."""
+        info: dict[str, Any] = {
+            "backend": "simvec",
+            "collection": self.collection,
+            "root": str(self.root),
+        }
+        try:
+            exists = self._engine.collection_exists(self.collection)
+            info["collection_exists"] = exists
+            if exists:
+                info["points"] = int(self._engine.count_by_filter(self.collection, {}))
+            info["reachable"] = True
+        except Exception as exc:  # noqa: BLE001 — diagnostics must not raise
+            info["reachable"] = False
+            info["error"] = str(exc)
+        return info

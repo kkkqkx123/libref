@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 
 from libref.cli.common import (
@@ -350,6 +351,7 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
     except Exception:  # noqa: BLE001, S110
         pass
     mcp = build_mcp_server(conn, settings)
+    _verify_fingerprint(settings, conn)
     if args.http:
         host = args.host or settings.mcp_host
         port = args.port or settings.mcp_port
@@ -357,8 +359,33 @@ def cmd_serve_mcp(args: argparse.Namespace) -> int:
         mcp.run("streamable-http", host=host, port=port, streamable_http_path=path)
     else:
         mcp.run("stdio")
-    conn.close()
+    _drain_and_close(settings, conn)
     return 0
+
+
+def _verify_fingerprint(settings, conn) -> None:
+    """Refuse to serve when this replica's settings diverge from the fleet."""
+    from libref.services.infra.runtime import check_config_fingerprint
+
+    if not check_config_fingerprint(conn, settings):
+        print(
+            "config error: settings fingerprint diverges from the shared "
+            "control plane; refusing to serve",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+
+def _drain_and_close(settings, conn) -> None:
+    """Graceful exit for serving commands: drain in-flight jobs, release storage."""
+    from libref.services.infra.jobs import JobManager
+    from libref.services.infra.runtime import drain
+
+    try:
+        drain(JobManager(conn), timeout=float(getattr(settings, "drain_timeout", 30.0)))
+    except Exception:
+        logging.getLogger(__name__).debug("drain on shutdown failed", exc_info=True)
+    conn.close()
 
 
 def cmd_serve_web(args: argparse.Namespace) -> int:
@@ -395,10 +422,11 @@ def cmd_serve_web(args: argparse.Namespace) -> int:
         rerank=gateway.rerank_fn(),
         chat=gateway.chat_fn(),
     )
+    _verify_fingerprint(settings, conn)
     host = args.host or settings.web_host
     port = args.port or settings.web_port
     uvicorn.run(app, host=host, port=port, log_level="warning")
-    conn.close()
+    _drain_and_close(settings, conn)
     return 0
 
 

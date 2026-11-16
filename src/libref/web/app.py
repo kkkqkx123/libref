@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import sqlite3
+import logging
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 
 from libref.config import LibrefSettings, settings_fingerprint
 from libref.crawler.registry import RegistryError
+from libref.db.contract import MetadataSession
 from libref.mcp_server.auth import verify_bearer
 from libref.services.code.mining_read import MiningReadService
 from libref.services.docs.pages import PageService
@@ -49,7 +50,7 @@ def _split_list(raw: str | None) -> list[str] | None:
 
 
 def build_web_app(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     settings: LibrefSettings,
     *,
     vec_store=None,
@@ -67,7 +68,29 @@ def build_web_app(
     catalog = LibraryService(conn)
     mining = MiningReadService(conn, settings)
     review = ReviewService(conn)
-    app = FastAPI(title="libref")
+    from contextlib import asynccontextmanager
+
+    from libref.services.infra.runtime import check_config_fingerprint, drain
+
+    @asynccontextmanager
+    async def _lifespan(app):
+        if context is not None:
+            try:
+                session = context.connect()
+                check_config_fingerprint(session, settings)
+            except Exception:
+                logging.getLogger(__name__).debug(
+                    "fingerprint check skipped", exc_info=True
+                )
+        yield
+        try:
+            session = context.connect() if context is not None else None
+            manager = session and context.job_manager
+            drain(manager, timeout=float(getattr(settings, "drain_timeout", 30.0)))
+        except Exception:
+            logging.getLogger(__name__).debug("drain on shutdown failed", exc_info=True)
+
+    app = FastAPI(title="libref", lifespan=_lifespan)
     app.state.context = context
     app.state.settings = settings
 

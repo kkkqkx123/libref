@@ -16,6 +16,7 @@ dependencies = [
     "mcp>=2.3.0",
     "psycopg>=3.3.9",
     "psycopg-binary>=3.3.9",
+    "psycopg-pool>=3.3.3",
     "pydantic>=2.8",
     "pydantic-settings>=2.4",
     "qdrant-client>=1.20.0",

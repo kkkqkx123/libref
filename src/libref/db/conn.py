@@ -23,17 +23,21 @@ def open_db(path: str | Path, *, check_same_thread: bool = True) -> sqlite3.Conn
     return conn
 
 
-def write_lock(conn: sqlite3.Connection) -> threading.RLock:
-    """Per-connection reentrant write guard shared by every writer on that connection.
+def write_lock(handle) -> threading.RLock:
+    """Reentrant write guard shared by every writer on one storage handle.
 
-    Writers hold it only around synchronous statement batches, never across awaits
-    or sleeps, so the event loop never blocks on it.
+    Metadata sessions carry their own guard and it is used directly. Writers
+    hold it only around synchronous statement batches, never across awaits or
+    sleeps, so the event loop never blocks on it.
     """
-    guard = getattr(conn, "_libref_write_guard", None)
+    own = getattr(handle, "write_lock", None)
+    if callable(own) and not isinstance(handle, sqlite3.Connection):
+        return own()
+    guard = getattr(handle, "_libref_write_guard", None)
     if guard is None:
         guard = threading.RLock()
         try:
-            conn._libref_write_guard = guard  # type: ignore[attr-defined]
+            handle._libref_write_guard = guard  # type: ignore[attr-defined]
         except AttributeError:
             return guard
     return guard

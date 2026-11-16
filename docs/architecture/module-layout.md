@@ -26,7 +26,13 @@ libref/
 │   │   │                       #      documents_fts + 扩展表
 │   │   │                       #      api_entities/call_instances/seq_patterns/review_status/schema_meta
 │   │   ├── migrations.py       # [P0] 版本化迁移（对齐 docs-mcp-server 迁移语义）
-│   │   └── conn.py             # [P0] 连接管理（PRAGMA）；向量通道在 store/vec_store
+│   │   ├── conn.py             # [P0] 连接管理（PRAGMA）；向量通道在 store/vec_store
+│   │   ├── contract.py         # [P0] 后端中立存储契约：MetadataSession / FulltextStore / 错误分级
+│   │   ├── storage_bundle.py   # [P0] StorageBundle：元数据 + 全文 + 向量三句柄聚合
+│   │   ├── assembly.py         # [P0] 装配根：按配置选择后端，唯一后端选择点
+│   │   ├── sqlite_session.py   # [P0] SQLite 本地分支（嵌入式会话）
+│   │   ├── postgres_schema.py  # [P2] PostgreSQL 汇总 DDL（远程分支面向新部署，不做旧数据迁移）
+│   │   └── postgres_session.py # [P2] PostgreSQL 共享分支（psycopg3 连接池，契约全量实现）
 │   │
 │   ├── crawler/                # ── 分支 A：文档抓取（借鉴 crawl4ai 算法，自研实现）──
 │   │   ├── __init__.py
@@ -77,7 +83,9 @@ libref/
 │   ├── store/                  # ── 知识库与检索 ──
 │   │   ├── __init__.py
 │   │   ├── document_store.py   # [P1/P3] pages/documents 读写、增量结局六态
-│   │   ├── vec_store.py        # [P0] 向量双后端（默认本地 simvec，Qdrant 保留）：写入/KNN/集合治理（真源 SQLite 的可重建派生索引）
+│   │   ├── fts5_store.py       # [P0] 全文本地分支：FTS5 契约面（触发器维护由 schema 承担）
+│   │   ├── postgres_fts.py     # [P2] 全文远程分支：关系库原生全文（tsvector 生成列 + ts_rank_cd）
+│   │   ├── vec_store.py        # [P0] 向量双后端（默认本地 simvec，Qdrant 保留）：写入/KNN/集合治理/诊断快照（真源 SQLite 的可重建派生索引）
 │   │   ├── evidence.py         # [P3] 证据充分度：候选池与头部词项覆盖 → 可答/弱/不可答
 │   │   └── retriever.py        # [P3] FTS5 BM25 + 向量 KNN → RRF → 频次重排 → 段落重组
 │   │

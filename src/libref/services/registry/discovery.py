@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sqlite3
 import time
 
 import httpx
 from pydantic import BaseModel, Field
 
 from libref.crawler.registry import SUPPORTED_ECOSYSTEMS, RegistryError
+from libref.db.contract import MetadataSession
 from libref.services.registry.resolver import is_fresh
 
 
@@ -145,7 +145,7 @@ def rank_candidates(
 class DiscoveryService:
     """Fuzzy library search with cache; the only reader/writer of discovery_cache."""
 
-    def __init__(self, conn: sqlite3.Connection, settings=None) -> None:
+    def __init__(self, conn: MetadataSession, settings=None) -> None:
         self._conn = conn
         self._settings = settings
 

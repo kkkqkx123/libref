@@ -10,9 +10,10 @@ import hashlib
 import hmac
 import json
 import secrets
-import sqlite3
 import time
 from dataclasses import dataclass, field
+
+from libref.db.contract import MetadataSession
 
 ROLE_SCOPES: dict[str, frozenset[str]] = {
     "developer": frozenset({"read", "feedback:write"}),
@@ -71,7 +72,7 @@ def _parse_json_list(raw: str | None) -> list[str]:
     return [str(item) for item in value if str(item).strip()]
 
 
-def _principal_from_row(row: sqlite3.Row | tuple) -> Principal:
+def _principal_from_row(row: tuple) -> Principal:
     return Principal(
         id=int(row[0]),
         tenant_id=str(row[1]),
@@ -82,7 +83,7 @@ def _principal_from_row(row: sqlite3.Row | tuple) -> Principal:
     )
 
 
-def ensure_auth_tables(conn: sqlite3.Connection) -> None:
+def ensure_auth_tables(conn: MetadataSession) -> None:
     """Create identity tables when absent; idempotent for fresh test databases."""
     from libref.db.schema import AUTH_TABLES_SQL
 
@@ -90,12 +91,14 @@ def ensure_auth_tables(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+def _columns(conn: MetadataSession, table: str) -> set[str]:
+    if hasattr(conn, "table_columns"):
+        return conn.table_columns(table)
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
 def create_principal(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     *,
     tenant_id: str,
     kind: str,
@@ -114,7 +117,7 @@ def create_principal(
 
 
 def issue_api_key(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     *,
     principal_id: int,
     scopes: list[str] | None = None,
@@ -140,7 +143,7 @@ def issue_api_key(
     return int(cur.lastrowid), raw
 
 
-def revoke_api_key(conn: sqlite3.Connection, key_id: int) -> None:
+def revoke_api_key(conn: MetadataSession, key_id: int) -> None:
     """Mark a key revoked; revoked keys stop authenticating immediately."""
     ensure_auth_tables(conn)
     cur = conn.execute(
@@ -153,7 +156,7 @@ def revoke_api_key(conn: sqlite3.Connection, key_id: int) -> None:
 
 
 def lookup_principal(
-    conn: sqlite3.Connection, raw_key: str, *, now: float | None = None
+    conn: MetadataSession, raw_key: str, *, now: float | None = None
 ) -> Principal | None:
     """Resolve a bearer key to its principal; expired or revoked keys miss."""
     ensure_auth_tables(conn)
@@ -197,7 +200,7 @@ def dev_principal(settings) -> Principal:
     )
 
 
-def bootstrap_admin(conn: sqlite3.Connection, raw_key: str) -> Principal:
+def bootstrap_admin(conn: MetadataSession, raw_key: str) -> Principal:
     """Idempotently create the first platform administrator from a bootstrap key."""
     ensure_auth_tables(conn)
     existing = lookup_principal(conn, raw_key)

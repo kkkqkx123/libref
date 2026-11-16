@@ -283,7 +283,7 @@ def test_groovy_qualified_extends_base(monkeypatch, tmp_path):
     assert any("foo.Bar" in b or b == "foo.Bar" for b in by_qual["a.C"].bases)
 
 
-def test_jvm_stdlib_targets_are_ambiguous(monkeypatch, tmp_path):
+def test_jvm_stdlib_targets_are_recognized(monkeypatch, tmp_path):
     assert ast_resolution._is_stdlib_target("kotlin.collections.listOf")
     assert ast_resolution._is_stdlib_target("kotlinx.coroutines.launch")
     assert ast_resolution._is_stdlib_target("groovy.lang.Closure.call")
@@ -359,7 +359,7 @@ def test_java_method_reference_shapes(monkeypatch, tmp_path):
         decls, {"A.java": aliases}, raw, "test/repo"
     )
     by_resolved = {(c.caller_file, c.raw_callee): c for c in resolved}
-    assert by_resolved[("A.java", "String.valueOf")].confidence == "AMBIGUOUS"
+    assert by_resolved[("A.java", "String.valueOf")].confidence == "INFERRED"
     assert by_resolved[("A.java", "this.helper")].callee == "A.helper"
     assert by_resolved[("A.java", "this.helper")].confidence == "EXTRACTED"
 

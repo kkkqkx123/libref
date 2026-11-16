@@ -102,9 +102,8 @@ class VersionGuard:
         return False
 
     async def _claim(self) -> None:
-        import sqlite3 as _sqlite3
-
         from libref.db.conn import write_lock as _guard
+        from libref.db.contract import DbIntegrityError
 
         ensure_version_locks(self._conn)
         attempt = 0
@@ -118,7 +117,7 @@ class VersionGuard:
                     )
                     self._conn.commit()
                 return
-            except _sqlite3.IntegrityError:
+            except DbIntegrityError:
                 try:
                     self._conn.rollback()
                 except Exception:  # noqa: BLE001, S110 — nothing left to roll back
@@ -210,9 +209,8 @@ class VersionGuardSync:
         return False
 
     def _claim(self) -> None:
-        import sqlite3 as _sqlite3
-
         from libref.db.conn import write_lock as _guard
+        from libref.db.contract import DbIntegrityError
 
         ensure_version_locks(self._conn)
         attempt = 0
@@ -226,7 +224,7 @@ class VersionGuardSync:
                     )
                     self._conn.commit()
                 return
-            except _sqlite3.IntegrityError:
+            except DbIntegrityError:
                 try:
                     self._conn.rollback()
                 except Exception:  # noqa: BLE001, S110 — nothing left to roll back

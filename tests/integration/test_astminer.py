@@ -300,7 +300,7 @@ def test_layout_guess_is_ambiguous_without_scope_signal(monkeypatch, tmp_path):
     assert resolved[0].confidence == "AMBIGUOUS"
 
 
-def test_stdlib_alias_target_is_ambiguous(monkeypatch, tmp_path):
+def test_stdlib_alias_target_is_inferred(monkeypatch, tmp_path):
     from libref.astminer.models import ApiDeclRecord, RawCall
 
     decls = [
@@ -325,7 +325,8 @@ def test_stdlib_alias_target_is_ambiguous(monkeypatch, tmp_path):
         decls, {"m.py": [("os", "os", None)]}, raw, "r"
     )
     assert resolved[0].callee == "os.path.join"
-    assert resolved[0].confidence == "AMBIGUOUS"
+    assert resolved[0].confidence == "INFERRED"
+    assert resolved[0].resolve_kind == "stdlib"
     third = [
         RawCall(
             raw_callee="np.array",

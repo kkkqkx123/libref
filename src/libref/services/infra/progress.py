@@ -8,19 +8,23 @@ the run restarts from zero instead of skipping the wrong segment.
 from __future__ import annotations
 
 import hashlib
-import sqlite3
 
+from libref.db.contract import MetadataSession
 from libref.db.schema import PROGRESS_SQL
 
 DOCS_KIND = "docs"
 CODE_KIND = "code"
 
 
-def ensure_progress_table(conn: sqlite3.Connection) -> None:
+def ensure_progress_table(conn: MetadataSession) -> None:
     conn.executescript(PROGRESS_SQL)
-    cols = {
-        row[1] for row in conn.execute("PRAGMA table_info(ingest_progress)").fetchall()
-    }
+    if hasattr(conn, "table_columns"):
+        cols = conn.table_columns("ingest_progress")
+    else:
+        cols = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(ingest_progress)").fetchall()
+        }
     if "vector_done" not in cols:
         conn.execute(
             "ALTER TABLE ingest_progress ADD COLUMN vector_done INTEGER NOT NULL DEFAULT 0"
@@ -45,7 +49,7 @@ def fingerprint_of(items: list[str]) -> str:
 
 
 def load_progress(
-    conn: sqlite3.Connection, version_id: int, kind: str
+    conn: MetadataSession, version_id: int, kind: str
 ) -> dict[str, int | str] | None:
     ensure_progress_table(conn)
     row = conn.execute(
@@ -65,7 +69,7 @@ def load_progress(
 
 
 def save_progress(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     version_id: int,
     kind: str,
     *,
@@ -94,7 +98,7 @@ def save_progress(
 
 
 def save_vector_watermark(
-    conn: sqlite3.Connection, version_id: int, kind: str, vector_done: int
+    conn: MetadataSession, version_id: int, kind: str, vector_done: int
 ) -> None:
     """Record vector progress ahead of the cursor; the cursor follows afterwards."""
     from libref.db.conn import write_lock
@@ -111,7 +115,7 @@ def save_vector_watermark(
         conn.commit()
 
 
-def clear_progress(conn: sqlite3.Connection, version_id: int, kind: str) -> None:
+def clear_progress(conn: MetadataSession, version_id: int, kind: str) -> None:
     from libref.db.conn import write_lock
 
     ensure_progress_table(conn)
@@ -124,7 +128,7 @@ def clear_progress(conn: sqlite3.Connection, version_id: int, kind: str) -> None
 
 
 def save_pending(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     version_id: int,
     kind: str,
     pending: list[str] | list[tuple[str, int]],
@@ -153,7 +157,7 @@ def save_pending(
 
 
 def load_pending(
-    conn: sqlite3.Connection, version_id: int, kind: str
+    conn: MetadataSession, version_id: int, kind: str
 ) -> list[tuple[str, int]]:
     """Follow queue saved by the previous attempt as (url, depth) pairs.
 
@@ -183,7 +187,7 @@ def load_pending(
 
 
 def resume_offset(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     version_id: int,
     kind: str,
     items: list[str],
@@ -206,7 +210,7 @@ def resume_offset(
 
 
 def save_visited(
-    conn: sqlite3.Connection, version_id: int, kind: str, visited: set[str] | list[str]
+    conn: MetadataSession, version_id: int, kind: str, visited: set[str] | list[str]
 ) -> None:
     """Persist the follow visited set alongside the queue; sorted for a stable snapshot."""
     import json as _json
@@ -225,7 +229,7 @@ def save_visited(
         conn.commit()
 
 
-def load_visited(conn: sqlite3.Connection, version_id: int, kind: str) -> list[str]:
+def load_visited(conn: MetadataSession, version_id: int, kind: str) -> list[str]:
     """Visited set saved by the previous attempt; empty when nothing was saved."""
     import json as _json
 

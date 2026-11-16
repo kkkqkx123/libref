@@ -1,11 +1,17 @@
-"""Shared runtime context for combined Web and MCP serving."""
+"""Shared runtime context for combined Web and MCP serving.
+
+The context owns the storage bundle assembled from settings; request-scoped
+services receive the metadata session instead of raw driver connections, so
+backend selection stays in the assembly layer.
+"""
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
+
+from libref.db.contract import MetadataSession
+from libref.db.storage_bundle import Bundle
 
 
 @dataclass
@@ -13,26 +19,42 @@ class AppContext:
     """Generation-guarded runtime: settings snapshot plus shared dependencies."""
 
     settings: Any
-    db_path: Path
+    db_path: Any  # retained for instance-local caches (simvec roots, snapshots)
     gateway: Any = None
     vec_store: Any = None
     embed: Any = None
     generation: int = 0
     job_manager: Any = None
+    storage: Bundle | None = None
 
-    def connect(self, *, check_same_thread: bool = True) -> sqlite3.Connection:
-        """Open a short-lived connection; migrations run once at startup."""
-        from libref.db import apply_migrations, open_db
+    def connect(self, *, check_same_thread: bool = True) -> MetadataSession:
+        """Open the metadata session for one request or worker scope.
 
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = open_db(self.db_path, check_same_thread=check_same_thread)
-        try:
-            apply_migrations(conn)
-        except Exception:  # noqa: BLE001, S110
-            pass
-        return conn
+        The SQLite branch opens a short-lived session and runs migrations once
+        per call cheaply (idempotent); the PostgreSQL branch returns the pooled
+        session whose named operations are atomic on their own.
+        """
+        from libref.db.assembly import build_metadata_session
 
-    def services_for(self, conn):
+        if self.storage is not None:
+            session = self.storage.metadata
+            if getattr(self.settings, "metadata_backend", "sqlite") != "sqlite":
+                return session
+            session.apply_migrations()
+            return session
+        if getattr(self.settings, "metadata_backend", "sqlite") == "postgres":
+            session = build_metadata_session(self.settings)
+            session.apply_migrations()
+            return session
+        from pathlib import Path
+
+        path = Path(str(self.db_path))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        session = build_metadata_session(self.settings)
+        session.apply_migrations()
+        return session
+
+    def services_for(self, conn: MetadataSession):
         """Build request-scoped services from the current generation dependencies."""
         from libref.services.code.mining_read import MiningReadService
         from libref.services.docs.pages import PageService
@@ -79,27 +101,40 @@ class AppContext:
         }
 
 
+def _instance_db_path(settings) -> Any:
+    from pathlib import Path
+
+    return Path(str(settings.db_path))
+
+
 def build_context(settings) -> AppContext:
-    """Assemble gateway, vectors, and job state for one settings snapshot."""
+    """Assemble storage bundle, gateway, vectors and job state for one snapshot."""
+    from libref.db.assembly import build_storage_bundle
     from libref.services.factory import build_gateway
     from libref.services.infra.vectors import build_vector
 
     gateway = build_gateway(settings)
     vec_store, embed, gateway = build_vector(settings, gateway)
+    try:
+        storage = build_storage_bundle(settings, vector=vec_store)
+    except Exception:  # noqa: BLE001 — remote backends may be unwired in this build
+        storage = None
     ctx = AppContext(
         settings=settings,
-        db_path=Path(str(settings.db_path)),
+        db_path=_instance_db_path(settings),
         gateway=gateway,
         vec_store=vec_store,
         embed=embed,
         generation=0,
         job_manager=None,
+        storage=storage,
     )
     return ctx
 
 
 def refresh_context(ctx: AppContext, settings) -> AppContext:
     """Rebuild derived dependencies for a new frozen snapshot."""
+    from libref.db.assembly import build_storage_bundle
     from libref.observe import setup_logging
     from libref.services.factory import build_gateway
     from libref.services.infra.vectors import build_vector
@@ -107,12 +142,17 @@ def refresh_context(ctx: AppContext, settings) -> AppContext:
     gateway = build_gateway(settings)
     vec_store, embed, gateway = build_vector(settings, gateway)
     setup_logging(settings)
+    try:
+        storage = build_storage_bundle(settings, vector=vec_store)
+    except Exception:  # noqa: BLE001 — remote backends may be unwired in this build
+        storage = None
     return AppContext(
         settings=settings,
-        db_path=Path(str(settings.db_path)),
+        db_path=_instance_db_path(settings),
         gateway=gateway,
         vec_store=vec_store,
         embed=embed,
         generation=ctx.generation + 1,
         job_manager=ctx.job_manager,
+        storage=storage,
     )

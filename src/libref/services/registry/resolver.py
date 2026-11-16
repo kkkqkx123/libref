@@ -6,8 +6,8 @@ The only place that reads and writes the registry cache table. Library metadata 
 from __future__ import annotations
 
 import json
-import sqlite3
 import time
+from typing import Any
 
 from libref.crawler.registry import (
     RegistryError,
@@ -45,7 +45,7 @@ def infer_ecosystem(explicit: str | None, name: str) -> str:
     )
 
 
-def read_cache(conn: sqlite3.Connection, ecosystem: str, name: str) -> dict | None:
+def read_cache(conn: Any, ecosystem: str, name: str) -> dict | None:
     row = conn.execute(
         "SELECT docs_url, candidates, versions, stable, homepage, repo_url, fetched_at "
         "FROM registry_cache WHERE ecosystem=? AND name=?",
@@ -65,7 +65,7 @@ def read_cache(conn: sqlite3.Connection, ecosystem: str, name: str) -> dict | No
 
 
 def write_cache(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     ecosystem: str,
     name: str,
@@ -95,7 +95,7 @@ def write_cache(
 
 
 def _write_cache_locked(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     ecosystem: str,
     name: str,
@@ -609,7 +609,7 @@ async def _resolve_via_registry(
 
 
 async def resolve_package(
-    conn: sqlite3.Connection,
+    conn: Any,
     client,
     settings,
     ecosystem: str | None,
@@ -640,7 +640,7 @@ async def resolve_package(
 
 
 async def resolve_repo(
-    conn: sqlite3.Connection,
+    conn: Any,
     client,
     settings,
     ecosystem: str | None,
@@ -670,7 +670,7 @@ async def resolve_repo(
 
 
 async def resolve(
-    conn: sqlite3.Connection,
+    conn: Any,
     client,
     settings,
     ecosystem: str | None,

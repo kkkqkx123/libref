@@ -43,14 +43,18 @@ def _review_map(conn, version_id: int) -> dict[int, str]:
     return ReviewService(conn).review_map_for_version(version_id)
 
 
-def _keep_call(confidence: str, status: str | None, include_ambiguous: bool) -> bool:
+def _keep_call(
+    confidence: str, resolve_kind: str, status: str | None, include_ambiguous: bool
+) -> bool:
     if status == "conflict":
         return False
-    if confidence != "AMBIGUOUS":
-        return True
     if status == "approved":
         return True
-    return bool(include_ambiguous)
+    # Stdlib/builtin rows are certain externals (INFERRED), so the mining
+    # exclusion rides on the source column instead of the confidence level.
+    if confidence == "AMBIGUOUS" or resolve_kind in ("stdlib", "builtin"):
+        return bool(include_ambiguous)
+    return True
 
 
 def _load_kept_calls(
@@ -73,7 +77,9 @@ def _load_kept_calls(
     review = _review_map(conn, version_id)
     out = []
     for r in rows:
-        if not _keep_call(str(r[3]), review.get(int(r[4])), include_ambiguous):
+        if not _keep_call(
+            str(r[3]), str(r[8] or ""), review.get(int(r[4])), include_ambiguous
+        ):
             continue
         if wanted and str(r[8] or "") not in wanted:
             continue
@@ -599,6 +605,8 @@ async def induce_labels(
                 if include_ambiguous
                 else (
                     f"{base} AND (call_instances.confidence != 'AMBIGUOUS'"
+                    " OR rs.status='approved')"
+                    " AND (COALESCE(call_instances.resolve_kind,'') NOT IN ('stdlib','builtin')"
                     " OR rs.status='approved')"
                 )
             )

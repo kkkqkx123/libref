@@ -202,17 +202,17 @@ def test_java_package_claim_over_path() -> None:
 def test_builtin_bare_calls_scoped_per_language() -> None:
     assert ast_resolution.resolve_one("len", None, {"b.len"}, set(), {}, None)[:2] == (
         "len",
-        "AMBIGUOUS",
+        "INFERRED",
     )
     assert ast_resolution.resolve_one(
         "len", None, {"b.len"}, set(), {}, None, language="javascript"
     )[:2] == ("b.len", "INFERRED")
     assert ast_resolution.resolve_one(
         "listOf", None, set(), set(), {}, None, language="kotlin"
-    )[:2] == ("listOf", "AMBIGUOUS")
+    )[:2] == ("listOf", "INFERRED")
     assert ast_resolution.resolve_one(
         "println", None, set(), set(), {}, None, language="groovy"
-    )[:2] == ("println", "AMBIGUOUS")
+    )[:2] == ("println", "INFERRED")
 
 
 def test_require_destructuring_leaves_no_junk_alias() -> None:

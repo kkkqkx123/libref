@@ -14,6 +14,30 @@ from libref.astminer.rules import CALLABLE_DECL_KINDS, is_builtin_bare
 
 _SELF_HEADS = frozenset({"self", "cls", "this", "Self"})
 
+
+def _strip_glued_new(
+    raw: str, alias_map: dict[str, str], index: dict[str, list[str]]
+) -> str:
+    """Undo the whitespace-strip gluing of `new X(...)` chain heads.
+
+    The extraction fallback removes all whitespace from composite receiver
+    text, so `new commander.Command(...).help` arrives with head
+    `newcommander`. When the remainder after `new` is a known head (alias,
+    declared suffix, or stdlib root), restore it so lookup succeeds. Real
+    identifiers that merely start with "new" stay untouched.
+    """
+    head, sep, tail = raw.partition(".")
+    if not sep or not head.startswith("new") or len(head) <= 3:
+        return raw
+    remainder = head[3:]
+    first = remainder[0]
+    if not (first.isalpha() or first == "_"):
+        return raw
+    if remainder in alias_map or remainder in index or _is_stdlib_target(remainder):
+        return f"{remainder}.{tail}" if tail else remainder
+    return raw
+
+
 try:
     _PYTHON_STDLIB = set(sys.stdlib_module_names)
 except AttributeError:  # pragma: no cover - fallback for older interpreters
@@ -283,9 +307,13 @@ def resolve_one(
     if not raw:
         return raw, "AMBIGUOUS", "unresolved"
     index = suffix_index if suffix_index is not None else _build_suffix_index(declared)
+    raw = _strip_glued_new(raw, alias_map, index)
     head, _, _rest = raw.partition(".")
     if is_builtin_bare(raw, alias_map, language) and raw not in same_file:
-        return raw, "AMBIGUOUS", "builtin"
+        # A known builtin/global has exactly one identity, so the reference is
+        # not ambiguous; it is only inferred in the sense that the target is
+        # platform-owned and absent from this repository.
+        return raw, "INFERRED", "builtin"
     if (
         "." not in raw
         and caller
@@ -302,7 +330,11 @@ def resolve_one(
         if len(suffixed) == 1 and suffixed[0] in same_file:
             return suffixed[0], "EXTRACTED", "alias-suffix"
         if _is_stdlib_target(resolved):
-            return resolved, "AMBIGUOUS", "stdlib"
+            # Stdlib targets are named exactly once; the uncertainty the
+            # AMBIGUOUS level is meant to flag is candidate competition, which
+            # does not apply here. Mining still drops them via the source
+            # column unless a reviewer approves them.
+            return resolved, "INFERRED", "stdlib"
         rewritten = _rewrite_factory_chain(
             resolved, declared, index, same_file, return_by_qual or {}
         )

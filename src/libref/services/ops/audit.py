@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import sqlite3
+from typing import Any
 
 
 def write_audit(
-    conn: sqlite3.Connection,
+    conn: Any,
     *,
     tenant_id: str,
     principal_id: int | None,

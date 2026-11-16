@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 from pathlib import Path
 from typing import Any
 
+from libref.db.contract import MetadataSession
 from libref.store.snapshots import dir_size_bytes
 
 logger = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ REASON_ABSENT_SWEEP = "absent-sweep"
 REASON_PURGE = "purge"
 
 
-def ensure_deletion_log(conn: sqlite3.Connection) -> None:
+def ensure_deletion_log(conn: MetadataSession) -> None:
     from libref.db.schema import GOVERNANCE_SQL
 
     conn.executescript(GOVERNANCE_SQL)
@@ -25,7 +25,7 @@ def ensure_deletion_log(conn: sqlite3.Connection) -> None:
 
 
 def log_deletion(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     *,
     library: str,
     version: str,
@@ -50,7 +50,7 @@ def log_deletion(
     return int(cur.lastrowid)
 
 
-def list_deletions(conn: sqlite3.Connection, limit: int = 50) -> list[dict[str, Any]]:
+def list_deletions(conn: MetadataSession, limit: int = 50) -> list[dict[str, Any]]:
     ensure_deletion_log(conn)
     rows = conn.execute(
         "SELECT id, library, version, ecosystem, reason, detail, created_at"
@@ -77,7 +77,7 @@ def list_deletions(conn: sqlite3.Connection, limit: int = 50) -> list[dict[str, 
     return out
 
 
-def prune_expired_logs(conn: sqlite3.Connection, ttl_days: float) -> int:
+def prune_expired_logs(conn: MetadataSession, ttl_days: float) -> int:
     ensure_deletion_log(conn)
     cutoff = time.time() - max(0.0, float(ttl_days)) * 86400
     cur = conn.execute(
@@ -105,7 +105,7 @@ def check_quota(root: Path, quota_mb: int, label: str) -> None:
 
 
 def purge_version(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     library: str,
     version: str,
     *,
@@ -155,7 +155,7 @@ def purge_version(
 
 
 def _purge_inner(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     library: str,
     version: str,
     eco: str,

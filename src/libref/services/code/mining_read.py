@@ -146,6 +146,12 @@ def _call_filter_sql(
     params: list[Any] = []
     if not include_ambiguous:
         parts.append(f"({alias}.confidence != 'AMBIGUOUS' OR rs.status='approved')")
+        # Stdlib/builtin references are certain externals (INFERRED), so the
+        # exclusion that once rode on AMBIGUOUS now rides on the source column.
+        parts.append(
+            f"(COALESCE({alias}.resolve_kind,'') NOT IN ('stdlib','builtin')"
+            " OR rs.status='approved')"
+        )
     if resolve_kinds:
         wanted = sorted({str(k) for k in resolve_kinds if str(k).strip()})
         if wanted:
@@ -187,7 +193,13 @@ class MiningReadService:
         if include_ambiguous:
             conf = f"AND {base_filter}"
         else:
-            conf = f"AND {base_filter} AND (call_instances.confidence != 'AMBIGUOUS' OR rs.status='approved')"
+            conf = (
+                f"AND {base_filter} "
+                "AND (call_instances.confidence != 'AMBIGUOUS'"
+                " OR rs.status='approved')"
+                " AND (COALESCE(call_instances.resolve_kind,'') NOT IN ('stdlib','builtin')"
+                " OR rs.status='approved')"
+            )
         sql = (
             "SELECT callee_name, count(*), "
             f"count(DISTINCT {_scope_of('call_instances')}) "
@@ -223,7 +235,13 @@ class MiningReadService:
         if include_ambiguous:
             conf = f"AND {base_filter}"
         else:
-            conf = f"AND {base_filter} AND (call_instances.confidence != 'AMBIGUOUS' OR rs.status='approved')"
+            conf = (
+                f"AND {base_filter} "
+                "AND (call_instances.confidence != 'AMBIGUOUS'"
+                " OR rs.status='approved')"
+                " AND (COALESCE(call_instances.resolve_kind,'') NOT IN ('stdlib','builtin')"
+                " OR rs.status='approved')"
+            )
         rows = self._conn.execute(
             "SELECT args, count(*) FROM call_instances LEFT JOIN review_status rs "
             "ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id "
@@ -260,8 +278,19 @@ class MiningReadService:
             conf = f"AND {no_conflict_c}"
             tconf = f"AND {no_conflict_t}"
         else:
-            conf = f"AND {no_conflict_c} AND (c.confidence != 'AMBIGUOUS' OR rc.status='approved')"
-            tconf = f"AND {no_conflict_t} AND (call_instances.confidence != 'AMBIGUOUS' OR rt.status='approved')"
+            conf = (
+                f"AND {no_conflict_c} "
+                "AND (c.confidence != 'AMBIGUOUS' OR rc.status='approved')"
+                " AND (COALESCE(c.resolve_kind,'') NOT IN ('stdlib','builtin')"
+                " OR rc.status='approved')"
+            )
+            tconf = (
+                f"AND {no_conflict_t} "
+                "AND (call_instances.confidence != 'AMBIGUOUS'"
+                " OR rt.status='approved')"
+                " AND (COALESCE(call_instances.resolve_kind,'') NOT IN ('stdlib','builtin')"
+                " OR rt.status='approved')"
+            )
         rows = self._conn.execute(
             "WITH target(s) AS ("
             f" SELECT DISTINCT {_scope_of('call_instances')}"
@@ -343,7 +372,13 @@ class MiningReadService:
         if include_ambiguous:
             conf = f"AND {base_filter}"
         else:
-            conf = f"AND {base_filter} AND (call_instances.confidence != 'AMBIGUOUS' OR rs.status='approved')"
+            conf = (
+                f"AND {base_filter} "
+                "AND (call_instances.confidence != 'AMBIGUOUS'"
+                " OR rs.status='approved')"
+                " AND (COALESCE(call_instances.resolve_kind,'') NOT IN ('stdlib','builtin')"
+                " OR rs.status='approved')"
+            )
         placeholders_w = ",".join("?" for _ in wanted)
         no_conflict_inner = "(rh2.status IS NULL OR rh2.status != 'conflict')"
         no_conflict_outer = "(rh.status IS NULL OR rh.status != 'conflict')"
@@ -354,10 +389,14 @@ class MiningReadService:
             inner_conf = (
                 f"AND {no_conflict_inner} "
                 "AND (h2.confidence != 'AMBIGUOUS' OR rh2.status='approved')"
+                " AND (h2.resolve_kind NOT IN ('stdlib','builtin')"
+                " OR rh2.status='approved')"
             )
             outer_conf = (
                 f"AND {no_conflict_outer} "
                 "AND (h.confidence != 'AMBIGUOUS' OR rh.status='approved')"
+                " AND (COALESCE(h.resolve_kind,'') NOT IN ('stdlib','builtin')"
+                " OR rh.status='approved')"
             )
         hit_rows = self._conn.execute(
             f"SELECT {_scope_of('h')}, h.callee_name"
@@ -427,7 +466,12 @@ class MiningReadService:
         if include_ambiguous:
             conf = f"AND {base_filter}"
         else:
-            conf = f"AND {base_filter} AND (ci.confidence != 'AMBIGUOUS' OR rs.status='approved')"
+            conf = (
+                f"AND {base_filter} "
+                "AND (ci.confidence != 'AMBIGUOUS' OR rs.status='approved')"
+                " AND (COALESCE(ci.resolve_kind,'') NOT IN ('stdlib','builtin')"
+                " OR rs.status='approved')"
+            )
         # Scopes missing any member can never contain the pattern as a subsequence,
         # so only those scopes are loaded in the second phase.
         members = sorted(set(pattern))

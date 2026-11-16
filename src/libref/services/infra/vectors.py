@@ -16,7 +16,7 @@ def build_vector(settings, gateway=None):
     from libref.store.vec_store import (
         QdrantVecStore,
         SimvecVecStore,
-        collection_for,
+        collection_for_deployment,
         simvec_root_for,
     )
 
@@ -24,16 +24,17 @@ def build_vector(settings, gateway=None):
     embed = gw.embed_fn()
     if embed is None:
         return None, None, gw
+    collection = collection_for_deployment(settings.vector_collection, settings)
     if settings.vector_backend == "simvec":
         vec = SimvecVecStore(
             simvec_root_for(settings.db_path, settings.simvec_dir),
-            collection_for(settings.vector_collection, settings.db_path),
+            collection,
             lib=settings.simvec_lib,
         )
     else:
         vec = QdrantVecStore(
             settings.qdrant_url,
-            collection_for(settings.vector_collection, settings.db_path),
+            collection,
             timeout=settings.qdrant_timeout,
         )
     return vec, embed, gw

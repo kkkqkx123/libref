@@ -8,11 +8,11 @@ Database failures fail open (allow) so quota bookkeeping never becomes an outage
 
 from __future__ import annotations
 
-import sqlite3
 import threading
 import time
 from dataclasses import dataclass
 
+from libref.db.contract import MetadataSession
 from libref.db.schema import QUOTA_RUNTIME_SQL
 
 RESOURCES = frozenset(
@@ -52,7 +52,7 @@ class QuotaDecision:
     reset_at: str
 
 
-def ensure_quota_tables(conn: sqlite3.Connection) -> None:
+def ensure_quota_tables(conn: MetadataSession) -> None:
     """Create quota tables when absent; idempotent for fresh test databases."""
     conn.executescript(QUOTA_RUNTIME_SQL)
     conn.commit()
@@ -95,7 +95,7 @@ def _subject(principal_id: int | None) -> int:
 
 
 def set_policy(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     *,
     tenant_id: str,
     resource: str,
@@ -128,7 +128,7 @@ def set_policy(
 
 
 def _db_policy(
-    conn: sqlite3.Connection, *, tenant_id: str, subject: int, resource: str
+    conn: MetadataSession, *, tenant_id: str, subject: int, resource: str
 ) -> tuple[int, str] | None:
     row = conn.execute(
         "SELECT limit_value, window_type FROM quota_policies"
@@ -155,7 +155,7 @@ _policy_cache_lock = threading.Lock()
 
 
 def effective_policy(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     *,
     tenant_id: str,
     principal_id: int | None,
@@ -201,7 +201,7 @@ def invalidate_policy_cache() -> None:
 
 
 def current_usage(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     *,
     tenant_id: str,
     principal_id: int | None,
@@ -219,7 +219,7 @@ def current_usage(
 
 
 def add_usage(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     *,
     tenant_id: str,
     principal_id: int | None,
@@ -256,7 +256,7 @@ def add_usage(
 
 
 def check(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     *,
     tenant_id: str,
     principal_id: int | None,
@@ -295,7 +295,7 @@ def check(
 
 
 def record_event(
-    conn: sqlite3.Connection,
+    conn: MetadataSession,
     *,
     tenant_id: str,
     principal_id: int | None,
