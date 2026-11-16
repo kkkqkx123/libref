@@ -79,6 +79,14 @@ class LibrefSettings(BaseSettings):
     vector_backend: Literal["qdrant", "simvec"] = "simvec"
     simvec_dir: Path | None = None
     simvec_lib: str | None = None
+    # Storage backend selection: metadata/relations and full-text. SQLite and
+    # FTS5 are the only wired backends; remote branches are scaffolding that
+    # the assembly layer rejects until implemented.
+    metadata_backend: Literal["sqlite", "postgres"] = "sqlite"
+    fulltext_backend: Literal["fts5", "postgres"] = "fts5"
+    postgres_url: str | None = None
+    postgres_pool_size: int = Field(default=8, ge=1)
+    postgres_timeout: float = Field(default=10.0, gt=0)
     chunk_embed_max_tokens: int = Field(default=512, ge=1)
     chunk_embed_overlap_tokens: int = Field(default=50, ge=0)
     chunk_embed_min_tokens: int = Field(default=150, ge=0)
@@ -281,6 +289,7 @@ SECRET_FIELDS = frozenset(
         "discovery_github_token",
         "bootstrap_admin_key",
         "client_api_key",
+        "postgres_url",
     }
 )
 
@@ -329,6 +338,11 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "vector_backend",
             "simvec_dir",
             "simvec_lib",
+            "metadata_backend",
+            "fulltext_backend",
+            "postgres_url",
+            "postgres_pool_size",
+            "postgres_timeout",
         }
     ),
     "chunking": frozenset(
