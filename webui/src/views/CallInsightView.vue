@@ -49,7 +49,7 @@
 <script setup lang="ts">
 import { ElButton, ElCheckbox, ElForm, ElFormItem, ElInput, ElInputNumber, ElRadioButton, ElRadioGroup } from 'element-plus';
 import { ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
 import type { Envelope, Row } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
@@ -61,17 +61,37 @@ import PageHeader from '../components/common/PageHeader.vue';
 import { messages } from '../i18n';
 import TagInput from '../components/common/TagInput.vue';
 import { scopeParams } from '../stores/scope';
+import {
+  applyScopeFromQuery,
+  readBool,
+  readList,
+  readNumber,
+  readString,
+  scopeSnapshot,
+  useQuerySync,
+} from '../utils/query';
+
+const route = useRoute();
+const { sync } = useQuerySync();
+
+applyScopeFromQuery(route.query);
 
 const router = useRouter();
 type View = 'callee' | 'caller' | 'file';
-const view = ref<View>('callee');
-const apiName = ref('');
-const includeAmbiguous = ref(false);
-const resolveKinds = ref<string[]>([]);
-const minArgs = ref<number | undefined>(undefined);
-const maxArgs = ref<number | undefined>(undefined);
-const limit = ref(50);
-const offset = ref(0);
+const VIEWS: View[] = ['callee', 'caller', 'file'];
+const requested = readString(route.query.view) as View;
+const view = ref<View>(VIEWS.includes(requested) ? requested : 'callee');
+const apiName = ref(readString(route.query.api));
+const includeAmbiguous = ref(readBool(route.query.include_ambiguous, false));
+const resolveKinds = ref<string[]>(readList(route.query.resolve_kinds));
+const minArgs = ref<number | undefined>(
+  route.query.min_args ? readNumber(route.query.min_args, 0) : undefined,
+);
+const maxArgs = ref<number | undefined>(
+  route.query.max_args ? readNumber(route.query.max_args, 0) : undefined,
+);
+const limit = ref(readNumber(route.query.limit, 50));
+const offset = ref(readNumber(route.query.offset, 0));
 const loading = ref(false);
 const loaded = ref(false);
 const error = ref('');
@@ -79,6 +99,17 @@ const requestId = ref('');
 const rows = ref<Row[]>([]);
 
 async function load(): Promise<void> {
+  sync({
+    view: view.value,
+    api: apiName.value.trim(),
+    include_ambiguous: includeAmbiguous.value,
+    resolve_kinds: resolveKinds.value,
+    min_args: minArgs.value,
+    max_args: maxArgs.value,
+    limit: limit.value,
+    offset: offset.value,
+    ...scopeSnapshot(),
+  });
   loading.value = true;
   error.value = '';
   try {
@@ -110,10 +141,16 @@ function page(direction: number): void {
   void load();
 }
 
+if (route.query.view || route.query.api) void load();
+
 function forwardFeedback(row: Row): void {
+  const entityId = Number(row['entity_id']);
   void router.push({
     path: '/feedback',
-    query: { entity_type: 'call_instance', body: String(row['entity_id'] || '') },
+    query: {
+      entity_type: 'call_instance',
+      entity_id: Number.isFinite(entityId) && entityId > 0 ? String(entityId) : undefined,
+    },
   });
 }
 </script>

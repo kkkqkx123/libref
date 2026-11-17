@@ -121,6 +121,60 @@ class PageService:
     def __init__(self, conn) -> None:
         self._conn = conn
 
+    def list_pages(
+        self,
+        library: str,
+        version: str,
+        *,
+        ecosystem: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Page inventory under one library version.
+
+        The reader is URL-addressed, so anything that wants to link into it needs
+        a way to discover which URLs exist; this is that picker.
+        """
+        filters = ["l.name = ?", "v.version = ?"]
+        params: list[Any] = [library, version]
+        if ecosystem is not None:
+            filters.append("l.ecosystem = ?")
+            params.append(ecosystem)
+        extra, extra_params = _tenant_extra(
+            self._conn,
+            tenant_id,
+            (("libraries", "l"), ("versions", "v"), ("pages", "p")),
+        )
+        where = " AND ".join(filters) + extra
+        joined = (
+            "FROM pages p "
+            "JOIN versions v ON v.id = p.version_id "
+            "JOIN libraries l ON l.id = v.library_id "
+            f"WHERE {where}"
+        )
+        total_row = self._conn.execute(
+            f"SELECT count(*) {joined}", params + extra_params
+        ).fetchone()
+        rows = self._conn.execute(
+            "SELECT p.id, p.url, "
+            "(SELECT count(*) FROM documents d WHERE d.page_id = p.id) AS chunks, "
+            "(SELECT d2.title FROM documents d2 WHERE d2.page_id = p.id "
+            " ORDER BY d2.sort_order LIMIT 1) AS title "
+            f"{joined} ORDER BY p.url LIMIT ? OFFSET ?",
+            params + extra_params + [limit, offset],
+        ).fetchall()
+        return {
+            "library": library,
+            "version": version,
+            "total": int(total_row[0]) if total_row else 0,
+            "limit": limit,
+            "offset": offset,
+            "items": [
+                {"id": r[0], "url": r[1], "chunks": r[2], "title": r[3]} for r in rows
+            ],
+        }
+
     def read_page(
         self,
         url: str,

@@ -29,6 +29,7 @@ from libref.web.api import (
     JobQuery,
     KeyCreate,
     LinkStatsQuery,
+    PageList,
     PatternInsightQuery,
     ReadQuery,
     ReadResponse,
@@ -42,6 +43,7 @@ from libref.web.api import (
     SymbolInsightQuery,
     envelope,
 )
+from libref.web.errors import ApiRejection
 
 
 def _split_list(raw: str | None) -> list[str] | None:
@@ -96,6 +98,28 @@ def build_web_app(
     app = FastAPI(title="libref", lifespan=_lifespan)
     app.state.context = context
     app.state.settings = settings
+
+    @app.exception_handler(HTTPException)
+    async def _rejection(request: Request, exc: HTTPException):
+        """Emit a stable ``error`` code next to the original ``detail`` text."""
+        from fastapi.responses import JSONResponse
+
+        from libref.web.errors import error_body
+
+        rid = str(getattr(getattr(request, "state", None), "request_id", ""))
+        headers = dict(exc.headers or {})
+        if rid:
+            headers.setdefault("x-request-id", rid)
+        return JSONResponse(
+            error_body(
+                exc.status_code,
+                exc.detail,
+                rid,
+                code=str(getattr(exc, "code", "") or ""),
+            ),
+            status_code=exc.status_code,
+            headers=headers,
+        )
 
     from libref.web.spa import SpaMiddleware, spa_dir_for
 
@@ -409,7 +433,9 @@ def build_web_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RegistryError as exc:
-            raise HTTPException(status_code=502, detail=f"{exc.kind}: {exc}") from exc
+            raise ApiRejection(
+                502, "upstream_unavailable", f"{exc.kind}: {exc}"
+            ) from exc
         return envelope(items)
 
     @app.get("/answer", response_model=AnswerResponse)
@@ -423,6 +449,7 @@ def build_web_app(
         preset: Literal["precise", "balanced", "thorough"] = "balanced",
         principal=Depends(_guard),
     ) -> dict[str, Any]:
+        from libref.llm.errors import LlmConfigError
         from libref.services.docs.answer import answer_query_async
 
         params = AnswerQuery(
@@ -452,6 +479,10 @@ def build_web_app(
                     preset=params.preset,
                     tenant_id=_tenant_of(principal),
                 )
+            except LlmConfigError as exc:
+                # Config-level refusal: the UI phrases this as "chat not enabled"
+                # instead of showing the raw English detail.
+                raise ApiRejection(400, "chat_disabled", str(exc)) from exc
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
         finally:
@@ -504,6 +535,41 @@ def build_web_app(
             if page is None:
                 raise HTTPException(status_code=404, detail="page not found")
             return page
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+    @app.get("/pages", response_model=PageList)
+    def pages_route(
+        request: Request,
+        library: str,
+        version: str,
+        ecosystem: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        """List page URLs under one library version; the reader is URL-addressed."""
+        _need(principal, "read")
+        if limit < 1 or limit > 200:
+            raise HTTPException(
+                status_code=400, detail="limit must be between 1 and 200"
+            )
+        if offset < 0:
+            raise HTTPException(status_code=400, detail="offset must be non-negative")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            return bundle["pages"].list_pages(
+                library,
+                version,
+                ecosystem=ecosystem,
+                limit=limit,
+                offset=offset,
+                tenant_id=_tenant_of(principal),
+            )
         finally:
             if should_close:
                 try:
@@ -1071,7 +1137,7 @@ def build_web_app(
         except RegistryError as exc:
             if exc.kind in ("no_docs", "no_repo"):
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            raise ApiRejection(502, "upstream_unavailable", str(exc)) from exc
         return resolution.model_dump()
 
     @app.get("/web-search")
@@ -1091,7 +1157,9 @@ def build_web_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RegistryError as exc:
-            raise HTTPException(status_code=502, detail=f"{exc.kind}: {exc}") from exc
+            raise ApiRejection(
+                502, "upstream_unavailable", f"{exc.kind}: {exc}"
+            ) from exc
         return envelope(items)
 
     @app.get("/github-search")
@@ -1111,7 +1179,9 @@ def build_web_app(
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except RegistryError as exc:
-            raise HTTPException(status_code=502, detail=f"{exc.kind}: {exc}") from exc
+            raise ApiRejection(
+                502, "upstream_unavailable", f"{exc.kind}: {exc}"
+            ) from exc
         return envelope(items)
 
     @app.get("/repo-deps")

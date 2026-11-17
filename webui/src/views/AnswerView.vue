@@ -17,12 +17,14 @@
     </div>
     <LoadingPanel v-if="loading" />
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="ask" />
+    <QuotaNotice v-else-if="quotaReset !== null" :reset-at="quotaReset">
+      <el-button size="small" type="primary" @click="viewSearch">{{ messages.answer.viewSearch }}</el-button>
+    </QuotaNotice>
     <template v-else-if="answer">
       <DegradedBanner
         :degraded="answer.degraded"
         :reasons="answer.reasons"
         :answerable="answer.answer !== ''"
-        :answerability="answer.answer === '' ? 0 : 1"
       />
       <EmptyState v-if="!answer.answer" :description="messages.answer.empty" />
       <div v-else class="libref-card">
@@ -35,7 +37,7 @@
         <p class="libref-answer-body">{{ answer.answer }}</p>
       </div>
       <div v-if="answer.citations.length > 0" class="libref-card">
-        <h4>{{ messages.answer.citations }}（{{ answer.citations.length }}）</h4>
+        <h4>{{ messages.answer.citationsCount(answer.citations.length) }}</h4>
         <CitationCard v-for="citation in answer.citations" :key="citation.id" :citation="citation" />
       </div>
     </template>
@@ -45,7 +47,7 @@
 <script setup lang="ts">
 import { ElButton, ElInput, ElTag } from 'element-plus';
 import { ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
 import type { AnswerResponse } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
@@ -55,27 +57,33 @@ import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import QuotaNotice from '../components/common/QuotaNotice.vue';
 import { messages } from '../i18n';
 import { scopeParams, scopeStore } from '../stores/scope';
+import { applyScopeFromQuery, readString, scopeSnapshot, useQuerySync } from '../utils/query';
 
 const route = useRoute();
-const query = ref(typeof route.query.query === 'string' ? route.query.query : '');
+const router = useRouter();
+const { sync } = useQuerySync();
+
+applyScopeFromQuery(route.query);
+const query = ref(readString(route.query.query));
 const loading = ref(false);
 const error = ref('');
 const requestId = ref('');
+const quotaReset = ref<string | null>(null);
 const answer = ref<AnswerResponse | null>(null);
-
-if (typeof route.query.library === 'string' && route.query.library) {
-  scopeStore.library = route.query.library;
-}
-if (typeof route.query.version === 'string' && route.query.version) {
-  scopeStore.version = route.query.version;
-}
 
 async function ask(): Promise<void> {
   if (!query.value.trim()) return;
+  sync({
+    query: query.value.trim(),
+    preset: scopeStore.preset,
+    ...scopeSnapshot(),
+  });
   loading.value = true;
   error.value = '';
+  quotaReset.value = null;
   answer.value = null;
   try {
     const { data } = await api<AnswerResponse>('/answer', {
@@ -88,11 +96,22 @@ async function ask(): Promise<void> {
     });
     answer.value = data;
   } catch (err) {
+    if (err instanceof ApiError && err.status === 429) {
+      quotaReset.value = err.resetAt || '';
+      return;
+    }
     error.value = err instanceof ApiError ? err.message : messages.value.answer.failed;
     requestId.value = err instanceof ApiError ? err.requestId : '';
   } finally {
     loading.value = false;
   }
+}
+
+function viewSearch(): void {
+  void router.push({
+    path: '/search',
+    query: { query: query.value.trim(), ...scopeSnapshot() as Record<string, string> },
+  });
 }
 
 if (query.value) void ask();

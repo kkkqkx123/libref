@@ -5,12 +5,27 @@ import { messages } from '../i18n';
 
 export class ApiError extends Error {
   status: number;
+  // Stable backend code (``page_not_found``, ``quota_exceeded``, ...); falls back
+  // to ``http_<status>`` when the cause is not mapped.
+  code: string;
+  // Raw backend detail, kept so a generic code can still name the culprit
+  // (which argument, which upstream).
+  detail: string;
   requestId: string;
   resetAt?: string | null;
 
-  constructor(status: number, message: string, requestId: string, resetAt?: string | null) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    detail: string,
+    requestId: string,
+    resetAt?: string | null,
+  ) {
     super(message);
     this.status = status;
+    this.code = code;
+    this.detail = detail;
     this.requestId = requestId;
     this.resetAt = resetAt;
   }
@@ -27,18 +42,7 @@ function baseUrl(): string {
   return (import.meta.env.VITE_API_BASE as string | undefined) || '';
 }
 
-function describeFailure(status: number, payload: unknown): string {
-  if (payload && typeof payload === 'object') {
-    const record = payload as Record<string, unknown>;
-    const detail = record['detail'];
-    if (typeof detail === 'string' && detail) return detail;
-    if (detail && typeof detail === 'object') {
-      const inner = detail as Record<string, unknown>;
-      if (typeof inner['error'] === 'string') return inner['error'] as string;
-    }
-    if (typeof record['message'] === 'string') return record['message'] as string;
-    if (typeof record['error'] === 'string') return record['error'] as string;
-  }
+function statusFallback(status: number): string {
   const m = messages.value.common;
   if (status === 401) return m.authRequired;
   if (status === 403) return m.forbidden;
@@ -46,6 +50,40 @@ function describeFailure(status: number, payload: unknown): string {
   if (status === 409) return m.conflict;
   if (status === 429) return m.quotaExceeded;
   return m.requestFailedStatus(status);
+}
+
+// Precedence: a known error code (localised) beats the raw detail text, which in
+// turn beats generic status wording. A known code still carries its detail when
+// the code is generic (``invalid_argument``), so the two are combined rather than
+// letting the wording swallow the cause.
+function describeFailure(
+  status: number,
+  payload: unknown,
+): { code: string; message: string; detail: string } {
+  let code = '';
+  let detailText = '';
+  if (payload && typeof payload === 'object') {
+    const record = payload as Record<string, unknown>;
+    if (typeof record['error'] === 'string') code = record['error'];
+    const detail = record['detail'];
+    if (typeof detail === 'string') detailText = detail;
+    else if (detail && typeof detail === 'object') {
+      const inner = detail as Record<string, unknown>;
+      if (typeof inner['error'] === 'string') detailText = inner['error'] as string;
+    }
+    if (!detailText && typeof record['message'] === 'string') detailText = record['message'];
+  }
+  if (!code) code = `http_${status}`;
+  const localised = (messages.value.errorCodes as Record<string, string>)[code];
+  if (localised) {
+    const combined =
+      detailText && detailText !== localised
+        ? messages.value.common.errorWithDetail(localised, detailText)
+        : localised;
+    return { code, message: combined, detail: detailText };
+  }
+  if (detailText) return { code, message: detailText, detail: detailText };
+  return { code, message: statusFallback(status), detail: '' };
 }
 
 function resetOf(payload: unknown): string | null {
@@ -88,7 +126,15 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<{ 
     payload = null;
   }
   if (!response.ok) {
-    throw new ApiError(response.status, describeFailure(response.status, payload), requestId, resetOf(payload));
+    const failure = describeFailure(response.status, payload);
+    throw new ApiError(
+      response.status,
+      failure.code,
+      failure.message,
+      failure.detail,
+      requestId,
+      resetOf(payload),
+    );
   }
   return { data: payload as T, requestId };
 }

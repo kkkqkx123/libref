@@ -256,3 +256,23 @@ class ReadResponse(BaseModel):
     chunks: int = 0
     chunk_details: list[dict[str, Any]] = Field(default_factory=list)
     docs: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class PageRow(BaseModel):
+    """One stored page URL under a library version."""
+
+    id: int = 0
+    url: str = ""
+    title: str | None = None
+    chunks: int = 0
+
+
+class PageList(BaseModel):
+    """Page inventory envelope: the reader is URL-addressed, this lists the URLs."""
+
+    library: str = ""
+    version: str = ""
+    total: int = 0
+    limit: int = 0
+    offset: int = 0
+    items: list[PageRow] = Field(default_factory=list)

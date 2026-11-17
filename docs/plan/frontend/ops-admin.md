@@ -35,9 +35,10 @@
   401 即转登录页；公开路径（根路径、产物目录、health、readyz）免凭据加载外壳。
 - 权限：按 scope 显示隐藏页面（read、review、ingest:write、jobs:write、feedback、admin），
   前端隐藏与后端拒绝双保险。
-- 配额：429 按资源展示重置时间并支持倒计时重试；静态命中不计数，只有 API 调用计数。
+- 配额：429 按资源展示本地化后的重置时间并提供手动重试（不做到期自动解禁）；
+  静态命中不计数，只有 API 调用计数。
 - 可观测：报错展示 x-request-id；审计动作（审核、反馈、任务、密钥、配置刷新）成功后提示已记录。
 - 托管：产物目录缺失或缺 index.html 时后端以降级纯 API 运行，前端构建流水线需保证产物完整；
-  静态资产长缓存、index.html 不缓存；开发期用前端 dev 服务器代理到本地 8001。
+  静态资产长缓存、index.html 不缓存；开发期前端 dev 服务器经 `VITE_API_BASE` 直连本地 8001。
 - 技术栈：Vite 加 Vue 3 加 Element Plus，`webui/` 独立 npm 工程不进 pyproject；
   接口契约以 FastAPI OpenAPI 为准，前端不直连任何服务层。

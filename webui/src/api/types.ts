@@ -90,10 +90,27 @@ export interface VersionRow {
   id: number;
   version: string;
   registry_confirmed: boolean;
+  prerelease?: boolean;
   created_at?: string | null;
   ecosystem: string;
   pages: number;
   [key: string]: unknown;
+}
+
+export interface PageRow {
+  id: number;
+  url: string;
+  title?: string | null;
+  chunks: number;
+}
+
+export interface PageList {
+  library: string;
+  version: string;
+  total: number;
+  limit: number;
+  offset: number;
+  items: PageRow[];
 }
 
 export interface JobSummary {
@@ -106,6 +123,7 @@ export interface JobSummary {
 
 export interface JobDetail extends JobSummary {
   result?: unknown;
+  params?: Record<string, unknown>;
 }
 
 export interface ReviewItem {

@@ -14,7 +14,7 @@ from tests.conftest import make_settings
 
 pytestmark = pytest.mark.integration
 
-_CONTRACT_PATHS = ("/search", "/answer", "/read", "/review")
+_CONTRACT_PATHS = ("/search", "/answer", "/read", "/pages", "/review")
 
 
 def _open(tmp_path, name: str = "contract.db") -> sqlite3.Connection:

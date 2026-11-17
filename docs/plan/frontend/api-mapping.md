@@ -7,10 +7,11 @@
 
 | 端点 | 前端用法 | 要点 |
 |---|---|---|
-| `GET /catalog` | 文库目录页 | 无库名返回库列表，有库名返回版本列表；生态可选 |
+| `GET /catalog` | 文库目录页 | 无库名返回库列表，有库名返回版本列表；生态可选；版本项带 `prerelease` 供标注与过滤 |
 | `GET /search` | 搜索页 | 必填 query；档位三选一；limit 上限 100；留意 answerable/answerability/reasons/suggestions 附加字段 |
 | `GET /answer` | 问答页 | limit 上限 50；chat 未启用后端报 400，前端转友好提示 |
 | `GET /read` | 文档阅读器 | mode 三选一；window 模式需 sort_order 加 radius（上限 20）；404 表示页面未收录 |
+| `GET /pages` | 目录页页面选择 | library 与 version 必填；limit 上限 200；条目含 url/title/chunks，选中后带 library/version 跳阅读器 |
 | `GET /library-search` | 入库向导辅助 | registry 联想；失败为 502，前端标注来源异常 |
 | `GET /resolve` | 入库向导第一步 | target 取 docs 或 repo；no_docs/no_repo 为 404，其余上游失败为 502 |
 | `GET /web-search`、`GET /github-search` | 入库向导辅助 | limit 范围 1 到 100；空查询前端拦截 |
@@ -35,7 +36,7 @@
 | `POST /doc-probe` | read | scope 为对象；fetch_sample_limit 上限 100；max_pages 上限由后端校验；地址不合规 400 |
 | `POST /repo-probe` | read | only_files 与 exclude_patterns 非空即合法由前端先验；tree_depth 上限 10 |
 | `POST /scrape` | ingest:write | 配额拒绝为 429（含 reset_at）；成功返回任务 id 即跳转任务中心 |
-| `GET /jobs`、`GET /jobs/{id}` | read | 详情 404 表示任务不存在或跨租户不可见 |
+| `GET /jobs`、`GET /jobs/{id}` | read | 详情 404 表示任务不存在或跨租户不可见；详情含 `params` 供失败任务原样重提 |
 | `POST /jobs` | jobs:write | kind 加 params 对象；429 同上 |
 | `POST /jobs/{id}/cancel` | jobs:write | 幂等语义，重复取消仍成功 |
 
@@ -65,8 +66,10 @@
 
 - 401 未授权：dev 模式不会出现；enforced 模式跳转登录（输入 API Key）并重试原请求。
 - 403 禁止：缺 scope 时隐藏对应入口，已在页面内则展示无权限说明而非空白。
-- 429 配额超限：展示资源名与 reset_at，倒计时后允许重试；静态页面刷新不计配额，
-  只有 API 与 MCP 计数（见 frontend-hosting 鉴权边界）。
-- 400 参数错误：展示后端 detail 原文；前端对必填与数值范围做先验，减少往返。
-- 502 上游失败：registry 与外部搜索专属，标注数据来源异常并保留已缓存内容。
+- 429 配额超限：统一提示组件展示 `resource` 与本地化后的 `reset_at`，附手动重试入口；
+  不做倒计时（客户端时钟与服务端窗口未必对齐，到期自动解禁反而会误判）。
+  静态页面刷新不计配额，只有 API 与 MCP 计数（见 frontend-hosting 鉴权边界）。
+- 400 参数错误：已知 code（如 `invalid_limit`、`invalid_ecosystem`）走词条，
+  通用 `invalid_argument` 以“词条 + 原文”两级展示，原文不丢；前端对必填与数值范围做先验，减少往返。
+- 502 上游失败：`upstream_unavailable`，标注数据来源异常并保留已缓存内容。
 - 每个请求携带的 x-request-id 响应头在报错时展示，便于与审计日志对账。

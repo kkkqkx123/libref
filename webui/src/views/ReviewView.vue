@@ -15,17 +15,21 @@
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="reload" />
     <template v-else>
       <EmptyState v-if="items.length === 0" :description="messages.review.empty" />
-      <div v-for="item in items" :key="item.entity_id" class="libref-card libref-review-row">
-        <div class="libref-review-main">
-          <ConfidenceBadge :confidence="String(item.confidence || '')" />
-          <span class="libref-mono">{{ item.callee }}</span>
-          <span class="libref-muted">{{ item.caller_file }}:{{ item.line_start }}-{{ item.line_end }}</span>
-        </div>
-        <div class="libref-muted">{{ messages.review.caller }} {{ item.caller || messages.common.unknown }} · {{ messages.review.args }} {{ formatArgs(item.args) }}</div>
-        <div class="libref-review-actions">
-          <el-button type="success" size="small" :disabled="!canWrite" @click="act(item, 'approve')">{{ messages.review.approve }}</el-button>
-          <el-button type="warning" size="small" :disabled="!canWrite" @click="act(item, 'conflict')">{{ messages.review.conflict }}</el-button>
-          <el-button size="small" :disabled="!canWrite" @click="act(item, 'reopen')">{{ messages.review.reopen }}</el-button>
+      <div ref="listRef">
+        <div v-for="item in items" :key="item.entity_id" class="libref-card libref-review-row">
+          <div class="libref-review-main">
+            <ConfidenceBadge :confidence="String(item.confidence || '')" />
+            <span class="libref-mono">{{ item.callee }}</span>
+            <span class="libref-muted">{{ item.caller_file }}:{{ item.line_start }}-{{ item.line_end }}</span>
+          </div>
+          <div class="libref-muted">
+            {{ messages.review.caller }} {{ item.caller || messages.common.unknown }} · {{ messages.review.args }} {{ formatArgs(item.args) }}
+          </div>
+          <div class="libref-review-actions">
+            <el-button type="success" size="small" :disabled="!canWrite" @click="act(item, 'approve')">{{ messages.review.approve }}</el-button>
+            <el-button type="warning" size="small" :disabled="!canWrite" @click="act(item, 'conflict')">{{ messages.review.conflict }}</el-button>
+            <el-button size="small" :disabled="!canWrite" @click="act(item, 'reopen')">{{ messages.review.reopen }}</el-button>
+          </div>
         </div>
       </div>
     </template>
@@ -34,7 +38,7 @@
 
 <script setup lang="ts">
 import { ElButton, ElForm, ElFormItem, ElInputNumber } from 'element-plus';
-import { ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import { api, ApiError } from '../api/client';
 import type { Envelope, ReviewItem } from '../api/types';
 import ConfidenceBadge from '../components/common/ConfidenceBadge.vue';
@@ -45,15 +49,21 @@ import PageHeader from '../components/common/PageHeader.vue';
 import { messages } from '../i18n';
 import { hasScope } from '../stores/auth';
 import { notifyError, notifySuccess } from '../stores/notify';
+import { readNumber, useQuerySync } from '../utils/query';
+import { useRoute } from 'vue-router';
 
-const canWrite = hasScope('review:write');
-const limit = ref(50);
+const route = useRoute();
+const { sync } = useQuerySync();
+const canWrite = computed(() => hasScope('review:write'));
+const listRef = ref<HTMLElement | null>(null);
+const limit = ref(readNumber(route.query.limit, 50));
 const loading = ref(false);
 const error = ref('');
 const requestId = ref('');
 const items = ref<ReviewItem[]>([]);
 
 async function reload(): Promise<void> {
+  sync({ limit: limit.value });
   loading.value = true;
   error.value = '';
   try {
@@ -81,9 +91,16 @@ async function act(item: ReviewItem, action: 'approve' | 'conflict' | 'reopen'):
     });
     notifySuccess(messages.value.review.processed);
     items.value = items.value.filter((entry) => entry.entity_id !== item.entity_id);
-    if (items.value.length === 0) await reload();
+    if (items.value.length === 0) {
+      await reload();
+      return;
+    }
+    await nextTick();
+    listRef.value?.querySelector('.libref-review-row')?.scrollIntoView({ block: 'nearest' });
   } catch (err) {
     notifyError(err, messages.value.review.failed);
+    // A rejected transition means this row already moved on: trust the backend.
+    if (err instanceof ApiError && err.status === 409) await reload();
   }
 }
 

@@ -178,11 +178,16 @@ class LibraryService:
             f"WHERE l.name = ?{extra} ORDER BY v.created_at",
             params,
         ).fetchall()
+        from libref.crawler.registry import is_prerelease
+
         return [
             {
                 "id": r[0],
                 "version": r[1],
                 "registry_confirmed": bool(r[2]),
+                # Catalog consumers (webui) cannot classify pre-releases on their
+                # own without duplicating the per-registry rules, so flag it here.
+                "prerelease": is_prerelease(r[1], r[4]),
                 "created_at": r[3],
                 "ecosystem": r[4],
                 "pages": r[5],

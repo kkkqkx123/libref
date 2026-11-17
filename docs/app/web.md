@@ -4,6 +4,8 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 健康检查无需鉴权，其余路由统一经顶层中间件鉴权：dev 模式注入固定主体，enforced 模式按 API Key 解析主体并按 scope 授权，未授权与缺 scope 分别返回未授权与禁止。列表类查询统一使用条目加总数包络，检索另带降级标记与原因。参数错误返回请求错误，资源缺失返回未找到，审核流转失败按冲突与参数错误区分返回，注册表缺地址按未找到与网关错误区分返回。
 
+错误响应统一为 `{"error": <稳定 code>, "detail": <原文>, "request_id": <编号>}`：`detail` 保持原样供人阅读与旧客户端消费，`error` 是前端据以本地化的标识。已知 code 有 `unauthorized/forbidden/missing_scope/origin_forbidden/not_found/page_not_found/job_not_found/quota_exceeded/review_conflict/invalid_limit/invalid_offset/invalid_scope/unavailable`，未归类的原因回落到 `http_<状态码>`。配额拒绝额外在顶层给 `resource` 与 `reset_at`。
+
 ## 健康与目录
 
 ### GET /health
@@ -16,7 +18,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### GET /catalog
 
-`library` 可选，缺省返回库列表，给定返回该库版本列表，`ecosystem` 可选。
+`library` 可选，缺省返回库列表，给定返回该库版本列表，`ecosystem` 可选。版本项含 `registry_confirmed` 与 `prerelease`：前者表示注册表确认过，后者按版本后缀线索判定，供界面标注与过滤预发布，目录本身不隐藏任何版本。
 
 ## 检索问答
 
@@ -68,6 +70,10 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 | library/version/ecosystem | 否 | 无 | 范围过滤 |
 
 缺参返回请求错误，地址无命中返回未找到。
+
+### GET /pages
+
+按库版本列页面，供界面从目录进入阅读器（阅读器只按 `url` 寻址，需要先知道有哪些地址）。`library/version` 必填，`ecosystem` 可选，`limit` 取 1 到 200 默认 50，`offset` 非负。返回 `library/version/total/limit/offset/items`，条目含 `id/url/title/chunks`。越界参数按请求错误拒绝。
 
 ### GET /resolve
 
@@ -133,7 +139,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### GET /jobs / GET /jobs/{job_id}
 
-`job_id` 缺省列最近任务，`limit` 取 1 到 200 默认 20，需 `read`，按调用方租户过滤。未知编号返回未找到。本节只读。
+`job_id` 缺省列最近任务，`limit` 取 1 到 200 默认 20，需 `read`，按调用方租户过滤。未知编号返回未找到。本节只读。详情在列表字段之外另给 `result` 与 `params`：后者是提交时的原始参数，失败任务据此可原样重提。
 
 ### POST /jobs
 

@@ -58,7 +58,7 @@
 <script setup lang="ts">
 import { ElButton, ElCheckbox, ElForm, ElFormItem, ElInput, ElInputNumber, ElRadioButton, ElRadioGroup } from 'element-plus';
 import { computed, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
 import type { Envelope, Row } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
@@ -72,16 +72,34 @@ import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue'
 import RowTable from '../components/common/RowTable.vue';
 import TagInput from '../components/common/TagInput.vue';
 import { scopeParams } from '../stores/scope';
+import {
+  applyScopeFromQuery,
+  readBool,
+  readList,
+  readNumber,
+  readString,
+  scopeSnapshot,
+  useQuerySync,
+} from '../utils/query';
+
+const route = useRoute();
+const { sync } = useQuerySync();
+
+applyScopeFromQuery(route.query);
 
 const router = useRouter();
 type View = 'patterns' | 'evidence' | 'tree' | 'clusters' | 'health' | 'labels' | 'snippets';
-const view = ref<View>('patterns');
-const pattern = ref<string[]>([]);
-const containing = ref<string[]>([]);
-const prefix = ref('');
-const dedup = ref(false);
-const perFileLimit = ref<number | undefined>(undefined);
-const limit = ref(50);
+const VIEWS: View[] = ['patterns', 'evidence', 'tree', 'clusters', 'health', 'labels', 'snippets'];
+const requested = readString(route.query.view) as View;
+const view = ref<View>(VIEWS.includes(requested) ? requested : 'patterns');
+const pattern = ref<string[]>(readList(route.query.pattern));
+const containing = ref<string[]>(readList(route.query.containing));
+const prefix = ref(readString(route.query.prefix));
+const dedup = ref(readBool(route.query.dedup, false));
+const perFileLimit = ref<number | undefined>(
+  route.query.per_file_limit ? readNumber(route.query.per_file_limit, 1) : undefined,
+);
+const limit = ref(readNumber(route.query.limit, 50));
 const loading = ref(false);
 const loaded = ref(false);
 const error = ref('');
@@ -111,6 +129,16 @@ async function loadHealth(): Promise<void> {
 }
 
 async function load(): Promise<void> {
+  sync({
+    view: view.value,
+    pattern: pattern.value,
+    containing: containing.value,
+    prefix: prefix.value,
+    dedup: dedup.value,
+    per_file_limit: perFileLimit.value,
+    limit: limit.value,
+    ...scopeSnapshot(),
+  });
   loading.value = true;
   error.value = '';
   try {
@@ -137,9 +165,15 @@ async function load(): Promise<void> {
 }
 
 function forwardFeedback(row: Row): void {
+  const entityId = Number(row['entity_id']);
+  const pattern = String(row['pattern'] || '');
   void router.push({
     path: '/feedback',
-    query: { entity_type: 'call_instance', body: String(row['pattern'] || '') },
+    query: {
+      entity_type: 'call_instance',
+      entity_id: Number.isFinite(entityId) && entityId > 0 ? String(entityId) : undefined,
+      body: pattern,
+    },
   });
 }
 

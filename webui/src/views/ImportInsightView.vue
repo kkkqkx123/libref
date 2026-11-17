@@ -37,6 +37,7 @@
 <script setup lang="ts">
 import { ElButton, ElForm, ElFormItem, ElInput, ElRadioButton, ElRadioGroup } from 'element-plus';
 import { ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { api, ApiError } from '../api/client';
 import type { Envelope, Row } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
@@ -47,12 +48,26 @@ import PageHeader from '../components/common/PageHeader.vue';
 import { messages } from '../i18n';
 import RowTable from '../components/common/RowTable.vue';
 import { scopeParams } from '../stores/scope';
+import {
+  applyScopeFromQuery,
+  readNumber,
+  readString,
+  scopeSnapshot,
+  useQuerySync,
+} from '../utils/query';
+
+const route = useRoute();
+const { sync } = useQuerySync();
+
+applyScopeFromQuery(route.query);
 
 type View = 'importers' | 'imports';
-const view = ref<View>('importers');
-const apiName = ref('');
-const limit = ref(50);
-const offset = ref(0);
+const VIEWS: View[] = ['importers', 'imports'];
+const requested = readString(route.query.view) as View;
+const view = ref<View>(VIEWS.includes(requested) ? requested : 'importers');
+const apiName = ref(readString(route.query.api));
+const limit = ref(readNumber(route.query.limit, 50));
+const offset = ref(readNumber(route.query.offset, 0));
 const loading = ref(false);
 const loaded = ref(false);
 const error = ref('');
@@ -60,6 +75,13 @@ const requestId = ref('');
 const rows = ref<Row[]>([]);
 
 async function load(): Promise<void> {
+  sync({
+    view: view.value,
+    api: apiName.value.trim() || undefined,
+    limit: limit.value,
+    offset: offset.value,
+    ...scopeSnapshot(),
+  });
   loading.value = true;
   error.value = '';
   try {
@@ -86,6 +108,8 @@ function page(direction: number): void {
   offset.value = Math.max(0, offset.value + direction * limit.value);
   void load();
 }
+
+if (route.query.view || route.query.api) void load();
 </script>
 
 <style scoped>

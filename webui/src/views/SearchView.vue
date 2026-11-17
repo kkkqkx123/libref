@@ -50,12 +50,22 @@ import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
 import { messages } from '../i18n';
 import RowTable from '../components/common/RowTable.vue';
-import { scopeParams, scopeStore } from '../stores/scope';
+import { scopeParams, scopeStore, type SearchPreset } from '../stores/scope';
+import { applyScopeFromQuery, readBool, readNumber, readString, scopeSnapshot, useQuerySync } from '../utils/query';
 
 const route = useRoute();
 const router = useRouter();
-const query = ref(typeof route.query.query === 'string' ? route.query.query : '');
-const suggest = ref(false);
+const { sync } = useQuerySync();
+
+applyScopeFromQuery(route.query);
+const preset = readString(route.query.preset);
+if (preset === 'precise' || preset === 'balanced' || preset === 'thorough') {
+  scopeStore.preset = preset as SearchPreset;
+}
+if (route.query.limit) scopeStore.limit = Math.min(100, Math.max(1, readNumber(route.query.limit, scopeStore.limit)));
+
+const query = ref(readString(route.query.query));
+const suggest = ref(readBool(route.query.suggest, false));
 const loading = ref(false);
 const searched = ref(false);
 const error = ref('');
@@ -64,6 +74,13 @@ const result = ref<SearchResponse | null>(null);
 
 async function search(): Promise<void> {
   if (!query.value.trim()) return;
+  sync({
+    query: query.value.trim(),
+    suggest: suggest.value,
+    preset: scopeStore.preset,
+    limit: scopeStore.limit,
+    ...scopeSnapshot(),
+  });
   loading.value = true;
   error.value = '';
   try {

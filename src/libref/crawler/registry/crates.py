@@ -89,11 +89,11 @@ def parse_crates_snapshot(
     if stable is None:
         from libref.crawler.registry import best_effort_stable
 
-        stable = best_effort_stable(versions)
+        stable = best_effort_stable(versions, ecosystem="crates")
     if include_prerelease:
         from libref.crawler.registry import best_effort_stable as _best
 
-        stable = _best(versions, include_prerelease=True) or stable
+        stable = _best(versions, include_prerelease=True, ecosystem="crates") or stable
     homepage = sanitize_http_url(crate.get("homepage"), allow_private=allow_private)
     candidates = rank_crates_candidates(
         crate.get("documentation"), name, stable, allow_private=allow_private

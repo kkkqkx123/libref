@@ -15,6 +15,11 @@
         </el-form-item>
       </el-form>
     </div>
+    <QuotaNotice v-if="quotaReset !== null" :reset-at="quotaReset">
+      <el-button v-if="quotaRetry" size="small" type="primary" @click="retryQuota">
+        {{ messages.common.retry }}
+      </el-button>
+    </QuotaNotice>
     <LoadingPanel v-if="loading && jobs.length === 0" />
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="reload" />
     <template v-else>
@@ -25,12 +30,14 @@
         <el-table-column prop="status" :label="messages.jobs.status" width="120">
           <template #default="scope"><StatusBadge :status="scope.row.status" /></template>
         </el-table-column>
-        <el-table-column prop="finished_at" :label="messages.jobs.finishedAt" width="200" />
+        <el-table-column :label="messages.jobs.finishedAt" width="200">
+          <template #default="scope">{{ format.dateTime(scope.row.finished_at) }}</template>
+        </el-table-column>
         <el-table-column prop="error" :label="messages.jobs.errorSummary" show-overflow-tooltip />
       </el-table>
     </template>
 
-    <el-drawer v-model="detailOpen"  :title="messages.jobs.detailTitle" size="480px" @closed="stopPolling">
+    <el-drawer v-model="detailOpen"  :title="messages.jobs.detailTitle" size="480px" @closed="closeDetail">
       <LoadingPanel v-if="detailLoading" />
       <template v-else-if="detail">
         <KeyValue :entries="detailEntries" />
@@ -44,6 +51,7 @@
           >
             {{ messages.jobs.cancelTask }}
           </el-button>
+          <el-button v-if="canResubmit" type="primary" @click="resubmit">{{ messages.jobs.resubmit }}</el-button>
         </div>
       </template>
     </el-drawer>
@@ -68,7 +76,7 @@
 <script setup lang="ts">
 import { ElButton, ElDialog, ElDrawer, ElForm, ElFormItem, ElInput, ElInputNumber, ElTable, ElTableColumn } from 'element-plus';
 import { ElMessageBox } from 'element-plus';
-import { computed, onUnmounted, reactive, ref } from 'vue';
+import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { api, ApiError } from '../api/client';
 import type { JobDetail, JobSummary } from '../api/types';
@@ -77,13 +85,18 @@ import ErrorState from '../components/common/ErrorState.vue';
 import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import QuotaNotice from '../components/common/QuotaNotice.vue';
 import { messages } from '../i18n';
+import { useFormatters } from '../i18n/format';
 import StatusBadge from '../components/common/StatusBadge.vue';
 import { hasScope } from '../stores/auth';
 import { notifyError, notifySuccess } from '../stores/notify';
+import { useQuerySync } from '../utils/query';
 
 const route = useRoute();
-const canCreate = hasScope('jobs:write');
+const { sync } = useQuerySync();
+const format = useFormatters();
+const canCreate = computed(() => hasScope('jobs:write'));
 const limit = ref(20);
 const loading = ref(false);
 const error = ref('');
@@ -94,7 +107,42 @@ const detailLoading = ref(false);
 const detail = ref<JobDetail | null>(null);
 const createOpen = ref(false);
 const createForm = reactive({ kind: '', paramsText: '{}' });
+// 429 is a quota refusal, not a failure: show the reset time plus a manual retry
+// instead of an error notification.
+const quotaReset = ref<string | null>(null);
+const quotaRetry = ref<null | (() => void)>(null);
+
+function handleWriteFailure(err: unknown, title: string, retry?: () => void): void {
+  if (err instanceof ApiError && err.status === 429) {
+    quotaReset.value = err.resetAt || '';
+    quotaRetry.value = retry || null;
+    return;
+  }
+  notifyError(err, title);
+}
+
+function retryQuota(): void {
+  const retry = quotaRetry.value;
+  quotaReset.value = null;
+  quotaRetry.value = null;
+  if (retry) retry();
+}
 let timer: number | null = null;
+let listTimer: number | null = null;
+
+const hasActiveJobs = computed(() =>
+  jobs.value.some((job) => job.status === 'pending' || job.status === 'running'),
+);
+
+const paramsText = computed(() => {
+  const params = detail.value?.params;
+  if (!params || Object.keys(params).length === 0) return messages.value.jobs.none;
+  try {
+    return JSON.stringify(params);
+  } catch {
+    return String(params);
+  }
+});
 
 const detailEntries = computed<KeyValueEntry[]>(() => {
   if (!detail.value) return [];
@@ -102,9 +150,19 @@ const detailEntries = computed<KeyValueEntry[]>(() => {
     { label: messages.value.jobs.id, value: String(detail.value.id) },
     { label: messages.value.jobs.kind, value: detail.value.kind },
     { label: messages.value.jobs.status, value: detail.value.status },
-    { label: messages.value.jobs.finishedAt, value: detail.value.finished_at || '' },
+    { label: messages.value.jobs.finishedAt, value: format.dateTime(detail.value.finished_at) },
     { label: messages.value.jobs.error, value: detail.value.error || '' },
+    { label: messages.value.jobs.params, value: paramsText.value },
   ];
+});
+
+
+// Only a failed job with recorded parameters can be replayed; replaying a
+// successful one would duplicate work the operator did not ask for.
+const canResubmit = computed(() => {
+  const current = detail.value;
+  if (!current || current.status !== 'failed' || !canCreate.value) return false;
+  return Object.keys(current.params || {}).length > 0;
 });
 
 const detailText = computed(() => {
@@ -122,6 +180,7 @@ async function reload(): Promise<void> {
   try {
     const { data } = await api<{ jobs: JobSummary[] }>('/jobs', { params: { limit: limit.value } });
     jobs.value = data.jobs;
+    ensureListPolling();
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : messages.value.common.loadFailed;
     requestId.value = err instanceof ApiError ? err.requestId : '';
@@ -147,7 +206,13 @@ async function loadDetail(id: number): Promise<void> {
 function openDetail(row: JobSummary): void {
   detail.value = null;
   detailOpen.value = true;
+  sync({ id: row.id });
   void loadDetail(row.id);
+}
+
+function closeDetail(): void {
+  stopPolling();
+  sync({ id: undefined });
 }
 
 function startPolling(id: number): void {
@@ -164,6 +229,41 @@ function stopPolling(): void {
   }
 }
 
+// Queued and running jobs move on their own; the list follows until every row
+// reaches a terminal state, then polling stops by itself.
+function ensureListPolling(): void {
+  if (hasActiveJobs.value && listTimer === null) {
+    listTimer = window.setInterval(() => {
+      void reload();
+    }, 5000);
+    return;
+  }
+  if (!hasActiveJobs.value) stopListPolling();
+}
+
+function stopListPolling(): void {
+  if (listTimer !== null) {
+    window.clearInterval(listTimer);
+    listTimer = null;
+  }
+}
+
+async function resubmit(): Promise<void> {
+  const current = detail.value;
+  if (!current) return;
+  try {
+    const { data } = await api<{ id: number }>('/jobs', {
+      method: 'POST',
+      body: { kind: current.kind, params: current.params || {} },
+    });
+    notifySuccess(messages.value.jobs.submitted(data.id));
+    detailOpen.value = false;
+    await reload();
+  } catch (err) {
+    handleWriteFailure(err, messages.value.jobs.resubmitFailed, () => void resubmit());
+  }
+}
+
 async function cancel(id: number): Promise<void> {
   try {
     await ElMessageBox.confirm(messages.value.jobs.cancelConfirm, messages.value.jobs.cancelTask, { type: 'warning' });
@@ -176,7 +276,7 @@ async function cancel(id: number): Promise<void> {
     await loadDetail(id);
     await reload();
   } catch (err) {
-    notifyError(err, messages.value.jobs.cancelFailed);
+    handleWriteFailure(err, messages.value.jobs.cancelFailed, () => void cancel(id));
   }
 }
 
@@ -199,11 +299,19 @@ async function create(): Promise<void> {
     createForm.paramsText = '{}';
     await reload();
   } catch (err) {
-    notifyError(err, messages.value.jobs.submitFailed);
+    handleWriteFailure(err, messages.value.jobs.submitFailed, () => void create());
   }
 }
 
-onUnmounted(() => stopPolling());
+watch(hasActiveJobs, (active) => {
+  if (active) ensureListPolling();
+  else stopListPolling();
+});
+
+onUnmounted(() => {
+  stopPolling();
+  stopListPolling();
+});
 
 void reload().then(() => {
   const id = route.query.id;

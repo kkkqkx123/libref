@@ -214,6 +214,7 @@ def test_capacity_gate_refuses_overflow(backend, conn, tmp_path, cleanup):
 
 @pytest.mark.integration
 @pytest.mark.requires_qdrant
+@needs_qdrant
 def test_remote_tuning_applies_without_rebuild(conn, tmp_path, cleanup):
     first = _profile_store(
         "qdrant", tmp_path, qdrant_hnsw_m=32, qdrant_hnsw_ef_construct=200
@@ -235,6 +236,7 @@ def test_remote_tuning_applies_without_rebuild(conn, tmp_path, cleanup):
 
 @pytest.mark.integration
 @pytest.mark.requires_qdrant
+@needs_qdrant
 def test_remote_shape_drift_rebuilds(conn, tmp_path, cleanup):
     first = _profile_store("qdrant", tmp_path, qdrant_shard_number=1)
     first.ensure_collection(conn, "test/model", 4)

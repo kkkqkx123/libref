@@ -4,11 +4,11 @@
     <div class="libref-header-right">
       <HealthDot :state="healthState" :label="healthLabel" />
       <el-dropdown @command="(cmd: string) => setLocale(cmd as 'zh-CN' | 'en')">
-        <el-button link>{{ locale === 'zh-CN' ? '中文' : 'English' }}</el-button>
+        <el-button link>{{ locale === 'zh-CN' ? messages.language.zh : messages.language.en }}</el-button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="zh-CN">中文</el-dropdown-item>
-            <el-dropdown-item command="en">English</el-dropdown-item>
+            <el-dropdown-item command="zh-CN">{{ messages.language.zh }}</el-dropdown-item>
+            <el-dropdown-item command="en">{{ messages.language.en }}</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -32,33 +32,29 @@
 <script setup lang="ts">
 import { ElButton, ElDropdown, ElDropdownItem, ElDropdownMenu, ElHeader } from 'element-plus';
 import { messages } from '../../i18n';
-import { computed, onMounted, ref } from 'vue';
+import { computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { api } from '../../api/client';
 import { authStore, displayName, logout } from '../../stores/auth';
 import { locale, setLocale } from '../../i18n';
+import { healthStore } from '../../stores/health';
 import { theme, toggleTheme } from '../../stores/theme';
 import HealthDot from '../common/HealthDot.vue';
 
 const router = useRouter();
-const fingerprint = ref('');
 
-const healthState = computed(() => {
-  if (!fingerprint.value) return 'unknown';
-  return 'ok';
+const healthState = computed<'ok' | 'degraded' | 'unknown'>(() => {
+  if (!healthStore.loaded) return 'unknown';
+  return healthStore.degraded ? 'degraded' : 'ok';
 });
-const healthLabel = computed(() =>
-  fingerprint.value ? messages.value.header.serviceNormal(fingerprint.value) : messages.value.common.unknownStatus,
-);
-
-onMounted(() => {
-  api<{ ok: boolean; fingerprint: string }>('/health', { auth: false })
-    .then(({ data }) => {
-      fingerprint.value = data.fingerprint || '';
-    })
-    .catch(() => {
-      fingerprint.value = '';
-    });
+const healthLabel = computed(() => {
+  if (!healthStore.loaded) return messages.value.common.unknownStatus;
+  if (healthStore.degraded) {
+    const names = healthStore.failing.map((entry) => entry.split(':')[0].trim());
+    return messages.value.header.serviceDegraded(names.join(', '));
+  }
+  return healthStore.fingerprint
+    ? messages.value.header.serviceNormal(healthStore.fingerprint)
+    : messages.value.common.unknownStatus;
 });
 
 function goHome(): void {

@@ -48,11 +48,6 @@ def nuget_search_url(query: str, take: int = 20) -> str:
     return f"{NUGET_SEARCH_URL}?{urlencode({'q': query.strip(), 'take': max(1, min(take, 100))})}"
 
 
-def _is_prerelease(version: str) -> bool:
-    lowered = version.lower()
-    return "-" in lowered
-
-
 def _timeline_entries(payload: dict[str, Any]) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     for page in payload.get("items") or []:
@@ -89,10 +84,14 @@ def pick_nuget_stable(
 ) -> str | None:
     """Latest non-prerelease by version comparison; prerelease only when nothing else exists.
 
+    NuGet follows SemVer, so any hyphen suffix is a pre-release; that rule lives in
+    the shared detector and is selected by passing the ecosystem.
     With inclusion enabled the comparison maximum wins directly, prereleases included."""
     from libref.crawler.registry import best_effort_stable
 
-    return best_effort_stable(versions, include_prerelease=include_prerelease)
+    return best_effort_stable(
+        versions, include_prerelease=include_prerelease, ecosystem="nuget"
+    )
 
 
 def parse_nuget_registration(

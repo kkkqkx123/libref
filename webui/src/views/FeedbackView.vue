@@ -1,6 +1,11 @@
 <template>
   <div class="libref-page">
     <PageHeader :title="messages.routes.feedback" :description="messages.feedback.description" />
+    <QuotaNotice v-if="quotaReset !== null" :reset-at="quotaReset">
+      <el-button size="small" type="primary" :loading="submitting" @click="retryQuota">
+        {{ messages.common.retry }}
+      </el-button>
+    </QuotaNotice>
     <div v-if="canSubmit" class="libref-card">
       <h4>{{ messages.feedback.submitTitle }}</h4>
       <el-form :model="form" label-width="90px" @submit.prevent="submit">
@@ -41,12 +46,17 @@
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="reload" />
     <template v-else>
       <EmptyState v-if="items.length === 0" :description="messages.feedback.empty" />
-      <div v-for="item in items" :key="item.id" class="libref-card">
+      <div
+        v-for="item in items"
+        :key="item.id"
+        class="libref-card"
+        :class="{ 'libref-feedback-resolved': item.status === 'resolved' }"
+      >
         <div class="libref-feedback-head">
           <StatusBadge :status="item.status" />
           <span class="libref-mono">{{ item.entity_type }}#{{ item.entity_id }}</span>
           <span class="libref-muted">{{ item.kind }}</span>
-          <span class="libref-muted">{{ item.created_at || '' }}</span>
+          <span class="libref-muted">{{ format.dateTime(item.created_at) }}</span>
           <el-button
             v-if="canResolve && item.status !== 'resolved'"
             link
@@ -65,7 +75,7 @@
 
 <script setup lang="ts">
 import { ElButton, ElForm, ElFormItem, ElInput, ElInputNumber, ElOption, ElSelect } from 'element-plus';
-import { reactive, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { api, ApiError } from '../api/client';
 import type { Envelope, FeedbackItem } from '../api/types';
@@ -73,24 +83,40 @@ import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import QuotaNotice from '../components/common/QuotaNotice.vue';
 import { messages } from '../i18n';
+import { useFormatters } from '../i18n/format';
 import StatusBadge from '../components/common/StatusBadge.vue';
 import { hasScope } from '../stores/auth';
 import { notifyError, notifySuccess } from '../stores/notify';
+import { readNumber, readString, useQuerySync } from '../utils/query';
 
 const route = useRoute();
-const canSubmit = hasScope('feedback:write');
-const canResolve = hasScope('feedback:resolve');
+const { sync } = useQuerySync();
+const format = useFormatters();
+const canSubmit = computed(() => hasScope('feedback:write'));
+const canResolve = computed(() => hasScope('feedback:resolve'));
 
 const form = reactive({
   entity_type: typeof route.query.entity_type === 'string' ? route.query.entity_type : 'call_instance',
-  entity_id: 0,
+  entity_id: route.query.entity_id ? readNumber(route.query.entity_id, 0) : 0,
   kind: 'general',
   body: typeof route.query.body === 'string' ? route.query.body : '',
 });
-const status = ref('');
+const status = ref(readString(route.query.status));
 const loading = ref(false);
 const submitting = ref(false);
+// Quota refusals show the reset time plus a manual retry rather than an error.
+const quotaReset = ref<string | null>(null);
+const quotaRetry = ref<null | (() => void)>(null);
+
+function retryQuota(): void {
+  const retry = quotaRetry.value;
+  quotaReset.value = null;
+  quotaRetry.value = null;
+  if (retry) retry();
+  else void submit();
+}
 const error = ref('');
 const requestId = ref('');
 const items = ref<FeedbackItem[]>([]);
@@ -112,13 +138,18 @@ async function submit(): Promise<void> {
     form.body = '';
     await reload();
   } catch (err) {
-    notifyError(err, messages.value.common.submitFailed);
+    if (err instanceof ApiError && err.status === 429) {
+      quotaReset.value = err.resetAt || '';
+    } else {
+      notifyError(err, messages.value.common.submitFailed);
+    }
   } finally {
     submitting.value = false;
   }
 }
 
 async function reload(): Promise<void> {
+  sync({ status: status.value });
   loading.value = true;
   error.value = '';
   try {
@@ -140,6 +171,11 @@ async function resolve(item: FeedbackItem): Promise<void> {
     notifySuccess(messages.value.feedback.resolvedDone);
     item.status = 'resolved';
   } catch (err) {
+    if (err instanceof ApiError && err.status === 429) {
+      quotaReset.value = err.resetAt || '';
+      quotaRetry.value = () => void resolve(item);
+      return;
+    }
     notifyError(err, messages.value.feedback.actionFailed);
   }
 }
@@ -148,6 +184,9 @@ void reload();
 </script>
 
 <style scoped>
+.libref-feedback-resolved {
+  opacity: 0.6;
+}
 .libref-feedback-head {
   display: flex;
   gap: 8px;

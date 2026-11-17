@@ -6,7 +6,7 @@
     :closable="false"
     class="libref-degraded"
   >
-    <template #title>{{ messages.common.retrievalDegraded }}：{{ answerabilityText }}</template>
+    <template #title>{{ messages.common.degradedTitle(answerabilityText) }}</template>
     <ul class="libref-degraded-list">
       <li v-for="reason in reasons" :key="reason">{{ reason }}</li>
     </ul>

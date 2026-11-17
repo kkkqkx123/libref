@@ -2,6 +2,15 @@
   <el-config-provider :locale="elementLocale">
     <el-container class="libref-root">
       <AppHeader />
+      <el-alert
+        v-if="healthStore.degraded"
+        type="warning"
+        show-icon
+        :closable="false"
+        class="libref-health-banner"
+        :title="messages.health.degradedTitle"
+        :description="messages.health.degradedHint(healthStore.failing.join('; '))"
+      />
       <el-container>
         <AppSidebar v-if="showSidebar" />
         <el-main class="libref-main">
@@ -13,15 +22,25 @@
 </template>
 
 <script setup lang="ts">
-import { ElConfigProvider, ElContainer, ElMain } from 'element-plus';
-import { computed } from 'vue';
+import { ElAlert, ElConfigProvider, ElContainer, ElMain } from 'element-plus';
+import { computed, onMounted, onUnmounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { elementLocale } from './i18n/element';
+import { messages } from './i18n';
+import { healthStore, startHealthPolling, stopHealthPolling } from './stores/health';
 import AppHeader from './components/business/AppHeader.vue';
 import AppSidebar from './components/business/AppSidebar.vue';
 
 const route = useRoute();
 const showSidebar = computed(() => route.path !== '/login');
+
+onMounted(() => {
+  startHealthPolling();
+});
+
+onUnmounted(() => {
+  stopHealthPolling();
+});
 </script>
 
 <style>
@@ -45,5 +64,8 @@ body {
 .libref-main {
   padding: 0;
   overflow-y: auto;
+}
+.libref-health-banner {
+  border-radius: 0;
 }
 </style>

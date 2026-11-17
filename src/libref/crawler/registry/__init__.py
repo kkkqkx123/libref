@@ -97,6 +97,13 @@ _PRERELEASE_HINTS = (
     "snapshot",
     "nightly",
 )
+# SemVer-shaped registries: any hyphen suffix is a pre-release identifier.
+_SEMVER_ECOSYSTEMS = frozenset({"npm", "crates", "nuget"})
+# Maven has no version grammar: these tokens are the field's de-facto markers.
+_MAVEN_HINTS = frozenset({"m", "ea", "cr", "milestone"})
+_PEP440_TAIL = re.compile(r"(?:a|b|rc|alpha|beta|pre|preview|dev)\d*$", re.IGNORECASE)
+_GO_PSEUDO = re.compile(r"^v\d+\.\d+\.\d+-\d{14}-[0-9a-f]{12}$")
+_VERSION_SEPARATORS = re.compile(r"[-._]")
 
 
 class RegistryError(Exception):
@@ -292,20 +299,70 @@ def _version_key(value: str) -> list[tuple[int, Any]]:
     return key
 
 
+def _token_hit(text: str, extra: frozenset[str] = frozenset()) -> bool:
+    """Token-boundary hint match.
+
+    Plain substring search misfires on ordinary words (``compressed`` contains
+    ``pre``), so a hint only counts when it is a whole token or when the rest of
+    the token is numeric (``beta1``, ``rc2``).
+    """
+    for token in _VERSION_SEPARATORS.split(text.lower()):
+        if not token:
+            continue
+        if token in extra or token in _PRERELEASE_HINTS:
+            return True
+        for hint in (*_PRERELEASE_HINTS, *extra):
+            if token.startswith(hint) and token[len(hint) :].isdigit():
+                return True
+    return False
+
+
+def is_prerelease(version: str, ecosystem: str | None = None) -> bool:
+    """Pre-release detection dispatched by registry convention.
+
+    Registries disagree on how a pre-release is spelled: npm/crates/nuget put it
+    after a hyphen, PyPI uses PEP 440 segment letters (``1.0.0a1``), Maven uses
+    free-form tokens (``-M1``, ``-EA``), Go adds pseudo-versions. One shared
+    substring rule cannot cover all four, so the caller passes its ecosystem.
+    Unknown ecosystems fall back to token-boundary hints.
+    """
+    text = str(version or "").strip()
+    if not text:
+        return False
+    # Build metadata never implies a pre-release: 1.0.0+incompatible is a release.
+    text = text.split("+", 1)[0].strip()
+    head, _, tail = text.partition("-")
+    eco = (ecosystem or "").strip().lower()
+    if eco in _SEMVER_ECOSYSTEMS:
+        return bool(tail.strip())
+    if eco == "pypi":
+        return bool(tail.strip()) or bool(_PEP440_TAIL.search(head))
+    if eco == "maven":
+        return _token_hit(text, _MAVEN_HINTS)
+    if eco == "go":
+        if not tail.strip():
+            return False
+        return bool(_GO_PSEUDO.match(text)) or _token_hit(text)
+    return _token_hit(text)
+
+
 def best_effort_stable(
-    versions: list[str], *, include_prerelease: bool = False
+    versions: list[str],
+    *,
+    include_prerelease: bool = False,
+    ecosystem: str | None = None,
 ) -> str | None:
     """Fallback when no stable release exists: filter pre-release suffixes, then take the max by version comparison.
 
     Approximation: ordering uses the chunk-wise version key, not PEP 440 or
-    SemVer; pre-release detection is suffix-hint based, except NuGet which
-    treats any hyphenated version as pre-release.
+    SemVer; pre-release detection is dispatched by ecosystem (see
+    ``is_prerelease``), which is why callers must pass theirs.
     With inclusion enabled the timeline maximum wins directly, prereleases included."""
     if not versions:
         return None
     if include_prerelease:
         return max(versions, key=_version_key)
-    plain = [v for v in versions if not any(h in v.lower() for h in _PRERELEASE_HINTS)]
+    plain = [v for v in versions if not is_prerelease(v, ecosystem)]
     return max(plain or versions, key=_version_key)
 
 
@@ -366,7 +423,10 @@ async def fetch_snapshot(
             resp.json(), allow_private=allow_private
         )
         if include_prerelease:
-            stable = best_effort_stable(versions, include_prerelease=True) or stable
+            stable = (
+                best_effort_stable(versions, include_prerelease=True, ecosystem=eco)
+                or stable
+            )
     elif eco == "npm":
         from libref.crawler.registry.npm import npm_snapshot_url, parse_npm_payload
 
@@ -380,7 +440,10 @@ async def fetch_snapshot(
             resp.json(), allow_private=allow_private
         )
         if include_prerelease:
-            stable = best_effort_stable(versions, include_prerelease=True) or stable
+            stable = (
+                best_effort_stable(versions, include_prerelease=True, ecosystem=eco)
+                or stable
+            )
     elif eco == "go":
         from libref.crawler.registry.go import (
             go_latest_url,
@@ -406,7 +469,10 @@ async def fetch_snapshot(
         if not versions:
             raise RegistryError("not_found", f"package not found: go:{name}")
         if include_prerelease:
-            stable = best_effort_stable(versions, include_prerelease=True) or stable
+            stable = (
+                best_effort_stable(versions, include_prerelease=True, ecosystem=eco)
+                or stable
+            )
         homepage, candidates, repo_url = (
             None,
             rank_go_candidates(name, stable, allow_private=allow_private),
@@ -503,8 +569,13 @@ async def fetch_snapshot(
         if not versions:
             raise RegistryError("not_found", f"package not found: maven:{name}")
         if include_prerelease:
-            stable = best_effort_stable(versions, include_prerelease=True) or stable
-        pom_version = stable or best_effort_stable(versions) or versions[0]
+            stable = (
+                best_effort_stable(versions, include_prerelease=True, ecosystem=eco)
+                or stable
+            )
+        pom_version = (
+            stable or best_effort_stable(versions, ecosystem=eco) or versions[0]
+        )
         pom_resp = await _get_text(
             client, maven_pom_url(base, group, artifact, pom_version)
         )

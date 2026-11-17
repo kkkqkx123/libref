@@ -26,7 +26,7 @@ API 端点占据根路径且数量多，MCP 以 `Mount("/")` 挂在最后，因�
 
 ## 构建与镜像
 
-`webui/` 保持独立 npm 工程，不进 `pyproject`。镜像构建时把预构建产物拷入运行时镜像指定目录即可；`.dockerignore` 当前排除项不含该产物路径，届时确认放行。开发期沿用前端自带 dev 服务器代理到本地 `8001`，不经过 Python 托管链路。
+`webui/` 保持独立 npm 工程，不进 `pyproject`。镜像构建时把预构建产物拷入运行时镜像指定目录即可；`.dockerignore` 当前排除项不含该产物路径，届时确认放行。开发期前端 dev 服务器通过 `VITE_API_BASE` 直连本地 `8001`（`.env.development` 指定，服务端 CORS 已放开），不经过 Python 托管链路，也不额外配置代理。
 
 ## nginx 叠加（生产可选）
 

@@ -14,11 +14,25 @@ from libref import observe
 from libref.mcp_server.auth import is_allowed_origin, parse_bearer
 from libref.services.infra import metrics as request_metrics
 from libref.services.infra.auth import current_principal
+from libref.web.errors import error_body
 
 
 def _public_path(path: str) -> bool:
     return path in ("/health", "/readyz", "/") or path.startswith(
         ("/health", "/assets/")
+    )
+
+
+def _reject(status: int, detail: Any, code: str, request_id: str) -> JSONResponse:
+    """Single rejection shape: same builder as route-level ``HTTPException``.
+
+    The middleware knows its causes outright, so the code is passed in instead of
+    being re-derived from the detail text.
+    """
+    return JSONResponse(
+        error_body(status, detail, request_id, code=code),
+        status_code=status,
+        headers={"x-request-id": request_id},
     )
 
 
@@ -71,17 +85,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     result="denied",
                     request_id=str(getattr(request.state, "request_id", "")),
                 )
-                return JSONResponse(
+                rid = str(getattr(request.state, "request_id", ""))
+                return _reject(
+                    429,
                     {
                         "error": "quota exceeded",
                         "resource": decision.resource,
                         "reset_at": decision.reset_at,
-                        "request_id": str(getattr(request.state, "request_id", "")),
+                        "request_id": rid,
                     },
-                    status_code=429,
-                    headers={
-                        "x-request-id": str(getattr(request.state, "request_id", ""))
-                    },
+                    "quota_exceeded",
+                    rid,
                 )
             quota.add_usage(
                 conn,
@@ -158,18 +172,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
         origin = request.headers.get("origin")
         host = str(getattr(settings, "web_host", "127.0.0.1") or "127.0.0.1")
         if not is_allowed_origin(origin, host=host):
-            return JSONResponse(
-                {"error": "forbidden", "request_id": request_id},
-                status_code=403,
-                headers={"x-request-id": request_id},
-            )
+            return _reject(403, "origin not allowed", "origin_forbidden", request_id)
         raw = parse_bearer(request.headers.get("authorization"))
         if not raw:
-            return JSONResponse(
-                {"error": "unauthorized", "request_id": request_id},
-                status_code=401,
-                headers={"x-request-id": request_id},
-            )
+            return _reject(401, "unauthorized", "unauthorized", request_id)
         try:
             import anyio as _anyio
 
@@ -190,17 +196,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
             principal = await _anyio.to_thread.run_sync(_lookup)
         except Exception:  # noqa: BLE001
-            return JSONResponse(
-                {"error": "unavailable", "request_id": request_id},
-                status_code=503,
-                headers={"x-request-id": request_id},
-            )
+            return _reject(503, "auth backend unavailable", "unavailable", request_id)
         if principal is None:
-            return JSONResponse(
-                {"error": "unauthorized", "request_id": request_id},
-                status_code=401,
-                headers={"x-request-id": request_id},
-            )
+            return _reject(401, "unauthorized", "unauthorized", request_id)
         request.state.principal = principal
         observe.principal_var.set(str(principal.id or principal.name))
         observe.tenant_var.set(principal.tenant_id)

@@ -23,6 +23,7 @@
 
 <script setup lang="ts">
 import { ElButton } from 'element-plus';
+import { computed } from 'vue';
 import { messages } from '../../i18n';
 import type { Row } from '../../api/types';
 import { hasScope } from '../../stores/auth';
@@ -32,7 +33,7 @@ import { formatCell } from '../../utils/format';
 defineProps<{ rows: Row[] }>();
 const emit = defineEmits<{ feedback: [row: Row] }>();
 
-const canFeedback = hasScope('feedback:write');
+const canFeedback = computed(() => hasScope('feedback:write'));
 
 function pick(row: Row, keys: string[]): string {
   for (const key of keys) {

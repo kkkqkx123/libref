@@ -38,7 +38,7 @@
 <script setup lang="ts">
 import { ElButton, ElForm, ElFormItem, ElInput, ElInputNumber, ElRadioButton, ElRadioGroup } from 'element-plus';
 import { computed, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
 import type { Envelope, Row } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
@@ -51,13 +51,28 @@ import { messages } from '../i18n';
 import TagInput from '../components/common/TagInput.vue';
 import { notifyError } from '../stores/notify';
 import { scopeParams } from '../stores/scope';
+import {
+  applyScopeFromQuery,
+  readList,
+  readNumber,
+  readString,
+  scopeSnapshot,
+  useQuerySync,
+} from '../utils/query';
+
+const route = useRoute();
+const { sync } = useQuerySync();
+
+applyScopeFromQuery(route.query);
 
 const router = useRouter();
 type View = 'usage' | 'related' | 'args' | 'common';
-const view = ref<View>('usage');
-const apiName = ref('');
-const apis = ref<string[]>([]);
-const limit = ref(20);
+const VIEWS: View[] = ['usage', 'related', 'args', 'common'];
+const requested = readString(route.query.view) as View;
+const view = ref<View>(VIEWS.includes(requested) ? requested : 'usage');
+const apiName = ref(readString(route.query.api));
+const apis = ref<string[]>(readList(route.query.apis));
+const limit = ref(readNumber(route.query.limit, 20));
 const loading = ref(false);
 const loaded = ref(false);
 const error = ref('');
@@ -71,6 +86,13 @@ async function load(): Promise<void> {
     notifyError(new Error(messages.value.apiInsight.apiRequired), messages.value.common.missingParam);
     return;
   }
+  sync({
+    view: view.value,
+    api: apiName.value.trim(),
+    apis: apis.value,
+    limit: limit.value,
+    ...scopeSnapshot(),
+  });
   loading.value = true;
   error.value = '';
   try {
@@ -93,8 +115,16 @@ async function load(): Promise<void> {
   }
 }
 
+if (route.query.view || route.query.api || route.query.apis) void load();
+
 function forwardFeedback(row: Row): void {
-  const callee = typeof row['callee_name'] === 'string' ? (row['callee_name'] as string) : '';
-  void router.push({ path: '/feedback', query: { entity_type: 'call_instance', body: callee } });
+  const entityId = Number(row['entity_id']);
+  void router.push({
+    path: '/feedback',
+    query: {
+      entity_type: 'call_instance',
+      entity_id: Number.isFinite(entityId) && entityId > 0 ? String(entityId) : undefined,
+    },
+  });
 }
 </script>

@@ -12,15 +12,23 @@ npm run dev        # serves on :5173, calls the API at VITE_API_BASE
 ```
 
 `VITE_API_BASE` defaults to the same origin in production builds and points at
-`http://127.0.0.1:8001` under `.env.development`.
+`http://127.0.0.1:8001` under `.env.development` (the service allows CORS in dev,
+so no dev proxy is configured).
 
 ## Verify
 
 ```sh
-npm run check      # vue-tsc plus design token check
+npm run check      # vue-tsc, message catalogue check, design token check
 npm run build      # type check then production build into dist/
-npm run gen:api    # refresh src/api/schema.d.ts from a running backend
+npm run gen:api    # export the OpenAPI snapshot and regenerate src/api/schema.d.ts
 ```
+
+`gen:api` runs `tools/export_openapi.py` from the repository root, which builds the
+app object directly — no backend has to be running. Both the snapshot and
+`schema.d.ts` are local-only (see `.gitignore`); `src/api/types.ts` is the
+hand-maintained mirror, and `tests/integration/test_openapi_contract.py` keeps the
+response models honest. A reachable backend at `LIBREF_BASE_URL` is used only when
+the offline export is unavailable.
 
 ## Deploy
 

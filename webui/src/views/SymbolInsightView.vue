@@ -42,6 +42,7 @@
 <script setup lang="ts">
 import { ElButton, ElForm, ElFormItem, ElInput, ElRadioButton, ElRadioGroup } from 'element-plus';
 import { ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { api, ApiError } from '../api/client';
 import type { Envelope, Row } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
@@ -53,13 +54,28 @@ import { messages } from '../i18n';
 import RowTable from '../components/common/RowTable.vue';
 import TagInput from '../components/common/TagInput.vue';
 import { scopeParams } from '../stores/scope';
+import {
+  applyScopeFromQuery,
+  readList,
+  readNumber,
+  readString,
+  scopeSnapshot,
+  useQuerySync,
+} from '../utils/query';
+
+const route = useRoute();
+const { sync } = useQuerySync();
+
+applyScopeFromQuery(route.query);
 
 type View = 'detail' | 'file' | 'children' | 'signature';
-const view = ref<View>('detail');
-const apiName = ref('');
-const apis = ref<string[]>([]);
-const limit = ref(50);
-const offset = ref(0);
+const VIEWS: View[] = ['detail', 'file', 'children', 'signature'];
+const requested = readString(route.query.view) as View;
+const view = ref<View>(VIEWS.includes(requested) ? requested : 'detail');
+const apiName = ref(readString(route.query.api));
+const apis = ref<string[]>(readList(route.query.apis));
+const limit = ref(readNumber(route.query.limit, 50));
+const offset = ref(readNumber(route.query.offset, 0));
 const loading = ref(false);
 const loaded = ref(false);
 const error = ref('');
@@ -67,6 +83,14 @@ const requestId = ref('');
 const rows = ref<Row[]>([]);
 
 async function load(): Promise<void> {
+  sync({
+    view: view.value,
+    api: apiName.value.trim() || undefined,
+    apis: apis.value.length > 0 ? apis.value.join(',') : undefined,
+    limit: limit.value,
+    offset: offset.value,
+    ...scopeSnapshot(),
+  });
   loading.value = true;
   error.value = '';
   try {
@@ -94,6 +118,8 @@ function page(direction: number): void {
   offset.value = Math.max(0, offset.value + direction * limit.value);
   void load();
 }
+
+if (route.query.view || route.query.api || route.query.apis) void load();
 </script>
 
 <style scoped>

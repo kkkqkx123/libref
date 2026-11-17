@@ -5,6 +5,8 @@
 <script setup lang="ts">
 import { ElTag } from 'element-plus';
 import { computed } from 'vue';
+import { messages } from '../../i18n';
+import type { MessageCatalog } from '../../i18n/locales/zh-CN';
 
 const props = defineProps<{ status: string }>();
 
@@ -20,5 +22,9 @@ const tagType = computed(() => {
   return 'info';
 });
 
-const label = computed(() => props.status || 'unknown');
+const label = computed(() => {
+  const keys = messages.value.status as MessageCatalog['status'];
+  const key = (props.status || 'unknown').toLowerCase() as keyof MessageCatalog['status'];
+  return keys[key] || props.status || messages.value.status.unknown;
+});
 </script>

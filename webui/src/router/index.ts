@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { messages } from '../i18n';
+import { watch } from 'vue';
+import { locale, messages } from '../i18n';
 import { authStore, detectMode, hasScopes } from '../stores/auth';
 
 const router = createRouter({
@@ -40,10 +41,23 @@ router.beforeEach(async (to) => {
     if (!ok && authStore.me) return { path: '/forbidden' };
     if (!ok) return { path: '/login', query: { redirect: to.fullPath } };
   }
-  const key = to.meta.titleKey as string | undefined;
-  const title = key && key in messages.value.routes ? messages.value.routes[key as keyof typeof messages.value.routes] : 'libref';
-  document.title = `${title} - libref`;
   return true;
+});
+
+function applyTitle(route = router.currentRoute.value): void {
+  const key = route.meta.titleKey as string | undefined;
+  const routes = messages.value.routes;
+  const title = key && key in routes ? routes[key as keyof typeof routes] : messages.value.app.brand;
+  document.title = `${title} - ${messages.value.app.brand}`;
+}
+
+router.afterEach((to) => {
+  applyTitle(to);
+});
+
+// Switching language keeps the route, so the title has to be rewritten here.
+watch(locale, () => {
+  applyTitle();
 });
 
 export default router;

@@ -11,19 +11,23 @@ const catalogs: Record<Locale, MessageCatalog> = {
   en,
 };
 
+function isSupported(value: string): value is Locale {
+  return value === 'zh-CN' || value === 'en';
+}
+
 function detectInitialLocale(): Locale {
   try {
     const params = new URLSearchParams(window.location.search);
     const fromQuery = params.get('lang');
-    if (fromQuery && isSupported(fromQuery)) return fromQuery as Locale;
+    if (fromQuery && isSupported(fromQuery)) return fromQuery;
   } catch {
-    // ignore
+    // A missing or unreadable location only costs the query-parameter hint.
   }
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && isSupported(saved)) return saved as Locale;
+    if (saved && isSupported(saved)) return saved;
   } catch {
-    // ignore
+    // Storage may be disabled; detection falls through to browser hints.
   }
   try {
     for (const candidate of navigator.languages || []) {
@@ -32,32 +36,32 @@ function detectInitialLocale(): Locale {
       if (normalized.startsWith('en')) return 'en';
     }
   } catch {
-    // ignore
+    // No navigator hints means the built-in default wins.
   }
   return 'zh-CN';
-}
-
-function isSupported(value: string): value is Locale {
-  return value === 'zh-CN' || value === 'en';
 }
 
 export const locale = ref<Locale>(detectInitialLocale());
 
 export const messages = computed<MessageCatalog>(() => catalogs[locale.value]);
 
-export function useMessages(): MessageCatalog {
-  return messages.value;
+function applyDocumentLang(next: Locale): void {
+  document.documentElement.lang = next;
 }
+
+applyDocumentLang(locale.value);
 
 export function setLocale(next: Locale): void {
   if (!isSupported(next)) return;
+  // Re-selecting the active locale still persists it, so the choice survives a
+  // reload even when the browser preference points elsewhere.
   locale.value = next;
   try {
     localStorage.setItem(STORAGE_KEY, next);
   } catch {
-    // ignore
+    // Persistence is best-effort; the switch still applies for this session.
   }
-  document.documentElement.lang = next;
+  applyDocumentLang(next);
 }
 
 export function supportedLocales(): Locale[] {

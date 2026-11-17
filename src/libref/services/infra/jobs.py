@@ -343,6 +343,9 @@ class JobManager:
             "status": job.status,
             "error": job.error,
             "result": job.result,
+            # Submission parameters: a failed job can only be re-submitted if the
+            # caller sees what it was originally asked to do.
+            "params": job.params,
             "finished_at": job.finished_at,
         }
 

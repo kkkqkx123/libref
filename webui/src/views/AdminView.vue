@@ -14,11 +14,15 @@
           <el-table-column prop="principal_id" :label="messages.admin.principal" width="90" />
           <el-table-column prop="key_prefix" :label="messages.admin.prefix" width="140" />
           <el-table-column prop="scopes" :label="messages.admin.scopes" show-overflow-tooltip />
-          <el-table-column prop="expires_at" :label="messages.admin.expiresAt" width="170" />
-          <el-table-column prop="revoked_at" :label="messages.admin.revokedAt" width="170">
-            <template #default="scope">{{ scope.row.revoked_at ? messages.admin.revoked : messages.admin.valid }}</template>
+          <el-table-column :label="messages.admin.expiresAt" width="170">
+            <template #default="scope">{{ format.dateTime(scope.row.expires_at) }}</template>
           </el-table-column>
-          <el-table-column prop="last_used_at" :label="messages.admin.lastUsed" width="170" />
+          <el-table-column :label="messages.admin.revokedAt" width="170">
+            <template #default="scope">{{ scope.row.revoked_at ? format.dateTime(scope.row.revoked_at) : messages.admin.valid }}</template>
+          </el-table-column>
+          <el-table-column :label="messages.admin.lastUsed" width="170">
+            <template #default="scope">{{ format.dateTime(scope.row.last_used_at) }}</template>
+          </el-table-column>
           <el-table-column  :label="messages.common.actions" width="100">
             <template #default="scope">
               <el-button
@@ -66,26 +70,30 @@
 <script setup lang="ts">
 import { ElAlert, ElButton, ElTabPane, ElTable, ElTableColumn, ElTabs } from 'element-plus';
 import { ElMessageBox } from 'element-plus';
-import { computed, ref } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { api, ApiError } from '../api/client';
 import type { Envelope, Row } from '../api/types';
 import KeyIssueDialog from '../components/business/KeyIssueDialog.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
 import { messages } from '../i18n';
+import { useFormatters } from '../i18n/format';
 import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue';
 import { hasScope } from '../stores/auth';
 import { notifyError, notifySuccess } from '../stores/notify';
 
-const canKeys = hasScope('admin:keys');
-const canConfig = hasScope('admin:config');
-const tab = ref(canKeys ? 'keys' : 'status');
+const format = useFormatters();
+const canKeys = computed(() => hasScope('admin:keys'));
+const canConfig = computed(() => hasScope('admin:config'));
+const tab = ref(canKeys.value ? 'keys' : 'status');
+let metricsTimer: number | null = null;
 
 const keys = ref<Row[]>([]);
 const newKey = ref('');
 const issueOpen = ref(false);
 const readyLoading = ref(false);
 const metricsLoading = ref(false);
+const metricsLoaded = ref(false);
 const ready = ref<Record<string, unknown>>({});
 const metrics = ref<Record<string, unknown>>({});
 
@@ -156,10 +164,9 @@ async function refreshConfig(): Promise<void> {
   }
 }
 
-async function loadStatus(): Promise<void> {
-  if (!canConfig) return;
+async function loadReadiness(): Promise<void> {
+  if (!canConfig.value) return;
   readyLoading.value = true;
-  metricsLoading.value = true;
   try {
     const { data } = await api<Row>('/readyz', { auth: false });
     ready.value = data;
@@ -168,18 +175,53 @@ async function loadStatus(): Promise<void> {
   } finally {
     readyLoading.value = false;
   }
+}
+
+async function loadMetrics(): Promise<void> {
+  if (!canConfig.value) return;
+  metricsLoading.value = !metricsLoaded.value;
   try {
     const { data } = await api<Row>('/metrics');
     metrics.value = data;
   } catch {
     metrics.value = {};
   } finally {
+    metricsLoaded.value = true;
     metricsLoading.value = false;
   }
 }
 
+// Process counters keep moving; polling runs only while the status tab is open.
+function startMetricsPolling(): void {
+  if (metricsTimer !== null) return;
+  metricsTimer = window.setInterval(() => {
+    void loadMetrics();
+  }, 10000);
+}
+
+function stopMetricsPolling(): void {
+  if (metricsTimer === null) return;
+  window.clearInterval(metricsTimer);
+  metricsTimer = null;
+}
+
+watch(
+  tab,
+  (next) => {
+    if (next !== 'status') {
+      stopMetricsPolling();
+      return;
+    }
+    void loadReadiness();
+    void loadMetrics();
+    startMetricsPolling();
+  },
+  { immediate: true },
+);
+
+onUnmounted(() => stopMetricsPolling());
+
 void loadKeys();
-void loadStatus();
 </script>
 
 <style scoped>

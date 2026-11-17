@@ -6,7 +6,7 @@
 
 ## 阶段零：工程骨架与契约接入（前置一切页面）
 
-- 建 `webui/` 独立 npm 工程：Vite + Vue 3 + Element Plus，开发期代理到本地 `8001`，
+- 建 `webui/` 独立 npm 工程：Vite + Vue 3 + Element Plus，开发期直连本地 `8001`，
   产物由 Python 自托管（托管结论见 `docs/architecture/frontend-hosting.md`）。
 - 按后端 `/openapi.json` 生成 API 类型与客户端（参考 linkrs 的 `gen:api` 做法：
   描述文件入库、生成物可复核），请求层统一注入凭据、请求标识与错误转译
