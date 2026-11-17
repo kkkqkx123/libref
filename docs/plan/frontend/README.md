@@ -31,5 +31,13 @@ Web 出口是纯 API 形态：约三十个根路径端点加挂载于 `/mcp` 的
 - `ops-admin.md`：任务、审核、反馈、管理面的操作流程与非功能要求。
 - `phases.md`：分阶段实施方案，阶段划分与每阶段验收标准。
 - `style-guide.md`：样式设计与统一规范，令牌单源与共用组件清单。
+
+## 实施状态
+
+- 五个阶段已全部实现，见 `webui/`（Vue 3 + Element Plus 单页应用）。
+- 后端前置：组合服务的拍平路由已补 FastAPI 路由不变量与 SPA 中间件，
+  按请求会话隔离修复了上下文连接复用，见 `tests/integration/test_combined_serve.py`。
+- 前端校验：`npm run check`（类型加令牌）与 `npm run build`；
+  后端校验：全量 pytest 加 ruff 加 mypy。
 - 落地顺序建议：检索问答先行（只读），其次源码洞察（只读），再入库引导与任务中心，
   最后审核反馈与系统管理（写操作多、权限要求高）。

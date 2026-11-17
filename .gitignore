@@ -25,11 +25,15 @@ htmlcov/
 .env
 .env.*
 !.env.example
+!webui/.env.development
 
 # 本地实例配置（libref.example.toml 模板需入库，复制出的 libref.toml 不进版本库）
 /libref.toml
 .idea/
 .vscode/
+
+# 前端依赖（npm 管理，由各环境自行安装）
+node_modules/
 
 # 系统文件
 .DS_Store

@@ -17,7 +17,9 @@ from libref.services.infra.auth import current_principal
 
 
 def _public_path(path: str) -> bool:
-    return path in ("/health", "/readyz") or path.startswith("/health")
+    return path in ("/health", "/readyz", "/") or path.startswith(
+        ("/health", "/assets/")
+    )
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

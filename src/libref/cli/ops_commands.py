@@ -560,6 +560,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
         origins = allowed_origins or ["*"]
         combined = _Starlette(routes=routes, lifespan=_lifespan)
+        combined.state.context = ctx
+        combined.state.settings = settings
         combined.add_middleware(
             CORSMiddleware,
             allow_origins=origins,
@@ -574,6 +576,20 @@ def cmd_serve(args: argparse.Namespace) -> int:
             expose_headers=["Mcp-Session-Id", "x-request-id"],
         )
         combined.add_middleware(AuthMiddleware, context=ctx)
+        # Flattened web routes bypass the inner app stack, so the combined app
+        # must restore the FastAPI route invariant and the SPA fallback itself.
+        from fastapi.middleware.asyncexitstack import AsyncExitStackMiddleware
+
+        combined.add_middleware(AsyncExitStackMiddleware)
+        from libref.web.spa import SpaMiddleware, spa_dir_for
+
+        spa_directory = spa_dir_for(settings)
+        if spa_directory is not None:
+            combined.add_middleware(
+                SpaMiddleware,
+                directory=spa_directory,
+                mcp_prefix=str(getattr(settings, "mcp_path", "/mcp") or "/mcp"),
+            )
         uvicorn.run(combined, host=host, port=port, log_level="warning")
         return 0
     finally:

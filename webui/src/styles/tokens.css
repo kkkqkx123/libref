@@ -1,0 +1,111 @@
+/* Design tokens: the single source of truth for web styling.
+   Element Plus theme variables are mapped from these tokens below; pages and
+   components must reference tokens or Element Plus variables, never raw values.
+   scripts/check-design-tokens.mjs locks this file against drift. */
+
+:root {
+  /* Brand */
+  --brand: #2f62d6;
+  --brand-hover: #2653b8;
+  --brand-light: #e9effc;
+
+  /* Semantic states (mirror Element Plus success/warning/error/info usage) */
+  --semantic-info: #2f62d6;
+  --semantic-info-light: #e9effc;
+  --semantic-success: #2ba471;
+  --semantic-success-light: #eaf7f0;
+  --semantic-warning: #e37318;
+  --semantic-warning-light: #fff4e3;
+  --semantic-error: #d54941;
+  --semantic-error-light: #fff0f0;
+
+  /* Confidence labels for mined call instances */
+  --confidence-extracted: #2ba471;
+  --confidence-inferred: #2f62d6;
+  --confidence-ambiguous: #e37318;
+
+  /* Surfaces and text */
+  --surface-bg: #f4f6f8;
+  --surface-card: #ffffff;
+  --surface-hover: #eef1f5;
+  --text-primary: rgba(0, 0, 0, 0.9);
+  --text-secondary: rgba(0, 0, 0, 0.6);
+  --text-placeholder: rgba(0, 0, 0, 0.4);
+  --border-default: #dcdfe6;
+  --border-light: #ebeef5;
+
+  /* Radius and shadow */
+  --radius-small: 4px;
+  --radius-base: 6px;
+  --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.08);
+
+  /* Element Plus theme mapping */
+  --el-color-primary: var(--brand);
+  --el-color-success: var(--semantic-success);
+  --el-color-warning: var(--semantic-warning);
+  --el-color-danger: var(--semantic-error);
+  --el-color-info: var(--semantic-info);
+  --el-bg-color-page: var(--surface-bg);
+  --el-border-color: var(--border-default);
+  --el-border-color-light: var(--border-light);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-secondary);
+}
+
+.dark {
+  --brand: #5b8def;
+  --brand-hover: #7aa3f2;
+  --brand-light: #1d2c4e;
+  --semantic-info: #5b8def;
+  --semantic-info-light: #1d2c4e;
+  --semantic-success: #4cbf8b;
+  --semantic-success-light: #14352a;
+  --semantic-warning: #f09a4c;
+  --semantic-warning-light: #3d2c14;
+  --semantic-error: #e0685f;
+  --semantic-error-light: #40201d;
+  --confidence-extracted: #4cbf8b;
+  --confidence-inferred: #5b8def;
+  --confidence-ambiguous: #f09a4c;
+  --surface-bg: #141414;
+  --surface-card: #1d1d1d;
+  --surface-hover: #262626;
+  --text-primary: rgba(255, 255, 255, 0.9);
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-placeholder: rgba(255, 255, 255, 0.4);
+  --border-default: #434343;
+  --border-light: #303030;
+  --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+/* Shared utilities */
+.libref-page {
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.libref-card {
+  background: var(--surface-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-base);
+  box-shadow: var(--shadow-card);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.libref-muted {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.libref-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.libref-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -97,6 +97,27 @@ def build_web_app(
     app.state.context = context
     app.state.settings = settings
 
+    from libref.web.spa import SpaMiddleware, spa_dir_for
+
+    spa_directory = spa_dir_for(settings)
+    if spa_directory is not None:
+        assets = spa_directory / "assets"
+        if assets.is_dir():
+            from starlette.staticfiles import StaticFiles
+
+            app.mount("/assets", StaticFiles(directory=assets), name="spa-assets")
+        app.add_middleware(
+            SpaMiddleware,
+            directory=spa_directory,
+            mcp_prefix=str(getattr(settings, "mcp_path", "/mcp") or "/mcp"),
+        )
+    elif bool(getattr(settings, "web_spa_enabled", True)) and str(
+        getattr(settings, "web_spa_dir", "") or ""
+    ):
+        logging.getLogger(__name__).warning(
+            "spa directory is missing index.html; running in pure-API mode"
+        )
+
     def _guard(
         request=None,
         authorization: str | None = Header(default=None),
@@ -252,6 +273,17 @@ def build_web_app(
     @app.get("/health")
     def health(request: Request) -> dict[str, Any]:
         return {"ok": True, "fingerprint": settings_fingerprint(_eff_settings(request))}
+
+    @app.get("/me")
+    def me(principal=Depends(_guard)) -> dict[str, Any]:
+        return {
+            "id": _principal_id(principal),
+            "name": str(getattr(principal, "name", "")),
+            "kind": str(getattr(principal, "kind", "")),
+            "tenant_id": _tenant_of(principal),
+            "roles": list(getattr(principal, "roles", []) or []),
+            "scopes": sorted(set(getattr(principal, "scopes", set()) or set())),
+        }
 
     @app.get("/metrics")
     def metrics_route(principal=Depends(_guard)) -> dict[str, Any]:

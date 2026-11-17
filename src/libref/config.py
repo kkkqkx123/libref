@@ -250,6 +250,9 @@ class LibrefSettings(BaseSettings):
     # Web exit: loopback-only by default; external exposure requires fronting auth.
     web_host: str = "127.0.0.1"
     web_port: int = Field(default=8001, ge=1, le=65535)
+    # Self-hosted SPA: empty directory keeps pure-API mode; missing index warns only.
+    web_spa_enabled: bool = True
+    web_spa_dir: str = ""
     # Docs-path extras: browser fallback default toggle, retrieval window expansion.
     render_js_default: bool = False
     render_wait_for: str | None = None
@@ -285,7 +288,7 @@ class LibrefSettings(BaseSettings):
     def _freeze_paths(self) -> LibrefSettings:
         for key in PATH_FIELDS:
             value = getattr(self, key, None)
-            if value is None:
+            if value is None or str(value) == "":
                 continue
             candidate = Path(str(value)).expanduser()
             if not candidate.is_absolute():
@@ -570,7 +573,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
         }
     ),
     "client": frozenset({"base_url", "client_api_key"}),
-    "web": frozenset({"web_host", "web_port"}),
+    "web": frozenset({"web_host", "web_port", "web_spa_enabled", "web_spa_dir"}),
     "retention": frozenset(
         {
             "snapshot_enabled",
@@ -594,6 +597,7 @@ PATH_FIELDS = frozenset(
         "repos_dir",
         "log_file",
         "simvec_dir",
+        "web_spa_dir",
     }
 )
 

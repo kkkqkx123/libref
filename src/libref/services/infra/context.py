@@ -36,21 +36,22 @@ class AppContext:
         """
         from libref.db.assembly import build_metadata_session
 
-        if self.storage is not None:
-            session = self.storage.metadata
-            if getattr(self.settings, "metadata_backend", "sqlite") != "sqlite":
-                return session
-            session.apply_migrations()
-            return session
-        if getattr(self.settings, "metadata_backend", "sqlite") == "postgres":
+        backend = getattr(self.settings, "metadata_backend", "sqlite")
+        if backend != "sqlite":
+            if self.storage is not None:
+                return self.storage.metadata
             session = build_metadata_session(self.settings)
             session.apply_migrations()
             return session
         from pathlib import Path
 
+        from libref.db.sqlite_session import SqliteSession
+
         path = Path(str(self.db_path))
         path.parent.mkdir(parents=True, exist_ok=True)
-        session = build_metadata_session(self.settings)
+        # Fresh per-request session: sharing one connection across server threads
+        # trips the driver thread-affinity check.
+        session = SqliteSession.open(path, check_same_thread=check_same_thread)
         session.apply_migrations()
         return session
 
