@@ -11,7 +11,7 @@
     </el-tag>
     <el-input
       v-model="draft"
-      :placeholder="placeholder"
+       :placeholder="placeholder || messages.common.tagPlaceholder"
       class="libref-tag-input-box"
       @keyup.enter="commit"
       @blur="commit"
@@ -22,8 +22,9 @@
 <script setup lang="ts">
 import { ElInput, ElTag } from 'element-plus';
 import { ref } from 'vue';
+import { messages } from '../../i18n';
 
-withDefaults(defineProps<{ placeholder?: string }>(), { placeholder: '输入后回车添加' });
+defineProps<{ placeholder?: string }>();
 const modelValue = defineModel<string[]>({ default: () => [] });
 const draft = ref('');
 

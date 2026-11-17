@@ -1,6 +1,7 @@
 // Authentication state: API key storage, mode detection, scope gates.
 // Unknown roles fall back to read-only, matching the backend default.
 import { reactive } from 'vue';
+import { messages } from '../i18n';
 import { api } from '../api/client';
 import type { Principal } from '../api/types';
 
@@ -62,5 +63,5 @@ export function logout(): void {
 
 export function displayName(): string {
   if (authStore.me) return authStore.me.name || 'operator';
-  return authStore.mode === 'dev' ? 'dev-operator' : '未登录';
+  return authStore.mode === 'dev' ? messages.value.app.devOperator : messages.value.app.notLoggedIn;
 }

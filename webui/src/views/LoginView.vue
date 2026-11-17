@@ -1,21 +1,21 @@
 <template>
   <div class="libref-page libref-login">
     <el-card class="libref-login-card" shadow="never">
-      <h2>登录 libref</h2>
-      <p class="libref-muted">enforced 模式使用 API 密钥登录；开发模式免登录直接进入。</p>
+      <h2>{{ messages.auth.loginTitle }}</h2>
+      <p class="libref-muted">{{ messages.auth.loginDesc }}</p>
       <el-input
         v-model="key"
         type="password"
-        placeholder="粘贴 API 密钥"
+         :placeholder="messages.auth.keyPlaceholder"
         show-password
         @keyup.enter="submit"
       />
       <ErrorState v-if="error" :message="error" :request-id="requestId" @retry="submit" />
       <div class="libref-login-actions">
         <el-button type="primary" :loading="busy" :disabled="!key.trim()" @click="submit">
-          登录
+          {{ messages.common.login }}
         </el-button>
-        <el-button link @click="enterDev">以开发模式进入</el-button>
+        <el-button link @click="enterDev">{{ messages.auth.devEnter }}</el-button>
       </div>
     </el-card>
   </div>
@@ -29,6 +29,7 @@ import { ApiError } from '../api/client';
 import { login } from '../stores/auth';
 import { notifyError } from '../stores/notify';
 import ErrorState from '../components/common/ErrorState.vue';
+import { messages } from '../i18n';
 
 const route = useRoute();
 const router = useRouter();
@@ -46,9 +47,9 @@ async function submit(): Promise<void> {
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/search';
     await router.push(redirect);
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : '登录失败';
+    error.value = err instanceof ApiError ? err.message : messages.value.auth.loginFailed;
     requestId.value = err instanceof ApiError ? err.requestId : '';
-    notifyError(err, '登录失败');
+    notifyError(err, messages.value.auth.loginFailed);
   } finally {
     busy.value = false;
   }

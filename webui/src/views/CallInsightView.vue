@@ -1,45 +1,45 @@
 <template>
   <div class="libref-page">
-    <PageHeader title="调用" description="按被调方、调用方、文件查看调用实例" />
+    <PageHeader :title="messages.routes.calls" :description="messages.callInsight.description" />
     <div class="libref-card">
       <el-form @submit.prevent="load">
-        <el-form-item label="视图">
+        <el-form-item :label="messages.common.view">
           <el-radio-group v-model="view">
-            <el-radio-button label="callee">被调方</el-radio-button>
-            <el-radio-button label="caller">调用方</el-radio-button>
-            <el-radio-button label="file">文件</el-radio-button>
+            <el-radio-button label="callee">{{ messages.callInsight.callee }}</el-radio-button>
+            <el-radio-button label="caller">{{ messages.callInsight.caller }}</el-radio-button>
+            <el-radio-button label="file">{{ messages.common.file }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="API">
-          <el-input v-model="apiName" clearable placeholder="限定被调或调用方" style="width: 280px" />
+          <el-input v-model="apiName" clearable  :placeholder="messages.callInsight.apiPlaceholder" style="width: 280px" />
         </el-form-item>
-        <el-form-item label="过滤">
-          <el-checkbox v-model="includeAmbiguous">含模糊解析</el-checkbox>
+        <el-form-item :label="messages.callInsight.filter">
+          <el-checkbox v-model="includeAmbiguous">{{ messages.callInsight.includeAmbiguous }}</el-checkbox>
         </el-form-item>
-        <el-form-item label="解析种类">
-          <TagInput v-model="resolveKinds" placeholder="如 EXTRACTED" />
+        <el-form-item :label="messages.callInsight.resolveKinds">
+          <TagInput v-model="resolveKinds"  :placeholder="messages.callInsight.resolveKindsPlaceholder" />
         </el-form-item>
-        <el-form-item label="实参数量">
-          <el-input-number v-model="minArgs" :min="0" placeholder="最小" style="width: 110px" />
+        <el-form-item :label="messages.callInsight.argCount">
+          <el-input-number v-model="minArgs" :min="0"  :placeholder="messages.common.min" style="width: 110px" />
           <span class="libref-muted">—</span>
-          <el-input-number v-model="maxArgs" :min="0" placeholder="最大" style="width: 110px" />
+          <el-input-number v-model="maxArgs" :min="0"  :placeholder="messages.common.max" style="width: 110px" />
         </el-form-item>
         <ScopeFilter />
         <el-form-item>
-          <el-button type="primary" :loading="loading" @click="load">查询</el-button>
+          <el-button type="primary" :loading="loading" @click="load">{{ messages.common.query }}</el-button>
         </el-form-item>
       </el-form>
     </div>
     <LoadingPanel v-if="loading" />
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="load" />
     <template v-else-if="loaded">
-      <EmptyState v-if="rows.length === 0" description="该条件下暂无调用实例" />
+      <EmptyState v-if="rows.length === 0" :description="messages.callInsight.empty" />
       <template v-else>
         <EvidenceList :rows="rows" @feedback="forwardFeedback" />
         <div class="libref-pager">
-          <el-button :disabled="offset === 0" @click="page(-1)">上一页</el-button>
-          <span class="libref-muted">偏移 {{ offset }}</span>
-          <el-button :disabled="rows.length < limit" @click="page(1)">下一页</el-button>
+          <el-button :disabled="offset === 0" @click="page(-1)">{{ messages.common.previous }}</el-button>
+          <span class="libref-muted">{{ messages.common.offset(offset) }}</span>
+          <el-button :disabled="rows.length < limit" @click="page(1)">{{ messages.common.next }}</el-button>
         </div>
       </template>
     </template>
@@ -58,6 +58,7 @@ import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import { messages } from '../i18n';
 import TagInput from '../components/common/TagInput.vue';
 import { scopeParams } from '../stores/scope';
 
@@ -97,7 +98,7 @@ async function load(): Promise<void> {
     rows.value = data.items;
     loaded.value = true;
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : '查询失败';
+    error.value = err instanceof ApiError ? err.message : messages.value.common.queryFailed;
     requestId.value = err instanceof ApiError ? err.requestId : '';
   } finally {
     loading.value = false;

@@ -15,7 +15,7 @@
         size="small"
         @click="emit('feedback', row)"
       >
-        反馈
+        {{ messages.common.feedback }}
       </el-button>
     </div>
   </div>
@@ -23,6 +23,7 @@
 
 <script setup lang="ts">
 import { ElButton } from 'element-plus';
+import { messages } from '../../i18n';
 import type { Row } from '../../api/types';
 import { hasScope } from '../../stores/auth';
 import ConfidenceBadge from '../common/ConfidenceBadge.vue';
@@ -59,7 +60,7 @@ function subOf(row: Row): string {
   const end = pick(row, ['line_end']);
   const range = start ? `:${start}${end ? `-${end}` : ''}` : '';
   const support = pick(row, ['support', 'count', 'frequency']);
-  return [file ? `${file}${range}` : '', support ? `支持度 ${support}` : '']
+  return [file ? `${file}${range}` : '', support ? messages.value.common.support(support) : '']
     .filter((part) => part)
     .join(' · ');
 }

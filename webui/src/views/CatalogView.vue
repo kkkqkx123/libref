@@ -1,31 +1,31 @@
 <template>
   <div class="libref-page">
-    <PageHeader title="文库目录" description="已入库的文库与版本，入口可下钻到搜索与洞察" />
+    <PageHeader :title="messages.routes.catalog" :description="messages.catalog.description" />
     <div class="libref-card">
       <el-form :inline="true" @submit.prevent>
-        <el-form-item label="生态">
-          <el-input v-model="ecosystem" clearable placeholder="如 npm" style="width: 160px" @change="reload" />
+        <el-form-item :label="messages.common.ecosystem">
+          <el-input v-model="ecosystem" clearable  :placeholder="messages.catalog.ecosystemPlaceholder" style="width: 160px" @change="reload" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="reload">刷新</el-button>
+          <el-button type="primary" @click="reload">{{ messages.common.refresh }}</el-button>
         </el-form-item>
       </el-form>
     </div>
     <LoadingPanel v-if="loading" />
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="reload" />
     <template v-else>
-      <EmptyState v-if="libraries.length === 0" description="尚未入库任何文库，先走入库向导" />
+      <EmptyState v-if="libraries.length === 0" :description="messages.catalog.empty" />
       <el-table v-else :data="libraries" stripe style="width: 100%" @row-click="openLibraryRow">
-        <el-table-column prop="name" label="文库" />
-        <el-table-column prop="ecosystem" label="生态" width="120" />
-        <el-table-column prop="versions" label="版本数" width="100" />
-        <el-table-column prop="description" label="描述" show-overflow-tooltip />
-        <el-table-column label="操作" width="220">
+        <el-table-column prop="name" :label="messages.catalog.library" />
+        <el-table-column prop="ecosystem" :label="messages.common.ecosystem" width="120" />
+        <el-table-column prop="versions" :label="messages.catalog.versions" width="100" />
+        <el-table-column prop="description" :label="messages.catalog.descriptionCol" show-overflow-tooltip />
+        <el-table-column :label="messages.common.actions" width="220">
           <template #default="scope">
-            <el-button link type="primary" size="small" @click.stop="drill(asLibrary(scope.row), 'search')">搜索</el-button>
-            <el-button link type="primary" size="small" @click.stop="drill(asLibrary(scope.row), 'answer')">问答</el-button>
+            <el-button link type="primary" size="small" @click.stop="drill(asLibrary(scope.row), 'search')">{{ messages.common.search }}</el-button>
+            <el-button link type="primary" size="small" @click.stop="drill(asLibrary(scope.row), 'answer')">{{ messages.common.answer }}</el-button>
             <el-button link type="primary" size="small" @click.stop="toggleVersions(asLibrary(scope.row))">
-              {{ expanded === asLibrary(scope.row).name ? '收起版本' : '查看版本' }}
+              {{ expanded === asLibrary(scope.row).name ? messages.catalog.collapseVersions : messages.catalog.viewVersions }}
             </el-button>
           </template>
         </el-table-column>
@@ -36,11 +36,11 @@
         stripe
         style="width: 100%; margin-top: 12px"
       >
-        <el-table-column prop="version" label="版本" />
-        <el-table-column prop="ecosystem" label="生态" width="120" />
-        <el-table-column prop="pages" label="页数" width="100" />
-        <el-table-column prop="registry_confirmed" label="注册表确认" width="140">
-          <template #default="scope">{{ scope.row.registry_confirmed ? '是' : '否' }}</template>
+        <el-table-column prop="version" :label="messages.common.version" />
+        <el-table-column prop="ecosystem" :label="messages.common.ecosystem" width="120" />
+        <el-table-column prop="pages" :label="messages.catalog.pages" width="100" />
+        <el-table-column prop="registry_confirmed" :label="messages.catalog.registryConfirmed" width="140">
+          <template #default="scope">{{ scope.row.registry_confirmed ? messages.common.yes : messages.common.no }}</template>
         </el-table-column>
       </el-table>
     </template>
@@ -57,6 +57,7 @@ import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import { messages } from '../i18n';
 import { notifyError } from '../stores/notify';
 import { scopeStore, setLibrary } from '../stores/scope';
 
@@ -80,7 +81,7 @@ async function reload(): Promise<void> {
     expanded.value = '';
     currentVersions.value = [];
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : '加载失败';
+    error.value = err instanceof ApiError ? err.message : messages.value.common.loadFailed;
     requestId.value = err instanceof ApiError ? err.requestId : '';
   } finally {
     loading.value = false;
@@ -100,7 +101,7 @@ async function toggleVersions(row: LibraryRow): Promise<void> {
     currentVersions.value = data.items;
     expanded.value = row.name;
   } catch (err) {
-    notifyError(err, '加载版本失败');
+    notifyError(err, messages.value.catalog.loadVersionsFailed);
   }
 }
 

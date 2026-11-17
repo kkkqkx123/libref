@@ -1,19 +1,19 @@
 <template>
   <div class="libref-page">
-    <PageHeader title="搜索" description="全文加向量双路检索，自动降级并给出可回答度" />
+    <PageHeader :title="messages.routes.search" :description="messages.search.description" />
     <div class="libref-card">
       <el-input
         v-model="query"
-        placeholder="输入问题或关键词"
+         :placeholder="messages.search.placeholder"
         clearable
         @keyup.enter="search"
       >
         <template #append>
-          <el-button type="primary" :loading="loading" @click="search">搜索</el-button>
+          <el-button type="primary" :loading="loading" @click="search">{{ messages.common.search }}</el-button>
         </template>
       </el-input>
       <ScopeFilter show-preset />
-      <el-checkbox v-model="suggest">无结果时给出联想建议</el-checkbox>
+      <el-checkbox v-model="suggest">{{ messages.search.suggest }}</el-checkbox>
     </div>
     <LoadingPanel v-if="loading" />
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="search" />
@@ -24,10 +24,10 @@
         :answerable="result?.answerable"
         :answerability="result?.answerability"
       />
-      <EmptyState v-if="(result?.items.length || 0) === 0" description="没有搜到结果，换个问法或放宽库版本限定" />
+      <EmptyState v-if="(result?.items.length || 0) === 0" :description="messages.search.empty" />
       <SearchResultList v-else :items="result?.items || []" @open-read="openRead" @open-answer="openAnswer" />
       <div v-if="(result?.suggestions?.length || 0) > 0" class="libref-card">
-        <h4>联想建议</h4>
+        <h4>{{ messages.search.suggestions }}</h4>
         <RowTable :rows="result?.suggestions || []" />
         <p v-if="result?.suggest_error" class="libref-muted">{{ result.suggest_error }}</p>
       </div>
@@ -48,6 +48,7 @@ import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import { messages } from '../i18n';
 import RowTable from '../components/common/RowTable.vue';
 import { scopeParams, scopeStore } from '../stores/scope';
 
@@ -78,7 +79,7 @@ async function search(): Promise<void> {
     result.value = data;
     searched.value = true;
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : '搜索失败';
+    error.value = err instanceof ApiError ? err.message : messages.value.search.failed;
     requestId.value = err instanceof ApiError ? err.requestId : '';
   } finally {
     loading.value = false;

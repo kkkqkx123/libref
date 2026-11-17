@@ -6,7 +6,7 @@
     :closable="false"
     class="libref-degraded"
   >
-    <template #title>检索已降级：{{ answerabilityText }}</template>
+    <template #title>{{ messages.common.retrievalDegraded }}：{{ answerabilityText }}</template>
     <ul class="libref-degraded-list">
       <li v-for="reason in reasons" :key="reason">{{ reason }}</li>
     </ul>
@@ -16,6 +16,7 @@
 <script setup lang="ts">
 import { ElAlert } from 'element-plus';
 import { computed } from 'vue';
+import { messages } from '../../i18n';
 
 const props = defineProps<{
   degraded: boolean;
@@ -29,9 +30,9 @@ const visible = computed(
 );
 
 const answerabilityText = computed(() => {
-  if (props.answerable === false) return '当前证据不足以回答';
+  if (props.answerable === false) return messages.value.common.insufficientEvidence;
   const score = Number(props.answerability || 0);
-  return `可回答度 ${score.toFixed(2)}`;
+  return messages.value.common.answerability(score);
 });
 </script>
 

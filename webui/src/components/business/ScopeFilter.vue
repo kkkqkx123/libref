@@ -1,11 +1,11 @@
 <template>
   <el-form :inline="true" class="libref-scope-filter" @submit.prevent>
-    <el-form-item label="库">
+    <el-form-item :label="messages.common.library">
       <el-select
         v-model="scopeStore.library"
         filterable
         clearable
-        placeholder="全部文库"
+        :placeholder="messages.common.allLibraries"
         style="width: 200px"
         @change="onLibraryChange"
       >
@@ -17,11 +17,11 @@
         />
       </el-select>
     </el-form-item>
-    <el-form-item label="版本">
+    <el-form-item :label="messages.common.version">
       <el-select
         v-model="scopeStore.version"
         clearable
-        placeholder="全部版本"
+        :placeholder="messages.common.allVersions"
         style="width: 160px"
       >
         <el-option
@@ -32,14 +32,14 @@
         />
       </el-select>
     </el-form-item>
-    <el-form-item label="生态">
-      <el-input v-model="scopeStore.ecosystem" clearable placeholder="如 npm" style="width: 140px" />
+    <el-form-item :label="messages.common.ecosystem">
+      <el-input v-model="scopeStore.ecosystem" clearable placeholder="npm" style="width: 140px" />
     </el-form-item>
-    <el-form-item v-if="showPreset" label="档位">
+    <el-form-item v-if="showPreset" :label="messages.common.preset">
       <el-radio-group v-model="scopeStore.preset">
-        <el-radio-button label="precise">精确</el-radio-button>
-        <el-radio-button label="balanced">均衡</el-radio-button>
-        <el-radio-button label="thorough">详尽</el-radio-button>
+        <el-radio-button label="precise">{{ messages.common.precise }}</el-radio-button>
+        <el-radio-button label="balanced">{{ messages.common.balanced }}</el-radio-button>
+        <el-radio-button label="thorough">{{ messages.common.thorough }}</el-radio-button>
       </el-radio-group>
     </el-form-item>
   </el-form>
@@ -53,6 +53,7 @@ import type { Envelope, LibraryRow, VersionRow } from '../../api/types';
 import { catalogStore } from '../../stores/catalog';
 import { notifyError } from '../../stores/notify';
 import { scopeStore, setLibrary } from '../../stores/scope';
+import { messages } from '../../i18n';
 
 withDefaults(defineProps<{ showPreset?: boolean }>(), { showPreset: false });
 
@@ -66,7 +67,7 @@ async function ensureLibraries(): Promise<void> {
     catalogStore.libraries = data.items;
     catalogStore.loaded = true;
   } catch (error) {
-    notifyError(error, '加载文库目录失败');
+    notifyError(error, messages.value.errors.loadCatalogFailed);
   }
 }
 
@@ -79,7 +80,7 @@ async function ensureVersions(): Promise<void> {
     });
     catalogStore.versionsByLibrary[scopeStore.library] = data.items;
   } catch (error) {
-    notifyError(error, '加载版本列表失败');
+    notifyError(error, messages.value.errors.loadVersionsFailed);
   }
 }
 

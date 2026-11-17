@@ -23,56 +23,61 @@
 import { ElAside, ElMenu, ElMenuItem, ElSubMenu } from 'element-plus';
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
+import { messages } from '../../i18n';
 import { hasScope, hasScopes } from '../../stores/auth';
 
 interface NavItem {
   path: string;
-  title: string;
+  titleKey: keyof (typeof messages.value)['nav'];
   scopes: string[];
   any?: boolean;
 }
 
-interface NavGroup {
-  name: string;
+interface NavGroupDef {
+  nameKey: keyof (typeof messages.value)['nav'];
   single: boolean;
   items: NavItem[];
 }
 
-const GROUPS: NavGroup[] = [
-  { name: '检索问答', single: false, items: [
-    { path: '/catalog', title: '文库目录', scopes: ['read'] },
-    { path: '/search', title: '搜索', scopes: ['read'] },
-    { path: '/answer', title: '问答', scopes: ['read'] },
+const GROUP_DEFS: NavGroupDef[] = [
+  { nameKey: 'retrieval', single: false, items: [
+    { path: '/catalog', titleKey: 'catalog', scopes: ['read'] },
+    { path: '/search', titleKey: 'search', scopes: ['read'] },
+    { path: '/answer', titleKey: 'answer', scopes: ['read'] },
   ]},
-  { name: '源码洞察', single: false, items: [
-    { path: '/insights/api', title: 'API 洞察', scopes: ['read'] },
-    { path: '/insights/calls', title: '调用', scopes: ['read'] },
-    { path: '/insights/symbols', title: '符号', scopes: ['read'] },
-    { path: '/insights/imports', title: '导入', scopes: ['read'] },
-    { path: '/insights/patterns', title: '模式', scopes: ['read'] },
+  { nameKey: 'insights', single: false, items: [
+    { path: '/insights/api', titleKey: 'apiInsight', scopes: ['read'] },
+    { path: '/insights/calls', titleKey: 'calls', scopes: ['read'] },
+    { path: '/insights/symbols', titleKey: 'symbols', scopes: ['read'] },
+    { path: '/insights/imports', titleKey: 'imports', scopes: ['read'] },
+    { path: '/insights/patterns', titleKey: 'patterns', scopes: ['read'] },
   ]},
-  { name: '入库任务', single: false, items: [
-    { path: '/ingest', title: '入库向导', scopes: ['ingest:write'] },
-    { path: '/jobs', title: '任务中心', scopes: ['read'] },
+  { nameKey: 'ingestTasks', single: false, items: [
+    { path: '/ingest', titleKey: 'ingest', scopes: ['ingest:write'] },
+    { path: '/jobs', titleKey: 'jobs', scopes: ['read'] },
   ]},
-  { name: '治理', single: false, items: [
-    { path: '/review', title: '审核', scopes: ['review:read'] },
-    { path: '/feedback', title: '反馈', scopes: ['feedback:read', 'feedback:write'], any: true },
-    { path: '/admin', title: '管理', scopes: ['admin:keys', 'admin:config'] },
+  { nameKey: 'governance', single: false, items: [
+    { path: '/review', titleKey: 'review', scopes: ['review:read'] },
+    { path: '/feedback', titleKey: 'feedback', scopes: ['feedback:read', 'feedback:write'], any: true },
+    { path: '/admin', titleKey: 'admin', scopes: ['admin:keys', 'admin:config'] },
   ]},
 ];
 
 const route = useRoute();
 const active = computed(() => route.path);
 
-const visibleGroups = computed(() =>
-  GROUPS.map((group) => ({
-    ...group,
-    items: group.items.filter((item) =>
-      item.any ? item.scopes.some((scope) => hasScope(scope)) : hasScopes(item.scopes),
-    ),
-  })).filter((group) => group.items.length > 0),
-);
+const visibleGroups = computed(() => {
+  const m = messages.value;
+  return GROUP_DEFS.map((group) => ({
+    name: m.nav[group.nameKey],
+    single: group.single,
+    items: group.items
+      .filter((item) =>
+        item.any ? item.scopes.some((scope) => hasScope(scope)) : hasScopes(item.scopes),
+      )
+      .map((item) => ({ path: item.path, title: m.nav[item.titleKey], scopes: item.scopes, any: item.any })),
+  })).filter((group) => group.items.length > 0);
+});
 </script>
 
 <style scoped>

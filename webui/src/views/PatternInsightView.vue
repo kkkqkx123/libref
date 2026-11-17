@@ -1,52 +1,52 @@
 <template>
   <div class="libref-page">
-    <PageHeader title="模式" description="序列挖掘的模式、证据、聚类与健康度" />
+    <PageHeader :title="messages.routes.patterns" :description="messages.patternInsight.description" />
     <div class="libref-card">
-      <h4>挖掘健康度</h4>
+      <h4>{{ messages.patternInsight.miningHealth }}</h4>
       <LoadingPanel v-if="healthLoading" :rows="2" />
       <div v-else-if="health" class="libref-health-grid">
         <KeyValue :entries="healthEntries" />
       </div>
-      <p v-else class="libref-muted">健康度暂不可用</p>
+      <p v-else class="libref-muted">{{ messages.patternInsight.healthUnavailable }}</p>
     </div>
     <div class="libref-card">
       <el-form @submit.prevent="load">
-        <el-form-item label="视图">
+        <el-form-item :label="messages.common.view">
           <el-radio-group v-model="view">
-            <el-radio-button label="patterns">模式</el-radio-button>
-            <el-radio-button label="evidence">证据</el-radio-button>
-            <el-radio-button label="tree">特征树</el-radio-button>
-            <el-radio-button label="clusters">聚类</el-radio-button>
-            <el-radio-button label="health">健康</el-radio-button>
-            <el-radio-button label="labels">标签</el-radio-button>
-            <el-radio-button label="snippets">片段</el-radio-button>
+            <el-radio-button label="patterns">{{ messages.patternInsight.patterns }}</el-radio-button>
+            <el-radio-button label="evidence">{{ messages.patternInsight.evidence }}</el-radio-button>
+            <el-radio-button label="tree">{{ messages.patternInsight.tree }}</el-radio-button>
+            <el-radio-button label="clusters">{{ messages.patternInsight.clusters }}</el-radio-button>
+            <el-radio-button label="health">{{ messages.patternInsight.health }}</el-radio-button>
+            <el-radio-button label="labels">{{ messages.common.labels }}</el-radio-button>
+            <el-radio-button label="snippets">{{ messages.patternInsight.snippets }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="序列">
-          <TagInput v-model="pattern" placeholder="模式序列，逗号分隔" />
+        <el-form-item :label="messages.patternInsight.pattern">
+          <TagInput v-model="pattern"  :placeholder="messages.patternInsight.patternPlaceholder" />
         </el-form-item>
-        <el-form-item label="包含">
-          <TagInput v-model="containing" placeholder="包含的调用，逗号分隔" />
+        <el-form-item :label="messages.common.containing">
+          <TagInput v-model="containing"  :placeholder="messages.patternInsight.containingPlaceholder" />
         </el-form-item>
-        <el-form-item label="前缀">
+        <el-form-item :label="messages.patternInsight.prefix">
           <el-input v-model="prefix" clearable style="width: 220px" />
         </el-form-item>
-        <el-form-item label="去重">
-          <el-checkbox v-model="dedup">按文件去重</el-checkbox>
+        <el-form-item :label="messages.common.dedup">
+          <el-checkbox v-model="dedup">{{ messages.patternInsight.dedupByFile }}</el-checkbox>
         </el-form-item>
-        <el-form-item label="单文件上限">
+        <el-form-item :label="messages.patternInsight.perFileLimit">
           <el-input-number v-model="perFileLimit" :min="1" :max="20" />
         </el-form-item>
         <ScopeFilter />
         <el-form-item>
-          <el-button type="primary" :loading="loading" @click="load">查询</el-button>
+          <el-button type="primary" :loading="loading" @click="load">{{ messages.common.query }}</el-button>
         </el-form-item>
       </el-form>
     </div>
     <LoadingPanel v-if="loading" />
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="load" />
     <template v-else-if="loaded">
-      <EmptyState v-if="rows.length === 0" description="该条件下暂无模式" />
+      <EmptyState v-if="rows.length === 0" :description="messages.patternInsight.empty" />
       <template v-else>
         <EvidenceList v-if="view === 'evidence'" :rows="rows" @feedback="forwardFeedback" />
         <RowTable v-else :rows="rows" />
@@ -67,6 +67,7 @@ import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import { messages } from '../i18n';
 import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue';
 import RowTable from '../components/common/RowTable.vue';
 import TagInput from '../components/common/TagInput.vue';
@@ -128,7 +129,7 @@ async function load(): Promise<void> {
     rows.value = data.items;
     loaded.value = true;
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : '查询失败';
+    error.value = err instanceof ApiError ? err.message : messages.value.common.queryFailed;
     requestId.value = err instanceof ApiError ? err.requestId : '';
   } finally {
     loading.value = false;

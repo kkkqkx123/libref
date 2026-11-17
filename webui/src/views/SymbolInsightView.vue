@@ -1,38 +1,38 @@
 <template>
   <div class="libref-page">
-    <PageHeader title="符号" description="符号详情、所在文件、子符号与签名" />
+    <PageHeader :title="messages.routes.symbols" :description="messages.symbolInsight.description" />
     <div class="libref-card">
       <el-form @submit.prevent="load">
-        <el-form-item label="视图">
+        <el-form-item :label="messages.common.view">
           <el-radio-group v-model="view">
-            <el-radio-button label="detail">详情</el-radio-button>
-            <el-radio-button label="file">所在文件</el-radio-button>
-            <el-radio-button label="children">子符号</el-radio-button>
-            <el-radio-button label="signature">签名</el-radio-button>
+            <el-radio-button label="detail">{{ messages.symbolInsight.detail }}</el-radio-button>
+            <el-radio-button label="file">{{ messages.symbolInsight.file }}</el-radio-button>
+            <el-radio-button label="children">{{ messages.symbolInsight.children }}</el-radio-button>
+            <el-radio-button label="signature">{{ messages.symbolInsight.signature }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="API">
-          <el-input v-model="apiName" clearable placeholder="单个符号" style="width: 280px" />
+          <el-input v-model="apiName" clearable  :placeholder="messages.symbolInsight.single" style="width: 280px" />
         </el-form-item>
-        <el-form-item label="多个 API">
-          <TagInput v-model="apis" placeholder="逗号或回车分隔" />
+        <el-form-item :label="messages.apiInsight.multipleApis">
+          <TagInput v-model="apis"  :placeholder="messages.common.tagPlaceholder" />
         </el-form-item>
         <ScopeFilter />
         <el-form-item>
-          <el-button type="primary" :loading="loading" @click="load">查询</el-button>
+          <el-button type="primary" :loading="loading" @click="load">{{ messages.common.query }}</el-button>
         </el-form-item>
       </el-form>
     </div>
     <LoadingPanel v-if="loading" />
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="load" />
     <template v-else-if="loaded">
-      <EmptyState v-if="rows.length === 0" description="该条件下暂无符号" />
+      <EmptyState v-if="rows.length === 0" :description="messages.symbolInsight.empty" />
       <template v-else>
         <RowTable :rows="rows" />
         <div class="libref-pager">
-          <el-button :disabled="offset === 0" @click="page(-1)">上一页</el-button>
-          <span class="libref-muted">偏移 {{ offset }}</span>
-          <el-button :disabled="rows.length < limit" @click="page(1)">下一页</el-button>
+          <el-button :disabled="offset === 0" @click="page(-1)">{{ messages.common.previous }}</el-button>
+          <span class="libref-muted">{{ messages.common.offset(offset) }}</span>
+          <el-button :disabled="rows.length < limit" @click="page(1)">{{ messages.common.next }}</el-button>
         </div>
       </template>
     </template>
@@ -49,6 +49,7 @@ import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import { messages } from '../i18n';
 import RowTable from '../components/common/RowTable.vue';
 import TagInput from '../components/common/TagInput.vue';
 import { scopeParams } from '../stores/scope';
@@ -82,7 +83,7 @@ async function load(): Promise<void> {
     rows.value = data.items;
     loaded.value = true;
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : '查询失败';
+    error.value = err instanceof ApiError ? err.message : messages.value.common.queryFailed;
     requestId.value = err instanceof ApiError ? err.requestId : '';
   } finally {
     loading.value = false;

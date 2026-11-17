@@ -1,46 +1,46 @@
 <template>
   <div class="libref-page">
-    <PageHeader title="反馈" description="提交挖掘问题，处理人标记解决" />
+    <PageHeader :title="messages.routes.feedback" :description="messages.feedback.description" />
     <div v-if="canSubmit" class="libref-card">
-      <h4>提交反馈</h4>
+      <h4>{{ messages.feedback.submitTitle }}</h4>
       <el-form :model="form" label-width="90px" @submit.prevent="submit">
-        <el-form-item label="实体类型">
+        <el-form-item :label="messages.feedback.entityType">
           <el-input v-model="form.entity_type" style="width: 220px" />
         </el-form-item>
-        <el-form-item label="实体标识">
+        <el-form-item :label="messages.feedback.entityId">
           <el-input-number v-model="form.entity_id" :min="0" />
         </el-form-item>
-        <el-form-item label="种类">
+        <el-form-item :label="messages.common.kind">
           <el-input v-model="form.kind" style="width: 220px" />
         </el-form-item>
-        <el-form-item label="正文">
+        <el-form-item :label="messages.feedback.body">
           <el-input v-model="form.body" type="textarea" :rows="3" />
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="submitting" :disabled="!form.body.trim()" @click="submit">
-            提交
+            {{ messages.common.submit }}
           </el-button>
         </el-form-item>
       </el-form>
     </div>
     <div class="libref-card">
       <el-form :inline="true" @submit.prevent="reload">
-        <el-form-item label="状态">
-          <el-select v-model="status" clearable placeholder="全部" style="width: 160px" @change="reload">
-            <el-option label="待处理" value="open" />
-            <el-option label="已确认" value="acknowledged" />
-            <el-option label="已解决" value="resolved" />
+        <el-form-item :label="messages.common.status">
+          <el-select v-model="status" clearable  :placeholder="messages.common.all" style="width: 160px" @change="reload">
+            <el-option :label="messages.feedback.open" value="open" />
+            <el-option :label="messages.feedback.acknowledged" value="acknowledged" />
+            <el-option :label="messages.feedback.resolved" value="resolved" />
           </el-select>
         </el-form-item>
         <el-form-item>
-          <el-button @click="reload">刷新</el-button>
+          <el-button @click="reload">{{ messages.common.refresh }}</el-button>
         </el-form-item>
       </el-form>
     </div>
     <LoadingPanel v-if="loading && items.length === 0" />
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="reload" />
     <template v-else>
-      <EmptyState v-if="items.length === 0" description="暂无反馈" />
+      <EmptyState v-if="items.length === 0" :description="messages.feedback.empty" />
       <div v-for="item in items" :key="item.id" class="libref-card">
         <div class="libref-feedback-head">
           <StatusBadge :status="item.status" />
@@ -54,7 +54,7 @@
             size="small"
             @click="resolve(item)"
           >
-            标记解决
+            {{ messages.feedback.resolve }}
           </el-button>
         </div>
         <p>{{ item.body }}</p>
@@ -73,6 +73,7 @@ import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import { messages } from '../i18n';
 import StatusBadge from '../components/common/StatusBadge.vue';
 import { hasScope } from '../stores/auth';
 import { notifyError, notifySuccess } from '../stores/notify';
@@ -107,11 +108,11 @@ async function submit(): Promise<void> {
         body: form.body.trim(),
       },
     });
-    notifySuccess('反馈已提交');
+    notifySuccess(messages.value.feedback.submitted);
     form.body = '';
     await reload();
   } catch (err) {
-    notifyError(err, '提交失败');
+    notifyError(err, messages.value.common.submitFailed);
   } finally {
     submitting.value = false;
   }
@@ -126,7 +127,7 @@ async function reload(): Promise<void> {
     });
     items.value = data.items;
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : '加载失败';
+    error.value = err instanceof ApiError ? err.message : messages.value.common.loadFailed;
     requestId.value = err instanceof ApiError ? err.requestId : '';
   } finally {
     loading.value = false;
@@ -136,10 +137,10 @@ async function reload(): Promise<void> {
 async function resolve(item: FeedbackItem): Promise<void> {
   try {
     await api<{ ok: boolean }>(`/feedback/${item.id}/resolve`, { method: 'POST' });
-    notifySuccess('已标记解决');
+    notifySuccess(messages.value.feedback.resolvedDone);
     item.status = 'resolved';
   } catch (err) {
-    notifyError(err, '操作失败');
+    notifyError(err, messages.value.feedback.actionFailed);
   }
 }
 

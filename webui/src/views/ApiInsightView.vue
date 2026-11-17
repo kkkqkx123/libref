@@ -1,35 +1,35 @@
 <template>
   <div class="libref-page">
-    <PageHeader title="API 洞察" description="用量排行、相关推荐、参数形态、共同相关" />
+    <PageHeader :title="messages.routes.apiInsight" :description="messages.apiInsight.description" />
     <div class="libref-card">
       <el-form @submit.prevent="load">
-        <el-form-item label="视图">
+        <el-form-item :label="messages.common.view">
           <el-radio-group v-model="view">
-            <el-radio-button label="usage">用量排行</el-radio-button>
-            <el-radio-button label="related">相关推荐</el-radio-button>
-            <el-radio-button label="args">参数形态</el-radio-button>
-            <el-radio-button label="common">共同相关</el-radio-button>
+            <el-radio-button label="usage">{{ messages.apiInsight.usage }}</el-radio-button>
+            <el-radio-button label="related">{{ messages.apiInsight.related }}</el-radio-button>
+            <el-radio-button label="args">{{ messages.apiInsight.args }}</el-radio-button>
+            <el-radio-button label="common">{{ messages.apiInsight.common }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item v-if="needsApi" label="API">
-          <el-input v-model="apiName" clearable placeholder="如 requests.get" style="width: 280px" />
+          <el-input v-model="apiName" clearable  :placeholder="messages.apiInsight.apiPlaceholder" style="width: 280px" />
         </el-form-item>
-        <el-form-item v-if="view === 'common'" label="多个 API">
-          <TagInput v-model="apis" placeholder="逗号或回车分隔" />
+        <el-form-item v-if="view === 'common'" :label="messages.apiInsight.multipleApis">
+          <TagInput v-model="apis"  :placeholder="messages.common.tagPlaceholder" />
         </el-form-item>
         <ScopeFilter />
-        <el-form-item label="条数">
+        <el-form-item :label="messages.common.limit">
           <el-input-number v-model="limit" :min="1" :max="500" />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" :loading="loading" @click="load">查询</el-button>
+          <el-button type="primary" :loading="loading" @click="load">{{ messages.common.query }}</el-button>
         </el-form-item>
       </el-form>
     </div>
     <LoadingPanel v-if="loading" />
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="load" />
     <template v-else-if="loaded">
-      <EmptyState v-if="rows.length === 0" description="该条件下暂无数据" />
+      <EmptyState v-if="rows.length === 0" :description="messages.common.noDataUnderCondition" />
       <EvidenceList v-else :rows="rows" @feedback="forwardFeedback" />
     </template>
   </div>
@@ -47,6 +47,7 @@ import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import { messages } from '../i18n';
 import TagInput from '../components/common/TagInput.vue';
 import { notifyError } from '../stores/notify';
 import { scopeParams } from '../stores/scope';
@@ -67,7 +68,7 @@ const needsApi = computed(() => view.value === 'related' || view.value === 'args
 
 async function load(): Promise<void> {
   if (needsApi.value && !apiName.value.trim()) {
-    notifyError(new Error('该视图需要先输入 API'), '参数缺失');
+    notifyError(new Error(messages.value.apiInsight.apiRequired), messages.value.common.missingParam);
     return;
   }
   loading.value = true;
@@ -85,7 +86,7 @@ async function load(): Promise<void> {
     rows.value = data.items;
     loaded.value = true;
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : '查询失败';
+    error.value = err instanceof ApiError ? err.message : messages.value.common.queryFailed;
     requestId.value = err instanceof ApiError ? err.requestId : '';
   } finally {
     loading.value = false;

@@ -1,25 +1,25 @@
 <template>
   <div class="libref-page">
-    <PageHeader title="管理" description="密钥、配置、指标与健康状态">
+    <PageHeader :title="messages.routes.admin" :description="messages.admin.description">
       <template #actions>
-        <el-button v-if="canKeys" type="primary" @click="issueOpen = true">签发密钥</el-button>
-        <el-button v-if="canConfig" @click="refreshConfig">刷新配置</el-button>
+        <el-button v-if="canKeys" type="primary" @click="issueOpen = true">{{ messages.admin.issueKey }}</el-button>
+        <el-button v-if="canConfig" @click="refreshConfig">{{ messages.admin.refreshConfig }}</el-button>
       </template>
     </PageHeader>
 
     <el-tabs v-model="tab">
-      <el-tab-pane v-if="canKeys" label="密钥" name="keys">
+      <el-tab-pane v-if="canKeys"  :label="messages.admin.keysTab" name="keys">
         <el-table :data="keys" stripe style="width: 100%">
-          <el-table-column prop="id" label="标识" width="80" />
-          <el-table-column prop="principal_id" label="主体" width="90" />
-          <el-table-column prop="key_prefix" label="前缀" width="140" />
-          <el-table-column prop="scopes" label="权限域" show-overflow-tooltip />
-          <el-table-column prop="expires_at" label="过期" width="170" />
-          <el-table-column prop="revoked_at" label="吊销" width="170">
-            <template #default="scope">{{ scope.row.revoked_at ? '已吊销' : '有效' }}</template>
+          <el-table-column prop="id" :label="messages.jobs.id" width="80" />
+          <el-table-column prop="principal_id" :label="messages.admin.principal" width="90" />
+          <el-table-column prop="key_prefix" :label="messages.admin.prefix" width="140" />
+          <el-table-column prop="scopes" :label="messages.admin.scopes" show-overflow-tooltip />
+          <el-table-column prop="expires_at" :label="messages.admin.expiresAt" width="170" />
+          <el-table-column prop="revoked_at" :label="messages.admin.revokedAt" width="170">
+            <template #default="scope">{{ scope.row.revoked_at ? messages.admin.revoked : messages.admin.valid }}</template>
           </el-table-column>
-          <el-table-column prop="last_used_at" label="最后使用" width="170" />
-          <el-table-column label="操作" width="100">
+          <el-table-column prop="last_used_at" :label="messages.admin.lastUsed" width="170" />
+          <el-table-column  :label="messages.common.actions" width="100">
             <template #default="scope">
               <el-button
                 v-if="!scope.row.revoked_at"
@@ -28,7 +28,7 @@
                 size="small"
                 @click="revoke(scope.row.id)"
               >
-                吊销
+                {{ messages.common.revoke }}
               </el-button>
             </template>
           </el-table-column>
@@ -39,20 +39,20 @@
           :closable="false"
           class="libref-new-key"
         >
-          <template #title>新密钥原文（仅展示一次）</template>
+          <template #title>{{ messages.admin.newKeyTitle }}</template>
           <span class="libref-mono">{{ newKey }}</span>
-          <el-button link type="primary" size="small" @click="copyKey">复制</el-button>
+          <el-button link type="primary" size="small" @click="copyKey">{{ messages.common.copy }}</el-button>
         </el-alert>
       </el-tab-pane>
 
-      <el-tab-pane v-if="canConfig" label="状态" name="status">
+      <el-tab-pane v-if="canConfig"  :label="messages.common.status" name="status">
         <div class="libref-card">
-          <h4>就绪检查</h4>
+          <h4>{{ messages.admin.readiness }}</h4>
           <LoadingPanel v-if="readyLoading" :rows="2" />
           <KeyValue v-else :entries="readyEntries" />
         </div>
         <div class="libref-card">
-          <h4>进程计数</h4>
+          <h4>{{ messages.admin.metrics }}</h4>
           <LoadingPanel v-if="metricsLoading" :rows="2" />
           <KeyValue v-else :entries="metricEntries" />
         </div>
@@ -72,6 +72,7 @@ import type { Envelope, Row } from '../api/types';
 import KeyIssueDialog from '../components/business/KeyIssueDialog.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import { messages } from '../i18n';
 import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue';
 import { hasScope } from '../stores/auth';
 import { notifyError, notifySuccess } from '../stores/notify';
@@ -108,22 +109,22 @@ async function loadKeys(): Promise<void> {
     const { data } = await api<Envelope<Row>>('/admin/keys');
     keys.value = data.items;
   } catch (err) {
-    notifyError(err, '加载密钥失败');
+    notifyError(err, messages.value.admin.loadKeysFailed);
   }
 }
 
 async function revoke(id: number): Promise<void> {
   try {
-    await ElMessageBox.confirm('确定吊销该密钥吗？吊销后立即失效。', '吊销密钥', { type: 'warning' });
+    await ElMessageBox.confirm(messages.value.admin.revokeConfirm, messages.value.admin.revokeKey, { type: 'warning' });
   } catch {
     return;
   }
   try {
     await api<{ ok: boolean }>(`/admin/keys/${id}`, { method: 'DELETE' });
-    notifySuccess('已吊销');
+    notifySuccess(messages.value.admin.revokedDone);
     await loadKeys();
   } catch (err) {
-    notifyError(err, '吊销失败');
+    notifyError(err, messages.value.admin.revokeFailed);
   }
 }
 
@@ -135,9 +136,9 @@ function onKeyCreated(key: string): void {
 async function copyKey(): Promise<void> {
   try {
     await navigator.clipboard.writeText(newKey.value);
-    notifySuccess('已复制');
+    notifySuccess(messages.value.common.copied);
   } catch {
-    notifyError(new Error('复制失败，请手动选择复制'), '复制失败');
+    notifyError(new Error(messages.value.common.copyFailedManual), messages.value.common.copyFailed);
   }
 }
 
@@ -147,11 +148,11 @@ async function refreshConfig(): Promise<void> {
       '/admin/config/refresh',
       { method: 'POST' },
     );
-    if (data.old_fingerprint === data.fingerprint) notifySuccess('配置无变化');
-    else notifySuccess(`配置已刷新：${data.fingerprint.slice(0, 12)}`);
+    if (data.old_fingerprint === data.fingerprint) notifySuccess(messages.value.admin.configUnchanged);
+    else notifySuccess(messages.value.admin.configRefreshed(data.fingerprint.slice(0, 12)));
   } catch (err) {
-    if (err instanceof ApiError) notifyError(err, '刷新失败');
-    else notifyError(err, '刷新失败');
+    if (err instanceof ApiError) notifyError(err, messages.value.admin.refreshFailed);
+    else notifyError(err, messages.value.admin.refreshFailed);
   }
 }
 

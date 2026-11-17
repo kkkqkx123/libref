@@ -1,5 +1,5 @@
 <template>
-  <el-empty :description="description">
+  <el-empty :description="description || messages.common.noData">
     <slot />
   </el-empty>
 </template>
@@ -7,5 +7,7 @@
 <script setup lang="ts">
 import { ElEmpty } from 'element-plus';
 
-withDefaults(defineProps<{ description?: string }>(), { description: '暂无数据' });
+import { messages } from '../../i18n';
+
+withDefaults(defineProps<{ description?: string }>(), {});
 </script>

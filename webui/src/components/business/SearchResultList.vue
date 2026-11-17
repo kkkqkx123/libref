@@ -18,10 +18,10 @@
         <span class="libref-muted">{{ item.path }}</span>
         <span class="libref-result-actions">
           <el-button link type="primary" size="small" @click="emit('open-read', item)">
-            阅读
+            {{ messages.common.read }}
           </el-button>
           <el-button link type="primary" size="small" @click="emit('open-answer', item)">
-            问答
+            {{ messages.common.answer }}
           </el-button>
         </span>
       </div>
@@ -32,6 +32,7 @@
 <script setup lang="ts">
 import { ElButton, ElCard, ElTag } from 'element-plus';
 import type { SearchItem } from '../../api/types';
+import { messages } from '../../i18n';
 
 defineProps<{ items: SearchItem[] }>();
 const emit = defineEmits<{
@@ -40,7 +41,7 @@ const emit = defineEmits<{
 }>();
 
 function scoreText(score: number): string {
-  return `得分 ${Number(score || 0).toFixed(2)}`;
+  return messages.value.common.score(score);
 }
 </script>
 

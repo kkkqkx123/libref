@@ -1,72 +1,72 @@
 <template>
   <div class="libref-page">
-    <PageHeader title="入库向导" description="解析定位、探测评估、正式提交三步完成入库" />
+    <PageHeader :title="messages.routes.ingest" :description="messages.ingest.description" />
     <el-steps :active="step" finish-status="success" class="libref-steps">
-      <el-step title="解析定位" />
-      <el-step title="探测评估" />
-      <el-step title="正式提交" />
+      <el-step :title="messages.ingest.stepResolve" />
+      <el-step :title="messages.ingest.stepProbe" />
+      <el-step :title="messages.ingest.stepSubmit" />
     </el-steps>
 
     <div v-if="step === 0" class="libref-card">
-      <h4>第一步：解析定位</h4>
+      <h4>{{ messages.ingest.step1 }}</h4>
       <el-form @submit.prevent="resolve">
-        <el-form-item label="生态">
-          <el-input v-model="form.ecosystem" placeholder="如 npm、pypi" style="width: 200px" />
+        <el-form-item :label="messages.common.ecosystem">
+          <el-input v-model="form.ecosystem"  :placeholder="messages.ingest.ecosystemPlaceholder" style="width: 200px" />
         </el-form-item>
-        <el-form-item label="名称">
-          <el-input v-model="form.name" placeholder="包名" style="width: 280px" />
-          <el-button link type="primary" @click="quickSearch">用注册表联想填充</el-button>
+        <el-form-item :label="messages.common.name">
+          <el-input v-model="form.name"  :placeholder="messages.ingest.namePlaceholder" style="width: 280px" />
+          <el-button link type="primary" @click="quickSearch">{{ messages.ingest.quickSearch }}</el-button>
         </el-form-item>
-        <el-form-item label="版本">
-          <el-input v-model="form.version" placeholder="留空取最新" style="width: 200px" />
+        <el-form-item :label="messages.common.version">
+          <el-input v-model="form.version"  :placeholder="messages.ingest.versionPlaceholder" style="width: 200px" />
         </el-form-item>
-        <el-form-item label="目标">
+        <el-form-item :label="messages.ingest.target">
           <el-radio-group v-model="form.target">
-            <el-radio-button label="docs">文档</el-radio-button>
-            <el-radio-button label="repo">仓库</el-radio-button>
+            <el-radio-button label="docs">{{ messages.common.docs }}</el-radio-button>
+            <el-radio-button label="repo">{{ messages.common.repo }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="busy" :disabled="!form.name.trim()" @click="resolve">
-            解析
+            {{ messages.common.parse }}
           </el-button>
         </el-form-item>
       </el-form>
       <div v-if="resolution" class="libref-resolution">
         <KeyValue :entries="resolutionEntries" />
-        <el-button type="primary" @click="step = 1">下一步：探测</el-button>
+        <el-button type="primary" @click="step = 1">{{ messages.common.nextStep }}：{{ messages.ingest.probe }}</el-button>
       </div>
     </div>
 
     <div v-if="step === 1" class="libref-card">
-      <h4>第二步：探测评估</h4>
-      <p class="libref-muted">地址：{{ probeAddress }}</p>
-      <el-button type="primary" :loading="busy" @click="probe">开始探测</el-button>
-      <el-button @click="step = 0">上一步</el-button>
+      <h4>{{ messages.ingest.step2 }}</h4>
+      <p class="libref-muted">{{ messages.ingest.address }}：{{ probeAddress }}</p>
+      <el-button type="primary" :loading="busy" @click="probe">{{ messages.ingest.startProbe }}</el-button>
+      <el-button @click="step = 0">{{ messages.common.previousStep }}</el-button>
       <div v-if="probeResult" class="libref-resolution">
         <RowTable :rows="[probeResult]" />
-        <el-button type="primary" @click="step = 2">下一步：提交</el-button>
+        <el-button type="primary" @click="step = 2">{{ messages.common.nextStep }}：{{ messages.common.submit }}</el-button>
       </div>
     </div>
 
     <div v-if="step === 2" class="libref-card">
-      <h4>第三步：正式提交</h4>
+      <h4>{{ messages.ingest.step3 }}</h4>
       <el-form @submit.prevent="submit">
-        <el-form-item label="库名">
+        <el-form-item :label="messages.ingest.libraryName">
           <el-input v-model="form.name" style="width: 280px" />
         </el-form-item>
-        <el-form-item label="版本">
-          <el-input v-model="submitVersion" placeholder="提交的版本号" style="width: 200px" />
+        <el-form-item :label="messages.common.version">
+          <el-input v-model="submitVersion"  :placeholder="messages.ingest.submitVersionPlaceholder" style="width: 200px" />
         </el-form-item>
-        <el-form-item label="起始地址">
+        <el-form-item :label="messages.ingest.startUrl">
           <el-input v-model="submitUrl" style="width: 420px" />
         </el-form-item>
-        <el-form-item label="页数上限">
+        <el-form-item :label="messages.ingest.maxPages">
           <el-input-number v-model="maxPages" :min="1" />
         </el-form-item>
         <el-form-item>
-          <el-button @click="step = 1">上一步</el-button>
-          <el-button type="primary" :loading="busy" @click="submit">提交采集任务</el-button>
+          <el-button @click="step = 1">{{ messages.common.previousStep }}</el-button>
+          <el-button type="primary" :loading="busy" @click="submit">{{ messages.ingest.submitScrape }}</el-button>
         </el-form-item>
       </el-form>
     </div>
@@ -84,6 +84,7 @@ import type { Row } from '../api/types';
 import ErrorState from '../components/common/ErrorState.vue';
 import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import { messages } from '../i18n';
 import RowTable from '../components/common/RowTable.vue';
 import { notifySuccess } from '../stores/notify';
 import { invalidateCatalog } from '../stores/catalog';
@@ -130,7 +131,7 @@ async function quickSearch(): Promise<void> {
     const first = data.items[0];
     if (first && typeof first['name'] === 'string') form.name = first['name'] as string;
   } catch (err) {
-    fail(err, '联想失败');
+    fail(err, messages.value.ingest.suggestFailed);
   } finally {
     busy.value = false;
   }
@@ -151,7 +152,7 @@ async function resolve(): Promise<void> {
     });
     resolution.value = data;
   } catch (err) {
-    fail(err, '解析失败');
+    fail(err, messages.value.ingest.resolveFailed);
   } finally {
     busy.value = false;
   }
@@ -177,7 +178,7 @@ async function probe(): Promise<void> {
       probeResult.value = data;
     }
   } catch (err) {
-    fail(err, '探测失败');
+    fail(err, messages.value.ingest.probeFailed);
   } finally {
     busy.value = false;
   }
@@ -199,10 +200,10 @@ async function submit(): Promise<void> {
       },
     });
     invalidateCatalog();
-    notifySuccess(`任务已提交：${data.id}`);
+    notifySuccess(messages.value.jobs.submitted(data.id));
     await router.push({ path: '/jobs', query: { id: String(data.id) } });
   } catch (err) {
-    fail(err, '提交失败');
+    fail(err, messages.value.ingest.submitFailed);
   } finally {
     busy.value = false;
   }

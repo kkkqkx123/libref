@@ -1,6 +1,7 @@
 // Typed fetch wrapper: injects the API key, normalizes FastAPI errors,
 // and surfaces the backend request id for audit correlation.
 import { authStore } from '../stores/auth';
+import { messages } from '../i18n';
 
 export class ApiError extends Error {
   status: number;
@@ -38,12 +39,13 @@ function describeFailure(status: number, payload: unknown): string {
     if (typeof record['message'] === 'string') return record['message'] as string;
     if (typeof record['error'] === 'string') return record['error'] as string;
   }
-  if (status === 401) return '未授权：请先登录';
-  if (status === 403) return '无权限：当前主体缺少所需权限';
-  if (status === 404) return '未找到：资源不存在或不可见';
-  if (status === 409) return '状态冲突：请刷新后重试';
-  if (status === 429) return '配额超限：请稍后重试';
-  return `请求失败（${status}）`;
+  const m = messages.value.common;
+  if (status === 401) return m.authRequired;
+  if (status === 403) return m.forbidden;
+  if (status === 404) return m.notFound;
+  if (status === 409) return m.conflict;
+  if (status === 429) return m.quotaExceeded;
+  return m.requestFailedStatus(status);
 }
 
 function resetOf(payload: unknown): string | null {

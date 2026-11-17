@@ -3,29 +3,40 @@
     <div class="libref-header-brand" @click="goHome">libref</div>
     <div class="libref-header-right">
       <HealthDot :state="healthState" :label="healthLabel" />
+      <el-dropdown @command="(cmd: string) => setLocale(cmd as 'zh-CN' | 'en')">
+        <el-button link>{{ locale === 'zh-CN' ? '中文' : 'English' }}</el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="zh-CN">中文</el-dropdown-item>
+            <el-dropdown-item command="en">English</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
       <el-button link @click="toggleTheme">
-        {{ theme === 'light' ? '深色' : '浅色' }}
+        {{ theme === 'light' ? messages.app.themeDark : messages.app.themeLight }}
       </el-button>
       <el-dropdown v-if="authStore.me" @command="onCommand">
         <span class="libref-header-user">{{ displayName() }}</span>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="logout">退出登录</el-dropdown-item>
+            <el-dropdown-item command="logout">{{ messages.common.logout }}</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
-      <el-button v-else-if="authStore.mode === 'enforced'" link @click="goLogin">登录</el-button>
-      <span v-else class="libref-muted">开发模式</span>
+      <el-button v-else-if="authStore.mode === 'enforced'" link @click="goLogin">{{ messages.common.login }}</el-button>
+      <span v-else class="libref-muted">{{ messages.app.devMode }}</span>
     </div>
   </el-header>
 </template>
 
 <script setup lang="ts">
 import { ElButton, ElDropdown, ElDropdownItem, ElDropdownMenu, ElHeader } from 'element-plus';
+import { messages } from '../../i18n';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../../api/client';
 import { authStore, displayName, logout } from '../../stores/auth';
+import { locale, setLocale } from '../../i18n';
 import { theme, toggleTheme } from '../../stores/theme';
 import HealthDot from '../common/HealthDot.vue';
 
@@ -37,7 +48,7 @@ const healthState = computed(() => {
   return 'ok';
 });
 const healthLabel = computed(() =>
-  fingerprint.value ? `服务正常 ${fingerprint.value.slice(0, 8)}` : '状态未知',
+  fingerprint.value ? messages.value.header.serviceNormal(fingerprint.value) : messages.value.common.unknownStatus,
 );
 
 onMounted(() => {

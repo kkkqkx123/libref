@@ -1,10 +1,10 @@
 <template>
   <div class="libref-page">
-    <PageHeader title="问答" description="基于检证据的生成回答，每条引用均可回跳原文" />
+    <PageHeader :title="messages.routes.answer" :description="messages.answer.description" />
     <div class="libref-card">
       <el-input
         v-model="query"
-        placeholder="输入问题"
+         :placeholder="messages.answer.placeholder"
         clearable
         type="textarea"
         :rows="2"
@@ -12,7 +12,7 @@
       />
       <ScopeFilter show-preset />
       <el-button type="primary" :loading="loading" :disabled="!query.trim()" @click="ask">
-        提问
+        {{ messages.common.ask }}
       </el-button>
     </div>
     <LoadingPanel v-if="loading" />
@@ -24,18 +24,18 @@
         :answerable="answer.answer !== ''"
         :answerability="answer.answer === '' ? 0 : 1"
       />
-      <EmptyState v-if="!answer.answer" description="没有可用证据，无法生成回答" />
+      <EmptyState v-if="!answer.answer" :description="messages.answer.empty" />
       <div v-else class="libref-card">
         <div class="libref-answer-meta">
           <el-tag size="small" :type="answer.confidence === 'high' ? 'success' : 'warning'">
-            置信度 {{ answer.confidence }}
+            {{ messages.answer.confidence }} {{ answer.confidence }}
           </el-tag>
-          <span class="libref-muted">模型 {{ answer.model || '未知' }}</span>
+          <span class="libref-muted">{{ messages.answer.model }} {{ answer.model || messages.common.unknown }}</span>
         </div>
         <p class="libref-answer-body">{{ answer.answer }}</p>
       </div>
       <div v-if="answer.citations.length > 0" class="libref-card">
-        <h4>引用（{{ answer.citations.length }}）</h4>
+        <h4>{{ messages.answer.citations }}（{{ answer.citations.length }}）</h4>
         <CitationCard v-for="citation in answer.citations" :key="citation.id" :citation="citation" />
       </div>
     </template>
@@ -55,6 +55,7 @@ import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import { messages } from '../i18n';
 import { scopeParams, scopeStore } from '../stores/scope';
 
 const route = useRoute();
@@ -87,7 +88,7 @@ async function ask(): Promise<void> {
     });
     answer.value = data;
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : '问答失败';
+    error.value = err instanceof ApiError ? err.message : messages.value.answer.failed;
     requestId.value = err instanceof ApiError ? err.requestId : '';
   } finally {
     loading.value = false;

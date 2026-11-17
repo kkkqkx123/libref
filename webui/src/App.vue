@@ -1,19 +1,22 @@
 <template>
-  <el-container class="libref-root">
-    <AppHeader />
-    <el-container>
-      <AppSidebar v-if="showSidebar" />
-      <el-main class="libref-main">
-        <router-view />
-      </el-main>
+  <el-config-provider :locale="elementLocale">
+    <el-container class="libref-root">
+      <AppHeader />
+      <el-container>
+        <AppSidebar v-if="showSidebar" />
+        <el-main class="libref-main">
+          <router-view />
+        </el-main>
+      </el-container>
     </el-container>
-  </el-container>
+  </el-config-provider>
 </template>
 
 <script setup lang="ts">
-import { ElContainer, ElMain } from 'element-plus';
+import { ElConfigProvider, ElContainer, ElMain } from 'element-plus';
 import { computed } from 'vue';
 import { useRoute } from 'vue-router';
+import { elementLocale } from './i18n/element';
 import AppHeader from './components/business/AppHeader.vue';
 import AppSidebar from './components/business/AppSidebar.vue';
 

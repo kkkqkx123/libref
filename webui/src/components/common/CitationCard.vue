@@ -5,7 +5,7 @@
     <div class="libref-citation-meta">
       <el-tag v-if="citation.library" size="small">{{ citation.library }}</el-tag>
       <el-tag v-if="citation.version" size="small" type="info">{{ citation.version }}</el-tag>
-      <el-button link type="primary" size="small" @click="open">查看原文</el-button>
+      <el-button link type="primary" size="small" @click="open">{{ messages.common.viewSource }}</el-button>
     </div>
   </el-card>
 </template>
@@ -13,6 +13,7 @@
 <script setup lang="ts">
 import { ElButton, ElCard, ElTag } from 'element-plus';
 import { useRouter } from 'vue-router';
+import { messages } from '../../i18n';
 import type { Citation } from '../../api/types';
 
 const props = defineProps<{ citation: Citation }>();

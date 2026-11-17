@@ -1,40 +1,40 @@
 <template>
   <div class="libref-page">
-    <PageHeader title="任务中心" description="采集与通用任务的提交、跟踪与取消">
+    <PageHeader :title="messages.routes.jobs" :description="messages.jobs.description">
       <template #actions>
-        <el-button v-if="canCreate" type="primary" @click="createOpen = true">新建任务</el-button>
+        <el-button v-if="canCreate" type="primary" @click="createOpen = true">{{ messages.jobs.createTask }}</el-button>
       </template>
     </PageHeader>
     <div class="libref-card">
       <el-form :inline="true" @submit.prevent="reload">
-        <el-form-item label="条数">
+        <el-form-item :label="messages.common.limit">
           <el-input-number v-model="limit" :min="1" :max="200" @change="reload" />
         </el-form-item>
         <el-form-item>
-          <el-button @click="reload">刷新</el-button>
+          <el-button @click="reload">{{ messages.common.refresh }}</el-button>
         </el-form-item>
       </el-form>
     </div>
     <LoadingPanel v-if="loading && jobs.length === 0" />
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="reload" />
     <template v-else>
-      <EmptyState v-if="jobs.length === 0" description="暂无任务，可从入库向导提交" />
+      <EmptyState v-if="jobs.length === 0" :description="messages.jobs.empty" />
       <el-table v-else :data="jobs" stripe style="width: 100%" @row-click="openDetail">
-        <el-table-column prop="id" label="标识" width="90" />
-        <el-table-column prop="kind" label="类型" width="160" />
-        <el-table-column prop="status" label="状态" width="120">
+        <el-table-column prop="id" :label="messages.jobs.id" width="90" />
+        <el-table-column prop="kind" :label="messages.jobs.kind" width="160" />
+        <el-table-column prop="status" :label="messages.jobs.status" width="120">
           <template #default="scope"><StatusBadge :status="scope.row.status" /></template>
         </el-table-column>
-        <el-table-column prop="finished_at" label="结束时间" width="200" />
-        <el-table-column prop="error" label="错误摘要" show-overflow-tooltip />
+        <el-table-column prop="finished_at" :label="messages.jobs.finishedAt" width="200" />
+        <el-table-column prop="error" :label="messages.jobs.errorSummary" show-overflow-tooltip />
       </el-table>
     </template>
 
-    <el-drawer v-model="detailOpen" title="任务详情" size="480px" @closed="stopPolling">
+    <el-drawer v-model="detailOpen"  :title="messages.jobs.detailTitle" size="480px" @closed="stopPolling">
       <LoadingPanel v-if="detailLoading" />
       <template v-else-if="detail">
         <KeyValue :entries="detailEntries" />
-        <h4>结果</h4>
+        <h4>{{ messages.jobs.result }}</h4>
         <pre class="libref-mono libref-result-pre">{{ detailText }}</pre>
         <div class="libref-detail-actions">
           <el-button
@@ -42,24 +42,24 @@
             type="danger"
             @click="cancel(detail.id)"
           >
-            取消任务
+            {{ messages.jobs.cancelTask }}
           </el-button>
         </div>
       </template>
     </el-drawer>
 
-    <el-dialog v-model="createOpen" title="新建通用任务" width="520px">
+    <el-dialog v-model="createOpen"  :title="messages.jobs.createTitle" width="520px">
       <el-form :model="createForm" label-width="80px">
-        <el-form-item label="类型">
-          <el-input v-model="createForm.kind" placeholder="任务类型" />
+        <el-form-item :label="messages.common.kind">
+          <el-input v-model="createForm.kind"  :placeholder="messages.jobs.kindPlaceholder" />
         </el-form-item>
-        <el-form-item label="参数">
-          <el-input v-model="createForm.paramsText" type="textarea" :rows="4" placeholder='JSON 对象，如 {"library": "x"}' />
+        <el-form-item :label="messages.jobs.params">
+          <el-input v-model="createForm.paramsText" type="textarea" :rows="4"  :placeholder="messages.jobs.paramsPlaceholder" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="createOpen = false">取消</el-button>
-        <el-button type="primary" :disabled="!createForm.kind" @click="create">提交</el-button>
+        <el-button @click="createOpen = false">{{ messages.common.cancel }}</el-button>
+        <el-button type="primary" :disabled="!createForm.kind" @click="create">{{ messages.common.submit }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -77,6 +77,7 @@ import ErrorState from '../components/common/ErrorState.vue';
 import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
+import { messages } from '../i18n';
 import StatusBadge from '../components/common/StatusBadge.vue';
 import { hasScope } from '../stores/auth';
 import { notifyError, notifySuccess } from '../stores/notify';
@@ -98,16 +99,16 @@ let timer: number | null = null;
 const detailEntries = computed<KeyValueEntry[]>(() => {
   if (!detail.value) return [];
   return [
-    { label: '标识', value: String(detail.value.id) },
-    { label: '类型', value: detail.value.kind },
-    { label: '状态', value: detail.value.status },
-    { label: '结束时间', value: detail.value.finished_at || '' },
-    { label: '错误', value: detail.value.error || '' },
+    { label: messages.value.jobs.id, value: String(detail.value.id) },
+    { label: messages.value.jobs.kind, value: detail.value.kind },
+    { label: messages.value.jobs.status, value: detail.value.status },
+    { label: messages.value.jobs.finishedAt, value: detail.value.finished_at || '' },
+    { label: messages.value.jobs.error, value: detail.value.error || '' },
   ];
 });
 
 const detailText = computed(() => {
-  if (!detail.value || detail.value.result === undefined) return '（无）';
+  if (!detail.value || detail.value.result === undefined) return messages.value.jobs.none;
   try {
     return JSON.stringify(detail.value.result, null, 2);
   } catch {
@@ -122,7 +123,7 @@ async function reload(): Promise<void> {
     const { data } = await api<{ jobs: JobSummary[] }>('/jobs', { params: { limit: limit.value } });
     jobs.value = data.jobs;
   } catch (err) {
-    error.value = err instanceof ApiError ? err.message : '加载失败';
+    error.value = err instanceof ApiError ? err.message : messages.value.common.loadFailed;
     requestId.value = err instanceof ApiError ? err.requestId : '';
   } finally {
     loading.value = false;
@@ -137,7 +138,7 @@ async function loadDetail(id: number): Promise<void> {
     if (data.status === 'pending' || data.status === 'running') startPolling(id);
     else stopPolling();
   } catch (err) {
-    notifyError(err, '加载详情失败');
+    notifyError(err, messages.value.jobs.loadDetailFailed);
   } finally {
     detailLoading.value = false;
   }
@@ -165,17 +166,17 @@ function stopPolling(): void {
 
 async function cancel(id: number): Promise<void> {
   try {
-    await ElMessageBox.confirm('确定取消该任务吗？', '取消任务', { type: 'warning' });
+    await ElMessageBox.confirm(messages.value.jobs.cancelConfirm, messages.value.jobs.cancelTask, { type: 'warning' });
   } catch {
     return;
   }
   try {
     await api<{ ok: boolean }>(`/jobs/${id}/cancel`, { method: 'POST' });
-    notifySuccess('已取消');
+    notifySuccess(messages.value.jobs.cancelled);
     await loadDetail(id);
     await reload();
   } catch (err) {
-    notifyError(err, '取消失败');
+    notifyError(err, messages.value.jobs.cancelFailed);
   }
 }
 
@@ -184,7 +185,7 @@ async function create(): Promise<void> {
   try {
     params = JSON.parse(createForm.paramsText || '{}') as Record<string, unknown>;
   } catch {
-    notifyError(new Error('参数不是合法 JSON'), '参数错误');
+    notifyError(new Error(messages.value.jobs.invalidJson), messages.value.common.paramError);
     return;
   }
   try {
@@ -192,13 +193,13 @@ async function create(): Promise<void> {
       method: 'POST',
       body: { kind: createForm.kind, params },
     });
-    notifySuccess(`任务已提交：${data.id}`);
+    notifySuccess(messages.value.jobs.submitted(data.id));
     createOpen.value = false;
     createForm.kind = '';
     createForm.paramsText = '{}';
     await reload();
   } catch (err) {
-    notifyError(err, '提交失败');
+    notifyError(err, messages.value.jobs.submitFailed);
   }
 }
 
