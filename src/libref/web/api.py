@@ -204,3 +204,55 @@ class KeyCreate(BaseModel):
     tenant_id: str = Field(default="default", min_length=1)
     roles: list[str] = Field(default_factory=list)
     scopes: list[str] = Field(default_factory=list)
+    expires_at: float | None = None
+
+
+class Envelope(BaseModel):
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    degraded: bool = False
+    count: int = 0
+
+
+class SearchResponse(Envelope):
+    reasons: list[str] = Field(default_factory=list)
+    answerable: bool = True
+    answerability: float = 0.0
+    suggestions: list[dict[str, Any]] = Field(default_factory=list)
+    suggest_error: str | None = None
+
+
+class AnswerCitation(BaseModel):
+    url: str = ""
+    title: str | None = None
+    id: int = 0
+    library: str | None = None
+    version: str | None = None
+    source_group_id: str = ""
+    chunk_id: str = ""
+    page_id: int | None = None
+    sort_order: int | None = None
+
+
+class AnswerResponse(BaseModel):
+    answer: str = ""
+    citations: list[AnswerCitation] = Field(default_factory=list)
+    degraded: bool = False
+    reasons: list[str] = Field(default_factory=list)
+    model: str = ""
+    confidence: str = "low"
+    cited_ids: list[int] = Field(default_factory=list)
+
+
+class ReadResponse(BaseModel):
+    url: str = ""
+    content: str = ""
+    library: str | None = None
+    version: str | None = None
+    title: str | None = None
+    path: str | None = None
+    source_group_id: str | None = None
+    center: int | None = None
+    radius: int | None = None
+    chunks: int = 0
+    chunk_details: list[dict[str, Any]] = Field(default_factory=list)
+    docs: list[dict[str, Any]] = Field(default_factory=list)

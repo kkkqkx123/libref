@@ -281,18 +281,30 @@ def test_link_stats_routes(tmp_path, monkeypatch) -> None:
         conn.close()
 
 
-def test_unauthorized_when_token_set(tmp_path, monkeypatch) -> None:
+def test_enforced_mode_api_key_auth(tmp_path, monkeypatch) -> None:
+    from libref.services.infra.auth import create_principal, issue_api_key
+
     monkeypatch.chdir(tmp_path)
     conn = _open(tmp_path, "auth.db")
     try:
         _seed(conn)
-        client = _client(conn, monkeypatch, tmp_path, mcp_token="tok-secret")
+        pid = create_principal(
+            conn, tenant_id="default", kind="human", name="op", roles=["developer"]
+        )
+        _, raw = issue_api_key(conn, principal_id=pid)
+        client = _client(conn, monkeypatch, tmp_path, auth_mode="enforced")
         assert client.get("/catalog").status_code == 401
         assert (
             client.get(
-                "/catalog", headers={"Authorization": "Bearer tok-secret"}
+                "/catalog", headers={"Authorization": f"Bearer {raw}"}
             ).status_code
             == 200
+        )
+        assert (
+            client.get(
+                "/catalog", headers={"Authorization": "Bearer libref_bad"}
+            ).status_code
+            == 401
         )
     finally:
         conn.close()

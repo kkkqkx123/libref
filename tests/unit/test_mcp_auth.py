@@ -1,4 +1,4 @@
-"""Auth unit tests: loopback detection, startup rejection, token validation, origin validation."""
+"""Auth unit tests: loopback detection, startup rejection, bearer parsing, origin validation."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ from libref.mcp_server.auth import (
     is_allowed_origin,
     is_loopback_host,
     parse_bearer,
-    verify_bearer,
     verify_key,
 )
 
@@ -55,16 +54,6 @@ def test_parse_bearer(monkeypatch, tmp_path) -> None:
     assert parse_bearer("Token abc") is None
     assert parse_bearer(None) is None
     assert parse_bearer("Bearer ") is None
-
-
-def test_verify_bearer(monkeypatch, tmp_path) -> None:
-    assert verify_bearer("Bearer abc", "abc") is True
-    assert verify_bearer("bearer abc", "abc") is True
-    assert verify_bearer("Bearer abc", "abd") is False
-    assert verify_bearer("Bearer abc", "abcd") is False
-    assert verify_bearer(None, "abc") is False
-    assert verify_bearer("Bearer abc", None) is False
-    assert verify_bearer("Token abc", "abc") is False
 
 
 def test_verify_key(monkeypatch, tmp_path) -> None:

@@ -7,7 +7,7 @@
 * 优先级：显式参数（命令行选项与调用方覆盖）高于环境变量（含本地文件注入），环境变量高于配置文件，配置文件高于内置默认。快照一旦生成即冻结为只读。
 * 环境变量：字段名前加 `LIBREF_` 前缀，如 `db_path` 对应 `LIBREF_DB_PATH`，另支持同目录 `.env` 文件注入。
 * 配置文件：`libref.toml`，按显式路径、当前目录、用户配置目录顺序查找。分节写法的节名与键名见各表“文件键”列（如 `[retrieval] rrf_k`）；与字段同名的顶层键同样接受。未知节与未知键直接报错。
-* 密钥：`embedding_api_key/chat_api_key/mcp_token/discovery_github_token` 只走环境变量，写入文件即报错。`config-show` 打印脱敏后的有效配置，已设置的密钥显示为掩码。
+* 密钥：`embedding_api_key/chat_api_key/discovery_github_token` 只走环境变量，写入文件即报错。`config-show` 打印脱敏后的有效配置，已设置的密钥显示为掩码。
 * 路径：`db_path/registry_overrides_file/snapshot_dir/repos_dir/log_file/simvec_dir` 支持 `~` 展开；文件中为相对路径时相对配置文件所在目录，运行时传入的相对路径相对当前工作目录。
 * 校验：未知覆盖键报错；`log_level` 仅接受 `DEBUG/INFO/WARNING/ERROR`，`log_format` 仅接受 `text/json`；`snippet_cap` 须大于 `snippet_radius`；`rerank_top_n` 不得超过 `rerank_candidate_limit`；`chunk_embed_min_tokens` 不得超过 `chunk_embed_max_tokens`；`chunk_bm25_min_terms` 不得超过 `chunk_bm25_max_terms`。数值字段的上下界见各表。
 * 指纹：有效快照的哈希用于核对多端配置是否一致，`config-show` 与 Web 健康检查均可查看。
@@ -183,8 +183,6 @@
 | mcp_path | 字符串 | /mcp | LIBREF_MCP_PATH | MCP 端点路径 |
 | mcp_enabled_tools | 名单/空 | 空（全量） | LIBREF_MCP_ENABLED_TOOLS | 工具白名单，空数组表示零工具 |
 | mcp_disabled_tools | 名单 | 空 | LIBREF_MCP_DISABLED_TOOLS | 工具黑名单，优先于白名单 |
-| mcp_token | 密钥/空 | 空 | LIBREF_MCP_TOKEN | 过渡保留的旧令牌，enforced 下建议只用 API Key |
-| mcp_require_auth | 布尔 | 关 | LIBREF_MCP_REQUIRE_AUTH | 旧强制鉴权开关，过渡保留 |
 | auth_mode | 字面量 | dev | LIBREF_AUTH_MODE | `dev/enforced`，dev 非回环拒绝启动 |
 | dev_principal | 字符串 | dev-operator | LIBREF_DEV_PRINCIPAL | dev 模式注入主体名 |
 | allowed_hosts | 名单/空 | 空 | LIBREF_ALLOWED_HOSTS | 非回环部署的传输安全主机表 |

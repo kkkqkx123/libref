@@ -39,6 +39,7 @@ class Principal:
     name: str = ""
     roles: list[str] = field(default_factory=list)
     scopes: set[str] = field(default_factory=set)
+    status: str = "active"
 
 
 def scopes_for_roles(roles: list[str]) -> set[str]:
@@ -73,13 +74,15 @@ def _parse_json_list(raw: str | None) -> list[str]:
 
 
 def _principal_from_row(row: tuple) -> Principal:
+    roles = _parse_json_list(row[4])
     return Principal(
         id=int(row[0]),
         tenant_id=str(row[1]),
         kind=str(row[2]),
         name=str(row[3]),
-        roles=_parse_json_list(row[4]),
-        scopes=scopes_for_roles(_parse_json_list(row[4])),
+        roles=roles,
+        scopes=scopes_for_roles(roles),
+        status=str(row[5]) if len(row) > 5 else "active",
     )
 
 
@@ -105,8 +108,11 @@ def create_principal(
     name: str,
     roles: list[str],
 ) -> int:
-    """Insert a principal row and return its id."""
+    """Insert a principal row and return its id; unknown roles fail fast."""
     ensure_auth_tables(conn)
+    unknown = [r for r in (roles or []) if str(r) not in ROLE_SCOPES]
+    if unknown:
+        raise ValueError(f"unknown roles: {','.join(sorted(set(map(str, unknown))))}")
     cur = conn.execute(
         "INSERT INTO principals(tenant_id, kind, name, roles) VALUES(?,?,?,?)",
         (tenant_id, kind, name, json.dumps(list(roles), ensure_ascii=False)),
@@ -122,19 +128,21 @@ def issue_api_key(
     principal_id: int,
     scopes: list[str] | None = None,
     created_by: int | None = None,
+    expires_at: float | None = None,
 ) -> tuple[int, str]:
     """Mint a key for one principal; only the returned raw value is usable."""
     ensure_auth_tables(conn)
     raw = f"libref_{secrets.token_hex(24)}"
     prefix = raw[:12]
     cur = conn.execute(
-        "INSERT INTO api_keys(principal_id, key_hash, key_prefix, scopes, created_by)"
-        " VALUES(?,?,?,?,?)",
+        "INSERT INTO api_keys(principal_id, key_hash, key_prefix, scopes, expires_at, created_by)"
+        " VALUES(?,?,?,?,?,?)",
         (
             principal_id,
             hash_key(raw),
             prefix,
             json.dumps(list(scopes or []), ensure_ascii=False),
+            float(expires_at) if expires_at is not None else None,
             created_by,
         ),
     )
@@ -163,11 +171,19 @@ def lookup_principal(
     moment = time.time() if now is None else float(now)
     prefix = raw_key[:12] if len(raw_key) >= 12 else raw_key
     rows = conn.execute(
-        "SELECT id, principal_id, key_hash, scopes, expires_at, revoked_at"
+        "SELECT id, principal_id, key_hash, scopes, expires_at, revoked_at, last_used_at"
         " FROM api_keys WHERE key_prefix=?",
         (prefix,),
     ).fetchall()
-    for key_id, principal_id, key_hash, scopes_raw, expires_at, revoked_at in rows:
+    for (
+        key_id,
+        principal_id,
+        key_hash,
+        scopes_raw,
+        expires_at,
+        revoked_at,
+        last_used,
+    ) in rows:
         if revoked_at is not None:
             continue
         if expires_at is not None and float(expires_at) <= moment:
@@ -175,14 +191,21 @@ def lookup_principal(
         if not verify_hash(raw_key, str(key_hash)):
             continue
         prow = conn.execute(
-            "SELECT id, tenant_id, kind, name, roles FROM principals WHERE id=?",
+            "SELECT id, tenant_id, kind, name, roles, status FROM principals WHERE id=?",
             (principal_id,),
         ).fetchone()
         if prow is None:
             continue
         principal = _principal_from_row(prow)
+        if principal.status != "active":
+            continue
         key_scopes = set(_parse_json_list(scopes_raw))
         principal.scopes |= key_scopes
+        if last_used is None or moment - float(last_used) > 3600.0:
+            conn.execute(
+                "UPDATE api_keys SET last_used_at=? WHERE id=?", (moment, key_id)
+            )
+            conn.commit()
         return principal
     return None
 
@@ -214,7 +237,7 @@ def bootstrap_admin(conn: MetadataSession, raw_key: str) -> Principal:
         tenant_id="*",
         kind="human",
         name="bootstrap-admin",
-        roles=["sys_admin", "kb_admin"],
+        roles=["sys_admin", "kb_admin", "developer"],
     )
     conn.execute(
         "INSERT INTO api_keys(principal_id, key_hash, key_prefix, scopes, created_by)"

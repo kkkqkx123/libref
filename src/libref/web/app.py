@@ -10,7 +10,6 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from libref.config import LibrefSettings, settings_fingerprint
 from libref.crawler.registry import RegistryError
 from libref.db.contract import MetadataSession
-from libref.mcp_server.auth import verify_bearer
 from libref.services.code.mining_read import MiningReadService
 from libref.services.docs.pages import PageService
 from libref.services.docs.search import SearchService
@@ -19,9 +18,11 @@ from libref.services.ops.review import ReviewService
 from libref.services.registry.libraries import LibraryService
 from libref.web.api import (
     AnswerQuery,
+    AnswerResponse,
     ApiInsightQuery,
     CallInsightQuery,
     DocProbeRequest,
+    Envelope,
     FeedbackCreate,
     ImportInsightQuery,
     JobCreate,
@@ -30,12 +31,14 @@ from libref.web.api import (
     LinkStatsQuery,
     PatternInsightQuery,
     ReadQuery,
+    ReadResponse,
     RepoProbeRequest,
     ResolveQuery,
     ReviewAction,
     ReviewQuery,
     ScrapeRequest,
     SearchQuery,
+    SearchResponse,
     SymbolInsightQuery,
     envelope,
 )
@@ -106,19 +109,7 @@ def build_web_app(
         from libref.mcp_server.auth import parse_bearer
         from libref.services.infra.auth import dev_principal, lookup_principal
 
-        token = getattr(settings, "mcp_token", None)
-        required = bool(getattr(settings, "mcp_require_auth", False))
         auth_mode = str(getattr(settings, "auth_mode", "dev") or "dev")
-        if token:
-            if not verify_bearer(authorization, token):
-                # In dev mode without a header, fall through to dev principal
-                # only when no legacy token is configured; otherwise enforce.
-                raise HTTPException(status_code=401, detail="unauthorized")
-            legacy = dev_principal(settings)
-            legacy.name = "legacy-token"
-            return legacy
-        if required and not token and auth_mode == "dev":
-            raise HTTPException(status_code=500, detail="auth misconfigured")
         if auth_mode == "dev":
             return dev_principal(settings)
         raw = parse_bearer(authorization)
@@ -292,7 +283,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/search")
+    @app.get("/search", response_model=SearchResponse)
     async def search(
         request: Request,
         query: str,
@@ -389,7 +380,7 @@ def build_web_app(
             raise HTTPException(status_code=502, detail=f"{exc.kind}: {exc}") from exc
         return envelope(items)
 
-    @app.get("/answer")
+    @app.get("/answer", response_model=AnswerResponse)
     async def answer(
         request: Request,
         query: str,
@@ -438,7 +429,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/read")
+    @app.get("/read", response_model=ReadResponse)
     def read(
         request: Request,
         url: str,
@@ -750,7 +741,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/review")
+    @app.get("/review", response_model=Envelope)
     def review_list(
         request: Request,
         action: Literal["list"] = "list",
@@ -1459,18 +1450,23 @@ def build_web_app(
         from libref.services.infra.auth import create_principal, issue_api_key
         from libref.services.ops.audit import write_audit
 
-        pid = create_principal(
-            conn,
-            tenant_id=body.tenant_id,
-            kind=body.kind,
-            name=body.name,
-            roles=list(body.roles),
-        )
+        pid = None
+        try:
+            pid = create_principal(
+                conn,
+                tenant_id=body.tenant_id,
+                kind=body.kind,
+                name=body.name,
+                roles=list(body.roles),
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         key_id, raw = issue_api_key(
             conn,
             principal_id=pid,
             scopes=list(body.scopes),
             created_by=_principal_id(principal),
+            expires_at=body.expires_at,
         )
         write_audit(
             conn,

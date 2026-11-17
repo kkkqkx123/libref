@@ -230,13 +230,7 @@ class LibrefSettings(BaseSettings):
     mcp_disabled_tools: Annotated[
         list[str], NoDecode, BeforeValidator(_split_tool_names)
     ] = Field(default_factory=list)
-    # API auth: token only via env var, never files; a token must be set before external exposure.
-    # Retained until the api_keys table lands; removal happens with the multi-tenant auth rollout.
-    mcp_token: str | None = None
-    mcp_require_auth: bool = False
-    # Staged multi-tenant auth fields: recognized early so deploy/ examples load.
-    # Enforcement (middleware, per-request Principal) lands with the services rollout;
-    # for now they are validated configuration only and do not change request handling.
+    # Authentication is API-Key only: enforced mode resolves Bearer keys to principals.
     auth_mode: Literal["dev", "enforced"] = "dev"
     dev_principal: str = "dev-operator"
     bootstrap_admin_key: str | None = None
@@ -368,7 +362,6 @@ SECRET_FIELDS = frozenset(
     {
         "embedding_api_key",
         "chat_api_key",
-        "mcp_token",
         "discovery_github_token",
         "bootstrap_admin_key",
         "client_api_key",
@@ -559,7 +552,6 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "mcp_disabled_tools",
         }
     ),
-    "mcp.auth": frozenset({"mcp_token", "mcp_require_auth"}),
     "auth": frozenset(
         {
             "auth_mode",

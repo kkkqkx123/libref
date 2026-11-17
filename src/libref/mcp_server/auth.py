@@ -59,19 +59,6 @@ def parse_bearer(authorization: str | None) -> str | None:
     return credential.strip()
 
 
-def verify_bearer(authorization: str | None, token: str | None) -> bool:
-    """Legacy static token check kept for direct unit coverage."""
-    raw = parse_bearer(authorization)
-    if not raw or not token:
-        return False
-    if len(raw) != len(token):
-        return False
-    different = 0
-    for left, right in zip(raw, token):
-        different |= ord(left) ^ ord(right)
-    return different == 0
-
-
 def verify_key(raw: str | None, stored_hash: str | None) -> bool:
     """Compare a presented key against its stored hash in constant time."""
     if not raw or not stored_hash:
