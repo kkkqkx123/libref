@@ -12,7 +12,7 @@
         <el-form-item label="API">
           <el-input v-model="apiName" clearable  :placeholder="messages.importInsight.placeholder" style="width: 280px" />
         </el-form-item>
-        <ScopeFilter />
+        <ScopeFilter show-limit />
         <el-form-item>
           <el-button type="primary" :loading="loading" @click="load">{{ messages.common.query }}</el-button>
         </el-form-item>
@@ -27,7 +27,7 @@
         <div class="libref-pager">
           <el-button :disabled="offset === 0" @click="page(-1)">{{ messages.common.previous }}</el-button>
           <span class="libref-muted">{{ messages.common.offset(offset) }}</span>
-          <el-button :disabled="rows.length < limit" @click="page(1)">{{ messages.common.next }}</el-button>
+          <el-button :disabled="rows.length < scopeStore.resultLimit" @click="page(1)">{{ messages.common.next }}</el-button>
         </div>
       </template>
     </template>
@@ -47,7 +47,7 @@ import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
 import { messages } from '../i18n';
 import RowTable from '../components/common/RowTable.vue';
-import { scopeParams } from '../stores/scope';
+import { scopeParams, scopeStore } from '../stores/scope';
 import {
   applyScopeFromQuery,
   readNumber,
@@ -66,7 +66,6 @@ const VIEWS: View[] = ['importers', 'imports'];
 const requested = readString(route.query.view) as View;
 const view = ref<View>(VIEWS.includes(requested) ? requested : 'importers');
 const apiName = ref(readString(route.query.api));
-const limit = ref(readNumber(route.query.limit, 50));
 const offset = ref(readNumber(route.query.offset, 0));
 const loading = ref(false);
 const loaded = ref(false);
@@ -78,7 +77,7 @@ async function load(): Promise<void> {
   sync({
     view: view.value,
     api: apiName.value.trim() || undefined,
-    limit: limit.value,
+    limit: scopeStore.resultLimit,
     offset: offset.value,
     ...scopeSnapshot(),
   });
@@ -90,7 +89,7 @@ async function load(): Promise<void> {
         view: view.value,
         api: apiName.value.trim() || undefined,
         ...scopeParams(),
-        limit: limit.value,
+        limit: scopeStore.resultLimit,
         offset: offset.value,
       },
     });
@@ -105,7 +104,7 @@ async function load(): Promise<void> {
 }
 
 function page(direction: number): void {
-  offset.value = Math.max(0, offset.value + direction * limit.value);
+  offset.value = Math.max(0, offset.value + direction * scopeStore.resultLimit);
   void load();
 }
 

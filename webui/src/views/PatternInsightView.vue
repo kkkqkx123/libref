@@ -37,7 +37,7 @@
         <el-form-item :label="messages.patternInsight.perFileLimit">
           <el-input-number v-model="perFileLimit" :min="1" :max="20" />
         </el-form-item>
-        <ScopeFilter />
+        <ScopeFilter show-limit />
         <el-form-item>
           <el-button type="primary" :loading="loading" @click="load">{{ messages.common.query }}</el-button>
         </el-form-item>
@@ -48,7 +48,13 @@
     <template v-else-if="loaded">
       <EmptyState v-if="rows.length === 0" :description="messages.patternInsight.empty" />
       <template v-else>
-        <EvidenceList v-if="view === 'evidence'" :rows="rows" @feedback="forwardFeedback" />
+        <EvidenceList
+          v-if="view === 'evidence'"
+          :rows="rows"
+          :inspect-label="messages.common.verifyCalls"
+          @inspect="forwardCalls"
+          @feedback="forwardFeedback"
+        />
         <RowTable v-else :rows="rows" />
       </template>
     </template>
@@ -71,7 +77,7 @@ import { messages } from '../i18n';
 import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue';
 import RowTable from '../components/common/RowTable.vue';
 import TagInput from '../components/common/TagInput.vue';
-import { scopeParams } from '../stores/scope';
+import { scopeParams, scopeStore } from '../stores/scope';
 import {
   applyScopeFromQuery,
   readBool,
@@ -99,7 +105,6 @@ const dedup = ref(readBool(route.query.dedup, false));
 const perFileLimit = ref<number | undefined>(
   route.query.per_file_limit ? readNumber(route.query.per_file_limit, 1) : undefined,
 );
-const limit = ref(readNumber(route.query.limit, 50));
 const loading = ref(false);
 const loaded = ref(false);
 const error = ref('');
@@ -136,7 +141,7 @@ async function load(): Promise<void> {
     prefix: prefix.value,
     dedup: dedup.value,
     per_file_limit: perFileLimit.value,
-    limit: limit.value,
+    limit: scopeStore.resultLimit,
     ...scopeSnapshot(),
   });
   loading.value = true;
@@ -149,7 +154,7 @@ async function load(): Promise<void> {
         containing: containing.value.length > 0 ? containing.value.join(',') : undefined,
         prefix: prefix.value || undefined,
         ...scopeParams(),
-        limit: limit.value,
+        limit: scopeStore.resultLimit,
         per_file_limit: perFileLimit.value,
         dedup: dedup.value,
       },
@@ -162,6 +167,14 @@ async function load(): Promise<void> {
   } finally {
     loading.value = false;
   }
+}
+
+function forwardCalls(row: Row): void {
+  const api = row['callee_name'];
+  void router.push({
+    path: '/insights/calls',
+    query: { view: 'callee', api: typeof api === 'string' ? api : undefined },
+  });
 }
 
 function forwardFeedback(row: Row): void {

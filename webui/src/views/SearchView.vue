@@ -14,6 +14,7 @@
       </el-input>
       <ScopeFilter show-preset />
       <el-checkbox v-model="suggest">{{ messages.search.suggest }}</el-checkbox>
+      <el-checkbox v-model="scopeStore.includePrerelease">{{ messages.common.includePrerelease }}</el-checkbox>
     </div>
     <LoadingPanel v-if="loading" />
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="search" />
@@ -63,6 +64,9 @@ if (preset === 'precise' || preset === 'balanced' || preset === 'thorough') {
   scopeStore.preset = preset as SearchPreset;
 }
 if (route.query.limit) scopeStore.limit = Math.min(100, Math.max(1, readNumber(route.query.limit, scopeStore.limit)));
+if (route.query.include_prerelease !== undefined) {
+  scopeStore.includePrerelease = readBool(route.query.include_prerelease, false);
+}
 
 const query = ref(readString(route.query.query));
 const suggest = ref(readBool(route.query.suggest, false));
@@ -79,6 +83,7 @@ async function search(): Promise<void> {
     suggest: suggest.value,
     preset: scopeStore.preset,
     limit: scopeStore.limit,
+    include_prerelease: scopeStore.includePrerelease,
     ...scopeSnapshot(),
   });
   loading.value = true;
@@ -91,6 +96,7 @@ async function search(): Promise<void> {
         limit: scopeStore.limit,
         preset: scopeStore.preset,
         suggest: suggest.value,
+        include_prerelease: scopeStore.includePrerelease,
       },
     });
     result.value = data;

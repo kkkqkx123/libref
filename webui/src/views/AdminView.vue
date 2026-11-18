@@ -90,6 +90,38 @@
         </el-table>
       </el-tab-pane>
 
+      <el-tab-pane v-if="canConfig" :label="messages.admin.quotaTab" name="quota">
+        <div class="libref-card">
+          <div class="libref-quota-head">
+            <h4>{{ messages.admin.quotaTab }}</h4>
+            <el-button type="primary" size="small" @click="openQuota()">{{ messages.admin.quotaNew }}</el-button>
+          </div>
+          <LoadingPanel v-if="quotaLoading" :rows="2" />
+          <EmptyState v-else-if="quotas.length === 0" :description="messages.admin.quotaEmpty" />
+          <el-table v-else :data="quotas" stripe style="width: 100%">
+            <el-table-column prop="tenant_id" :label="messages.admin.quotaTenant" />
+            <el-table-column prop="principal_id" :label="messages.admin.quotaPrincipal" width="100">
+              <template #default="scope">{{ scope.row.principal_id ?? messages.common.none }}</template>
+            </el-table-column>
+            <el-table-column prop="resource" :label="messages.admin.quotaResource" />
+            <el-table-column :label="messages.admin.quotaLimit" width="110">
+              <template #default="scope">
+                {{ scope.row.limit_value === 0 ? messages.admin.quotaUnlimited : scope.row.limit_value }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="window_type" :label="messages.admin.quotaWindow" width="100" />
+            <el-table-column prop="updated_at" :label="messages.admin.quotaUpdatedAt" />
+            <el-table-column :label="messages.common.actions" width="90">
+              <template #default="scope">
+                <el-button link type="primary" size="small" @click="openQuota(scope.row)">
+                  {{ messages.common.edit }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+      </el-tab-pane>
+
       <el-tab-pane v-if="canConfig"  :label="messages.common.status" name="status">
         <div class="libref-card">
           <h4>{{ messages.admin.readiness }}</h4>
@@ -104,17 +136,53 @@
       </el-tab-pane>
     </el-tabs>
 
+    <el-dialog v-model="quotaDialog" :title="quotaEditing ? messages.admin.quotaTab : messages.admin.quotaNew" width="480px">
+      <el-form label-width="120px">
+        <el-form-item :label="messages.admin.quotaResource">
+          <el-select v-model="quotaForm.resource" filterable allow-create style="width: 100%">
+            <el-option v-for="r in quotaResources" :key="r" :label="r" :value="r" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="messages.admin.quotaLimit">
+          <el-input-number v-model="quotaForm.limit_value" :min="0" style="width: 160px" />
+          <span class="libref-muted">{{ messages.admin.quotaLimitHint }}</span>
+        </el-form-item>
+        <el-form-item :label="messages.admin.quotaWindow">
+          <el-select v-model="quotaForm.window_type" style="width: 160px">
+            <el-option label="hour" value="hour" />
+            <el-option label="day" value="day" />
+            <el-option label="month" value="month" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="messages.admin.quotaTenant">
+          <el-input v-model="quotaForm.tenant_id" :placeholder="messages.admin.quotaTenantHint" />
+        </el-form-item>
+        <el-form-item :label="messages.admin.quotaPrincipal">
+          <el-input-number v-model="quotaForm.principal_id" :min="1" controls-position="right" />
+          <span class="libref-muted">{{ messages.admin.quotaPrincipalHint }}</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="quotaDialog = false">{{ messages.common.cancel }}</el-button>
+        <el-button type="primary" :loading="quotaSaving" @click="saveQuota">{{ messages.admin.quotaSave }}</el-button>
+      </template>
+    </el-dialog>
+
     <KeyIssueDialog v-model="issueOpen" @created="onKeyCreated" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ElAlert, ElButton, ElTabPane, ElTable, ElTableColumn, ElTabs, ElTag } from 'element-plus';
+import {
+  ElAlert, ElButton, ElDialog, ElForm, ElFormItem, ElInput, ElInputNumber,
+  ElOption, ElSelect, ElTabPane, ElTable, ElTableColumn, ElTabs, ElTag,
+} from 'element-plus';
 import { ElMessageBox } from 'element-plus';
-import { computed, onUnmounted, ref, watch } from 'vue';
+import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import { api, ApiError } from '../api/client';
 import type { Envelope, Row } from '../api/types';
 import KeyIssueDialog from '../components/business/KeyIssueDialog.vue';
+import EmptyState from '../components/common/EmptyState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
 import { messages } from '../i18n';
@@ -152,6 +220,24 @@ const metricsLoading = ref(false);
 const metricsLoaded = ref(false);
 const ready = ref<Record<string, unknown>>({});
 const metrics = ref<Record<string, unknown>>({});
+
+const QUOTA_RESOURCES = [
+  'http_requests', 'llm_prompt_tokens', 'llm_completion_tokens', 'scrape_pages',
+  'index_requests', 'job_submissions', 'snapshot_bytes', 'repos_bytes',
+];
+const quotaResources = QUOTA_RESOURCES;
+const quotas = ref<Row[]>([]);
+const quotaLoading = ref(false);
+const quotaDialog = ref(false);
+const quotaEditing = ref(false);
+const quotaSaving = ref(false);
+const quotaForm = reactive<{
+  resource: string;
+  limit_value: number;
+  window_type: 'hour' | 'day' | 'month';
+  tenant_id: string;
+  principal_id: number | undefined;
+}>({ resource: 'http_requests', limit_value: 0, window_type: 'hour', tenant_id: '', principal_id: undefined });
 
 const readyEntries = computed<KeyValueEntry[]>(() =>
   Object.entries(ready.value).map(([label, value]) => ({
@@ -265,6 +351,54 @@ async function loadMetrics(): Promise<void> {
   }
 }
 
+async function loadQuotas(): Promise<void> {
+  if (!canConfig.value) return;
+  quotaLoading.value = true;
+  try {
+    const { data } = await api<Envelope<Row>>('/admin/quota/policies');
+    quotas.value = data.items;
+  } catch (err) {
+    notifyError(err, messages.value.admin.quotaLoadFailed);
+  } finally {
+    quotaLoading.value = false;
+  }
+}
+
+function openQuota(row?: Row): void {
+  quotaEditing.value = Boolean(row);
+  quotaForm.resource = row ? String(row['resource'] ?? 'http_requests') : 'http_requests';
+  quotaForm.limit_value = row ? Number(row['limit_value'] ?? 0) : 0;
+  quotaForm.window_type = (row?.['window_type'] as 'hour' | 'day' | 'month') || 'hour';
+  quotaForm.tenant_id = row ? String(row['tenant_id'] ?? '') : '';
+  const principalId = row ? Number(row['principal_id']) : NaN;
+  quotaForm.principal_id = Number.isFinite(principalId) && principalId > 0 ? principalId : undefined;
+  quotaDialog.value = true;
+}
+
+async function saveQuota(): Promise<void> {
+  if (!quotaForm.resource.trim()) return;
+  quotaSaving.value = true;
+  try {
+    await api<{ ok: boolean }>('/admin/quota/policies', {
+      method: 'PUT',
+      body: {
+        resource: quotaForm.resource.trim(),
+        limit_value: quotaForm.limit_value,
+        window_type: quotaForm.window_type,
+        tenant_id: quotaForm.tenant_id.trim(),
+        principal_id: quotaForm.principal_id ?? null,
+      },
+    });
+    notifySuccess(messages.value.admin.quotaSaved);
+    quotaDialog.value = false;
+    await loadQuotas();
+  } catch (err) {
+    notifyError(err, messages.value.admin.quotaSaveFailed);
+  } finally {
+    quotaSaving.value = false;
+  }
+}
+
 // Process counters keep moving; polling runs only while the status tab is open.
 function startMetricsPolling(): void {
   if (metricsTimer !== null) return;
@@ -285,6 +419,11 @@ watch(
     if (next === 'principals') {
       stopMetricsPolling();
       void loadPrincipals();
+      return;
+    }
+    if (next === 'quota') {
+      stopMetricsPolling();
+      void loadQuotas();
       return;
     }
     if (next !== 'status') {
@@ -316,5 +455,14 @@ void loadKeys();
 .libref-separation-ok {
   color: var(--text-secondary);
   font-size: 12px;
+}
+.libref-quota-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.libref-quota-head h4 {
+  margin: 0;
 }
 </style>

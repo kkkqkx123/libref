@@ -24,7 +24,7 @@
           <span class="libref-muted">—</span>
           <el-input-number v-model="maxArgs" :min="0"  :placeholder="messages.common.max" style="width: 110px" />
         </el-form-item>
-        <ScopeFilter />
+        <ScopeFilter show-limit />
         <el-form-item>
           <el-button type="primary" :loading="loading" @click="load">{{ messages.common.query }}</el-button>
         </el-form-item>
@@ -35,11 +35,16 @@
     <template v-else-if="loaded">
       <EmptyState v-if="rows.length === 0" :description="messages.callInsight.empty" />
       <template v-else>
-        <EvidenceList :rows="rows" @feedback="forwardFeedback" />
+        <EvidenceList
+          :rows="rows"
+          :inspect-label="messages.common.viewSymbol"
+          @inspect="forwardSymbol"
+          @feedback="forwardFeedback"
+        />
         <div class="libref-pager">
           <el-button :disabled="offset === 0" @click="page(-1)">{{ messages.common.previous }}</el-button>
           <span class="libref-muted">{{ messages.common.offset(offset) }}</span>
-          <el-button :disabled="rows.length < limit" @click="page(1)">{{ messages.common.next }}</el-button>
+          <el-button :disabled="rows.length < scopeStore.resultLimit" @click="page(1)">{{ messages.common.next }}</el-button>
         </div>
       </template>
     </template>
@@ -60,7 +65,7 @@ import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
 import { messages } from '../i18n';
 import TagInput from '../components/common/TagInput.vue';
-import { scopeParams } from '../stores/scope';
+import { scopeParams, scopeStore } from '../stores/scope';
 import {
   applyScopeFromQuery,
   readBool,
@@ -90,7 +95,6 @@ const minArgs = ref<number | undefined>(
 const maxArgs = ref<number | undefined>(
   route.query.max_args ? readNumber(route.query.max_args, 0) : undefined,
 );
-const limit = ref(readNumber(route.query.limit, 50));
 const offset = ref(readNumber(route.query.offset, 0));
 const loading = ref(false);
 const loaded = ref(false);
@@ -106,7 +110,7 @@ async function load(): Promise<void> {
     resolve_kinds: resolveKinds.value,
     min_args: minArgs.value,
     max_args: maxArgs.value,
-    limit: limit.value,
+    limit: scopeStore.resultLimit,
     offset: offset.value,
     ...scopeSnapshot(),
   });
@@ -118,7 +122,7 @@ async function load(): Promise<void> {
         view: view.value,
         api: apiName.value.trim() || undefined,
         ...scopeParams(),
-        limit: limit.value,
+        limit: scopeStore.resultLimit,
         offset: offset.value,
         include_ambiguous: includeAmbiguous.value,
         resolve_kinds: resolveKinds.value.length > 0 ? resolveKinds.value.join(',') : undefined,
@@ -137,11 +141,19 @@ async function load(): Promise<void> {
 }
 
 function page(direction: number): void {
-  offset.value = Math.max(0, offset.value + direction * limit.value);
+  offset.value = Math.max(0, offset.value + direction * scopeStore.resultLimit);
   void load();
 }
 
 if (route.query.view || route.query.api) void load();
+
+function forwardSymbol(row: Row): void {
+  const api = row['callee_name'];
+  void router.push({
+    path: '/insights/symbols',
+    query: { view: 'detail', api: typeof api === 'string' ? api : undefined },
+  });
+}
 
 function forwardFeedback(row: Row): void {
   const entityId = Number(row['entity_id']);

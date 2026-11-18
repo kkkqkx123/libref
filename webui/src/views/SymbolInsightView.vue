@@ -17,7 +17,7 @@
         <el-form-item :label="messages.apiInsight.multipleApis">
           <TagInput v-model="apis"  :placeholder="messages.common.tagPlaceholder" />
         </el-form-item>
-        <ScopeFilter />
+        <ScopeFilter show-limit />
         <el-form-item>
           <el-button type="primary" :loading="loading" @click="load">{{ messages.common.query }}</el-button>
         </el-form-item>
@@ -28,11 +28,15 @@
     <template v-else-if="loaded">
       <EmptyState v-if="rows.length === 0" :description="messages.symbolInsight.empty" />
       <template v-else>
-        <RowTable :rows="rows" />
+        <RowTable
+          :rows="rows"
+          :inspect-label="messages.common.verifyCalls"
+          @inspect="forwardCalls"
+        />
         <div class="libref-pager">
           <el-button :disabled="offset === 0" @click="page(-1)">{{ messages.common.previous }}</el-button>
           <span class="libref-muted">{{ messages.common.offset(offset) }}</span>
-          <el-button :disabled="rows.length < limit" @click="page(1)">{{ messages.common.next }}</el-button>
+          <el-button :disabled="rows.length < scopeStore.resultLimit" @click="page(1)">{{ messages.common.next }}</el-button>
         </div>
       </template>
     </template>
@@ -42,7 +46,7 @@
 <script setup lang="ts">
 import { ElButton, ElForm, ElFormItem, ElInput, ElRadioButton, ElRadioGroup } from 'element-plus';
 import { ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
 import type { Envelope, Row } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
@@ -53,7 +57,7 @@ import PageHeader from '../components/common/PageHeader.vue';
 import { messages } from '../i18n';
 import RowTable from '../components/common/RowTable.vue';
 import TagInput from '../components/common/TagInput.vue';
-import { scopeParams } from '../stores/scope';
+import { scopeParams, scopeStore } from '../stores/scope';
 import {
   applyScopeFromQuery,
   readList,
@@ -64,9 +68,18 @@ import {
 } from '../utils/query';
 
 const route = useRoute();
+const router = useRouter();
 const { sync } = useQuerySync();
 
 applyScopeFromQuery(route.query);
+
+function forwardCalls(row: Row): void {
+  const api = row['qualified_name'];
+  void router.push({
+    path: '/insights/calls',
+    query: { view: 'callee', api: typeof api === 'string' ? api : undefined },
+  });
+}
 
 type View = 'detail' | 'file' | 'children' | 'signature';
 const VIEWS: View[] = ['detail', 'file', 'children', 'signature'];
@@ -74,7 +87,6 @@ const requested = readString(route.query.view) as View;
 const view = ref<View>(VIEWS.includes(requested) ? requested : 'detail');
 const apiName = ref(readString(route.query.api));
 const apis = ref<string[]>(readList(route.query.apis));
-const limit = ref(readNumber(route.query.limit, 50));
 const offset = ref(readNumber(route.query.offset, 0));
 const loading = ref(false);
 const loaded = ref(false);
@@ -87,7 +99,7 @@ async function load(): Promise<void> {
     view: view.value,
     api: apiName.value.trim() || undefined,
     apis: apis.value.length > 0 ? apis.value.join(',') : undefined,
-    limit: limit.value,
+    limit: scopeStore.resultLimit,
     offset: offset.value,
     ...scopeSnapshot(),
   });
@@ -100,7 +112,7 @@ async function load(): Promise<void> {
         api: apiName.value.trim() || undefined,
         apis: apis.value.length > 0 ? apis.value.join(',') : undefined,
         ...scopeParams(),
-        limit: limit.value,
+        limit: scopeStore.resultLimit,
         offset: offset.value,
       },
     });
@@ -115,7 +127,7 @@ async function load(): Promise<void> {
 }
 
 function page(direction: number): void {
-  offset.value = Math.max(0, offset.value + direction * limit.value);
+  offset.value = Math.max(0, offset.value + direction * scopeStore.resultLimit);
   void load();
 }
 

@@ -9,6 +9,15 @@
       <span class="libref-mono libref-ellipsis libref-evidence-main">{{ mainOf(row) }}</span>
       <span class="libref-muted libref-evidence-sub">{{ subOf(row) }}</span>
       <el-button
+        v-if="inspectLabel"
+        link
+        type="primary"
+        size="small"
+        @click="emit('inspect', row)"
+      >
+        {{ inspectLabel }}
+      </el-button>
+      <el-button
         v-if="canFeedback"
         link
         type="primary"
@@ -30,8 +39,8 @@ import { hasScope } from '../../stores/auth';
 import ConfidenceBadge from '../common/ConfidenceBadge.vue';
 import { formatCell } from '../../utils/format';
 
-defineProps<{ rows: Row[] }>();
-const emit = defineEmits<{ feedback: [row: Row] }>();
+withDefaults(defineProps<{ rows: Row[]; inspectLabel?: string }>(), { inspectLabel: '' });
+const emit = defineEmits<{ feedback: [row: Row]; inspect: [row: Row] }>();
 
 const canFeedback = computed(() => hasScope('feedback:write'));
 

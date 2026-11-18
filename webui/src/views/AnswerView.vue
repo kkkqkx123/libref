@@ -11,6 +11,10 @@
         @keyup.enter="ask"
       />
       <ScopeFilter show-preset />
+      <div class="libref-answer-limit">
+        <span class="libref-muted">{{ messages.common.limit }}</span>
+        <el-input-number v-model="answerLimit" :min="1" :max="50" style="width: 120px" />
+      </div>
       <el-button type="primary" :loading="loading" :disabled="!query.trim()" @click="ask">
         {{ messages.common.ask }}
       </el-button>
@@ -45,7 +49,7 @@
 </template>
 
 <script setup lang="ts">
-import { ElButton, ElInput, ElTag } from 'element-plus';
+import { ElButton, ElInput, ElInputNumber, ElTag } from 'element-plus';
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
@@ -60,7 +64,7 @@ import PageHeader from '../components/common/PageHeader.vue';
 import QuotaNotice from '../components/common/QuotaNotice.vue';
 import { messages } from '../i18n';
 import { scopeParams, scopeStore } from '../stores/scope';
-import { applyScopeFromQuery, readString, scopeSnapshot, useQuerySync } from '../utils/query';
+import { applyScopeFromQuery, readNumber, readString, scopeSnapshot, useQuerySync } from '../utils/query';
 
 const route = useRoute();
 const router = useRouter();
@@ -68,6 +72,7 @@ const { sync } = useQuerySync();
 
 applyScopeFromQuery(route.query);
 const query = ref(readString(route.query.query));
+const answerLimit = ref(Math.min(50, Math.max(1, readNumber(route.query.answer_limit, 5))));
 const loading = ref(false);
 const error = ref('');
 const requestId = ref('');
@@ -79,6 +84,7 @@ async function ask(): Promise<void> {
   sync({
     query: query.value.trim(),
     preset: scopeStore.preset,
+    answer_limit: answerLimit.value,
     ...scopeSnapshot(),
   });
   loading.value = true;
@@ -90,7 +96,7 @@ async function ask(): Promise<void> {
       params: {
         query: query.value.trim(),
         ...scopeParams(),
-        limit: 5,
+        limit: answerLimit.value,
         preset: scopeStore.preset,
       },
     });
@@ -127,5 +133,11 @@ if (query.value) void ask();
 .libref-answer-body {
   white-space: pre-wrap;
   line-height: 1.7;
+}
+.libref-answer-limit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 12px;
 }
 </style>

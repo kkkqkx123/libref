@@ -24,6 +24,38 @@
         <el-form-item v-else :label="messages.requests.startUrl">
           <el-input v-model="form.startUrl" :placeholder="messages.requests.startUrlPlaceholder" />
         </el-form-item>
+        <el-form-item :label="messages.requests.advanced">
+          <el-switch v-model="showAdvanced" />
+        </el-form-item>
+        <template v-if="showAdvanced">
+          <el-form-item v-if="form.kind === 'docs'" :label="messages.ingest.maxPages">
+            <el-input-number v-model="form.max_pages" :min="1" />
+          </el-form-item>
+          <el-form-item v-if="form.kind === 'docs'" :label="messages.requests.prefilter">
+            <el-checkbox v-model="form.prefilter" />
+          </el-form-item>
+          <el-form-item v-if="form.kind === 'repo'" :label="messages.ingest.probeRepoSubdir">
+            <el-input v-model="form.subdir" placeholder="packages/core" />
+          </el-form-item>
+          <el-form-item :label="messages.requests.maxFiles">
+            <el-input-number v-model="form.max_files" :min="1" />
+          </el-form-item>
+          <el-form-item :label="messages.requests.onlyFiles">
+            <TagInput v-model="form.only_files" :placeholder="messages.common.tagPlaceholder" />
+          </el-form-item>
+          <el-form-item :label="messages.requests.excludePatterns">
+            <TagInput v-model="form.exclude_patterns" :placeholder="messages.common.tagPlaceholder" />
+          </el-form-item>
+          <el-form-item :label="messages.requests.update">
+            <el-checkbox v-model="form.update" />
+          </el-form-item>
+          <el-form-item :label="messages.requests.fresh">
+            <el-checkbox v-model="form.fresh" />
+          </el-form-item>
+          <el-form-item :label="messages.common.includePrerelease">
+            <el-checkbox v-model="scopeStore.includePrerelease" />
+          </el-form-item>
+        </template>
         <el-form-item>
           <el-button type="primary" :loading="submitting" @click="submit">{{ messages.common.submit }}</el-button>
           <el-button :loading="probing" @click="probe">{{ messages.common.probe }}</el-button>
@@ -61,19 +93,44 @@
 </template>
 
 <script setup lang="ts">
-import { ElButton, ElForm, ElFormItem, ElInput, ElRadioButton, ElRadioGroup } from 'element-plus';
+import {
+  ElButton, ElCheckbox, ElForm, ElFormItem, ElInput, ElInputNumber,
+  ElRadioButton, ElRadioGroup, ElSwitch,
+} from 'element-plus';
 import { ref } from 'vue';
+import { useRoute } from 'vue-router';
 import { api, ApiError } from '../api/client';
 import type { Envelope, IndexRequest, IndexRequestCreate } from '../api/types';
+import { readString } from '../utils/query';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
 import PageHeader from '../components/common/PageHeader.vue';
 import StatusBadge from '../components/common/StatusBadge.vue';
+import TagInput from '../components/common/TagInput.vue';
 import { messages } from '../i18n';
 import { notifyError, notifySuccess } from '../stores/notify';
+import { scopeStore } from '../stores/scope';
 
-const form = ref({ kind: 'repo' as 'repo' | 'docs', library: '', version: '', ecosystem: '', source: '', startUrl: '' });
+const route = useRoute();
+const presetKind = readString(route.query.kind);
+const form = ref({
+  kind: (presetKind === 'docs' ? 'docs' : 'repo') as 'repo' | 'docs',
+  library: readString(route.query.library),
+  version: readString(route.query.version),
+  ecosystem: readString(route.query.ecosystem),
+  source: readString(route.query.source),
+  startUrl: readString(route.query.start_url),
+  max_pages: undefined as number | undefined,
+  prefilter: false,
+  subdir: '',
+  max_files: undefined as number | undefined,
+  only_files: [] as string[],
+  exclude_patterns: [] as string[],
+  update: false,
+  fresh: false,
+});
+const showAdvanced = ref(false);
 const items = ref<IndexRequest[]>([]);
 const loading = ref(false);
 const submitting = ref(false);
@@ -103,8 +160,20 @@ function payload(): IndexRequestCreate {
     version: form.value.version,
   };
   if (form.value.ecosystem) base.ecosystem = form.value.ecosystem;
-  if (form.value.kind === 'repo') base.source = form.value.source;
-  else base.start_url = form.value.startUrl;
+  if (form.value.kind === 'repo') {
+    base.source = form.value.source;
+    if (form.value.subdir) base.subdir = form.value.subdir;
+  } else {
+    base.start_url = form.value.startUrl;
+    if (form.value.max_pages) base.max_pages = form.value.max_pages;
+    if (form.value.prefilter) base.prefilter = true;
+  }
+  if (form.value.max_files) base.max_files = form.value.max_files;
+  if (form.value.only_files.length > 0) base.only_files = form.value.only_files;
+  if (form.value.exclude_patterns.length > 0) base.exclude_patterns = form.value.exclude_patterns;
+  if (form.value.update) base.update = true;
+  if (form.value.fresh) base.fresh = true;
+  if (scopeStore.includePrerelease) base.include_prerelease = true;
   return base;
 }
 
@@ -126,15 +195,23 @@ async function probe(): Promise<void> {
   probeResult.value = '';
   try {
     if (form.value.kind === 'repo') {
+      const body: Record<string, unknown> = { source: form.value.source };
+      if (form.value.subdir) body.subdir = form.value.subdir;
+      if (form.value.max_files) body.max_files = form.value.max_files;
+      if (form.value.only_files.length > 0) body.only_files = form.value.only_files;
+      if (form.value.exclude_patterns.length > 0) body.exclude_patterns = form.value.exclude_patterns;
       const { data } = await api<{ root_kind: string; effective_files: number }>('/repo-probe', {
         method: 'POST',
-        body: { source: form.value.source },
+        body,
       });
       probeResult.value = messages.value.requests.probeResult(data.root_kind, data.effective_files);
     } else {
+      const body: Record<string, unknown> = { start_url: form.value.startUrl };
+      if (form.value.max_pages) body.max_pages = form.value.max_pages;
+      if (form.value.prefilter) body.prefilter = true;
       const { data } = await api<{ total_pages?: number; eligible?: number }>('/doc-probe', {
         method: 'POST',
-        body: { start_url: form.value.startUrl },
+        body,
       });
       probeResult.value = messages.value.requests.probeResult(String(data.total_pages ?? data.eligible ?? 0), '');
     }
@@ -161,6 +238,16 @@ function reapply(item: IndexRequest): void {
   form.value.ecosystem = String(item.params.ecosystem || '');
   form.value.source = item.kind === 'repo' ? String(item.params.source || '') : '';
   form.value.startUrl = item.kind === 'docs' ? String(item.params.start_url || '') : '';
+  form.value.max_pages = item.params.max_pages ? Number(item.params.max_pages) : undefined;
+  form.value.prefilter = Boolean(item.params.prefilter);
+  form.value.subdir = String(item.params.subdir || '');
+  form.value.max_files = item.params.max_files ? Number(item.params.max_files) : undefined;
+  form.value.only_files = Array.isArray(item.params.only_files) ? item.params.only_files.map(String) : [];
+  form.value.exclude_patterns = Array.isArray(item.params.exclude_patterns) ? item.params.exclude_patterns.map(String) : [];
+  form.value.update = Boolean(item.params.update);
+  form.value.fresh = Boolean(item.params.fresh);
+  if (typeof item.params.include_prerelease === 'boolean') scopeStore.includePrerelease = item.params.include_prerelease;
+  showAdvanced.value = true;
 }
 
 void reload();

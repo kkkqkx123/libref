@@ -17,10 +17,7 @@
         <el-form-item v-if="view === 'common'" :label="messages.apiInsight.multipleApis">
           <TagInput v-model="apis"  :placeholder="messages.common.tagPlaceholder" />
         </el-form-item>
-        <ScopeFilter />
-        <el-form-item :label="messages.common.limit">
-          <el-input-number v-model="limit" :min="1" :max="500" />
-        </el-form-item>
+        <ScopeFilter show-limit />
         <el-form-item>
           <el-button type="primary" :loading="loading" @click="load">{{ messages.common.query }}</el-button>
         </el-form-item>
@@ -36,7 +33,7 @@
 </template>
 
 <script setup lang="ts">
-import { ElButton, ElForm, ElFormItem, ElInput, ElInputNumber, ElRadioButton, ElRadioGroup } from 'element-plus';
+import { ElButton, ElForm, ElFormItem, ElInput, ElRadioButton, ElRadioGroup } from 'element-plus';
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
@@ -50,11 +47,10 @@ import PageHeader from '../components/common/PageHeader.vue';
 import { messages } from '../i18n';
 import TagInput from '../components/common/TagInput.vue';
 import { notifyError } from '../stores/notify';
-import { scopeParams } from '../stores/scope';
+import { scopeParams, scopeStore } from '../stores/scope';
 import {
   applyScopeFromQuery,
   readList,
-  readNumber,
   readString,
   scopeSnapshot,
   useQuerySync,
@@ -72,7 +68,6 @@ const requested = readString(route.query.view) as View;
 const view = ref<View>(VIEWS.includes(requested) ? requested : 'usage');
 const apiName = ref(readString(route.query.api));
 const apis = ref<string[]>(readList(route.query.apis));
-const limit = ref(readNumber(route.query.limit, 20));
 const loading = ref(false);
 const loaded = ref(false);
 const error = ref('');
@@ -86,11 +81,17 @@ async function load(): Promise<void> {
     notifyError(new Error(messages.value.apiInsight.apiRequired), messages.value.common.missingParam);
     return;
   }
+  // The common view accepts either a single API or a tag list; both empty is a
+  // guaranteed 400, so stop before issuing the request.
+  if (view.value === 'common' && !apiName.value.trim() && apis.value.length === 0) {
+    notifyError(new Error(messages.value.apiInsight.apiRequired), messages.value.common.missingParam);
+    return;
+  }
   sync({
     view: view.value,
     api: apiName.value.trim(),
     apis: apis.value,
-    limit: limit.value,
+    limit: scopeStore.resultLimit,
     ...scopeSnapshot(),
   });
   loading.value = true;
@@ -102,7 +103,7 @@ async function load(): Promise<void> {
         api: apiName.value.trim() || undefined,
         apis: apis.value.length > 0 ? apis.value.join(',') : undefined,
         ...scopeParams(),
-        limit: limit.value,
+        limit: scopeStore.resultLimit,
       },
     });
     rows.value = data.items;

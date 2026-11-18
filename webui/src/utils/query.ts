@@ -2,7 +2,7 @@
 // so a copied link reproduces the same view, and hydrate them back on mount.
 import { useRoute, useRouter } from 'vue-router';
 import type { LocationQuery, LocationQueryValue } from 'vue-router';
-import { scopeStore } from '../stores/scope';
+import { RESULT_LIMIT_MAX, RESULT_LIMIT_MIN, scopeStore } from '../stores/scope';
 
 export type QueryValue = string | number | boolean | null | undefined;
 export type QuerySnapshot = Record<string, QueryValue | string[]>;
@@ -77,6 +77,10 @@ export function applyScopeFromQuery(query: LocationQuery): void {
   if (library) scopeStore.library = library;
   if (version) scopeStore.version = version;
   if (ecosystem) scopeStore.ecosystem = ecosystem;
+  if (query.limit !== undefined) {
+    const parsed = readNumber(query.limit, scopeStore.resultLimit);
+    scopeStore.resultLimit = Math.min(RESULT_LIMIT_MAX, Math.max(RESULT_LIMIT_MIN, parsed));
+  }
 }
 
 export function scopeSnapshot(): QuerySnapshot {

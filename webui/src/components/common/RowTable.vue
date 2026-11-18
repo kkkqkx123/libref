@@ -13,16 +13,28 @@
         </span>
       </template>
     </el-table-column>
+    <el-table-column v-if="inspectLabel" :label="messages.common.actions" width="110">
+      <template #default="scope">
+        <el-button link type="primary" size="small" @click="emit('inspect', scope.row)">
+          {{ inspectLabel }}
+        </el-button>
+      </template>
+    </el-table-column>
   </el-table>
 </template>
 
 <script setup lang="ts">
-import { ElTable, ElTableColumn } from 'element-plus';
+import { ElButton, ElTable, ElTableColumn } from 'element-plus';
 import { computed } from 'vue';
 import type { Row } from '../../api/types';
+import { messages } from '../../i18n';
 import { formatCell } from '../../utils/format';
 
-const props = defineProps<{ rows: Row[]; maxColumns?: number }>();
+const props = withDefaults(
+  defineProps<{ rows: Row[]; maxColumns?: number; inspectLabel?: string }>(),
+  { inspectLabel: '' },
+);
+const emit = defineEmits<{ inspect: [row: Row] }>();
 
 const HIDDEN = new Set(['metadata']);
 

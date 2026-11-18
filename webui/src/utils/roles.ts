@@ -42,7 +42,14 @@ export const ROLE_OPTIONS: RoleOption[] = [
       'index:approve',
     ],
   },
-  { value: PLATFORM_ROLE, scopes: ['*'] },
+  {
+    value: PLATFORM_ROLE,
+    scopes: [
+      'read', 'feedback:write', 'review:read', 'review:write', 'feedback:read',
+      'feedback:resolve', 'index:request', 'index:approve', 'ingest:write',
+      'jobs:write', 'admin:keys', 'admin:config', 'platform:admin',
+    ],
+  },
 ];
 
 // Same contract as the server: at most one role per group, and the platform

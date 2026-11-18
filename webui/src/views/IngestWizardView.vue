@@ -24,11 +24,8 @@
         <el-form-item :label="messages.common.version">
           <el-input v-model="form.version" :placeholder="messages.ingest.versionPlaceholder" style="width: 200px" />
         </el-form-item>
-        <el-form-item :label="messages.ingest.target">
-          <el-radio-group v-model="form.target">
-            <el-radio-button label="docs">{{ messages.common.docs }}</el-radio-button>
-            <el-radio-button label="repo">{{ messages.common.repo }}</el-radio-button>
-          </el-radio-group>
+        <el-form-item>
+          <el-checkbox v-model="scopeStore.includePrerelease">{{ messages.common.includePrerelease }}</el-checkbox>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="busy" :disabled="!form.name.trim()" @click="resolve">
@@ -38,7 +35,11 @@
       </el-form>
       <div v-if="resolution" class="libref-resolution">
         <KeyValue :entries="resolutionEntries" />
-        <el-button type="primary" @click="step = 1">{{ messages.ingest.stepToProbe }}</el-button>
+        <div v-if="repoRedirect" class="libref-repo-redirect">
+          <p class="libref-muted">{{ messages.ingest.repoRedirectHint }}</p>
+          <el-button type="primary" @click="goRequests">{{ messages.ingest.goRequests }}</el-button>
+        </div>
+        <el-button v-else type="primary" @click="step = 1">{{ messages.ingest.stepToProbe }}</el-button>
       </div>
     </div>
 
@@ -76,25 +77,15 @@
       <h4>{{ messages.ingest.step2 }}</h4>
       <p class="libref-muted">{{ messages.ingest.probeAddress(probeAddress) }}</p>
       <el-form @submit.prevent="probe">
-        <template v-if="form.target === 'docs'">
-          <el-form-item :label="messages.ingest.probeDocSamples">
-            <el-input-number v-model="docSampleLimit" :min="1" :max="100" />
-          </el-form-item>
-          <el-form-item :label="messages.ingest.probeDocPages">
-            <el-input-number v-model="docMaxPages" :min="1" />
-          </el-form-item>
-          <el-form-item :label="messages.ingest.probePrefilter">
-            <el-checkbox v-model="docPrefilter">{{ messages.ingest.probePrefilterHint }}</el-checkbox>
-          </el-form-item>
-        </template>
-        <template v-else>
-          <el-form-item :label="messages.ingest.probeRepoSubdir">
-            <el-input v-model="repoSubdir" placeholder="packages/core" style="width: 260px" />
-          </el-form-item>
-          <el-form-item :label="messages.ingest.probeRepoSamples">
-            <el-input-number v-model="repoSampleLimit" :min="1" :max="100" />
-          </el-form-item>
-        </template>
+        <el-form-item :label="messages.ingest.probeDocSamples">
+          <el-input-number v-model="docSampleLimit" :min="1" :max="100" />
+        </el-form-item>
+        <el-form-item :label="messages.ingest.probeDocPages">
+          <el-input-number v-model="docMaxPages" :min="1" />
+        </el-form-item>
+        <el-form-item :label="messages.ingest.probePrefilter">
+          <el-checkbox v-model="docPrefilter">{{ messages.ingest.probePrefilterHint }}</el-checkbox>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="busy" @click="probe">{{ messages.ingest.startProbe }}</el-button>
           <el-button @click="step = 0">{{ messages.common.previousStep }}</el-button>
@@ -128,19 +119,12 @@
       </el-form>
     </div>
 
-    <div v-if="step === 2 && form.target === 'repo'" class="libref-card">
-      <h4>{{ messages.ingest.depsTitle }}</h4>
-      <el-button size="small" :loading="depsLoading" @click="loadDeps">{{ messages.ingest.loadDeps }}</el-button>
-      <EmptyState v-if="deps !== null && deps.length === 0" :description="messages.ingest.depsEmpty" />
-      <RowTable v-else-if="deps && deps.length > 0" :rows="deps" />
-    </div>
-
     <ErrorState v-if="error" :message="error" :request-id="requestId" @retry="resolve" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ElButton, ElCheckbox, ElForm, ElFormItem, ElInput, ElInputNumber, ElRadioButton, ElRadioGroup, ElStep, ElSteps, ElTable, ElTableColumn } from 'element-plus';
+import { ElButton, ElCheckbox, ElForm, ElFormItem, ElInput, ElInputNumber, ElStep, ElSteps, ElTable, ElTableColumn } from 'element-plus';
 import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
@@ -152,8 +136,9 @@ import PageHeader from '../components/common/PageHeader.vue';
 import QuotaNotice from '../components/common/QuotaNotice.vue';
 import { messages } from '../i18n';
 import RowTable from '../components/common/RowTable.vue';
-import { notifyError, notifySuccess } from '../stores/notify';
+import { notifySuccess } from '../stores/notify';
 import { invalidateCatalog } from '../stores/catalog';
+import { scopeStore } from '../stores/scope';
 
 type DiscoverySource = 'registry' | 'web' | 'github';
 
@@ -163,22 +148,19 @@ const busy = ref(false);
 const error = ref('');
 const requestId = ref('');
 
-const form = reactive({ ecosystem: '', name: '', version: '', target: 'docs' });
+const form = reactive({ ecosystem: '', name: '', version: '' });
 const resolution = ref<Row | null>(null);
 const probeResult = ref<Row | null>(null);
+const repoRedirect = ref(false);
 const submitVersion = ref('');
 const submitUrl = ref('');
 const maxPages = ref<number | undefined>(undefined);
 const docSampleLimit = ref<number | undefined>(undefined);
 const docMaxPages = ref<number | undefined>(undefined);
 const docPrefilter = ref(false);
-const repoSubdir = ref('');
-const repoSampleLimit = ref<number | undefined>(undefined);
 const discovery = ref<Row[]>([]);
 const discoverySource = ref('');
 const discovered = ref(false);
-const deps = ref<Row[] | null>(null);
-const depsLoading = ref(false);
 
 const resolutionEntries = computed<KeyValueEntry[]>(() => {
   if (!resolution.value) return [];
@@ -189,9 +171,20 @@ const resolutionEntries = computed<KeyValueEntry[]>(() => {
 
 const probeAddress = computed(() => {
   if (!resolution.value) return '';
-  const value = resolution.value['start_url'] ?? resolution.value['url'] ?? resolution.value['repo'];
+  const value = resolution.value['start_url'] ?? resolution.value['url'];
   return typeof value === 'string' ? value : '';
 });
+
+// A resolved source address that is a code repository belongs on the request path,
+// where approval is enforced. Detecting it here prevents a repo from being scraped as docs.
+function isRepoAddress(value: string): boolean {
+  if (!value) return false;
+  if (/(^|\/)github\.com\//i.test(value) || /(^|\/)gitlab\.com\//i.test(value)) {
+    const path = value.replace(/^https?:\/\//i, '').replace(/^[^/]+\//, '');
+    return path.split('/').filter(Boolean).length >= 2;
+  }
+  return false;
+}
 
 // 429 is a quota refusal, not a failure: the submit path shows the reset time and
 // a manual retry instead of an error panel.
@@ -224,7 +217,7 @@ async function discover(source: DiscoverySource): Promise<void> {
       source === 'registry' ? '/library-search' : source === 'web' ? '/web-search' : '/github-search';
     const params =
       source === 'registry'
-        ? { query, ecosystem: form.ecosystem || undefined, limit: 10 }
+        ? { query, ecosystem: form.ecosystem || undefined, limit: 10, include_prerelease: scopeStore.includePrerelease }
         : { query, limit: 10 };
     const { data } = await api<Envelope<Row>>(path, { params });
     discovery.value = data.items;
@@ -255,20 +248,24 @@ async function resolve(): Promise<void> {
   busy.value = true;
   error.value = '';
   resolution.value = null;
-  deps.value = null;
+  repoRedirect.value = false;
   try {
     const { data } = await api<Row>('/resolve', {
       params: {
         ecosystem: form.ecosystem || undefined,
         name: form.name.trim(),
         version: form.version || undefined,
-        target: form.target,
+        target: 'docs',
+        include_prerelease: scopeStore.includePrerelease,
       },
     });
     resolution.value = data;
-    if (!submitUrl.value) {
-      const address = data['start_url'] ?? data['repo'] ?? data['url'];
-      if (typeof address === 'string') submitUrl.value = address;
+    const address = data['start_url'] ?? data['url'] ?? data['repo'];
+    const value = typeof address === 'string' ? address : '';
+    if (isRepoAddress(value)) {
+      repoRedirect.value = true;
+    } else if (!submitUrl.value && value) {
+      submitUrl.value = value;
     }
   } catch (err) {
     fail(err, messages.value.ingest.resolveFailed);
@@ -277,59 +274,39 @@ async function resolve(): Promise<void> {
   }
 }
 
+function goRequests(): void {
+  void router.push({
+    path: '/requests',
+    query: {
+      kind: 'repo',
+      library: form.name.trim(),
+      source: probeAddress.value || submitUrl.value || undefined,
+      version: submitVersion.value || form.version || undefined,
+      ecosystem: form.ecosystem || undefined,
+    },
+  });
+}
+
 async function probe(): Promise<void> {
   busy.value = true;
   error.value = '';
   probeResult.value = null;
   try {
-    if (form.target === 'docs') {
-      const { data } = await api<Row>('/doc-probe', {
-        method: 'POST',
-        body: {
-          start_url: probeAddress.value || submitUrl.value,
-          sample_limit: docSampleLimit.value,
-          max_pages: docMaxPages.value,
-          prefilter: docPrefilter.value,
-        },
-      });
-      probeResult.value = data;
-      if (!submitUrl.value && probeAddress.value) submitUrl.value = probeAddress.value;
-    } else {
-      const { data } = await api<Row>('/repo-probe', {
-        method: 'POST',
-        body: {
-          source: probeAddress.value || form.name.trim(),
-          subdir: repoSubdir.value.trim() || undefined,
-          sample_limit: repoSampleLimit.value,
-        },
-      });
-      probeResult.value = data;
-    }
+    const { data } = await api<Row>('/doc-probe', {
+      method: 'POST',
+      body: {
+        start_url: probeAddress.value || submitUrl.value,
+        sample_limit: docSampleLimit.value,
+        max_pages: docMaxPages.value,
+        prefilter: docPrefilter.value,
+      },
+    });
+    probeResult.value = data;
+    if (!submitUrl.value && probeAddress.value) submitUrl.value = probeAddress.value;
   } catch (err) {
     fail(err, messages.value.ingest.probeFailed);
   } finally {
     busy.value = false;
-  }
-}
-
-async function loadDeps(): Promise<void> {
-  const version = submitVersion.value.trim() || form.version.trim();
-  if (!form.name.trim() || !version) return;
-  depsLoading.value = true;
-  try {
-    const { data } = await api<Envelope<Row>>('/repo-deps', {
-      params: {
-        library: form.name.trim(),
-        version,
-        ecosystem: form.ecosystem || undefined,
-      },
-    });
-    deps.value = data.items;
-  } catch (err) {
-    deps.value = [];
-    notifyError(err, messages.value.ingest.depsFailed);
-  } finally {
-    depsLoading.value = false;
   }
 }
 

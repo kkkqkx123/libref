@@ -42,20 +42,31 @@
         <el-radio-button label="thorough">{{ messages.common.thorough }}</el-radio-button>
       </el-radio-group>
     </el-form-item>
+    <el-form-item v-if="showLimit" :label="messages.common.limit">
+      <el-input-number
+        v-model="scopeStore.resultLimit"
+        :min="RESULT_LIMIT_MIN"
+        :max="RESULT_LIMIT_MAX"
+        style="width: 120px"
+      />
+    </el-form-item>
   </el-form>
 </template>
 
 <script setup lang="ts">
-import { ElForm, ElFormItem, ElInput, ElOption, ElRadioButton, ElRadioGroup, ElSelect } from 'element-plus';
+import { ElForm, ElFormItem, ElInput, ElInputNumber, ElOption, ElRadioButton, ElRadioGroup, ElSelect } from 'element-plus';
 import { computed, onMounted, watch } from 'vue';
 import { api } from '../../api/client';
 import type { Envelope, LibraryRow, VersionRow } from '../../api/types';
 import { catalogStore } from '../../stores/catalog';
 import { notifyError } from '../../stores/notify';
-import { scopeStore, setLibrary } from '../../stores/scope';
+import { RESULT_LIMIT_MAX, RESULT_LIMIT_MIN, scopeStore, setLibrary } from '../../stores/scope';
 import { messages } from '../../i18n';
 
-withDefaults(defineProps<{ showPreset?: boolean }>(), { showPreset: false });
+withDefaults(defineProps<{ showPreset?: boolean; showLimit?: boolean }>(), {
+  showPreset: false,
+  showLimit: false,
+});
 
 const libraries = computed(() => catalogStore.libraries);
 const versions = computed<VersionRow[]>(() => catalogStore.versionsByLibrary[scopeStore.library] || []);
