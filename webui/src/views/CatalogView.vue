@@ -4,7 +4,7 @@
     <div class="libref-card">
       <el-form :inline="true" @submit.prevent>
         <el-form-item :label="messages.common.ecosystem">
-          <el-input v-model="ecosystem" clearable  :placeholder="messages.catalog.ecosystemPlaceholder" style="width: 160px" @change="reload" />
+          <el-input v-model="ecosystem" clearable  :placeholder="messages.catalog.ecosystemPlaceholder" @change="reload" class="libref-w-160"/>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="reload">{{ messages.common.refresh }}</el-button>
@@ -15,7 +15,7 @@
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="reload" />
     <template v-else>
       <EmptyState v-if="libraries.length === 0" :description="messages.catalog.empty" />
-      <el-table v-else :data="libraries" stripe style="width: 100%" @row-click="openLibraryRow">
+      <el-table v-else :data="libraries" stripe @row-click="openLibraryRow" class="libref-w-full">
         <el-table-column prop="name" :label="messages.catalog.library" />
         <el-table-column prop="ecosystem" :label="messages.common.ecosystem" width="120" />
         <el-table-column prop="versions" :label="messages.catalog.versions" width="100" />
@@ -46,7 +46,7 @@
           <el-checkbox v-model="stableOnly">{{ messages.catalog.stableOnly }}</el-checkbox>
         </div>
         <EmptyState v-if="visibleVersions.length === 0" :description="messages.catalog.onlyPrerelease" />
-        <el-table v-else :data="visibleVersions" stripe style="width: 100%; margin-top: 8px">
+        <el-table v-else :data="visibleVersions" stripe class="libref-w-full libref-mt-2">
           <el-table-column prop="version" :label="messages.common.version">
             <template #default="scope">
               <span class="libref-mono">{{ scope.row.version }}</span>
@@ -60,7 +60,7 @@
           <el-table-column prop="registry_confirmed" :label="messages.catalog.registryConfirmed" width="140">
             <template #default="scope">{{ scope.row.registry_confirmed ? messages.common.yes : messages.common.no }}</template>
           </el-table-column>
-          <el-table-column :label="messages.common.actions" width="180">
+          <el-table-column :label="messages.common.actions" width="260">
             <template #default="scope">
               <el-button
                 link
@@ -70,6 +70,15 @@
                 @click.stop="openPages(asVersion(scope.row))"
               >
                 {{ messages.catalog.viewPages }}
+              </el-button>
+              <el-button
+                link
+                type="primary"
+                size="small"
+                class="libref-inline-action"
+                @click.stop="openDeps(asVersion(scope.row))"
+              >
+                {{ messages.catalog.viewDeps }}
               </el-button>
             </template>
           </el-table-column>
@@ -82,7 +91,7 @@
       <ErrorState v-else-if="pagesError" :message="pagesError" :request-id="pagesRequestId" @retry="loadPages" />
       <template v-else>
         <EmptyState v-if="pageRows.length === 0" :description="messages.catalog.pagesEmpty" />
-        <el-table v-else :data="pageRows" stripe style="width: 100%" @row-click="openPage">
+        <el-table v-else :data="pageRows" stripe @row-click="openPage" class="libref-w-full">
           <el-table-column prop="title" :label="messages.catalog.pageTitle" show-overflow-tooltip>
             <template #default="scope">{{ scope.row.title || scope.row.url }}</template>
           </el-table-column>
@@ -106,6 +115,20 @@
         </div>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="depsOpen" :title="depsTitle" width="720px" @closed="resetDeps">
+      <LoadingPanel v-if="depsLoading" />
+      <ErrorState v-else-if="depsError" :message="depsError" :request-id="depsRequestId" @retry="loadDeps" />
+      <template v-else>
+        <EmptyState v-if="depsRows.length === 0" :description="messages.catalog.depsEmpty" />
+        <el-table v-else :data="depsRows" stripe class="libref-w-full">
+          <el-table-column prop="ecosystem" :label="messages.common.ecosystem" width="120" />
+          <el-table-column prop="name" :label="messages.common.name" />
+          <el-table-column prop="req" :label="messages.catalog.depRequirement" />
+          <el-table-column prop="source_file" :label="messages.catalog.depSourceFile" show-overflow-tooltip />
+        </el-table>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -114,7 +137,7 @@ import { ElButton, ElCheckbox, ElDialog, ElDropdown, ElDropdownItem, ElDropdownM
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { Envelope, LibraryRow, PageList, PageRow, VersionRow } from '../api/types';
+import type { Envelope, LibraryRow, PageList, PageRow, Row, VersionRow } from '../api/types';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
@@ -152,6 +175,23 @@ const pageLimit = 50;
 const pageOffset = ref(0);
 const pageLibrary = ref<LibraryRow | null>(null);
 const pageVersion = ref<VersionRow | null>(null);
+
+// Dependency dialog: reads the repo_dependencies table, which only holds rows
+// for versions already indexed. The library/version/ecosystem come from the
+// expanded version row, so no guessing is needed.
+const depsOpen = ref(false);
+const depsLoading = ref(false);
+const depsError = ref('');
+const depsRequestId = ref('');
+const depsRows = ref<Row[]>([]);
+const depsLibrary = ref<LibraryRow | null>(null);
+const depsVersion = ref<VersionRow | null>(null);
+
+const depsTitle = computed(() => {
+  const lib = depsLibrary.value?.name || '';
+  const ver = depsVersion.value?.version || '';
+  return messages.value.catalog.depsTitle(lib, ver);
+});
 
 const pagesTitle = computed(() => {
   const lib = pageLibrary.value?.name || '';
@@ -261,6 +301,46 @@ function resetPages(): void {
   pagesRequestId.value = '';
 }
 
+function openDeps(version: VersionRow): void {
+  const library = libraries.value.find((row) => row.name === expanded.value) || null;
+  depsLibrary.value = library;
+  depsVersion.value = version;
+  depsRows.value = [];
+  depsOpen.value = true;
+  void loadDeps();
+}
+
+async function loadDeps(): Promise<void> {
+  const library = depsLibrary.value;
+  const version = depsVersion.value;
+  if (!library || !version) return;
+  depsLoading.value = true;
+  depsError.value = '';
+  try {
+    const { data } = await api<Envelope<Row>>('/repo-deps', {
+      params: {
+        library: library.name,
+        version: version.version,
+        ecosystem: library.ecosystem || undefined,
+      },
+    });
+    depsRows.value = data.items;
+  } catch (err) {
+    depsError.value = err instanceof ApiError ? err.message : messages.value.catalog.depsFailed;
+    depsRequestId.value = err instanceof ApiError ? err.requestId : '';
+  } finally {
+    depsLoading.value = false;
+  }
+}
+
+function resetDeps(): void {
+  depsRows.value = [];
+  depsError.value = '';
+  depsRequestId.value = '';
+  depsVersion.value = null;
+  depsLibrary.value = null;
+}
+
 function openPage(row: unknown): void {
   const page = row as PageRow;
   const library = pageLibrary.value;
@@ -292,15 +372,18 @@ void reload();
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 16px;
+  margin-top: var(--sp-4);
 }
 .libref-prerelease-tag {
-  margin-left: 6px;
+  margin-left: var(--sp-1-5);
+}
+.libref-inline-action {
+  margin-left: var(--sp-3);
 }
 .libref-pager {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 12px;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
 }
 </style>

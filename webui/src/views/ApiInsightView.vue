@@ -12,7 +12,7 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item v-if="needsApi" label="API">
-          <el-input v-model="apiName" clearable  :placeholder="messages.apiInsight.apiPlaceholder" style="width: 280px" />
+          <el-input v-model="apiName" clearable  :placeholder="messages.apiInsight.apiPlaceholder" class="libref-w-280"/>
         </el-form-item>
         <el-form-item v-if="view === 'common'" :label="messages.apiInsight.multipleApis">
           <TagInput v-model="apis"  :placeholder="messages.common.tagPlaceholder" />

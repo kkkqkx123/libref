@@ -29,7 +29,7 @@
           <TagInput v-model="containing"  :placeholder="messages.patternInsight.containingPlaceholder" />
         </el-form-item>
         <el-form-item :label="messages.patternInsight.prefix">
-          <el-input v-model="prefix" clearable style="width: 220px" />
+          <el-input v-model="prefix" clearable class="libref-w-220"/>
         </el-form-item>
         <el-form-item :label="messages.common.dedup">
           <el-checkbox v-model="dedup">{{ messages.patternInsight.dedupByFile }}</el-checkbox>

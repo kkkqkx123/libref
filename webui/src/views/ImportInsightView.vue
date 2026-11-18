@@ -10,7 +10,7 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="API">
-          <el-input v-model="apiName" clearable  :placeholder="messages.importInsight.placeholder" style="width: 280px" />
+          <el-input v-model="apiName" clearable  :placeholder="messages.importInsight.placeholder" class="libref-w-280"/>
         </el-form-item>
         <ScopeFilter show-limit />
         <el-form-item>
@@ -114,8 +114,8 @@ if (route.query.view || route.query.api) void load();
 <style scoped>
 .libref-pager {
   display: flex;
-  gap: 12px;
+  gap: var(--sp-3);
   align-items: center;
-  margin-top: 12px;
+  margin-top: var(--sp-3);
 }
 </style>

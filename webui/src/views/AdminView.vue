@@ -9,7 +9,7 @@
 
     <el-tabs v-model="tab">
       <el-tab-pane v-if="canKeys"  :label="messages.admin.keysTab" name="keys">
-        <el-table :data="keys" stripe style="width: 100%">
+        <el-table :data="keys" stripe class="libref-w-full">
           <el-table-column prop="id" :label="messages.jobs.id" width="80" />
           <el-table-column prop="principal_id" :label="messages.admin.principal" width="90" />
           <el-table-column prop="key_prefix" :label="messages.admin.prefix" width="140" />
@@ -58,7 +58,7 @@
         >
           <template #title>{{ messages.admin.separationHint(conflictCount) }}</template>
         </el-alert>
-        <el-table :data="principals" stripe style="width: 100%">
+        <el-table :data="principals" stripe class="libref-w-full">
           <el-table-column prop="id" :label="messages.jobs.id" width="70" />
           <el-table-column prop="tenant_id" :label="messages.admin.tenant" width="110" />
           <el-table-column prop="name" :label="messages.admin.principal" width="170" />
@@ -98,7 +98,7 @@
           </div>
           <LoadingPanel v-if="quotaLoading" :rows="2" />
           <EmptyState v-else-if="quotas.length === 0" :description="messages.admin.quotaEmpty" />
-          <el-table v-else :data="quotas" stripe style="width: 100%">
+          <el-table v-else :data="quotas" stripe class="libref-w-full">
             <el-table-column prop="tenant_id" :label="messages.admin.quotaTenant" />
             <el-table-column prop="principal_id" :label="messages.admin.quotaPrincipal" width="100">
               <template #default="scope">{{ scope.row.principal_id ?? messages.common.none }}</template>
@@ -139,16 +139,16 @@
     <el-dialog v-model="quotaDialog" :title="quotaEditing ? messages.admin.quotaTab : messages.admin.quotaNew" width="480px">
       <el-form label-width="120px">
         <el-form-item :label="messages.admin.quotaResource">
-          <el-select v-model="quotaForm.resource" filterable allow-create style="width: 100%">
+          <el-select v-model="quotaForm.resource" filterable allow-create class="libref-w-full">
             <el-option v-for="r in quotaResources" :key="r" :label="r" :value="r" />
           </el-select>
         </el-form-item>
         <el-form-item :label="messages.admin.quotaLimit">
-          <el-input-number v-model="quotaForm.limit_value" :min="0" style="width: 160px" />
+          <el-input-number v-model="quotaForm.limit_value" :min="0" class="libref-w-160"/>
           <span class="libref-muted">{{ messages.admin.quotaLimitHint }}</span>
         </el-form-item>
         <el-form-item :label="messages.admin.quotaWindow">
-          <el-select v-model="quotaForm.window_type" style="width: 160px">
+          <el-select v-model="quotaForm.window_type" class="libref-w-160">
             <el-option label="hour" value="hour" />
             <el-option label="day" value="day" />
             <el-option label="month" value="month" />
@@ -444,23 +444,23 @@ void loadKeys();
 
 <style scoped>
 .libref-new-key {
-  margin-top: 12px;
+  margin-top: var(--sp-3);
 }
 .libref-role-tag {
-  margin-right: 4px;
+  margin-right: var(--sp-1);
 }
 .libref-separation-note {
-  margin-bottom: 12px;
+  margin-bottom: var(--sp-3);
 }
 .libref-separation-ok {
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 .libref-quota-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: var(--sp-3);
 }
 .libref-quota-head h4 {
   margin: 0;

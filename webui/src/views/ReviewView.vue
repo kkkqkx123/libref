@@ -110,13 +110,13 @@ void reload();
 <style scoped>
 .libref-review-main {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
-  margin-bottom: 4px;
+  margin-bottom: var(--sp-1);
 }
 .libref-review-actions {
-  margin-top: 8px;
+  margin-top: var(--sp-2);
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
 }
 </style>

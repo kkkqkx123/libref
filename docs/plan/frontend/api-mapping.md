@@ -15,8 +15,7 @@
 | `GET /library-search` | 入库向导辅助 | registry 联想；失败为 502，前端标注来源异常 |
 | `GET /resolve` | 入库向导第一步 | target 取 docs 或 repo；no_docs/no_repo 为 404，其余上游失败为 502 |
 | `GET /web-search`、`GET /github-search` | 入库向导辅助 | limit 范围 1 到 100；空查询前端拦截 |
-| `GET /repo-deps` | 版本详情附属 | library 与 version 必填；租户不可见按 404 处理 |
-| `GET /link-stats` | 阅读器附属 | 有 url 返回单页统计，否则返回版本汇总加热门引用；limit 上限 500 |
+| `GET /repo-deps` | 目录页版本详情的依赖对话框 | library 与 version 必填；租户不可见按 404 处理；返回 ecosystem/name/req/source_file |
 | `GET /mining-health` | 模式页健康区 | 库版本生态全可选，无参返回全局健康 |
 
 ## 源码洞察（scope: read）
@@ -73,3 +72,10 @@
   通用 `invalid_argument` 以“词条 + 原文”两级展示，原文不丢；前端对必填与数值范围做先验，减少往返。
 - 502 上游失败：`upstream_unavailable`，标注数据来源异常并保留已缓存内容。
 - 每个请求携带的 x-request-id 响应头在报错时展示，便于与审计日志对账。
+
+## 后续项（后端有能力，前端本阶段不实现）
+
+| 端点 | 现状 | 后续接入点 |
+|---|---|---|
+| `GET /link-stats` | 前端未调用，无词条无入口；有 url 返回单页统计，否则返回版本汇总加热门引用，limit 上限 500 | 阅读器附属信息区，作为独立低优先级项排期 |
+

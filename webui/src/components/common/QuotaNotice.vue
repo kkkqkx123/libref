@@ -28,9 +28,9 @@ const hint = computed(() =>
 
 <style scoped>
 .libref-quota {
-  margin-bottom: 16px;
+  margin-bottom: var(--sp-4);
 }
 .libref-quota-hint {
-  margin: 4px 0 8px;
+  margin: var(--sp-1) 0 var(--sp-2);
 }
 </style>

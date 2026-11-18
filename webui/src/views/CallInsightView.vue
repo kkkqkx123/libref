@@ -11,7 +11,7 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="API">
-          <el-input v-model="apiName" clearable  :placeholder="messages.callInsight.apiPlaceholder" style="width: 280px" />
+          <el-input v-model="apiName" clearable  :placeholder="messages.callInsight.apiPlaceholder" class="libref-w-280"/>
         </el-form-item>
         <el-form-item :label="messages.callInsight.filter">
           <el-checkbox v-model="includeAmbiguous">{{ messages.callInsight.includeAmbiguous }}</el-checkbox>
@@ -20,9 +20,9 @@
           <TagInput v-model="resolveKinds"  :placeholder="messages.callInsight.resolveKindsPlaceholder" />
         </el-form-item>
         <el-form-item :label="messages.callInsight.argCount">
-          <el-input-number v-model="minArgs" :min="0"  :placeholder="messages.common.min" style="width: 110px" />
+          <el-input-number v-model="minArgs" :min="0"  :placeholder="messages.common.min" class="libref-w-110"/>
           <span class="libref-muted">—</span>
-          <el-input-number v-model="maxArgs" :min="0"  :placeholder="messages.common.max" style="width: 110px" />
+          <el-input-number v-model="maxArgs" :min="0"  :placeholder="messages.common.max" class="libref-w-110"/>
         </el-form-item>
         <ScopeFilter show-limit />
         <el-form-item>
@@ -170,8 +170,8 @@ function forwardFeedback(row: Row): void {
 <style scoped>
 .libref-pager {
   display: flex;
-  gap: 12px;
+  gap: var(--sp-3);
   align-items: center;
-  margin-top: 12px;
+  margin-top: var(--sp-3);
 }
 </style>

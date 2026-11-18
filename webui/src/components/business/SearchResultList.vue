@@ -47,23 +47,23 @@ function scoreText(score: number): string {
 
 <style scoped>
 .libref-result-card {
-  margin-bottom: 12px;
+  margin-bottom: var(--sp-3);
 }
 .libref-result-title {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--sp-2);
   font-weight: 600;
-  margin-bottom: 4px;
+  margin-bottom: var(--sp-1);
 }
 .libref-result-snippet {
-  margin: 8px 0;
-  font-size: 14px;
+  margin: var(--sp-2) 0;
+  font-size: var(--fs-base);
   line-height: 1.6;
 }
 .libref-result-meta {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
 }
 .libref-result-actions {

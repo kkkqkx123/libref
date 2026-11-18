@@ -254,5 +254,5 @@ void reload();
 </script>
 
 <style scoped>
-.libref-request-row { margin-bottom: 8px; }
+.libref-request-row { margin-bottom: var(--sp-2); }
 </style>

@@ -39,6 +39,23 @@
   --radius-base: 6px;
   --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.08);
 
+  /* Type scale. Components reference these instead of raw font sizes. */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-lg: 18px;
+  --fs-xl: 20px;
+
+  /* Spacing scale. Covers the rhythm used by layout, gaps and insets. */
+  --sp-1: 4px;
+  --sp-1-5: 6px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-4-5: 18px;
+  --sp-5: 20px;
+  --sp-10: 80px;
+
   /* Element Plus theme mapping */
   --el-color-primary: var(--brand);
   --el-color-success: var(--semantic-success);
@@ -80,7 +97,7 @@
 
 /* Shared utilities */
 .libref-page {
-  padding: 20px;
+  padding: var(--sp-5);
   max-width: 1200px;
   margin: 0 auto;
 }
@@ -90,18 +107,18 @@
   border: 1px solid var(--border-light);
   border-radius: var(--radius-base);
   box-shadow: var(--shadow-card);
-  padding: 16px;
-  margin-bottom: 16px;
+  padding: var(--sp-4);
+  margin-bottom: var(--sp-4);
 }
 
 .libref-muted {
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .libref-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--fs-xs);
 }
 
 .libref-ellipsis {
@@ -109,3 +126,26 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Shared note-list inset, used by degraded banner and reader candidates. */
+.libref-note-list {
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-4-5);
+  list-style: disc inside;
+}
+
+/* Spacing utility used where a width class carried a compound inset. */
+.libref-mt-2 { margin-top: var(--sp-2); }
+
+/* Width utilities. Replace inline `style="width: …"` with these classes. */
+.libref-w-full { width: 100%; }
+.libref-w-100 { width: 100px; }
+.libref-w-110 { width: 110px; }
+.libref-w-120 { width: 120px; }
+.libref-w-140 { width: 140px; }
+.libref-w-160 { width: 160px; }
+.libref-w-200 { width: 200px; }
+.libref-w-220 { width: 220px; }
+.libref-w-280 { width: 280px; }
+.libref-w-320 { width: 320px; }
+.libref-w-420 { width: 420px; }

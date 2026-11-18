@@ -33,16 +33,16 @@ function open(): void {
 
 <style scoped>
 .libref-citation {
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
 }
 .libref-citation-title {
   font-weight: 600;
-  margin-bottom: 4px;
+  margin-bottom: var(--sp-1);
 }
 .libref-citation-meta {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
-  margin-top: 8px;
+  margin-top: var(--sp-2);
 }
 </style>

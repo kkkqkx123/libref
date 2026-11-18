@@ -19,16 +19,16 @@ defineProps<{ title: string; description?: string }>();
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
 }
 .libref-page-title {
-  margin: 0 0 4px;
-  font-size: 20px;
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-xl);
 }
 .libref-page-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
   flex-shrink: 0;
 }
 </style>

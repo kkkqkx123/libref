@@ -38,10 +38,10 @@ const answerabilityText = computed(() => {
 
 <style scoped>
 .libref-degraded {
-  margin-bottom: 16px;
+  margin-bottom: var(--sp-4);
 }
 .libref-degraded-list {
-  margin: 4px 0 0;
-  padding-left: 18px;
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-4-5);
 }
 </style>

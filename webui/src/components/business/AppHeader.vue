@@ -83,13 +83,13 @@ function onCommand(command: string): void {
 }
 .libref-header-brand {
   font-weight: 700;
-  font-size: 18px;
+  font-size: var(--fs-lg);
   cursor: pointer;
 }
 .libref-header-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 .libref-header-user {
   cursor: pointer;

@@ -4,7 +4,7 @@
     <div class="libref-card">
       <el-form :inline="true" @submit.prevent="load">
         <el-form-item :label="messages.reader.address">
-          <el-input v-model="url" style="width: 320px" placeholder="https://…" />
+          <el-input v-model="url" placeholder="https://…" class="libref-w-320"/>
         </el-form-item>
         <el-form-item :label="messages.common.mode">
           <el-radio-group v-model="mode">
@@ -14,13 +14,13 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item v-if="mode === 'window'" :label="messages.reader.position">
-          <el-input-number v-model="sortOrder" :min="0" style="width: 120px" />
+          <el-input-number v-model="sortOrder" :min="0" class="libref-w-120"/>
         </el-form-item>
         <el-form-item v-if="mode === 'window'" :label="messages.reader.radius">
-          <el-input-number v-model="radius" :min="0" :max="20" style="width: 100px" />
+          <el-input-number v-model="radius" :min="0" :max="20" class="libref-w-100"/>
         </el-form-item>
         <el-form-item v-if="mode === 'section'" :label="messages.reader.sourceGroup">
-          <el-input v-model="sourceGroupId" style="width: 200px" />
+          <el-input v-model="sourceGroupId" class="libref-w-200"/>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="loading" :disabled="!url" @click="load">{{ messages.common.open }}</el-button>
@@ -244,29 +244,29 @@ if (url.value) void load();
 .libref-reader-body {
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 14px;
+  font-size: var(--fs-base);
   line-height: 1.7;
   background: var(--surface-bg);
   border-radius: var(--radius-small);
-  padding: 12px;
+  padding: var(--sp-3);
 }
 .libref-reader-nav {
   display: flex;
-  gap: 8px;
-  margin-bottom: 12px;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
 }
 .libref-reader-missing {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
 }
 .libref-reader-candidates {
-  margin-top: 16px;
+  margin-top: var(--sp-4);
   text-align: left;
 }
 .libref-reader-candidates ul {
-  margin: 4px 0 0;
-  padding-left: 18px;
+  margin: var(--sp-1) 0 0;
+  padding-left: var(--sp-4-5);
 }
 </style>

@@ -24,7 +24,7 @@
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="reload" />
     <template v-else>
       <EmptyState v-if="jobs.length === 0" :description="messages.jobs.empty" />
-      <el-table v-else :data="jobs" stripe style="width: 100%" @row-click="openDetail">
+      <el-table v-else :data="jobs" stripe @row-click="openDetail" class="libref-w-full">
         <el-table-column prop="id" :label="messages.jobs.id" width="90" />
         <el-table-column prop="kind" :label="messages.jobs.kind" width="160" />
         <el-table-column prop="status" :label="messages.jobs.status" width="120">
@@ -328,9 +328,9 @@ void reload().then(() => {
   word-break: break-word;
   background: var(--surface-bg);
   border-radius: var(--radius-small);
-  padding: 12px;
+  padding: var(--sp-3);
 }
 .libref-detail-actions {
-  margin-top: 16px;
+  margin-top: var(--sp-4);
 }
 </style>

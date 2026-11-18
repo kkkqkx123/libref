@@ -18,9 +18,7 @@
           v-model="form.roles"
           multiple
           filterable
-          data-testid="role-select"
-          style="width: 100%"
-        >
+          data-testid="role-select" class="libref-w-full">
           <el-option
             v-for="role in roleOptions"
             :key="role.value"
@@ -37,9 +35,7 @@
         <el-date-picker
           v-model="expiresDate"
           type="datetime"
-           :placeholder="messages.admin.expiresPlaceholder"
-          style="width: 100%"
-        />
+           :placeholder="messages.admin.expiresPlaceholder" class="libref-w-full"/>
       </el-form-item>
     </el-form>
     <template #footer>
@@ -96,14 +92,14 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .role-conflict {
-  margin-top: 4px;
-  font-size: 12px;
+  margin-top: var(--sp-1);
+  font-size: var(--fs-xs);
   color: var(--semantic-error);
 }
 
 .role-hint {
-  margin-top: 4px;
-  font-size: 12px;
+  margin-top: var(--sp-1);
+  font-size: var(--fs-xs);
   color: var(--text-secondary);
 }
 </style>

@@ -1,5 +1,5 @@
 <template>
-  <el-table :data="rows" size="small" stripe style="width: 100%">
+  <el-table :data="rows" size="small" stripe class="libref-w-full">
     <el-table-column
       v-for="column in columns"
       :key="column"

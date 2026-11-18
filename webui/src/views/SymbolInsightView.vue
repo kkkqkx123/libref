@@ -12,7 +12,7 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="API">
-          <el-input v-model="apiName" clearable  :placeholder="messages.symbolInsight.single" style="width: 280px" />
+          <el-input v-model="apiName" clearable  :placeholder="messages.symbolInsight.single" class="libref-w-280"/>
         </el-form-item>
         <el-form-item :label="messages.apiInsight.multipleApis">
           <TagInput v-model="apis"  :placeholder="messages.common.tagPlaceholder" />
@@ -137,8 +137,8 @@ if (route.query.view || route.query.api || route.query.apis) void load();
 <style scoped>
 .libref-pager {
   display: flex;
-  gap: 12px;
+  gap: var(--sp-3);
   align-items: center;
-  margin-top: 12px;
+  margin-top: var(--sp-3);
 }
 </style>

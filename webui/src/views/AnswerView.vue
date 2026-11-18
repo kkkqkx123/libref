@@ -13,7 +13,7 @@
       <ScopeFilter show-preset />
       <div class="libref-answer-limit">
         <span class="libref-muted">{{ messages.common.limit }}</span>
-        <el-input-number v-model="answerLimit" :min="1" :max="50" style="width: 120px" />
+        <el-input-number v-model="answerLimit" :min="1" :max="50" class="libref-w-120"/>
       </div>
       <el-button type="primary" :loading="loading" :disabled="!query.trim()" @click="ask">
         {{ messages.common.ask }}
@@ -126,9 +126,9 @@ if (query.value) void ask();
 <style scoped>
 .libref-answer-meta {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
-  margin-bottom: 8px;
+  margin-bottom: var(--sp-2);
 }
 .libref-answer-body {
   white-space: pre-wrap;
@@ -137,7 +137,7 @@ if (query.value) void ask();
 .libref-answer-limit {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  margin-right: 12px;
+  gap: var(--sp-2);
+  margin-right: var(--sp-3);
 }
 </style>

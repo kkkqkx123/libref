@@ -6,9 +6,7 @@
         filterable
         clearable
         :placeholder="messages.common.allLibraries"
-        style="width: 200px"
-        @change="onLibraryChange"
-      >
+        @change="onLibraryChange" class="libref-w-200">
         <el-option
           v-for="library in libraries"
           :key="`${library.ecosystem}/${library.name}`"
@@ -21,9 +19,7 @@
       <el-select
         v-model="scopeStore.version"
         clearable
-        :placeholder="messages.common.allVersions"
-        style="width: 160px"
-      >
+        :placeholder="messages.common.allVersions" class="libref-w-160">
         <el-option
           v-for="version in versions"
           :key="version.version"
@@ -33,7 +29,7 @@
       </el-select>
     </el-form-item>
     <el-form-item :label="messages.common.ecosystem">
-      <el-input v-model="scopeStore.ecosystem" clearable placeholder="npm" style="width: 140px" />
+      <el-input v-model="scopeStore.ecosystem" clearable placeholder="npm" class="libref-w-140"/>
     </el-form-item>
     <el-form-item v-if="showPreset" :label="messages.common.preset">
       <el-radio-group v-model="scopeStore.preset">
@@ -46,9 +42,7 @@
       <el-input-number
         v-model="scopeStore.resultLimit"
         :min="RESULT_LIMIT_MIN"
-        :max="RESULT_LIMIT_MAX"
-        style="width: 120px"
-      />
+        :max="RESULT_LIMIT_MAX" class="libref-w-120"/>
     </el-form-item>
   </el-form>
 </template>

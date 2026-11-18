@@ -48,7 +48,7 @@ function remove(index: number): void {
 .libref-tag-input {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--sp-1-5);
   align-items: center;
 }
 .libref-tag-input-box {

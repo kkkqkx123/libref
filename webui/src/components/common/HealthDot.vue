@@ -17,8 +17,8 @@ const tone = computed(() => `libref-health-${props.state}`);
 .libref-health {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 13px;
+  gap: var(--sp-1-5);
+  font-size: var(--fs-sm);
 }
 .libref-health-dot {
   width: 8px;

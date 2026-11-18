@@ -64,13 +64,13 @@ function enterDev(): void {
 .libref-login {
   display: flex;
   justify-content: center;
-  padding-top: 80px;
+  padding-top: var(--sp-10);
 }
 .libref-login-card {
   width: 420px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-3);
 }
 .libref-login-actions {
   display: flex;

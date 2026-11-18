@@ -79,9 +79,9 @@ function subOf(row: Row): string {
 <style scoped>
 .libref-evidence-row {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
-  padding: 8px 0;
+  padding: var(--sp-2) 0;
   border-bottom: 1px solid var(--border-light);
 }
 .libref-evidence-main {

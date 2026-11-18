@@ -16,13 +16,13 @@
       <h4>{{ messages.ingest.step1 }}</h4>
       <el-form @submit.prevent="resolve">
         <el-form-item :label="messages.common.ecosystem">
-          <el-input v-model="form.ecosystem" :placeholder="messages.ingest.ecosystemPlaceholder" style="width: 200px" />
+          <el-input v-model="form.ecosystem" :placeholder="messages.ingest.ecosystemPlaceholder" class="libref-w-200"/>
         </el-form-item>
         <el-form-item :label="messages.common.name">
-          <el-input v-model="form.name" :placeholder="messages.ingest.namePlaceholder" style="width: 280px" />
+          <el-input v-model="form.name" :placeholder="messages.ingest.namePlaceholder" class="libref-w-280"/>
         </el-form-item>
         <el-form-item :label="messages.common.version">
-          <el-input v-model="form.version" :placeholder="messages.ingest.versionPlaceholder" style="width: 200px" />
+          <el-input v-model="form.version" :placeholder="messages.ingest.versionPlaceholder" class="libref-w-200"/>
         </el-form-item>
         <el-form-item>
           <el-checkbox v-model="scopeStore.includePrerelease">{{ messages.common.includePrerelease }}</el-checkbox>
@@ -58,7 +58,7 @@
       </div>
       <p v-if="discoverySource" class="libref-muted">{{ discoverySource }}</p>
       <EmptyState v-if="discovered && discovery.length === 0" :description="messages.ingest.discoveryEmpty" />
-      <el-table v-else-if="discovery.length > 0" :data="discovery" size="small" stripe style="width: 100%">
+      <el-table v-else-if="discovery.length > 0" :data="discovery" size="small" stripe class="libref-w-full">
         <el-table-column prop="name" :label="messages.common.name" />
         <el-table-column prop="title" :label="messages.catalog.descriptionCol" show-overflow-tooltip />
         <el-table-column prop="url" label="URL" show-overflow-tooltip />
@@ -101,13 +101,13 @@
       <h4>{{ messages.ingest.step3 }}</h4>
       <el-form @submit.prevent="submit">
         <el-form-item :label="messages.ingest.libraryName">
-          <el-input v-model="form.name" style="width: 280px" />
+          <el-input v-model="form.name" class="libref-w-280"/>
         </el-form-item>
         <el-form-item :label="messages.common.version">
-          <el-input v-model="submitVersion" :placeholder="messages.ingest.submitVersionPlaceholder" style="width: 200px" />
+          <el-input v-model="submitVersion" :placeholder="messages.ingest.submitVersionPlaceholder" class="libref-w-200"/>
         </el-form-item>
         <el-form-item :label="messages.ingest.startUrl">
-          <el-input v-model="submitUrl" style="width: 420px" />
+          <el-input v-model="submitUrl" class="libref-w-420"/>
         </el-form-item>
         <el-form-item :label="messages.ingest.maxPages">
           <el-input-number v-model="maxPages" :min="1" />
@@ -338,18 +338,18 @@ async function submit(): Promise<void> {
 
 <style scoped>
 .libref-steps {
-  margin-bottom: 16px;
+  margin-bottom: var(--sp-4);
 }
 .libref-resolution {
-  margin-top: 16px;
+  margin-top: var(--sp-4);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--sp-3);
   align-items: flex-start;
 }
 .libref-discovery-actions {
   display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
 }
 </style>

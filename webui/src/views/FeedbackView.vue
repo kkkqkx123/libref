@@ -10,13 +10,13 @@
       <h4>{{ messages.feedback.submitTitle }}</h4>
       <el-form :model="form" label-width="90px" @submit.prevent="submit">
         <el-form-item :label="messages.feedback.entityType">
-          <el-input v-model="form.entity_type" style="width: 220px" />
+          <el-input v-model="form.entity_type" class="libref-w-220"/>
         </el-form-item>
         <el-form-item :label="messages.feedback.entityId">
           <el-input-number v-model="form.entity_id" :min="0" />
         </el-form-item>
         <el-form-item :label="messages.common.kind">
-          <el-input v-model="form.kind" style="width: 220px" />
+          <el-input v-model="form.kind" class="libref-w-220"/>
         </el-form-item>
         <el-form-item :label="messages.feedback.body">
           <el-input v-model="form.body" type="textarea" :rows="3" />
@@ -32,7 +32,7 @@
     <div v-if="canRead" class="libref-card">
       <el-form :inline="true" @submit.prevent="reload">
         <el-form-item :label="messages.common.status">
-          <el-select v-model="status" clearable  :placeholder="messages.common.all" style="width: 160px" @change="reload">
+          <el-select v-model="status" clearable  :placeholder="messages.common.all" @change="reload" class="libref-w-160">
             <el-option :label="messages.feedback.open" value="open" />
             <el-option :label="messages.feedback.acknowledged" value="acknowledged" />
             <el-option :label="messages.feedback.resolved" value="resolved" />
@@ -195,7 +195,7 @@ if (canRead.value) void reload();
 }
 .libref-feedback-head {
   display: flex;
-  gap: 8px;
+  gap: var(--sp-2);
   align-items: center;
 }
 </style>
