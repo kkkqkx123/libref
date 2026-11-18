@@ -15,6 +15,7 @@ from libref.services.docs.pages import PageService
 from libref.services.docs.search import SearchService
 from libref.services.infra.auth import (
     PLATFORM_SCOPE,
+    require_any_scope,
     require_scopes,
     write_tenant,
 )
@@ -39,6 +40,7 @@ from libref.web.api import (
     LinkStatsQuery,
     PageList,
     PatternInsightQuery,
+    QuotaPolicyUpsert,
     ReadQuery,
     ReadResponse,
     RepoProbeRequest,
@@ -1237,6 +1239,7 @@ def build_web_app(
                     exclude_patterns=body.exclude_patterns,
                     tree_depth=body.tree_depth,
                     samples_per_dir=body.samples_per_dir,
+                    allow_local=False,
                 )
             except ValueError as exc:
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1610,7 +1613,11 @@ def build_web_app(
         status: str | None = None,
         principal=Depends(_guard),
     ) -> dict[str, Any]:
-        _need(principal, "feedback:read")
+        scope = require_any_scope(principal, "feedback:read", "feedback:read:own")
+        own_only = scope == "feedback:read:own"
+        author_id = _principal_id(principal)
+        if own_only and author_id is None:
+            return envelope([])
         from libref.services.ops.feedback import FeedbackService
 
         rc, should_close, est, bundle = _req_bundle(request, principal)
@@ -1619,6 +1626,7 @@ def build_web_app(
             tenant_id=_tenant_of(principal),
             limit=max(1, min(limit, 200)),
             status=status,
+            principal_id=author_id if own_only else None,
         )
         return envelope(items)
 
@@ -1729,6 +1737,28 @@ def build_web_app(
                 pass
         return {"ok": True}
 
+    @app.get("/admin/principals")
+    def admin_principals_list(
+        request: Request,
+        tenant_id: str | None = None,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        """Read-only principal view; role conflicts are flagged, never repaired."""
+        _need(principal, "admin:keys")
+        from libref.services.infra.auth import list_principals
+        from libref.services.ops.audit import write_audit
+
+        rows = list_principals(conn, viewer=principal, tenant_id=tenant_id)
+        write_audit(
+            conn,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+            action="principals.list",
+            target=str(len(rows)),
+            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+        )
+        return envelope([dict(row) for row in rows])
+
     @app.get("/admin/keys")
     def admin_keys_list(request: Request, principal=Depends(_guard)) -> dict[str, Any]:
         _need(principal, "admin:keys")
@@ -1774,7 +1804,11 @@ def build_web_app(
         body: KeyCreate, request: Request, principal=Depends(_guard)
     ) -> dict[str, Any]:
         _need(principal, "admin:keys")
-        from libref.services.infra.auth import create_principal, issue_api_key
+        from libref.services.infra.auth import (
+            PLATFORM_ROLE,
+            create_principal,
+            issue_api_key,
+        )
         from libref.services.ops.audit import write_audit
 
         try:
@@ -1796,11 +1830,16 @@ def build_web_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # The platform role is exempt from separation of duties, so granting it
+        # deserves its own audit action rather than blending in with tenant keys.
+        action = (
+            "keys.issue.platform" if PLATFORM_ROLE in list(body.roles) else "keys.issue"
+        )
         write_audit(
             conn,
             tenant_id=_tenant_of(principal),
             principal_id=_principal_id(principal),
-            action="keys.issue",
+            action=action,
             target=str(key_id),
             request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
         )
@@ -1860,6 +1899,81 @@ def build_web_app(
             request_id=str(getattr(request.state, "request_id", "")),
         )
         return {"ok": True, "revoked": count}
+
+    @app.get("/admin/quota/policies")
+    def admin_quota_policies(
+        request: Request, principal=Depends(_guard)
+    ) -> dict[str, Any]:
+        """List quota policies: one tenant for admins, every tenant for platform."""
+        _need(principal, "admin:config")
+        from libref.services.infra import quota
+
+        scopes = set(getattr(principal, "scopes", set()) or ())
+        scope_tenant = None if PLATFORM_SCOPE in scopes else _tenant_of(principal)
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            return envelope(quota.list_policies(rc, tenant_id=scope_tenant))
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+    @app.put("/admin/quota/policies")
+    def admin_quota_policies_upsert(
+        body: QuotaPolicyUpsert, request: Request, principal=Depends(_guard)
+    ) -> dict[str, Any]:
+        """Upsert one quota policy and drop the cached effective decision."""
+        _need(principal, "admin:config")
+        from libref.services.infra import quota
+        from libref.services.infra.auth import principal_tenant
+        from libref.services.ops.audit import write_audit
+
+        target = (body.tenant_id or "").strip() or _write_tenant_of(principal)
+        if not principal.can_administer(target):
+            raise HTTPException(status_code=403, detail="forbidden: target tenant")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            if body.principal_id is not None:
+                owner = principal_tenant(rc, body.principal_id)
+                if owner is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"unknown principal: {body.principal_id}",
+                    )
+                if owner != target:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="principal does not belong to the target tenant",
+                    )
+            try:
+                quota.set_policy(
+                    rc,
+                    tenant_id=target,
+                    resource=body.resource,
+                    limit_value=body.limit_value,
+                    window_type=body.window_type,
+                    principal_id=body.principal_id,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            quota.invalidate_policy_cache()
+            write_audit(
+                rc,
+                tenant_id=_tenant_of(principal),
+                principal_id=_principal_id(principal),
+                action="quota.policy",
+                target=f"{target}:{body.principal_id or '*'}:{body.resource}",
+                request_id=str(getattr(request.state, "request_id", "")),
+            )
+            return {"ok": True}
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
 
     @app.post("/admin/config/refresh")
     def admin_config_refresh(

@@ -14,7 +14,24 @@
         </el-select>
       </el-form-item>
       <el-form-item :label="messages.admin.roles">
-        <TagInput v-model="form.roles"  :placeholder="messages.admin.rolesPlaceholder" />
+        <el-select
+          v-model="form.roles"
+          multiple
+          filterable
+          data-testid="role-select"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="role in roleOptions"
+            :key="role.value"
+            :label="role.value"
+            :value="role.value"
+          />
+        </el-select>
+        <div v-if="conflicts.length > 0" class="role-conflict">
+          {{ messages.admin.roleConflict(conflicts[0].join(' + ')) }}
+        </div>
+        <div v-else class="role-hint">{{ messages.admin.roleSeparationHint }}</div>
       </el-form-item>
       <el-form-item :label="messages.admin.expires">
         <el-date-picker
@@ -27,17 +44,18 @@
     </el-form>
     <template #footer>
       <el-button @click="visible = false">{{ messages.common.cancel }}</el-button>
-      <el-button type="primary" :disabled="!form.name" @click="submit">{{ messages.common.issue }}</el-button>
+      <el-button type="primary" :disabled="!canSubmit" @click="submit">{{ messages.common.issue }}</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ElButton, ElDatePicker, ElDialog, ElForm, ElFormItem, ElInput, ElOption, ElSelect } from 'element-plus';
-import { reactive, ref } from 'vue';
+import { computed, reactive, ref } from 'vue';
 import { api } from '../../api/client';
 import { notifyError, notifySuccess } from '../../stores/notify';
-import TagInput from '../common/TagInput.vue';
+import { authStore } from '../../stores/auth';
+import { canIssueKey, grantableRoles, roleConflicts } from '../../utils/roles';
 import { messages } from '../../i18n';
 
 const visible = defineModel<boolean>({ default: false });
@@ -45,6 +63,11 @@ const emit = defineEmits<{ created: [key: string] }>();
 
 const form = reactive({ name: '', tenant_id: 'default', kind: 'human', roles: [] as string[] });
 const expiresDate = ref<Date | null>(null);
+
+// Offer only what this caller can actually grant; the server re-checks it.
+const roleOptions = computed(() => grantableRoles(authStore.me?.roles || []));
+const conflicts = computed(() => roleConflicts(form.roles));
+const canSubmit = computed(() => canIssueKey(form.name, form.roles));
 
 async function submit(): Promise<void> {
   try {
@@ -70,3 +93,17 @@ async function submit(): Promise<void> {
   }
 }
 </script>
+
+<style scoped>
+.role-conflict {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--semantic-error);
+}
+
+.role-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+</style>

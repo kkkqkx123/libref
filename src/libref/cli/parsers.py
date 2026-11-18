@@ -38,6 +38,8 @@ from libref.cli.ops_commands import (
     cmd_reconcile,
     cmd_reembed,
     cmd_review,
+    cmd_role_audit,
+    cmd_role_split,
     cmd_serve,
     cmd_serve_mcp,
     cmd_vectors_optimize,
@@ -930,6 +932,43 @@ def build_parser() -> argparse.ArgumentParser:
         help="Defaults to the config value deletion_log_ttl_days",
     )
     p_del.set_defaults(func=cmd_deletions)
+
+    p_role_audit = sub.add_parser(
+        "role-audit",
+        help="Report principals whose roles break separation of duties",
+        parents=[_config_parent],
+    )
+    p_role_audit.add_argument("--json", action="store_true", help="Print JSON")
+    p_role_audit.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit non-zero when conflicts exist (suitable for CI gates)",
+    )
+    p_role_audit.set_defaults(func=cmd_role_audit)
+
+    p_role_split = sub.add_parser(
+        "role-split",
+        help="Move a principal's extra roles onto new principals",
+        parents=[_config_parent],
+    )
+    p_role_split.add_argument(
+        "--principal", type=int, required=True, help="Principal id to split"
+    )
+    p_role_split.add_argument(
+        "--keep",
+        required=True,
+        help="Role that stays on the principal; every other role moves",
+    )
+    p_role_split.add_argument(
+        "--name",
+        default=None,
+        help="Name for the new principals (default: <name>-split)",
+    )
+    p_role_split.add_argument(
+        "--dry-run", action="store_true", help="Print the plan without writing"
+    )
+    p_role_split.add_argument("--json", action="store_true", help="Print JSON")
+    p_role_split.set_defaults(func=cmd_role_split)
 
     p_request = sub.add_parser(
         "request",

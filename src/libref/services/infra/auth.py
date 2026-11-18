@@ -15,6 +15,7 @@ import json
 import secrets
 import time
 from dataclasses import dataclass, field
+from typing import TypedDict
 from urllib.parse import urlsplit
 
 from libref.db.contract import MetadataSession
@@ -25,7 +26,9 @@ PLATFORM_SCOPE = "platform:admin"
 
 ROLE_SCOPES: dict[str, frozenset[str]] = {
     "external": frozenset({"read", "index:request"}),
-    "developer": frozenset({"read", "feedback:write", "index:request"}),
+    "developer": frozenset(
+        {"read", "feedback:write", "feedback:read:own", "index:request"}
+    ),
     "kb_admin": frozenset(
         {
             "read",
@@ -69,6 +72,101 @@ ROLE_SCOPES: dict[str, frozenset[str]] = {
 
 KNOWN_SCOPES: frozenset[str] = frozenset().union(*ROLE_SCOPES.values())
 READ_SCOPES = frozenset({"read"})
+
+# Separation of duties: one principal may hold at most one role from each group.
+# The three tenant roles form the submit -> review -> operate chain, so any pair
+# collapses two halves of one decision into one person (self-review, or an
+# operator approving their own collection job). ``external`` is a read-only
+# consumer and conflicts with nothing; ``platform_admin`` is a platform-wide
+# role rather than a tenant function, and exempting it is what keeps bootstrap
+# usable -- it necessarily holds every scope.
+ROLE_SEPARATION_GROUPS: tuple[frozenset[str], ...] = (
+    frozenset({"developer", "kb_admin", "sys_admin"}),
+)
+ROLE_SEPARATION_EXEMPT: frozenset[str] = frozenset({PLATFORM_ROLE})
+
+
+def role_separation_violations(roles: list[str]) -> list[list[str]]:
+    """Return the conflicting roles inside each group a principal over-subscribes.
+
+    Each entry lists the roles of one group that must not coexist; an empty list
+    means the combination is permitted.
+    """
+    held = {str(role) for role in (roles or [])}
+    if held & ROLE_SEPARATION_EXEMPT:
+        return []
+    conflicts: list[list[str]] = []
+    for group in ROLE_SEPARATION_GROUPS:
+        shared = sorted(held & group)
+        if len(shared) > 1:
+            conflicts.append(shared)
+    return conflicts
+
+
+def check_role_separation(roles: list[str]) -> None:
+    """Reject role combinations that break separation of duties."""
+    conflicts = role_separation_violations(roles)
+    if not conflicts:
+        return
+    details = "; ".join("+".join(roles_) for roles_ in conflicts)
+    raise ValueError(f"roles break separation of duties: {details}")
+
+
+class RoleSplitPlan(TypedDict):
+    """One way to spread a conflicting role set over two principals."""
+
+    keep: str
+    move: list[str]
+    kept_scopes: list[str]
+    move_scopes: list[str]
+
+
+def separation_advice(roles: list[str]) -> list[RoleSplitPlan]:
+    """Enumerate the ways to split a conflicting role set, one plan per kept role.
+
+    The list is advisory: splitting revokes nothing by itself, so an operator
+    picks the half that matches who actually does the work and the other half
+    moves to a new principal.
+    """
+    held = {str(role) for role in (roles or [])}
+    plans: list[RoleSplitPlan] = []
+    for group in ROLE_SEPARATION_GROUPS:
+        shared = sorted(held & group)
+        if len(shared) <= 1:
+            continue
+        for keep in shared:
+            move = [role for role in shared if role != keep]
+            plans.append(
+                {
+                    "keep": keep,
+                    "move": move,
+                    "kept_scopes": sorted(ROLE_SCOPES.get(keep, frozenset())),
+                    "move_scopes": sorted(
+                        frozenset().union(
+                            *[ROLE_SCOPES.get(r, frozenset()) for r in move]
+                        )
+                    ),
+                }
+            )
+    return plans
+
+
+def pack_roles(roles: list[str]) -> list[list[str]]:
+    """Group roles into the fewest sets that each satisfy separation of duties.
+
+    One conflict between two roles does not imply every role needs its own
+    principal: a read-only bystander such as ``external`` can share a principal
+    with either side, so greedy packing keeps the principal count minimal.
+    """
+    bins: list[list[str]] = []
+    for role in [str(r) for r in (roles or [])]:
+        for group in bins:
+            if not role_separation_violations([*group, role]):
+                group.append(role)
+                break
+        else:
+            bins.append([role])
+    return bins
 
 
 class AuthDenied(Exception):
@@ -116,6 +214,17 @@ def require_scopes(principal: Principal | None, *scopes: str) -> None:
         raise AuthDenied(
             403, "missing_scope", f"forbidden: missing {','.join(missing)}"
         )
+
+
+def require_any_scope(principal: Principal | None, *scopes: str) -> str:
+    """Return the first held scope among alternatives; reject when none is held."""
+    held = set(getattr(principal, "scopes", set()) or ())
+    for scope in scopes:
+        if scope in held:
+            return scope
+    raise AuthDenied(
+        403, "missing_scope", f"forbidden: missing one of {','.join(scopes)}"
+    )
 
 
 def write_tenant(principal: Principal | None) -> str:
@@ -296,7 +405,9 @@ def _validate_roles(roles: list[str]) -> list[str]:
     unknown = sorted({str(r) for r in (roles or []) if str(r) not in ROLE_SCOPES})
     if unknown:
         raise ValueError(f"unknown roles: {','.join(unknown)}")
-    return [str(r) for r in (roles or [])]
+    checked = [str(r) for r in (roles or [])]
+    check_role_separation(checked)
+    return checked
 
 
 def create_principal(
@@ -329,11 +440,226 @@ def create_principal(
     return int(cur.lastrowid)
 
 
+class RoleConflict(TypedDict):
+    """One principal whose stored roles span a separation group."""
+
+    principal_id: int
+    tenant_id: str
+    name: str
+    roles: list[str]
+    groups: list[list[str]]
+
+
+def scan_role_conflicts(conn: MetadataSession) -> list[RoleConflict]:
+    """List principals already holding a forbidden role combination.
+
+    Existing rows are reported, never rewritten: narrowing a principal silently
+    would revoke live access, so remediation stays a human decision.
+    """
+    rows = conn.execute(
+        "SELECT id, tenant_id, name, roles FROM principals ORDER BY id"
+    ).fetchall()
+    conflicts: list[RoleConflict] = []
+    for pid, tenant_id, name, roles_raw in rows:
+        roles = _parse_json_list(roles_raw)
+        groups = role_separation_violations(roles)
+        if not groups:
+            continue
+        conflicts.append(
+            {
+                "principal_id": int(pid),
+                "tenant_id": str(tenant_id),
+                "name": str(name),
+                "roles": roles,
+                "groups": groups,
+            }
+        )
+    return conflicts
+
+
 def _principal_row(conn: MetadataSession, principal_id: int) -> tuple | None:
     return conn.execute(
         "SELECT id, tenant_id, kind, name, roles, status FROM principals WHERE id=?",
         (principal_id,),
     ).fetchone()
+
+
+def principal_tenant(conn: MetadataSession, principal_id: int) -> str | None:
+    """Tenant owning one principal; ``None`` when the id is unknown."""
+    row = _principal_row(conn, int(principal_id))
+    return None if row is None else str(row[1])
+
+
+class PrincipalSummary(TypedDict):
+    """Read-only principal row for the admin view."""
+
+    id: int
+    tenant_id: str
+    kind: str
+    name: str
+    status: str
+    roles: list[str]
+    scopes: list[str]
+    conflicting: list[list[str]]
+
+
+def list_principals(
+    conn: MetadataSession, *, viewer: Principal, tenant_id: str | None = None
+) -> list[PrincipalSummary]:
+    """List principals the viewer may administer, flagging stale conflicts.
+
+    Conflicts are reported instead of repaired here: the read path must stay
+    side-effect free, and the fix needs a human choice of which role stays.
+    """
+    wanted = (tenant_id or "").strip()
+    sql = "SELECT id, tenant_id, kind, name, roles, status FROM principals"
+    params: tuple = ()
+    if wanted:
+        sql += " WHERE tenant_id=?"
+        params = (wanted,)
+    sql += " ORDER BY id"
+    out: list[PrincipalSummary] = []
+    for pid, tenant, kind, name, roles_raw, status in conn.execute(
+        sql, params
+    ).fetchall():
+        if not viewer.can_administer(str(tenant)):
+            continue
+        roles = _parse_json_list(roles_raw)
+        out.append(
+            {
+                "id": int(pid),
+                "tenant_id": str(tenant),
+                "kind": str(kind),
+                "name": str(name),
+                "status": "active" if status is None else str(status),
+                "roles": roles,
+                "scopes": sorted(scopes_for_roles(roles)),
+                "conflicting": role_separation_violations(roles),
+            }
+        )
+    return out
+
+
+def set_principal_roles(
+    conn: MetadataSession, *, caller: Principal, principal_id: int, roles: list[str]
+) -> list[str]:
+    """Replace a principal's roles under the rules used when creating one."""
+    ensure_auth_tables(conn)
+    row = _principal_row(conn, principal_id)
+    if row is None:
+        raise ValueError(f"unknown principal: {principal_id}")
+    if not caller.can_administer(str(row[1])):
+        raise ValueError("caller cannot administer target principal")
+    checked = _validate_roles(roles)
+    if not caller.has(PLATFORM_SCOPE):
+        excess = [r for r in checked if r not in caller.roles]
+        if excess:
+            raise ValueError(f"caller cannot grant roles: {','.join(excess)}")
+    conn.execute(
+        "UPDATE principals SET roles=? WHERE id=?",
+        (json.dumps(checked, ensure_ascii=False), principal_id),
+    )
+    conn.commit()
+    return checked
+
+
+class SplitPart(TypedDict):
+    """One replacement principal produced by a split."""
+
+    principal_id: int
+    name: str
+    roles: list[str]
+    key_id: int
+    key: str
+
+
+class SplitResult(TypedDict):
+    """Outcome of one explicit role split."""
+
+    dry_run: bool
+    principal_id: int
+    tenant_id: str
+    kept_roles: list[str]
+    moved_roles: list[str]
+    planned: list[list[str]]
+    new_principals: list[SplitPart]
+
+
+def split_role_conflict(
+    conn: MetadataSession,
+    *,
+    caller: Principal,
+    settings,
+    principal_id: int,
+    keep_role: str,
+    new_name: str | None = None,
+    dry_run: bool = False,
+) -> SplitResult:
+    """Move every role but ``keep_role`` onto fresh principals.
+
+    Nothing is rewritten until the caller asks for it: ``dry_run`` returns the
+    plan only. When executed, the extra roles are packed into the fewest legal
+    principals, each handed a key whose plaintext is returned exactly once.
+    Existing keys of the original principal keep working with the narrower role
+    set, so the split cannot silently lock anyone out mid-shift.
+    """
+    ensure_auth_tables(conn)
+    row = _principal_row(conn, principal_id)
+    if row is None:
+        raise ValueError(f"unknown principal: {principal_id}")
+    tenant = str(row[1])
+    current = _parse_json_list(row[4])
+    if not role_separation_violations(current):
+        raise ValueError(f"principal {principal_id} holds no conflicting roles")
+    keep = str(keep_role or "").strip()
+    if keep not in current:
+        raise ValueError(f"keep role {keep!r} is not held by principal {principal_id}")
+    moved = [role for role in current if role != keep]
+    plan = pack_roles(moved)
+    base = (new_name or f"{row[3]!s}-split").strip()
+    result: SplitResult = {
+        "dry_run": bool(dry_run),
+        "principal_id": principal_id,
+        "tenant_id": tenant,
+        "kept_roles": [keep],
+        "moved_roles": moved,
+        "planned": plan,
+        "new_principals": [],
+    }
+    if dry_run:
+        return result
+    # Validate the whole plan before writing anything: a rejected pack would
+    # otherwise leave a half-split tenant behind.
+    for chunk in plan:
+        _validate_roles(chunk)
+        if not caller.has(PLATFORM_SCOPE):
+            excess = [r for r in chunk if r not in caller.roles]
+            if excess:
+                raise ValueError(f"caller cannot grant roles: {','.join(excess)}")
+    for index, chunk in enumerate(plan):
+        name = base if index == 0 else f"{base}-{index + 1}"
+        new_pid = create_principal(
+            conn,
+            caller=caller,
+            tenant_id=tenant,
+            kind=str(row[2]),
+            name=name,
+            roles=chunk,
+        )
+        key_id, raw = issue_api_key(
+            conn, caller=caller, settings=settings, principal_id=new_pid
+        )
+        result["new_principals"].append(
+            {
+                "principal_id": new_pid,
+                "name": name,
+                "roles": chunk,
+                "key_id": key_id,
+                "key": raw,
+            }
+        )
+    set_principal_roles(conn, caller=caller, principal_id=principal_id, roles=[keep])
+    return result
 
 
 def validate_key_scopes(

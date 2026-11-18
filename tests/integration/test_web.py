@@ -200,26 +200,26 @@ def test_probe_routes(tmp_path, monkeypatch) -> None:
         repo.mkdir()
         (repo / "a.py").write_text("x = 1\n", encoding="utf-8")
         (repo / "note.txt").write_text("hi\n", encoding="utf-8")
-        scoped = client.post(
+        denied = client.post(
             "/repo-probe", json={"source": str(repo), "only_files": ["a.py"]}
         )
-        assert scoped.status_code == 200
-        assert scoped.json()["effective_files"] == 1
-        assert scoped.json()["unmatched_only_files"] == []
-        drilled = client.post(
-            "/repo-probe",
-            json={
-                "source": str(repo),
-                "exclude_patterns": [r"\.txt$"],
-                "tree_depth": 2,
-                "samples_per_dir": 2,
-            },
+        assert denied.status_code == 400
+        assert "CLI-only" in denied.json()["detail"]
+        from libref.services.code.probe import probe_repo
+
+        scoped = probe_repo(str(repo), only_files=["a.py"])
+        assert scoped.effective_files == 1
+        assert scoped.unmatched_only_files == []
+        drilled = probe_repo(
+            str(repo),
+            exclude_patterns=[r"\.txt$"],
+            tree_depth=2,
+            samples_per_dir=2,
         )
-        assert drilled.status_code == 200
-        assert drilled.json()["effective_files"] == 1
-        assert drilled.json()["exclude_patterns"] == [r"\.txt$"]
-        assert drilled.json()["dir_samples"] == [
-            {"directory": "(root)", "files": ["a.py"]}
+        assert drilled.effective_files == 1
+        assert drilled.exclude_patterns == [r"\.txt$"]
+        assert [(s.directory, s.files) for s in drilled.dir_samples] == [
+            ("(root)", ["a.py"])
         ]
         bad = client.post("/repo-probe", json={"source": str(repo), "tree_depth": 0})
         assert bad.status_code == 422

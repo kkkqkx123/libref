@@ -31,6 +31,19 @@ export function hasScopes(scopes: string[]): boolean {
 
 export async function detectMode(): Promise<void> {
   if (authStore.ready) return;
+  // A stored key must be replayed first: probing without it would report
+  // "enforced + anonymous" on every reload and drop a live session.
+  if (authStore.key) {
+    try {
+      const { data } = await api<Principal>('/me');
+      authStore.me = data;
+      authStore.mode = 'enforced';
+      authStore.ready = true;
+      return;
+    } catch {
+      // Stale key or dev-mode server; the anonymous probe below decides which.
+    }
+  }
   try {
     const { data } = await api<Principal>('/me', { auth: false });
     authStore.me = data;

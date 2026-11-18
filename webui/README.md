@@ -18,10 +18,17 @@ so no dev proxy is configured).
 ## Verify
 
 ```sh
+npm test           # vitest: unit and component specs under src/**/*.spec.ts
 npm run check      # vue-tsc, message catalogue check, design token check
 npm run build      # type check then production build into dist/
 npm run gen:api    # export the OpenAPI snapshot and regenerate src/api/schema.d.ts
 ```
+
+Specs sit next to the code they cover and are type-checked by `vue-tsc` along with
+everything else. Pure predicates (permission gates, role combinations, the
+navigation table) are tested directly; components are mounted with element-plus
+left real unless a dialog needs its inputs driven, in which case only the widgets
+under test are stubbed. Rationale and coverage map: `docs/plan/frontend-testing.md`.
 
 `gen:api` runs `tools/export_openapi.py` from the repository root, which builds the
 app object directly — no backend has to be running. Both the snapshot and

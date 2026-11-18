@@ -49,6 +49,47 @@
         </el-alert>
       </el-tab-pane>
 
+      <el-tab-pane v-if="canKeys" :label="messages.admin.principalsTab" name="principals">
+        <el-alert
+          v-if="conflictCount > 0"
+          type="warning"
+          :closable="false"
+          class="libref-separation-note"
+        >
+          <template #title>{{ messages.admin.separationHint(conflictCount) }}</template>
+        </el-alert>
+        <el-table :data="principals" stripe style="width: 100%">
+          <el-table-column prop="id" :label="messages.jobs.id" width="70" />
+          <el-table-column prop="tenant_id" :label="messages.admin.tenant" width="110" />
+          <el-table-column prop="name" :label="messages.admin.principal" width="170" />
+          <el-table-column prop="kind" :label="messages.admin.kind" width="90" />
+          <el-table-column :label="messages.admin.roles" width="220">
+            <template #default="scope">
+              <el-tag
+                v-for="role in scope.row.roles"
+                :key="role"
+                :type="roleSeverity(scope.row.conflicting, role)"
+                size="small"
+                class="libref-role-tag"
+              >
+                {{ role }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="scopes" :label="messages.admin.scopes" show-overflow-tooltip>
+            <template #default="scope">{{ scope.row.scopes.join(', ') }}</template>
+          </el-table-column>
+          <el-table-column :label="messages.admin.separation" width="180">
+            <template #default="scope">
+              <el-tag v-if="scope.row.conflicting.length > 0" type="danger" size="small">
+                {{ scope.row.conflicting.map(groupLabel).join(' | ') }}
+              </el-tag>
+              <span v-else class="libref-separation-ok">{{ messages.admin.separationOk }}</span>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-tab-pane>
+
       <el-tab-pane v-if="canConfig"  :label="messages.common.status" name="status">
         <div class="libref-card">
           <h4>{{ messages.admin.readiness }}</h4>
@@ -68,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { ElAlert, ElButton, ElTabPane, ElTable, ElTableColumn, ElTabs } from 'element-plus';
+import { ElAlert, ElButton, ElTabPane, ElTable, ElTableColumn, ElTabs, ElTag } from 'element-plus';
 import { ElMessageBox } from 'element-plus';
 import { computed, onUnmounted, ref, watch } from 'vue';
 import { api, ApiError } from '../api/client';
@@ -82,6 +123,17 @@ import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue'
 import { hasScope } from '../stores/auth';
 import { notifyError, notifySuccess } from '../stores/notify';
 
+interface PrincipalRow {
+  id: number;
+  tenant_id: string;
+  kind: string;
+  name: string;
+  status: string;
+  roles: string[];
+  scopes: string[];
+  conflicting: string[][];
+}
+
 const format = useFormatters();
 const canKeys = computed(() => hasScope('admin:keys'));
 const canConfig = computed(() => hasScope('admin:config'));
@@ -89,6 +141,10 @@ const tab = ref(canKeys.value ? 'keys' : 'status');
 let metricsTimer: number | null = null;
 
 const keys = ref<Row[]>([]);
+const principals = ref<PrincipalRow[]>([]);
+const conflictCount = computed(
+  () => principals.value.filter((row) => row.conflicting.length > 0).length,
+);
 const newKey = ref('');
 const issueOpen = ref(false);
 const readyLoading = ref(false);
@@ -112,13 +168,31 @@ const metricEntries = computed<KeyValueEntry[]>(() =>
 );
 
 async function loadKeys(): Promise<void> {
-  if (!canKeys) return;
+  if (!canKeys.value) return;
   try {
     const { data } = await api<Envelope<Row>>('/admin/keys');
     keys.value = data.items;
   } catch (err) {
     notifyError(err, messages.value.admin.loadKeysFailed);
   }
+}
+
+async function loadPrincipals(): Promise<void> {
+  if (!canKeys.value) return;
+  try {
+    const { data } = await api<Envelope<PrincipalRow>>('/admin/principals');
+    principals.value = data.items;
+  } catch (err) {
+    notifyError(err, messages.value.admin.loadPrincipalsFailed);
+  }
+}
+
+function roleSeverity(conflicting: string[][], role: string): 'danger' | 'info' {
+  return conflicting.some((group) => group.includes(role)) ? 'danger' : 'info';
+}
+
+function groupLabel(group: string[]): string {
+  return group.join(' + ');
 }
 
 async function revoke(id: number): Promise<void> {
@@ -208,6 +282,11 @@ function stopMetricsPolling(): void {
 watch(
   tab,
   (next) => {
+    if (next === 'principals') {
+      stopMetricsPolling();
+      void loadPrincipals();
+      return;
+    }
     if (next !== 'status') {
       stopMetricsPolling();
       return;
@@ -227,5 +306,15 @@ void loadKeys();
 <style scoped>
 .libref-new-key {
   margin-top: 12px;
+}
+.libref-role-tag {
+  margin-right: 4px;
+}
+.libref-separation-note {
+  margin-bottom: 12px;
+}
+.libref-separation-ok {
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 </style>

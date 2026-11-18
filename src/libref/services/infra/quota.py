@@ -11,6 +11,7 @@ from __future__ import annotations
 import threading
 import time
 from dataclasses import dataclass
+from typing import Any
 
 from libref.db.contract import MetadataSession
 from libref.db.schema import QUOTA_RUNTIME_SQL
@@ -127,6 +128,34 @@ def set_policy(
         ),
     )
     conn.commit()
+
+
+def list_policies(
+    conn: MetadataSession, *, tenant_id: str | None = None
+) -> list[dict[str, Any]]:
+    """List policy rows, narrowable to one tenant; ``None`` lists every tenant."""
+    ensure_quota_tables(conn)
+    sql = (
+        "SELECT tenant_id, principal_id, resource, limit_value, window_type, updated_at"
+        " FROM quota_policies"
+    )
+    params: tuple[Any, ...] = ()
+    if tenant_id is not None:
+        sql += " WHERE tenant_id=?"
+        params = (tenant_id,)
+    sql += " ORDER BY tenant_id, principal_id, resource"
+    rows = conn.execute(sql, params).fetchall()
+    return [
+        {
+            "tenant_id": str(row[0]),
+            "principal_id": int(row[1]) or None,
+            "resource": str(row[2]),
+            "limit_value": int(row[3]),
+            "window_type": str(row[4]),
+            "updated_at": str(row[5]),
+        }
+        for row in rows
+    ]
 
 
 def _db_policy(

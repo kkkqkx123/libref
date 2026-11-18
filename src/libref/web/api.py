@@ -227,9 +227,20 @@ class KeyCreate(BaseModel):
     name: str = Field(min_length=1)
     kind: str = Field(default="human")
     tenant_id: str = Field(default="default", min_length=1)
+    # developer/kb_admin/sys_admin are mutually exclusive on one principal, and
+    # every role must be one the caller already holds (platform role exempt).
     roles: list[str] = Field(default_factory=list)
     scopes: list[str] = Field(default_factory=list)
     expires_at: float | None = None
+
+
+class QuotaPolicyUpsert(BaseModel):
+    resource: str = Field(min_length=1)
+    limit_value: int = Field(ge=0)
+    window_type: Literal["hour", "day", "month"] = "hour"
+    # Empty tenant falls back to the caller's writable tenant.
+    tenant_id: str = ""
+    principal_id: int | None = Field(default=None, ge=1)
 
 
 class Envelope(BaseModel):

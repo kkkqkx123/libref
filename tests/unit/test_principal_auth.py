@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 import time
 
@@ -14,9 +15,11 @@ from libref.services.infra.auth import (
     bootstrap_admin,
     create_principal,
     dev_principal,
+    ensure_auth_tables,
     issue_api_key,
     lookup_principal,
     revoke_principal_keys,
+    scan_role_conflicts,
     scopes_for_roles,
 )
 from tests.conftest import make_settings
@@ -292,5 +295,80 @@ def test_key_scopes_cannot_exceed_target_roles(monkeypatch, tmp_path) -> None:
                 principal_id=pid,
                 scopes=["review:write"],
             )
+    finally:
+        conn.close()
+
+
+def test_conflicting_tenant_roles_are_rejected(monkeypatch, tmp_path) -> None:
+    """Submit, review, and operate must not collapse onto one principal."""
+    conn = _conn()
+    settings = _settings(monkeypatch, tmp_path)
+    try:
+        caller = _caller(settings)
+        for roles in (
+            ["developer", "kb_admin"],
+            ["developer", "sys_admin"],
+            ["kb_admin", "sys_admin"],
+            ["developer", "kb_admin", "sys_admin"],
+        ):
+            with pytest.raises(ValueError, match="separation of duties"):
+                create_principal(
+                    conn,
+                    caller=caller,
+                    tenant_id="default",
+                    kind="human",
+                    name="mixed",
+                    roles=roles,
+                )
+        assert conn.execute("SELECT COUNT(*) FROM principals").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_read_only_and_platform_roles_pass_separation(monkeypatch, tmp_path) -> None:
+    """``external`` is a consumer, and ``platform_admin`` is not a tenant function."""
+    conn = _conn()
+    settings = _settings(monkeypatch, tmp_path)
+    try:
+        caller = _caller(settings)
+        allowed = (
+            ["developer", "external"],
+            ["kb_admin", "external"],
+            ["sys_admin", "external"],
+            [PLATFORM_ROLE],
+            [PLATFORM_ROLE, "developer"],
+            [PLATFORM_ROLE, "kb_admin", "sys_admin"],
+        )
+        for index, roles in enumerate(allowed):
+            pid = create_principal(
+                conn,
+                caller=caller,
+                tenant_id="default",
+                kind="human",
+                name=f"ok-{index}",
+                roles=roles,
+            )
+            assert pid > 0
+    finally:
+        conn.close()
+
+
+def test_role_conflict_scan_reports_without_rewriting() -> None:
+    """Rows written before the rule existed are reported, never silently narrowed."""
+    conn = _conn()
+    try:
+        ensure_auth_tables(conn)
+        conn.execute(
+            "INSERT INTO principals(tenant_id, kind, name, roles) VALUES(?,?,?,?)",
+            ("default", "human", "legacy", json.dumps(["kb_admin", "sys_admin"])),
+        )
+        conn.commit()
+        conflicts = scan_role_conflicts(conn)
+        assert [item["name"] for item in conflicts] == ["legacy"]
+        assert conflicts[0]["groups"] == [["kb_admin", "sys_admin"]]
+        stored = conn.execute(
+            "SELECT roles FROM principals WHERE name='legacy'"
+        ).fetchone()[0]
+        assert json.loads(stored) == ["kb_admin", "sys_admin"]
     finally:
         conn.close()

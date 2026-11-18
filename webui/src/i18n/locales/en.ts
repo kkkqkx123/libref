@@ -177,6 +177,10 @@ export const en = {
     tenant: 'Tenant',
     roles: 'Roles',
     rolesPlaceholder: 'e.g. developer, press Enter to add',
+    roleConflict: (roles: string) =>
+      `These roles cannot be combined on one principal: ${roles}`,
+    roleSeparationHint:
+      'Submitting, reviewing, and operating stay separate; assign each to a different principal.',
     expires: 'Expires',
     expiresPlaceholder: 'Leave empty for no expiry',
     keyIssued: 'Key issued; shown only once',
@@ -184,6 +188,13 @@ export const en = {
     description: 'Keys, config, metrics, and health',
     refreshConfig: 'Refresh config',
     keysTab: 'Keys',
+    principalsTab: 'Principals',
+    kind: 'Kind',
+    separation: 'Separation',
+    separationOk: 'OK',
+    separationHint: (count: number) =>
+      `${count} principal(s) break separation of duties; split them with "libref role-split".`,
+    loadPrincipalsFailed: 'Failed to load principals',
     principal: 'Principal',
     prefix: 'Prefix',
     scopes: 'Scopes',
@@ -387,6 +398,7 @@ export const en = {
     submitted: 'Feedback submitted',
     resolvedDone: 'Marked resolved',
     actionFailed: 'Action failed',
+    ownOnlyHint: 'Showing only the feedback you submitted',
   },
   ingest: {
     description: 'Resolve, probe, and submit in three steps',

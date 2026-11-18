@@ -28,7 +28,8 @@
         </el-form-item>
       </el-form>
     </div>
-    <div class="libref-card">
+    <p v-if="ownOnly" class="libref-muted">{{ messages.feedback.ownOnlyHint }}</p>
+    <div v-if="canRead" class="libref-card">
       <el-form :inline="true" @submit.prevent="reload">
         <el-form-item :label="messages.common.status">
           <el-select v-model="status" clearable  :placeholder="messages.common.all" style="width: 160px" @change="reload">
@@ -42,9 +43,9 @@
         </el-form-item>
       </el-form>
     </div>
-    <LoadingPanel v-if="loading && items.length === 0" />
-    <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="reload" />
-    <template v-else>
+    <LoadingPanel v-if="canRead && loading && items.length === 0" />
+    <ErrorState v-else-if="canRead && error" :message="error" :request-id="requestId" @retry="reload" />
+    <template v-else-if="canRead">
       <EmptyState v-if="items.length === 0" :description="messages.feedback.empty" />
       <div
         v-for="item in items"
@@ -95,6 +96,11 @@ const route = useRoute();
 const { sync } = useQuerySync();
 const format = useFormatters();
 const canSubmit = computed(() => hasScope('feedback:write'));
+const canReadAll = computed(() => hasScope('feedback:read'));
+const canReadOwn = computed(() => hasScope('feedback:read:own'));
+// Reading is split: handlers see the tenant list, authors see only their own rows.
+const canRead = computed(() => canReadAll.value || canReadOwn.value);
+const ownOnly = computed(() => !canReadAll.value && canReadOwn.value);
 const canResolve = computed(() => hasScope('feedback:resolve'));
 
 const form = reactive({
@@ -136,7 +142,7 @@ async function submit(): Promise<void> {
     });
     notifySuccess(messages.value.feedback.submitted);
     form.body = '';
-    await reload();
+    if (canRead.value) await reload();
   } catch (err) {
     if (err instanceof ApiError && err.status === 429) {
       quotaReset.value = err.resetAt || '';
@@ -180,7 +186,7 @@ async function resolve(item: FeedbackItem): Promise<void> {
   }
 }
 
-void reload();
+if (canRead.value) void reload();
 </script>
 
 <style scoped>

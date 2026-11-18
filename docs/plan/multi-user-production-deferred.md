@@ -1,6 +1,6 @@
 # 多用户服务：本阶段不做的任务与替代方案（后续参考）
 
-> 配套文档：`docs/plan/multi-user-production-deployment.md`（v2，4 角色与 11 项开放点已拍板）。
+> 相关方案：`docs/plan/permission-hardening.md`（认证、角色与出口收敛）、`docs/plan/permission-boundaries-repair.md`（策略分散修正）。本文只记录未启动的任务与已放弃的替代方案，落地结论以这两篇为准。
 > 定位：记录**本阶段明确不做**的任务，以及**被已拍板结论取代的替代方案**，供后续阶段启动时直接复用，不留悬空问题。
 > 事实基线同主方案（`6c8004b95f54136fbbcf6850c44c1d1c10e7d21b`）；所有现状结论附 `file:line`。按 `AGENTS.md:11`，不贴完整代码片段。
 > 本文不产生本阶段的实施项；此处任一任务启动时，应新建独立方案并回填主方案 §11.5 的验证口径。
@@ -41,7 +41,7 @@
 | 方案 | 对应结论 | 现状证据 | 本阶段为何不选 | 后续启用的代价 |
 |---|---|---|---|---|
 | **A2 JWT / OIDC 对接身份系统** | O2 选了自建用户表 + API Key | 无用户表；`mcp_server/auth.py:36-48` 只有静态 token 比较 | 需引入 IdP、JWKS 轮换、audience 校验；外部 AI 助手是机器主体，无人工登录，OIDC 反而增加流程 | 新增 token verifier 中间件；`api_keys` 表可保留为本地凭据或退役 |
-| **A3 MCP OAuth 2.1 授权**（PKCE、RFC 8707 resource、per-tool scopes、`WWW-Authenticate` 挑战） | O2 / O5 | `server.py` 无任何 auth 引用；`mcp>=2.3.0` 已支持 OAuth 资源服务器形态（见[官方授权说明](https://restfulapi.net/mcp-server-authorization/)与[主方案 §1.10](multi-user-production-deployment.md)） | 本阶段服务面向受控内网与自建主体，静态 API Key 足够；OAuth 属于「公开/多客户 MCP 服务器」层级 | 需实现或部署授权服务器、保护资源元数据端点、把 scope 映射到 tool 级拒绝；`ALL_MCP_TOOLS`（`server.py:57-80`）需按 scope 动态可见 |
+| **A3 MCP OAuth 2.1 授权**（PKCE、RFC 8707 resource、per-tool scopes、`WWW-Authenticate` 挑战） | O2 / O5 | `server.py` 无任何 auth 引用；`mcp>=2.3.0` 已支持 OAuth 资源服务器形态（见[官方授权说明](https://restfulapi.net/mcp-server-authorization/)） | 本阶段服务面向受控内网与自建主体，静态 API Key 足够；OAuth 属于「公开/多客户 MCP 服务器」层级 | 需实现或部署授权服务器、保护资源元数据端点、把 scope 映射到 tool 级拒绝；`ALL_MCP_TOOLS`（`server.py:73-103`）需按 scope 动态可见 |
 | **A4 反向代理前置鉴权**（服务只信可信 header） | O2 | `web/app.py:69-75` 的 `_guard` 目前直接读 header；无可信代理边界 | 服务侧失去主体身份，无法做 `tenant_id` 归属与审计；必须额外防绕过 | 需要网络层保证「只能经代理访问」，并补 header 签名校验 |
 | **A5 密码登录 / 会话** | O2 | 全库无 `session` | 与「外部 AI 助手无需人工登录」冲突；引入状态 | 同 T6 |
 
@@ -113,10 +113,10 @@
 
 下列任务仅在触发条件满足时启动，当前不作为正式实现项：T1、T5、A1、A1'、A2、A3、A6、A7、A7'、A8、A10。下列任务按当前拍板结论不需要实现：T6、T9、T10、A4、A5、A9。
 
-正式实现的修改方案见 `docs/plan/multi-user-production-formal-implementation.md`。本文仍只增不删；任务启动后在本节标注「已启动，见 <新方案路径>」。
+正式实现的修改方案见 `docs/plan/permission-hardening.md`。本文仍只增不删；任务启动后在本节标注「已启动，见 <新方案路径>」。
 
 > **已启动（2026-11）**：T2、T7、T8、T3、T4、T11 已按该方案进入实施，见
-> `docs/plan/multi-user-production-formal-implementation.md`。本文其余判定（T1、T5、
+> `docs/plan/permission-hardening.md`。本文其余判定（T1、T5、
 > A1、A1'、A2、A3、A6、A7、A7'、A8、A10 触发启动；T6、T9、T10、A4、A5、A9 不实现）不变。
 
 ## 7. 维护约定

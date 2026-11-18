@@ -79,3 +79,16 @@ def test_link_stats_cli() -> None:
         ["link-stats", "docs", "1.0", "--url", "https://d.example/a"]
     )
     assert singled.url == "https://d.example/a"
+
+
+def test_repo_probe_rejects_local_paths_for_http_exits(tmp_path) -> None:
+    from libref.services.code.probe import probe_repo
+
+    folder = tmp_path / "repo"
+    folder.mkdir()
+    (folder / "sample.py").write_text("value = 1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="CLI-only"):
+        probe_repo(str(folder), allow_local=False)
+
+    assert probe_repo(str(folder)).root_kind == "local"

@@ -15,6 +15,11 @@
 | created_at | TEXT NOT NULL DEFAULT 当前时间 | 创建时间 |
 | result | JSON NOT NULL DEFAULT '{}' | 结果摘要 |
 | finished_at | TEXT | 完成时间 |
+| tenant_id | TEXT NOT NULL DEFAULT 'default' | 归属租户 |
+| principal_id | INTEGER | 提交主体编号 |
+| owner | TEXT | 提交主体名，用于展示 |
+| cancel_requested | INTEGER NOT NULL DEFAULT 0 | 取消请求标记 |
+| attempts | INTEGER NOT NULL DEFAULT 0 | 已执行次数，用于重试上限 |
 
 另有 `idx_jobs_recovery(status, heartbeat_at)`。
 

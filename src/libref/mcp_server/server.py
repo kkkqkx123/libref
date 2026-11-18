@@ -552,6 +552,7 @@ def build_mcp_server(
                 exclude_patterns=exclude_patterns,
                 tree_depth=tree_depth,
                 samples_per_dir=samples_per_dir,
+                allow_local=False,
             )
         except ValueError as exc:
             return _invalid(str(exc))

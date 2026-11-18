@@ -319,6 +319,99 @@ def cmd_deletions(args: argparse.Namespace) -> int:
         conn.close()
 
 
+def cmd_role_audit(args: argparse.Namespace) -> int:
+    """Report principals whose role combination breaks separation of duties."""
+    import json as _json
+
+    from libref.services.infra.auth import scan_role_conflicts, separation_advice
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        conflicts = scan_role_conflicts(conn)
+    finally:
+        conn.close()
+    if getattr(args, "json", False):
+        print(_json.dumps(conflicts, ensure_ascii=False, indent=2))
+        return 1 if conflicts and getattr(args, "strict", False) else 0
+    if not conflicts:
+        print("(no role conflicts)")
+        return 0
+    for row in conflicts:
+        groups = " | ".join("+".join(group) for group in row["groups"])
+        print(
+            f"{row['principal_id']} {row['tenant_id']}/{row['name']}"
+            f" roles={','.join(row['roles'])} conflicting={groups}"
+        )
+        for plan in separation_advice(row["roles"]):
+            print(
+                f"    split: --principal {row['principal_id']}"
+                f" --keep {plan['keep']}  (moves {','.join(plan['move'])})"
+            )
+    print(
+        f"total: {len(conflicts)} principal(s); split the roles across separate"
+        " principals to restore separation of duties"
+    )
+    return 1 if getattr(args, "strict", False) else 0
+
+
+def cmd_role_split(args: argparse.Namespace) -> int:
+    """Split one conflicting principal into a kept role plus new principals."""
+    import json as _json
+
+    from libref.services.infra.auth import dev_principal, split_role_conflict
+    from libref.services.ops.audit import write_audit
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    caller = dev_principal(settings)
+    try:
+        result = split_role_conflict(
+            conn,
+            caller=caller,
+            settings=settings,
+            principal_id=int(args.principal),
+            keep_role=str(args.keep),
+            new_name=getattr(args, "name", None),
+            dry_run=bool(getattr(args, "dry_run", False)),
+        )
+        if not result["dry_run"]:
+            write_audit(
+                conn,
+                tenant_id=result["tenant_id"],
+                principal_id=None,
+                action="roles.split",
+                target=f"{result['principal_id']}->{len(result['new_principals'])}",
+            )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        conn.close()
+    if getattr(args, "json", False):
+        print(_json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+    kept = ",".join(result["kept_roles"])
+    moved = ",".join(result["moved_roles"])
+    if result["dry_run"]:
+        print(
+            f"dry run: principal {result['principal_id']} keeps {kept}; moves {moved}"
+        )
+        for index, chunk in enumerate(result["planned"]):
+            print(f"  would create principal #{index + 1} roles={','.join(chunk)}")
+        print("no changes written")
+        return 0
+    print(f"principal {result['principal_id']} keeps {kept}; moved {moved}")
+    for part in result["new_principals"]:
+        print(
+            f"  principal {part['principal_id']} {part['name']}"
+            f" roles={','.join(part['roles'])}"
+        )
+        print(f"    key {part['key_id']}: {part['key']}")
+    print("store these keys now: the plaintext is not retrievable later")
+    return 0
+
+
 def cmd_config_show(args: argparse.Namespace) -> int:
     import json as _json
 
@@ -360,6 +453,27 @@ def _ensure_bootstrap(settings, conn) -> None:
     bootstrap_admin(conn, str(raw), settings)
 
 
+def _warn_role_conflicts(conn) -> None:
+    """Report stale role combinations without blocking the boot.
+
+    Blocking would turn an existing database into an outage on upgrade; the
+    combination is a compliance defect, not an unsafe runtime state.
+    """
+    from libref.services.infra.auth import scan_role_conflicts
+
+    try:
+        conflicts = scan_role_conflicts(conn)
+    except Exception:  # noqa: BLE001 — advisory check must never block startup
+        return
+    if not conflicts:
+        return
+    print(
+        f"security warning: {len(conflicts)} principal(s) break separation of duties;"
+        " run `libref role-audit` for details",
+        file=sys.stderr,
+    )
+
+
 def _prepare_auth(host: str, settings, conn) -> int | None:
     """Bootstrap identity and validate startup; return an exit code on failure."""
     from libref.services.infra.auth import check_startup
@@ -375,6 +489,7 @@ def _prepare_auth(host: str, settings, conn) -> int | None:
     except Exception as exc:  # noqa: BLE001 — unsafe startup must never proceed
         print(f"config error: {exc}", file=sys.stderr)
         return 2
+    _warn_role_conflicts(conn)
     return None
 
 

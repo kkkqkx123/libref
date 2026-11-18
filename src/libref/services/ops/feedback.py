@@ -27,9 +27,6 @@ class FeedbackService:
         text = (body or "").strip()
         if not text:
             raise ValueError("feedback body is empty")
-        from libref.services.infra.auth import ensure_auth_tables
-
-        ensure_auth_tables(self._conn)
         cur = self._conn.execute(
             "INSERT INTO feedback(tenant_id, principal_id, entity_type, entity_id,"
             " kind, body) VALUES(?,?,?,?,?,?)",
@@ -40,41 +37,32 @@ class FeedbackService:
         return int(cur.lastrowid)
 
     def list_items(
-        self, *, tenant_id: str, limit: int = 50, status: str | None = None
+        self,
+        *,
+        tenant_id: str,
+        limit: int = 50,
+        status: str | None = None,
+        principal_id: int | None = None,
     ) -> list[dict[str, Any]]:
-        """List feedback inside one tenant, newest last for stable review order."""
-        from libref.services.infra.auth import ensure_auth_tables
-
-        ensure_auth_tables(self._conn)
-        if tenant_id == GLOBAL_TENANT:
-            if status is None:
-                rows = self._conn.execute(
-                    "SELECT id, tenant_id, principal_id, entity_type, entity_id,"
-                    " kind, body, status, created_at, resolved_by, resolved_at"
-                    " FROM feedback ORDER BY id LIMIT ?",
-                    (limit,),
-                ).fetchall()
-            else:
-                rows = self._conn.execute(
-                    "SELECT id, tenant_id, principal_id, entity_type, entity_id,"
-                    " kind, body, status, created_at, resolved_by, resolved_at"
-                    " FROM feedback WHERE status=? ORDER BY id LIMIT ?",
-                    (status, limit),
-                ).fetchall()
-        elif status is None:
-            rows = self._conn.execute(
-                "SELECT id, tenant_id, principal_id, entity_type, entity_id,"
-                " kind, body, status, created_at, resolved_by, resolved_at"
-                " FROM feedback WHERE tenant_id=? ORDER BY id LIMIT ?",
-                (tenant_id, limit),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT id, tenant_id, principal_id, entity_type, entity_id,"
-                " kind, body, status, created_at, resolved_by, resolved_at"
-                " FROM feedback WHERE tenant_id=? AND status=? ORDER BY id LIMIT ?",
-                (tenant_id, status, limit),
-            ).fetchall()
+        """List feedback inside one tenant, optionally narrowed to one author."""
+        clauses: list[str] = []
+        params: list[Any] = []
+        if tenant_id != GLOBAL_TENANT:
+            clauses.append("tenant_id=?")
+            params.append(tenant_id)
+        if status is not None:
+            clauses.append("status=?")
+            params.append(status)
+        if principal_id is not None:
+            clauses.append("principal_id=?")
+            params.append(principal_id)
+        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+        rows = self._conn.execute(
+            "SELECT id, tenant_id, principal_id, entity_type, entity_id,"
+            " kind, body, status, created_at, resolved_by, resolved_at"
+            f" FROM feedback{where} ORDER BY id LIMIT ?",
+            (*params, limit),
+        ).fetchall()
         return [
             {
                 "id": int(row[0]),
@@ -100,9 +88,6 @@ class FeedbackService:
         tenant_id: str | None = None,
     ) -> None:
         """Mark one item resolved inside its tenant; repeat resolution is rejected."""
-        from libref.services.infra.auth import ensure_auth_tables
-
-        ensure_auth_tables(self._conn)
         sql = (
             "UPDATE feedback SET status='resolved', resolved_by=?,"
             " resolved_at=datetime('now')"

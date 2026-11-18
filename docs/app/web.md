@@ -131,7 +131,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### GET /feedback
 
-查看本租户反馈，需 `feedback:read`。`limit` 上限 200，`status` 可选过滤。
+查看反馈：`feedback:read` 看本租户全部，`feedback:read:own` 只看自己提交的条目；两者都没有返回禁止。`limit` 上限 200，`status` 可选过滤。
 
 ### POST /feedback/{feedback_id}/resolve
 
@@ -153,9 +153,13 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 列出凭据，需 `admin:keys`。普通管理员只看本租户，平台管理员可看全部；密钥明文不回显，列举动作记审计。
 
+### GET /admin/principals
+
+列出主体，需 `admin:keys`。返回 `id`、`tenant_id`、`kind`、`name`、`status`、`roles`、`scopes` 与 `conflicting`（每个违反职责分离的角色组；空数组表示合规）。普通管理员只看本租户，平台管理员可看全部；`tenant_id` 可显式过滤。该接口只读，不做任何修复，列举动作记审计。
+
 ### POST /admin/keys
 
-签发凭据，需 `admin:keys`。主体租户与 Key scope 都不得超过调用者权限，Key scope 也不得超过目标主体的角色 scope；非空 Key scope 会收窄角色权限，留空表示继承角色全部 scope。未知 scope 与越权 scope 返回请求错误。明文仅返回一次，默认有效期与最大有效期由 `[auth]` 控制。
+签发凭据，需 `admin:keys`。主体租户与 Key scope 都不得超过调用者权限，Key scope 也不得超过目标主体的角色 scope；非空 Key scope 会收窄角色权限，留空表示继承角色全部 scope。`developer` / `kb_admin` / `sys_admin` 三者互斥，同一主体只能持有其中一个（平台角色豁免）；未知角色、越权角色与冲突组合都返回请求错误。明文仅返回一次，默认有效期与最大有效期由 `[auth]` 控制。
 
 ### DELETE /admin/keys/{key_id}
 
@@ -164,6 +168,14 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 ### DELETE /admin/principals/{principal_id}/keys
 
 吊销一个主体的全部有效 Key，需 `admin:keys`。返回吊销数量；主体不可见时返回未找到。
+
+### GET /admin/quota/policies
+
+列出配额策略，需 `admin:config`。普通管理员只看本租户，平台管理员可看全部；每项含租户、主体（空表示租户默认策略）、资源、窗口与上限。
+
+### PUT /admin/quota/policies
+
+写入或覆盖一条配额策略，需 `admin:config`。请求体给资源、上限、窗口，租户缺省落到调用者可写的租户，主体可选（必须属于目标租户，否则按请求错误拒绝）。写入后失效策略缓存并记审计；未知资源或窗口返回请求错误。
 
 ### POST /admin/config/refresh
 

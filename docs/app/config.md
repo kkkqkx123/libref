@@ -219,7 +219,7 @@
 | quota_job_submissions_per_hour | 整数（≥0） | 0 | LIBREF_QUOTA_JOB_SUBMISSIONS_PER_HOUR | 每小时任务提交上限，0 不限 |
 | quota_index_requests_per_hour | 整数（≥0） | 0 | LIBREF_QUOTA_INDEX_REQUESTS_PER_HOUR | 每小时索引申请上限，0 不限 |
 
-数据库策略优先；配置字段只是无匹配策略时的兜底上限。
+数据库策略优先；配置字段只是无匹配策略时的兜底上限。策略行经 `admin:config` 的配额接口（`GET/PUT /admin/quota/policies`）读写，按租户与主体覆盖，写入后即时生效。
 
 ## 日志（[logging]）
 

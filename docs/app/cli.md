@@ -174,7 +174,7 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 
 ### probe-repo
 
-只返回目录结构，不解析。`source` 必填，`--subdir/--max-files/--sample-limit` 可选，`--only-file` 可重复（单文件限定，先过滤再做预算判断，未命中路径在返回体中回显），`--exclude-pattern` 可重复（排除匹配路径），`--tree-depth` 展开目录树深度（缺省 1，返回目录与递归文件数，最多 100 条），`--samples-per-dir` 每目录采样上限（缺省关闭，打开后按目录分组采样，总量受采样数约束）。基路径分步走：先看根，再用 `--subdir` 下钻。
+只返回目录结构，不解析。`source` 必填，`--subdir/--max-files/--sample-limit` 可选，`--only-file` 可重复（单文件限定，先过滤再做预算判断，未命中路径在返回体中回显），`--exclude-pattern` 可重复（排除匹配路径），`--tree-depth` 展开目录树深度（缺省 1，返回目录与递归文件数，最多 100 条），`--samples-per-dir` 每目录采样上限（缺省关闭，打开后按目录分组采样，总量受采样数约束）。基路径分步走：先看根，再用 `--subdir` 下钻。本地路径只在本命令可用；REST 的 `/repo-probe` 与 MCP 的 `repo_probe` 只接受远端地址，避免把服务端文件系统暴露给只持 `read` 的调用方。
 
 ### link-stats
 
@@ -229,6 +229,8 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 * `config-show`：无参数。打印配置文件路径、配置指纹与脱敏后的有效配置。
 * `purge`：`library/version` 必填，`--ecosystem` 可选。整版本删除并记录，输出各计数。
 * `deletions`：`--limit` 默认 50，`--full` 打印详情，`--prune` 按保留期清理，`--ttl-days` 缺省取配置。
+* `role-audit`：巡检角色互斥。逐行列出违反职责分离的主体，并为每个主体列出可执行的 `--keep` 选项；`--json` 输出结构化清单，`--strict` 存在冲突时返回 1，无冲突返回 0。
+* `role-split`：`--principal` 与 `--keep` 必填，`--name` 覆盖新主体命名（缺省 `<原名>-split`），`--dry-run` 只打印计划，`--json` 输出结构化结果。执行时把非保留角色装箱到最少量的新主体，每个新主体签发一把 key 并只回显一次明文，原主体只留 `--keep`；主体不存在、无冲突或 `--keep` 不在其角色中返回 2。
 
 ## 服务启动
 

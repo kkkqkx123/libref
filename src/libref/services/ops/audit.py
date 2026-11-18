@@ -18,10 +18,8 @@ def write_audit(
     """Record one privileged action; audit writes never raise."""
     try:
         from libref.db.conn import write_lock as _guard
-        from libref.services.infra.auth import ensure_auth_tables
         from libref.services.infra.tenant import owner_tenant
 
-        ensure_auth_tables(conn)
         with _guard(conn):
             conn.execute(
                 "INSERT INTO audit_log(tenant_id, principal_id, action, target,"

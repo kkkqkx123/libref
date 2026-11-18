@@ -99,6 +99,27 @@ def test_developer_scope_denial_is_audited(tmp_path, monkeypatch) -> None:
         conn.close()
 
 
+def test_admin_keys_rejects_conflicting_roles(tmp_path, monkeypatch) -> None:
+    """A single key cannot carry roles that break separation of duties."""
+    conn, settings, client = _setup(tmp_path, monkeypatch)
+    try:
+        _, root_key = _key(conn, settings, name="root", roles=[PLATFORM_ROLE])
+        body = {
+            "name": "combined",
+            "tenant_id": "default",
+            "roles": ["kb_admin", "sys_admin"],
+        }
+        denied = client.post("/admin/keys", json=body, headers=_auth(root_key))
+        assert denied.status_code == 400
+        assert "separation of duties" in denied.json()["detail"]
+        created = conn.execute(
+            "SELECT COUNT(*) FROM principals WHERE name='combined'"
+        ).fetchone()[0]
+        assert created == 0
+    finally:
+        conn.close()
+
+
 def test_admin_cannot_grant_beyond_own_tenant_or_scopes(tmp_path, monkeypatch) -> None:
     conn, settings, client = _setup(tmp_path, monkeypatch)
     try:
@@ -261,5 +282,162 @@ def test_revoke_principal_keys_direct_call(tmp_path, monkeypatch) -> None:
         from libref.services.infra.auth import lookup_principal
 
         assert lookup_principal(conn, raw) is None
+    finally:
+        conn.close()
+
+
+def test_developer_reads_only_own_feedback(tmp_path, monkeypatch) -> None:
+    conn, settings, client = _setup(tmp_path, monkeypatch)
+    try:
+        author_pid, author_key = _key(conn, settings, name="dev-a", roles=["developer"])
+        _, other_key = _key(conn, settings, name="dev-b", roles=["developer"])
+        _, reviewer_key = _key(conn, settings, name="kb", roles=["kb_admin"])
+        _, reader_key = _key(conn, settings, name="bot", roles=["external"])
+
+        for key, body in ((author_key, "from a"), (other_key, "from b")):
+            created = client.post("/feedback", json={"body": body}, headers=_auth(key))
+            assert created.status_code == 200
+
+        mine = client.get("/feedback", headers=_auth(author_key)).json()
+        assert mine["count"] == 1
+        assert mine["items"][0]["principal_id"] == author_pid
+        assert mine["items"][0]["body"] == "from a"
+
+        everything = client.get("/feedback", headers=_auth(reviewer_key)).json()
+        assert everything["count"] == 2
+
+        denied = client.get("/feedback", headers=_auth(reader_key))
+        assert denied.status_code == 403
+        assert denied.json()["error"] == "missing_scope"
+    finally:
+        conn.close()
+
+
+def test_quota_policy_routes_respect_scope_and_tenant(tmp_path, monkeypatch) -> None:
+    conn, settings, client = _setup(tmp_path, monkeypatch)
+    try:
+        _, ops_key = _key(conn, settings, name="ops", roles=["sys_admin"])
+        _, dev_key = _key(conn, settings, name="dev", roles=["developer"])
+        _, foreign_key = _key(
+            conn, settings, name="ops-t2", roles=["sys_admin"], tenant_id="t2"
+        )
+        payload = {
+            "resource": "http_requests",
+            "limit_value": 7,
+            "window_type": "hour",
+        }
+
+        assert (
+            client.put(
+                "/admin/quota/policies", json=payload, headers=_auth(dev_key)
+            ).status_code
+            == 403
+        )
+        crossed = client.put(
+            "/admin/quota/policies",
+            json={**payload, "tenant_id": "default"},
+            headers=_auth(foreign_key),
+        )
+        assert crossed.status_code == 403
+
+        assert (
+            client.put(
+                "/admin/quota/policies", json=payload, headers=_auth(ops_key)
+            ).status_code
+            == 200
+        )
+        listed = client.get("/admin/quota/policies", headers=_auth(ops_key)).json()
+        assert listed["count"] == 1
+        row = listed["items"][0]
+        assert row["tenant_id"] == "default"
+        assert row["principal_id"] is None
+        assert (row["limit_value"], row["window_type"]) == (7, "hour")
+
+        from libref.services.infra import quota
+
+        assert quota.effective_policy(
+            conn,
+            tenant_id="default",
+            principal_id=None,
+            resource="http_requests",
+            settings=settings,
+        ) == (7, "hour")
+
+        unknown = client.put(
+            "/admin/quota/policies",
+            json={"resource": "nope", "limit_value": 1},
+            headers=_auth(ops_key),
+        )
+        assert unknown.status_code == 400
+
+        rows = conn.execute(
+            "SELECT target FROM audit_log WHERE action='quota.policy'"
+        ).fetchall()
+        assert rows == [("default:*:http_requests",)]
+    finally:
+        conn.close()
+
+
+def test_principals_view_flags_conflicts_and_needs_admin_scope(
+    tmp_path, monkeypatch
+) -> None:
+    """The read-only principal view is the browser counterpart of role-audit."""
+    conn, settings, client = _setup(tmp_path, monkeypatch)
+    try:
+        _, root_key = _key(conn, settings, name="root", roles=[PLATFORM_ROLE])
+        _, dev_key = _key(conn, settings, name="dev", roles=["developer"])
+        # Insert directly: this models a row written before the rule existed,
+        # which the service layer would now refuse to create.
+        conn.execute(
+            "INSERT INTO principals(tenant_id, kind, name, roles) VALUES(?,?,?,?)",
+            ("default", "human", "legacy", '["kb_admin", "sys_admin"]'),
+        )
+        conn.commit()
+
+        denied = client.get("/admin/principals", headers=_auth(dev_key))
+        assert denied.status_code == 403
+        assert denied.json()["error"] == "missing_scope"
+
+        ok = client.get("/admin/principals", headers=_auth(root_key))
+        assert ok.status_code == 200
+        rows = {row["name"]: row for row in ok.json()["items"]}
+        assert rows["legacy"]["conflicting"] == [["kb_admin", "sys_admin"]]
+        assert rows["dev"]["conflicting"] == []
+        assert "review:read" not in rows["dev"]["scopes"]
+
+        actions = [
+            row[0] for row in conn.execute("SELECT action FROM audit_log ORDER BY id")
+        ]
+        assert "principals.list" in actions
+    finally:
+        conn.close()
+
+
+def test_platform_role_issue_gets_its_own_audit_action(tmp_path, monkeypatch) -> None:
+    """Granting the separated-out platform role must stand out in the trail."""
+    conn, settings, client = _setup(tmp_path, monkeypatch)
+    try:
+        _, root_key = _key(conn, settings, name="root", roles=[PLATFORM_ROLE])
+        created = client.post(
+            "/admin/keys",
+            json={
+                "name": "second-root",
+                "tenant_id": "default",
+                "roles": [PLATFORM_ROLE],
+            },
+            headers=_auth(root_key),
+        )
+        assert created.status_code == 200
+        tenant_key = client.post(
+            "/admin/keys",
+            json={"name": "ops", "tenant_id": "default", "roles": ["sys_admin"]},
+            headers=_auth(root_key),
+        )
+        assert tenant_key.status_code == 200
+        actions = [
+            row[0] for row in conn.execute("SELECT action FROM audit_log ORDER BY id")
+        ]
+        assert "keys.issue.platform" in actions
+        assert "keys.issue" in actions
     finally:
         conn.close()

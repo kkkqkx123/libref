@@ -97,8 +97,13 @@ def probe_repo(
     exclude_patterns: list[str] | None = None,
     tree_depth: int | None = None,
     samples_per_dir: int | None = None,
+    allow_local: bool = True,
 ) -> RepoProbe:
-    """Walk only; parsing, caching, and persistence never run on this path."""
+    """Walk only; parsing, caching, and persistence never run on this path.
+
+    HTTP exits pass ``allow_local=False`` so remote callers cannot enumerate
+    host directories; local paths stay a CLI concern.
+    """
     from libref.astminer import config as ast_config
     from libref.astminer import gradle as ast_gradle
     from libref.astminer import manifests as ast_manifests
@@ -167,6 +172,8 @@ def probe_repo(
         return cached
     maybe_local = Path(source)
     if maybe_local.is_dir():
+        if not allow_local:
+            raise ValueError("local repository paths are CLI-only; pass a remote URL")
         root = maybe_local.resolve()
         census = describe_source_files(
             root,
