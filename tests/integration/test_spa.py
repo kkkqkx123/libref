@@ -22,6 +22,7 @@ def _spa_dir(tmp_path) -> str:
 def _client(tmp_path, monkeypatch, **overrides):
     from fastapi.testclient import TestClient
 
+    overrides.setdefault("auth_mode", "dev")
     settings = make_settings(monkeypatch, tmp_path, **overrides)
     app = build_web_app(None, settings)
     return TestClient(app)
@@ -40,12 +41,12 @@ def test_shell_and_assets_are_public_but_api_keeps_json(tmp_path, monkeypatch) -
     assert "immutable" in asset.headers["Cache-Control"]
     assert client.get("/catalog").status_code == 401
     missing_json = client.get("/no-such-route")
-    assert missing_json.status_code == 404
+    assert missing_json.status_code == 401
     missing_html = client.get("/no-such-route", headers={"Accept": "text/html"})
     assert missing_html.status_code == 200
     assert "shell" in missing_html.text
     mcp_html = client.get("/mcp/sse", headers={"Accept": "text/html"})
-    assert mcp_html.status_code == 404
+    assert mcp_html.status_code == 401
     assert "shell" not in mcp_html.text
 
 

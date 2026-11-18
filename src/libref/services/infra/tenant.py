@@ -169,7 +169,7 @@ def validate_scrape_target(start_url: str, settings) -> str:
         ):
             raise ValueError(f"scrape host not allowlisted: {host}")
     # Loopback and private ranges are rejected except for dev-local loopback.
-    auth_mode = str(getattr(settings, "auth_mode", "dev") or "dev")
+    auth_mode = str(getattr(settings, "auth_mode", "enforced") or "enforced")
     is_loopback_name = lowered in (
         "localhost",
         "localhost.",

@@ -22,7 +22,7 @@
 
 ## 暴露面规则
 
-- 接口默认只绑本地回环。`dev` 模式跳过 key 校验，非回环 dev 直接拒绝启动；`enforced` 模式每请求需 `Authorization: Bearer`，首次启动需 `LIBREF_BOOTSTRAP_ADMIN_KEY` 或已有主体，否则拒绝启动。
+- 接口默认只绑本地回环。默认 `enforced` 模式每请求需 `Authorization: Bearer`，浏览器来源必须精确命中 `allowed_origins`；首次启动需 `LIBREF_BOOTSTRAP_ADMIN_KEY` 或已有主体，否则拒绝启动。`dev` 必须显式开启、只许回环，且不得经反向代理对外提供。
 - 密钥只走环境变量，不进配置文件；请求侧用 Authorization Bearer 传递。模板见 `deploy/env.dev.example` 与 `deploy/env.prod.example`，真实文件不进版本库。
 
 ## 常用操作
@@ -32,7 +32,7 @@
 - 重灌向量：`libref reembed`，对账语义为版本内向量点数等于文档表计数（全文小块除外）。
 - 审核：`libref review list|approve|conflict|reopen`，非法转移拒绝。
 - 删除与清理：`libref purge` 整版删除并记日志，`libref deletions --prune` 按保留期清理。
-- 服务：`libref serve`（组合 Web 与 `/mcp`，`--stdio` 切标准输入输出）；旧 `serve-mcp [--http]`（用 `[mcp]` 监听）与 `serve-web` 保留；配置脱敏查看用 `libref config-show`。
+- 服务：`libref serve`（组合 Web 与 `/mcp`，`--stdio` 切标准输入输出）；`serve-mcp` 只走标准输入输出，配置脱敏查看用 `libref config-show`。
 - 任务：`POST /scrape` 与 `POST /jobs` 只提交，后台 worker 原子认领执行；`GET /jobs` 按租户过滤。
 
 ## 配额与保留期

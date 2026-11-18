@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 
 from libref.config import LibrefSettings, settings_fingerprint
 from libref.crawler.registry import RegistryError
@@ -121,7 +121,10 @@ def build_web_app(
             headers=headers,
         )
 
+    from libref.web.middleware import AuthMiddleware
     from libref.web.spa import SpaMiddleware, spa_dir_for
+
+    app.add_middleware(AuthMiddleware, context=context, conn=conn, settings=settings)
 
     spa_directory = spa_dir_for(settings)
     if spa_directory is not None:
@@ -130,10 +133,16 @@ def build_web_app(
             from starlette.staticfiles import StaticFiles
 
             app.mount("/assets", StaticFiles(directory=assets), name="spa-assets")
+        api_paths = {
+            str(getattr(route, "path", ""))
+            for route in app.routes
+            if getattr(route, "path", "")
+        }
         app.add_middleware(
             SpaMiddleware,
             directory=spa_directory,
             mcp_prefix=str(getattr(settings, "mcp_path", "/mcp") or "/mcp"),
+            api_paths=api_paths,
         )
     elif bool(getattr(settings, "web_spa_enabled", True)) and str(
         getattr(settings, "web_spa_dir", "") or ""
@@ -142,25 +151,8 @@ def build_web_app(
             "spa directory is missing index.html; running in pure-API mode"
         )
 
-    def _guard(
-        request=None,
-        authorization: str | None = Header(default=None),
-    ):
-
-        req = request
-        state_principal = getattr(getattr(req, "state", None), "principal", None)
-        if state_principal is not None:
-            return state_principal
-        from libref.mcp_server.auth import parse_bearer
-        from libref.services.infra.auth import dev_principal, lookup_principal
-
-        auth_mode = str(getattr(settings, "auth_mode", "dev") or "dev")
-        if auth_mode == "dev":
-            return dev_principal(settings)
-        raw = parse_bearer(authorization)
-        if not raw:
-            raise HTTPException(status_code=401, detail="unauthorized")
-        principal = lookup_principal(conn, raw)
+    def _guard(request: Request):
+        principal = getattr(request.state, "principal", None)
         if principal is None:
             raise HTTPException(status_code=401, detail="unauthorized")
         return principal
@@ -169,10 +161,21 @@ def build_web_app(
         missing = [
             s for s in scopes if s not in set(getattr(principal, "scopes", set()))
         ]
-        if missing:
-            raise HTTPException(
-                status_code=403, detail=f"forbidden: missing {','.join(missing)}"
-            )
+        if not missing:
+            return
+        from libref.services.ops.audit import write_audit
+
+        write_audit(
+            conn,
+            tenant_id=str(getattr(principal, "tenant_id", "default") or "default"),
+            principal_id=_principal_id(principal),
+            action="auth.forbidden",
+            target=",".join(missing),
+            result="denied",
+        )
+        raise HTTPException(
+            status_code=403, detail=f"forbidden: missing {','.join(missing)}"
+        )
 
     def _principal_id(principal) -> int | None:
         pid = getattr(principal, "id", None)
@@ -1523,12 +1526,30 @@ def build_web_app(
         return {"ok": True}
 
     @app.get("/admin/keys")
-    def admin_keys_list(principal=Depends(_guard)) -> dict[str, Any]:
+    def admin_keys_list(request: Request, principal=Depends(_guard)) -> dict[str, Any]:
         _need(principal, "admin:keys")
-        rows = conn.execute(
-            "SELECT id, principal_id, key_prefix, scopes, expires_at,"
-            " revoked_at, last_used_at, created_at FROM api_keys ORDER BY id"
-        ).fetchall()
+        from libref.services.infra.auth import PLATFORM_SCOPE
+        from libref.services.ops.audit import write_audit
+
+        global_view = PLATFORM_SCOPE in set(getattr(principal, "scopes", set()))
+        sql = (
+            "SELECT k.id, k.principal_id, k.key_prefix, k.scopes, k.expires_at,"
+            " k.revoked_at, k.last_used_at, k.created_at FROM api_keys k"
+        )
+        params: tuple = ()
+        if not global_view:
+            sql += " JOIN principals p ON p.id=k.principal_id WHERE p.tenant_id=?"
+            params = (_tenant_of(principal),)
+        sql += " ORDER BY k.id"
+        rows = conn.execute(sql, params).fetchall()
+        write_audit(
+            conn,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+            action="keys.list",
+            target=str(len(rows)),
+            request_id=str(getattr(request.state, "request_id", "")),
+        )
         items = [
             {
                 "id": int(r[0]),
@@ -1552,24 +1573,25 @@ def build_web_app(
         from libref.services.infra.auth import create_principal, issue_api_key
         from libref.services.ops.audit import write_audit
 
-        pid = None
         try:
             pid = create_principal(
                 conn,
+                caller=principal,
                 tenant_id=body.tenant_id,
                 kind=body.kind,
                 name=body.name,
                 roles=list(body.roles),
             )
+            key_id, raw = issue_api_key(
+                conn,
+                caller=principal,
+                settings=_eff_settings(request),
+                principal_id=pid,
+                scopes=list(body.scopes),
+                expires_at=body.expires_at,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        key_id, raw = issue_api_key(
-            conn,
-            principal_id=pid,
-            scopes=list(body.scopes),
-            created_by=_principal_id(principal),
-            expires_at=body.expires_at,
-        )
         write_audit(
             conn,
             tenant_id=_tenant_of(principal),
@@ -1589,8 +1611,17 @@ def build_web_app(
         from libref.services.ops.audit import write_audit
 
         try:
-            revoke_api_key(conn, key_id)
+            revoke_api_key(conn, caller=principal, key_id=key_id)
         except ValueError as exc:
+            write_audit(
+                conn,
+                tenant_id=_tenant_of(principal),
+                principal_id=_principal_id(principal),
+                action="keys.revoke",
+                target=str(key_id),
+                result="denied",
+                request_id=str(getattr(request.state, "request_id", "")),
+            )
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         write_audit(
             conn,
@@ -1598,9 +1629,33 @@ def build_web_app(
             principal_id=_principal_id(principal),
             action="keys.revoke",
             target=str(key_id),
-            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+            request_id=str(getattr(request.state, "request_id", "")),
         )
         return {"ok": True}
+
+    @app.delete("/admin/principals/{principal_id}/keys")
+    def admin_principal_keys_revoke(
+        principal_id: int, request: Request, principal=Depends(_guard)
+    ) -> dict[str, Any]:
+        _need(principal, "admin:keys")
+        from libref.services.infra.auth import revoke_principal_keys
+        from libref.services.ops.audit import write_audit
+
+        try:
+            count = revoke_principal_keys(
+                conn, caller=principal, principal_id=principal_id
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        write_audit(
+            conn,
+            tenant_id=_tenant_of(principal),
+            principal_id=_principal_id(principal),
+            action="keys.revoke_all",
+            target=str(principal_id),
+            request_id=str(getattr(request.state, "request_id", "")),
+        )
+        return {"ok": True, "revoked": count}
 
     @app.post("/admin/config/refresh")
     def admin_config_refresh(
@@ -1613,7 +1668,21 @@ def build_web_app(
         from libref.services.ops.audit import write_audit
 
         old_fp = settings_fingerprint(settings)
-        fresh = _load_settings()
+        try:
+            fresh = _load_settings()
+        except Exception as exc:
+            write_audit(
+                conn,
+                tenant_id=_tenant_of(principal),
+                principal_id=_principal_id(principal),
+                action="config.refresh",
+                target=old_fp[:12],
+                result="denied",
+                request_id=str(getattr(request.state, "request_id", "")),
+            )
+            raise HTTPException(
+                status_code=400, detail=f"config refresh failed: {exc}"
+            ) from exc
         new_fp = settings_fingerprint(fresh)
         try:
             ctx = getattr(request.app.state, "context", None)
@@ -1622,15 +1691,26 @@ def build_web_app(
                 request.app.state.context = updated
                 request.app.state.settings = fresh
             _setup_logging(fresh)
-        except Exception:  # noqa: BLE001, S110 — refresh never breaks running requests
-            pass
+        except Exception as exc:
+            write_audit(
+                conn,
+                tenant_id=_tenant_of(principal),
+                principal_id=_principal_id(principal),
+                action="config.refresh",
+                target=f"{old_fp[:12]}->{new_fp[:12]}",
+                result="failed",
+                request_id=str(getattr(request.state, "request_id", "")),
+            )
+            raise HTTPException(
+                status_code=500, detail=f"config rebuild failed: {exc}"
+            ) from exc
         write_audit(
             conn,
             tenant_id=_tenant_of(principal),
             principal_id=_principal_id(principal),
             action="config.refresh",
             target=f"{old_fp[:12]}->{new_fp[:12]}",
-            request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+            request_id=str(getattr(request.state, "request_id", "")),
         )
         return {"ok": True, "old_fingerprint": old_fp, "fingerprint": new_fp}
 

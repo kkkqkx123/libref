@@ -350,47 +350,51 @@ def _startup_auth_state(settings, conn) -> bool:
 
 def _ensure_bootstrap(settings, conn) -> None:
     """Idempotently create the platform administrator from the bootstrap key."""
-    if str(getattr(settings, "auth_mode", "dev") or "dev") != "enforced":
+    if str(getattr(settings, "auth_mode", "enforced") or "enforced") != "enforced":
         return
     raw = getattr(settings, "bootstrap_admin_key", None)
-    if _startup_auth_state(settings, conn):
-        return
-    if not raw:
+    if _startup_auth_state(settings, conn) or not raw:
         return
     from libref.services.infra.auth import bootstrap_admin
 
-    bootstrap_admin(conn, str(raw))
+    bootstrap_admin(conn, str(raw), settings)
+
+
+def _prepare_auth(host: str, settings, conn) -> int | None:
+    """Bootstrap identity and validate startup; return an exit code on failure."""
+    from libref.services.infra.auth import check_startup
+
+    try:
+        _ensure_bootstrap(settings, conn)
+        check_startup(
+            host,
+            auth_mode=str(getattr(settings, "auth_mode", "enforced") or "enforced"),
+            bootstrap_key=getattr(settings, "bootstrap_admin_key", None),
+            has_principals=_startup_auth_state(settings, conn),
+        )
+    except Exception as exc:  # noqa: BLE001 — unsafe startup must never proceed
+        print(f"config error: {exc}", file=sys.stderr)
+        return 2
+    return None
+
+
+def _use_local_principal(settings) -> None:
+    """Grant the trusted stdio operator a local platform principal."""
+    from libref.services.infra.auth import current_principal, dev_principal
+
+    current_principal.set(dev_principal(settings))
 
 
 def cmd_serve_mcp(args: argparse.Namespace) -> int:
+    """Serve MCP over stdio; HTTP MCP is always the combined serve command."""
     from libref.mcp_server import build_mcp_server
-    from libref.mcp_server.auth import check_startup
 
     settings = _load_settings(args, _mcp_tools_overrides(args))
     conn = _connect(settings, check_same_thread=False)
-    try:
-        _ensure_bootstrap(settings, conn)
-        try:
-            check_startup(
-                args.host or settings.mcp_host,
-                auth_mode=str(getattr(settings, "auth_mode", "dev") or "dev"),
-                bootstrap_key=getattr(settings, "bootstrap_admin_key", None),
-                has_principals=_startup_auth_state(settings, conn),
-            )
-        except ValueError as exc:
-            print(f"config error: {exc}", file=sys.stderr)
-            return 2
-    except Exception:  # noqa: BLE001, S110
-        pass
+    _use_local_principal(settings)
     mcp = build_mcp_server(conn, settings)
     _verify_fingerprint(settings, conn)
-    if args.http:
-        host = args.host or settings.mcp_host
-        port = args.port or settings.mcp_port
-        path = args.path or settings.mcp_path
-        mcp.run("streamable-http", host=host, port=port, streamable_http_path=path)
-    else:
-        mcp.run("stdio")
+    mcp.run("stdio")
     _drain_and_close(settings, conn)
     return 0
 
@@ -420,55 +424,12 @@ def _drain_and_close(settings, conn) -> None:
     conn.close()
 
 
-def cmd_serve_web(args: argparse.Namespace) -> int:
-    from libref.mcp_server.auth import check_startup
-
-    settings = _load_settings(args)
-    conn = _connect(settings, check_same_thread=False)
-    try:
-        _ensure_bootstrap(settings, conn)
-        try:
-            check_startup(
-                args.host or settings.web_host,
-                auth_mode=str(getattr(settings, "auth_mode", "dev") or "dev"),
-                bootstrap_key=getattr(settings, "bootstrap_admin_key", None),
-                has_principals=_startup_auth_state(settings, conn),
-            )
-        except ValueError as exc:
-            print(f"config error: {exc}", file=sys.stderr)
-            return 2
-    except Exception:  # noqa: BLE001, S110
-        pass
-    import uvicorn
-
-    from libref.services.factory import build_gateway
-    from libref.web import build_web_app
-
-    gateway = build_gateway(settings)
-    vec_store, embed = _build_vector(settings, gateway)
-    app = build_web_app(
-        conn,
-        settings,
-        vec_store=vec_store,
-        embed=embed,
-        rerank=gateway.rerank_fn(),
-        chat=gateway.chat_fn(),
-    )
-    _verify_fingerprint(settings, conn)
-    host = args.host or settings.web_host
-    port = args.port or settings.web_port
-    uvicorn.run(app, host=host, port=port, log_level="warning")
-    _drain_and_close(settings, conn)
-    return 0
-
-
 def cmd_serve(args: argparse.Namespace) -> int:
     """Single combined serving: Web routes plus MCP mounted at the same port."""
     import uvicorn
     from starlette.middleware.cors import CORSMiddleware
     from starlette.routing import Mount
 
-    from libref.mcp_server.auth import check_startup
     from libref.services.infra.context import build_context
     from libref.web.middleware import AuthMiddleware
 
@@ -477,21 +438,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
     port = getattr(args, "port", None) or settings.web_port
     conn = _connect(settings, check_same_thread=False)
     try:
-        _ensure_bootstrap(settings, conn)
-        try:
-            check_startup(
-                host,
-                auth_mode=str(getattr(settings, "auth_mode", "dev") or "dev"),
-                bootstrap_key=getattr(settings, "bootstrap_admin_key", None),
-                has_principals=_startup_auth_state(settings, conn),
-            )
-        except ValueError as exc:
-            print(f"config error: {exc}", file=sys.stderr)
-            return 2
+        failure = _prepare_auth(host, settings, conn)
+        if failure is not None:
+            return failure
         ctx = build_context(settings)
         if getattr(args, "stdio", False):
             from libref.mcp_server import build_mcp_server as _build_mcp
 
+            _use_local_principal(settings)
             mcp = _build_mcp(conn, settings, context=ctx)
             mcp.run("stdio")
             return 0
@@ -558,13 +512,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
         from starlette.applications import Starlette as _Starlette
 
-        origins = allowed_origins or ["*"]
         combined = _Starlette(routes=routes, lifespan=_lifespan)
         combined.state.context = ctx
         combined.state.settings = settings
         combined.add_middleware(
             CORSMiddleware,
-            allow_origins=origins,
+            allow_origins=allowed_origins,
             allow_methods=["*"],
             allow_headers=[
                 "Authorization",
@@ -589,6 +542,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 SpaMiddleware,
                 directory=spa_directory,
                 mcp_prefix=str(getattr(settings, "mcp_path", "/mcp") or "/mcp"),
+                api_paths={
+                    str(getattr(route, "path", ""))
+                    for route in routes
+                    if getattr(route, "path", "")
+                },
             )
         uvicorn.run(combined, host=host, port=port, log_level="warning")
         return 0

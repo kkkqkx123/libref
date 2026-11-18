@@ -231,10 +231,12 @@ class LibrefSettings(BaseSettings):
         list[str], NoDecode, BeforeValidator(_split_tool_names)
     ] = Field(default_factory=list)
     # Authentication is API-Key only: enforced mode resolves Bearer keys to principals.
-    auth_mode: Literal["dev", "enforced"] = "dev"
+    auth_mode: Literal["dev", "enforced"] = "enforced"
     dev_principal: str = "dev-operator"
     bootstrap_admin_key: str | None = None
     client_api_key: str | None = None
+    api_key_default_ttl_hours: float = Field(default=168.0, gt=0)
+    api_key_max_ttl_hours: float = Field(default=8760.0, gt=0)
     base_url: str | None = None
     allowed_hosts: Annotated[
         list[str] | None, NoDecode, BeforeValidator(_split_tool_names)
@@ -294,6 +296,17 @@ class LibrefSettings(BaseSettings):
             if not candidate.is_absolute():
                 candidate = Path.cwd() / candidate
             object.__setattr__(self, key, candidate)
+        return self
+
+    @model_validator(mode="after")
+    def _check_auth(self) -> LibrefSettings:
+        if self.api_key_default_ttl_hours > self.api_key_max_ttl_hours:
+            raise ValueError(
+                "api_key_default_ttl_hours must not exceed api_key_max_ttl_hours"
+            )
+        from libref.services.infra.auth import validate_origin_config
+
+        validate_origin_config(self.allowed_origins)
         return self
 
     @model_validator(mode="after")
@@ -562,6 +575,8 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "allowed_hosts",
             "allowed_origins",
             "bootstrap_admin_key",
+            "api_key_default_ttl_hours",
+            "api_key_max_ttl_hours",
         }
     ),
     "quota": frozenset(

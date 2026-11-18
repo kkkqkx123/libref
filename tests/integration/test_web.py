@@ -46,6 +46,7 @@ def _seed(conn) -> None:
 
 
 def _client(conn, monkeypatch, tmp_path, **overrides):
+    overrides.setdefault("auth_mode", "dev")
     settings = make_settings(monkeypatch, tmp_path, **overrides)
     app = build_web_app(conn, settings)
     from fastapi.testclient import TestClient
@@ -282,16 +283,27 @@ def test_link_stats_routes(tmp_path, monkeypatch) -> None:
 
 
 def test_enforced_mode_api_key_auth(tmp_path, monkeypatch) -> None:
-    from libref.services.infra.auth import create_principal, issue_api_key
+    from libref.services.infra.auth import (
+        create_principal,
+        dev_principal,
+        issue_api_key,
+    )
 
     monkeypatch.chdir(tmp_path)
     conn = _open(tmp_path, "auth.db")
     try:
         _seed(conn)
+        settings = make_settings(monkeypatch, tmp_path, auth_mode="enforced")
+        caller = dev_principal(settings)
         pid = create_principal(
-            conn, tenant_id="default", kind="human", name="op", roles=["developer"]
+            conn,
+            caller=caller,
+            tenant_id="default",
+            kind="human",
+            name="op",
+            roles=["developer"],
         )
-        _, raw = issue_api_key(conn, principal_id=pid)
+        _, raw = issue_api_key(conn, caller=caller, settings=settings, principal_id=pid)
         client = _client(conn, monkeypatch, tmp_path, auth_mode="enforced")
         assert client.get("/catalog").status_code == 401
         assert (

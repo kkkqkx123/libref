@@ -151,19 +151,23 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### GET /admin/keys
 
-列出凭据，需 `admin:keys`。密钥明文不回显。
+列出凭据，需 `admin:keys`。普通管理员只看本租户，平台管理员可看全部；密钥明文不回显，列举动作记审计。
 
 ### POST /admin/keys
 
-签发凭据，需 `admin:keys`。明文仅返回一次。
+签发凭据，需 `admin:keys`。主体租户与 Key scope 都不得超过调用者权限；未知 scope 与越权 scope 返回请求错误。明文仅返回一次，默认有效期与最大有效期由 `[auth]` 控制。
 
 ### DELETE /admin/keys/{key_id}
 
-吊销凭据，需 `admin:keys`。未知编号返回未找到。
+吊销凭据，需 `admin:keys`。只能吊销本租户主体的 Key，平台管理员不受此限；未知编号返回未找到。
+
+### DELETE /admin/principals/{principal_id}/keys
+
+吊销一个主体的全部有效 Key，需 `admin:keys`。返回吊销数量；主体不可见时返回未找到。
 
 ### POST /admin/config/refresh
 
-重建冻结快照，需 `admin:config`。返回新旧指纹；上游密钥改环境变量后调本接口生效。
+重建冻结快照，需 `admin:config`。返回新旧指纹；上游密钥改环境变量后调本接口生效。配置解析或运行时重建失败返回错误并记审计，不再静默返回成功。
 
 ## 探查
 
@@ -187,7 +191,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 完整参数定义见同目录 `config.md`（真相源），以下为按功能归纳。行为由配置决定，优先级为显式参数、环境变量、配置文件、内置默认。密钥只走环境变量。
 
-* 服务暴露：`web_host/web_port` 为组合 `serve` 的唯一监听，`mcp_path` 为 `/mcp` 挂载路径；`serve-mcp --http` 仍用 `mcp_host/mcp_port`。鉴权走顶层中间件，健康检查除外；`[mcp.auth]` 旧令牌为过渡保留。
+* 服务暴露：`web_host/web_port` 为组合 `serve` 的唯一监听，`mcp_path` 为 `/mcp` 挂载路径。HTTP 与 `/mcp` 共用顶层鉴权中间件，健康检查与静态资源除外；`allowed_origins` 按来源精确匹配，非浏览器请求可不带 Origin。
 * 检索问答：同 MCP 的向量、嵌入、精排、融合、片段、窗口、问答与发现注册表各键，详尽预设强制开窗口。
 * 洞察：`evidence_per_file_limit/evidence_dedup` 证据默认，`cluster_threshold/cluster_min_size` 分组默认。
 * 写入：抓取并发与超时、范围、分块、嵌入与向量后端各键，`snapshot_*` 快照与 `repos_dir/repos_quota_mb` 配额。

@@ -34,21 +34,22 @@ cp deploy/libref.toml.example libref.toml
 ## enforced 模式
 
 1. 复制 `env.prod.example` 为 `.env`，设置 `LIBREF_AUTH_MODE=enforced`。
-2. 首次启动前用 `openssl rand -hex 32` 生成 `LIBREF_BOOTSTRAP_ADMIN_KEY`；服务启动时幂等创建首个系统管理员主体与其 API Key，解决「空库无管理员」的死锁。之后凭据签发/吊销全部走 `POST /admin/keys`。
+2. 首次启动前用 `openssl rand -hex 32` 生成 `LIBREF_BOOTSTRAP_ADMIN_KEY`；服务启动时幂等创建首个平台管理员主体与其 API Key，解决「空库无管理员」的死锁。之后凭据签发/吊销全部走 `POST /admin/keys`。
 3. 把签发给 CLI 或外部 AI 助手的 Key 填入 `LIBREF_CLIENT_API_KEY`，`LIBREF_BASE_URL` 指向服务地址；CLI 用 `--remote` 时每个请求带 `Authorization: Bearer <key>`。
-4. 非回环部署必须设置 `LIBREF_ALLOWED_HOSTS` / `LIBREF_ALLOWED_ORIGINS`，它们传给 MCP 2.3.0 的 `TransportSecuritySettings` 做 DNS rebinding 保护；浏览器客户端还需放行 `Mcp-*` 请求头并暴露 `Mcp-Session-Id`。
+4. 非回环部署必须设置 `LIBREF_ALLOWED_HOSTS` / `LIBREF_ALLOWED_ORIGINS`。前者供 MCP 传输层做 DNS rebinding 保护；后者同时用于鉴权来源精确匹配与 CORS，禁止通配符和带路径的来源。浏览器客户端还需放行 `Mcp-*` 请求头并暴露 `Mcp-Session-Id`。
 5. 外部流量经反向代理终止 TLS，服务本身只绑回环或私有网络。
 
-## 四类主体与 scope
+## 主体与 scope
 
 | 角色 | 主体类型 | 主要 scope |
 |---|---|---|
 | 开发者 | human | `read`、`feedback:write` |
 | 知识库管理员 | human | `read`、`review:read/write`、`feedback:read/resolve` |
-| 系统管理员 | human（平台级） | `read`、`ingest:write`、`jobs:write`、`admin:keys`、`admin:config` |
+| 系统管理员 | human | `read`、`ingest:write`、`jobs:write`、`admin:keys`、`admin:config` |
+| 平台管理员 | human（首次引导） | 全部 scope，含 `platform:admin` 跨租户权限 |
 | 外部 AI 助手 | service（机器主体，无人工登录） | `read`；可按需追加 `feedback:write` |
 
-完整的角色到端点/工具映射见 `docs/plan/multi-user-production-deployment.md` §5.2。外部 AI 助手由系统管理员签发 Key，凭据即身份，无密码、无会话。
+签发 Key 时 scope 必须是调用者已有 scope 的子集，主体租户必须属于调用者可管理范围；只有平台管理员能创建 `*` 租户主体或跨租户签发。凭据即身份，无密码、无会话。
 
 ## 密钥边界
 
@@ -64,4 +65,4 @@ cp deploy/libref.toml.example libref.toml
 
 ## 启动命令
 
-单一组合 `libref serve` 同进程提供 Web 路由与 `/mcp`（Web 在前、`Mount("/")` 在后，顶层 `lifespan` 持有 `session_manager`）；`--stdio` 切到标准输入输出供本地客户端。旧 `serve-mcp/serve-web` 保留兼容，其中 `serve-mcp --http` 使用 `[mcp]` 的监听配置，组合 `serve` 使用 `[web]` 的监听配置。详见 `docs/app/cli.md`。
+单一组合 `libref serve` 同进程提供 Web 路由与 `/mcp`（Web 在前、`Mount("/")` 在后，顶层 `lifespan` 持有 `session_manager`）；`--stdio` 切到标准输入输出供本地客户端。`serve-mcp` 只保留标准输入输出，流式 HTTP 统一由 `serve` 提供。详见 `docs/app/cli.md`。

@@ -30,11 +30,19 @@ def spa_dir_for(settings) -> Path | None:
 class SpaMiddleware(BaseHTTPMiddleware):
     """Serve the shell for browser navigations that match no API route."""
 
-    def __init__(self, app: Any, *, directory: Path, mcp_prefix: str) -> None:
+    def __init__(
+        self,
+        app: Any,
+        *,
+        directory: Path,
+        mcp_prefix: str,
+        api_paths: set[str] | frozenset[str] | None = None,
+    ) -> None:
         super().__init__(app)
         self._directory = directory
         self._index = directory / "index.html"
         self._mcp_prefix = "/" + str(mcp_prefix or "/mcp").strip("/")
+        self._api_paths = frozenset(api_paths or ())
 
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -43,9 +51,10 @@ class SpaMiddleware(BaseHTTPMiddleware):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             return response
         if (
-            response.status_code == 404
+            response.status_code in (401, 404)
             and request.method == "GET"
             and "text/html" in request.headers.get("accept", "")
+            and path not in self._api_paths
             and path != self._mcp_prefix
             and not path.startswith(self._mcp_prefix + "/")
             and self._index.is_file()

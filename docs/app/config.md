@@ -183,18 +183,20 @@
 | mcp_path | 字符串 | /mcp | LIBREF_MCP_PATH | MCP 端点路径 |
 | mcp_enabled_tools | 名单/空 | 空（全量） | LIBREF_MCP_ENABLED_TOOLS | 工具白名单，空数组表示零工具 |
 | mcp_disabled_tools | 名单 | 空 | LIBREF_MCP_DISABLED_TOOLS | 工具黑名单，优先于白名单 |
-| auth_mode | 字面量 | dev | LIBREF_AUTH_MODE | `dev/enforced`，dev 非回环拒绝启动 |
-| dev_principal | 字符串 | dev-operator | LIBREF_DEV_PRINCIPAL | dev 模式注入主体名 |
-| allowed_hosts | 名单/空 | 空 | LIBREF_ALLOWED_HOSTS | 非回环部署的传输安全主机表 |
-| allowed_origins | 名单/空 | 空 | LIBREF_ALLOWED_ORIGINS | 非回环部署的传输安全来源表 |
-| bootstrap_admin_key | 密钥/空 | 空 | LIBREF_BOOTSTRAP_ADMIN_KEY | 首次引导系统管理员，明文不落文件 |
+| auth_mode | 字面量 | enforced | LIBREF_AUTH_MODE | `dev/enforced`，默认强制鉴权；dev 必须显式开启且只许回环 |
+| dev_principal | 字符串 | dev-operator | LIBREF_DEV_PRINCIPAL | dev 模式注入的主体名 |
+| allowed_hosts | 名单/空 | 空 | LIBREF_ALLOWED_HOSTS | MCP 传输安全的主机表 |
+| allowed_origins | 名单/空 | 空 | LIBREF_ALLOWED_ORIGINS | 浏览器来源精确允许表，禁止通配符与路径 |
+| bootstrap_admin_key | 密钥/空 | 空 | LIBREF_BOOTSTRAP_ADMIN_KEY | 首次引导平台管理员，明文不落文件 |
+| api_key_default_ttl_hours | 正数 | 168 | LIBREF_API_KEY_DEFAULT_TTL_HOURS | 未指定过期时间的 Key 默认有效期 |
+| api_key_max_ttl_hours | 正数 | 8760 | LIBREF_API_KEY_MAX_TTL_HOURS | Key 最大有效期，默认有效期不得超过此值 |
 | base_url | 字符串/空 | 空 | LIBREF_BASE_URL | 远程模式服务端地址 |
 | client_api_key | 密钥/空 | 空 | LIBREF_CLIENT_API_KEY | 远程模式 Bearer Key，只走环境 |
 | instance_id | 字符串 | libref-1 | LIBREF_INSTANCE_ID | DB 认领与版本锁的进程标识 |
 | web_host | 字符串 | 127.0.0.1 | LIBREF_WEB_HOST | Web 监听地址 |
 | web_port | 整数（1–65535） | 8001 | LIBREF_WEB_PORT | Web 监听端口 |
 
-未知工具名启动即报错。鉴权语义两出口一致，健康检查除外。
+未知工具名启动即报错。所有 HTTP 出口共用一套鉴权：enforced 下每请求需 Bearer Key，带 Origin 的浏览器请求还必须命中 `allowed_origins`；健康检查与静态资源除外。开发模式只供本机显式使用，反向代理到回环地址不改变模式。
 
 ## 治理（[retention]）
 

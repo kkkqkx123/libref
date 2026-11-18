@@ -3,7 +3,7 @@
 #   cp libref.example.toml libref.toml
 #
 # 加载优先级：命令行显式覆盖 > 环境变量（含 .env） > 本文件 > 内置默认值。
-# 密钥（embedding_api_key、chat_api_key、mcp_token、discovery_github_token）禁止写在本文件，须走环境变量或 .env，
+# 密钥（embedding_api_key、chat_api_key、bootstrap_admin_key、client_api_key、discovery_github_token）禁止写在本文件，须走环境变量或 .env，
 # 写了会直接报错。文件中的相对路径按本文件所在目录解析并冻结为绝对路径；
 # 环境变量中的相对路径按启动目录解析一次并冻结。生产建议全部使用绝对路径。
 # 未列出的键保持内置默认值（三路径缺省均为家目录下绝对路径，相互独立）；
@@ -178,22 +178,19 @@ mcp_path = "/mcp"
 # mcp_disabled_tools = ["web_search", "github_search"]
 
 [auth]
-# Staged auth config, validated only until P1; enforcement lands with services rollout.
+# 默认强制鉴权；dev 仅供本机显式开启，非回环启动会被拒绝。
 # auth_mode = "enforced"
 # dev_principal = "dev-operator"
 # allowed_hosts = ["libref.internal"]
+# 浏览器来源精确匹配，禁止通配符与带路径的来源。
 # allowed_origins = ["https://app.internal"]
+# api_key_default_ttl_hours = 168
+# api_key_max_ttl_hours = 8760
 # bootstrap_admin_key must come from env, never here.
 
 [client]
 # base_url = "https://libref.internal"
 # client_api_key must come from env, never here.
-
-[mcp.auth]
-# 接口鉴权：令牌只走环境变量 LIBREF_MCP_TOKEN，不进文件；
-# 对外暴露或显式开启时必须配令牌，否则拒绝启动。
-# mcp_token 经环境变量注入，此处只登记开关。
-mcp_require_auth = false
 
 [logging]
 # 运行时日志：级别与格式，文件槽缺省只走标准错误

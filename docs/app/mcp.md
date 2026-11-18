@@ -2,7 +2,7 @@
 
 MCP 出口面向模型，共二十一个工具。实现在 `src/libref/mcp_server/server.py`，组装时按配置过滤可见工具，未知工具名启动即报错。向量、重排与对话能力在组装处显式建立并复用于检索与问答。所有工具只做参数校验与服务调用，不抛协议层错误，失败以载荷内错误返回。写操作按 scope 校验，缺凭据返回未授权，缺 scope 返回禁止。
 
-传输支持标准输入输出与流式 HTTP 两种形态。`serve-mcp --http` 默认绑定回环，走 `[mcp]` 监听配置；组合 `serve` 的 `/mcp` 与 Web 共用 `[web]` 监听。dev 模式跳过 key 校验并注入固定主体，非回环 dev 直接拒绝启动；enforced 模式每请求需 `Authorization: Bearer`。工具可见性由允许名单减去拒绝名单决定，缺省全部可见，空允许名单表示零工具。
+标准输入输出供本机客户端使用，由命令直接注入本地平台主体；流式 HTTP 只由组合 `serve` 的 `/mcp` 提供，与 Web 共用 `[web]` 监听和鉴权中间件。dev 模式必须显式开启且只许回环；enforced 模式每请求需 `Authorization: Bearer`，浏览器来源另需在 `allowed_origins` 中精确登记。工具可见性由允许名单减去拒绝名单决定，缺省全部可见，空允许名单表示零工具。
 
 错误信封统一为 `error/message`，错误名取 `invalid/not_found/conflict/unavailable/failed` 与注册表分类错误。列表类返回条目加总数，检索与问答附带降级标记与原因，检索在空命中且要求建议时附带注册表建议。
 
@@ -134,7 +134,7 @@ MCP 出口面向模型，共二十一个工具。实现在 `src/libref/mcp_serve
 完整参数定义见同目录 `config.md`（真相源），以下为按功能归纳。组装与行为由配置决定，优先级为显式参数、环境变量、配置文件、内置默认。密钥只走环境变量。
 
 * 可见性：`mcp_enabled_tools` 允许名单（缺省全量，空数组表示零工具），`mcp_disabled_tools` 拒绝名单（拒绝优先于允许）。未知工具名启动即报错。
-* 传输与鉴权：`serve-mcp --http` 用 `mcp_host/mcp_port/mcp_path`；组合 `serve` 的 `/mcp` 与 Web 共用 `web_host/web_port`，挂载路径取 `mcp_path`。`[auth]` 的 `auth_mode/dev_principal/allowed_hosts/allowed_origins` 决定 dev 与 enforced 行为，`bootstrap_admin_key/client_api_key` 只走环境；enforced 下只认 API Key。
+* 传输与鉴权：`serve-mcp` 只走标准输入输出；组合 `serve` 的 `/mcp` 与 Web 共用 `web_host/web_port`，挂载路径取 `mcp_path`。`[auth]` 的 `auth_mode/dev_principal/allowed_hosts/allowed_origins` 决定 dev 与 enforced 行为，`bootstrap_admin_key/client_api_key` 只走环境；enforced 下只认 API Key。
 * 检索问答：`vector_backend/simvec_dir/simvec_lib/qdrant_url/vector_collection/qdrant_timeout` 决定向量是否可用；`embedding_model/embedding_dim/embedding_api_base` 决定向量语义（密钥 `embedding_api_key` 只走环境）。`rerank_model/rerank_enabled/rerank_candidate_limit/rerank_top_n/rerank_truncate` 决定精排是否启用与窗口。`rrf_k/rrf_w_fts/rrf_w_vec`、`freq_alpha/cluster_alpha`、`candidate_multiplier/assemble_multiplier/assemble_min`、`retrieval_max_versions`、`fts_w_content/fts_w_title/fts_w_url/fts_w_path`、`cluster_threshold/cluster_min_size` 决定融合与加权。`snippet_radius/snippet_cap`（前者须小于后者）、`window_preview_cap`、`retriever_window_radius/retriever_expand_window` 决定片段与窗口默认，详尽预设强制开窗口。`material_limit/answer_total_budget` 决定问答材料预算，`chat_model/chat_enabled/chat_api_base/chat_timeout/chat_enable_thinking` 决定生成（密钥 `chat_api_key` 只走环境）。
 * 发现解析：`discovery_enabled/discovery_topn/discovery_cache_ttl_days/discovery_offline`，`registry_*` 解析缓存、离线、私有、镜像、地址覆盖与有效期，令牌 `discovery_github_token` 只走环境。
 * 洞察：`evidence_per_file_limit/evidence_dedup` 证据默认，`induction_enabled/induction_topn/induction_batch/induction_prompt_version` 标签归纳，`cluster_threshold/cluster_min_size` 分组默认。

@@ -40,7 +40,6 @@ from libref.cli.ops_commands import (
     cmd_review,
     cmd_serve,
     cmd_serve_mcp,
-    cmd_serve_web,
     cmd_vectors_optimize,
     cmd_vectors_status,
 )
@@ -405,17 +404,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_mcp = sub.add_parser(
         "serve-mcp",
-        help="Start the MCP server (stdio by default)",
+        help="Start the MCP server over stdio",
         parents=[_config_parent],
     )
-    p_mcp.add_argument(
-        "--http",
-        action="store_true",
-        help="Use the Streamable HTTP transport instead (binds loopback only by default)",
-    )
-    p_mcp.add_argument("--host", default=None, help="HTTP listen address")
-    p_mcp.add_argument("--port", type=int, default=None, help="HTTP listen port")
-    p_mcp.add_argument("--path", default=None, help="HTTP endpoint path")
     p_mcp.add_argument(
         "--enabled-tools",
         default=None,
@@ -427,15 +418,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated tool denylist; defaults to the config value",
     )
     p_mcp.set_defaults(func=cmd_serve_mcp)
-
-    p_web = sub.add_parser(
-        "serve-web",
-        help="Start the Web server (binds loopback only by default)",
-        parents=[_config_parent],
-    )
-    p_web.add_argument("--host", default=None, help="HTTP listen address")
-    p_web.add_argument("--port", type=int, default=None, help="HTTP listen port")
-    p_web.set_defaults(func=cmd_serve_web)
 
     p_serve = sub.add_parser(
         "serve",

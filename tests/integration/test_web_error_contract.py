@@ -53,7 +53,7 @@ def _seed(conn) -> None:
 
 
 def _client(conn, monkeypatch, tmp_path):
-    return build_web_app(conn, make_settings(monkeypatch, tmp_path))
+    return build_web_app(conn, make_settings(monkeypatch, tmp_path, auth_mode="dev"))
 
 
 @pytest.fixture()

@@ -128,7 +128,10 @@ def build_mcp_server(
         found = current_principal.get()
         if found is not None:
             return found
-        if str(getattr(resolve_settings, "auth_mode", "dev") or "dev") == "dev":
+        if (
+            str(getattr(resolve_settings, "auth_mode", "enforced") or "enforced")
+            == "dev"
+        ):
             return dev_principal(resolve_settings)
         return None
 

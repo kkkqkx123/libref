@@ -48,7 +48,7 @@ def _seed(conn) -> None:
 
 
 def _client(conn, monkeypatch, tmp_path):
-    settings = make_settings(monkeypatch, tmp_path)
+    settings = make_settings(monkeypatch, tmp_path, auth_mode="dev")
     app = build_web_app(conn, settings)
     from fastapi.testclient import TestClient
 

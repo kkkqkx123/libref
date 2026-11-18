@@ -1,4 +1,4 @@
-"""MCP serve-mcp Streamable HTTP handshake smoke test (subprocess + SDK HTTP client, no network)."""
+"""Combined-serve MCP Streamable HTTP handshake smoke test (subprocess + SDK client)."""
 
 from __future__ import annotations
 
@@ -86,14 +86,18 @@ def test_serve_mcp_http_handshake(tmp_path, monkeypatch):
         pytest.skip(f"server binary missing: {SERVER_BIN}")
     db_path = tmp_path / "http.db"
     _seed_db(db_path)
-    env = {**os.environ, "LIBREF_DB_PATH": str(db_path)}
+    env = {
+        **os.environ,
+        "LIBREF_DB_PATH": str(db_path),
+        "LIBREF_AUTH_MODE": "dev",
+    }
     last: Exception | None = None
     for _ in range(3):
         port = _free_port()
         log_path = tmp_path / f"server-{port}.log"
         with open(log_path, "wb") as log:
             proc = subprocess.Popen(
-                [str(SERVER_BIN), "serve-mcp", "--http", "--port", str(port)],
+                [str(SERVER_BIN), "serve", "--port", str(port)],
                 env=env,
                 cwd=str(tmp_path),
                 stdout=log,

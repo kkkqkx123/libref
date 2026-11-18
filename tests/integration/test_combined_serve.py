@@ -10,6 +10,7 @@ from starlette.applications import Starlette
 from libref.db import apply_migrations, open_db
 from libref.services.infra.context import build_context
 from libref.web import build_web_app
+from libref.web.middleware import AuthMiddleware
 from libref.web.spa import SpaMiddleware, spa_dir_for
 from tests.conftest import make_settings
 
@@ -21,6 +22,7 @@ def _combined(tmp_path, monkeypatch, **overrides):
     db_path = tmp_path / "combined.db"
     conn = open_db(db_path, check_same_thread=False)
     apply_migrations(conn)
+    overrides.setdefault("auth_mode", "dev")
     settings = make_settings(monkeypatch, tmp_path, db_path=str(db_path), **overrides)
     ctx = build_context(settings)
     web_app = build_web_app(conn, settings, context=ctx)
@@ -28,6 +30,7 @@ def _combined(tmp_path, monkeypatch, **overrides):
     combined = Starlette(routes=routes)
     combined.state.context = ctx
     combined.state.settings = settings
+    combined.add_middleware(AuthMiddleware, context=ctx)
     combined.add_middleware(AsyncExitStackMiddleware)
     spa_directory = spa_dir_for(settings)
     if spa_directory is not None:
@@ -35,6 +38,11 @@ def _combined(tmp_path, monkeypatch, **overrides):
             SpaMiddleware,
             directory=spa_directory,
             mcp_prefix=str(getattr(settings, "mcp_path", "/mcp") or "/mcp"),
+            api_paths={
+                str(getattr(route, "path", ""))
+                for route in routes
+                if getattr(route, "path", "")
+            },
         )
     return TestClient(combined)
 

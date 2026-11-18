@@ -1,21 +1,30 @@
 """Request identity for multi-user service.
 
 Principals carry roles, API keys carry hashes only, and effective scopes are
-the union of role scopes with key scopes. Secrets never round-trip.
+the union of role scopes with key scopes. Secrets never round-trip. The module
+owns the single authentication path used by every HTTP exit.
 """
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import hmac
+import ipaddress
 import json
 import secrets
 import time
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 from libref.db.contract import MetadataSession
 
+PLATFORM_ROLE = "platform_admin"
+PLATFORM_SCOPE = "platform:admin"
+GLOBAL_TENANT = "*"
+
 ROLE_SCOPES: dict[str, frozenset[str]] = {
+    "external": frozenset({"read"}),
     "developer": frozenset({"read", "feedback:write"}),
     "kb_admin": frozenset(
         {"read", "review:read", "review:write", "feedback:read", "feedback:resolve"}
@@ -23,10 +32,35 @@ ROLE_SCOPES: dict[str, frozenset[str]] = {
     "sys_admin": frozenset(
         {"read", "ingest:write", "jobs:write", "admin:keys", "admin:config"}
     ),
-    "external": frozenset({"read"}),
+    PLATFORM_ROLE: frozenset(
+        {
+            "read",
+            "feedback:write",
+            "review:read",
+            "review:write",
+            "feedback:read",
+            "feedback:resolve",
+            "ingest:write",
+            "jobs:write",
+            "admin:keys",
+            "admin:config",
+            PLATFORM_SCOPE,
+        }
+    ),
 }
 
+KNOWN_SCOPES: frozenset[str] = frozenset().union(*ROLE_SCOPES.values())
 READ_SCOPES = frozenset({"read"})
+
+
+class AuthDenied(Exception):
+    """Authentication or authorization failure with a stable HTTP code."""
+
+    def __init__(self, status: int, code: str, detail: str) -> None:
+        super().__init__(detail)
+        self.status = status
+        self.code = code
+        self.detail = detail
 
 
 @dataclass
@@ -40,6 +74,25 @@ class Principal:
     roles: list[str] = field(default_factory=list)
     scopes: set[str] = field(default_factory=set)
     status: str = "active"
+
+    def has(self, scope: str) -> bool:
+        return scope in self.scopes
+
+    def can_administer(self, tenant_id: str) -> bool:
+        """Whether this caller may manage identities for the target tenant."""
+        if self.has(PLATFORM_SCOPE):
+            return True
+        return tenant_id == self.tenant_id and tenant_id != GLOBAL_TENANT
+
+
+def _system_caller() -> Principal:
+    return Principal(
+        tenant_id=GLOBAL_TENANT,
+        kind="system",
+        name="bootstrap",
+        roles=[PLATFORM_ROLE],
+        scopes=set(ROLE_SCOPES[PLATFORM_ROLE]),
+    )
 
 
 def scopes_for_roles(roles: list[str]) -> set[str]:
@@ -59,6 +112,113 @@ def verify_hash(raw: str, stored: str) -> bool:
     """Compare a presented key against its hash in constant time."""
     candidate = hash_key(raw)
     return hmac.compare_digest(candidate, stored)
+
+
+def verify_key(raw: str | None, stored: str | None) -> bool:
+    """Compare a presented key against its stored hash, rejecting empty values."""
+    if not raw or not stored:
+        return False
+    return verify_hash(raw, stored)
+
+
+def is_loopback_host(host: str) -> bool:
+    """Whether the listen address is a local loopback; failures count as exposed."""
+    name = (host or "").strip().lower()
+    if name == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
+def parse_bearer(authorization: str | None) -> str | None:
+    """Extract a bearer token; malformed headers miss."""
+    if not authorization:
+        return None
+    scheme, _, credential = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not credential.strip():
+        return None
+    return credential.strip()
+
+
+def _origin_key(raw: str) -> tuple[str, str, int]:
+    parts = urlsplit(raw.strip())
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ValueError(f"invalid origin: {raw}")
+    if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username:
+        raise ValueError(f"invalid origin: {raw}")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    return parts.scheme, parts.hostname.lower().rstrip("."), port
+
+
+def validate_origin_config(origins: list[str] | None) -> None:
+    """Reject wildcard or malformed origins before they can weaken request checks."""
+    for raw in origins or []:
+        text = str(raw).strip()
+        if text == "*":
+            raise ValueError("allowed_origins must not contain '*'")
+        _origin_key(text)
+
+
+def is_allowed_origin(origin: str | None, allowed_origins: list[str] | None) -> bool:
+    """Exact origin matching; requests without an Origin are non-browser calls."""
+    if not origin:
+        return True
+    try:
+        presented = _origin_key(origin)
+    except ValueError:
+        return False
+    return any(presented == _origin_key(str(item)) for item in (allowed_origins or []))
+
+
+def check_startup(
+    host: str,
+    *,
+    auth_mode: str = "enforced",
+    bootstrap_key: str | None = None,
+    has_principals: bool = False,
+) -> None:
+    """Refuse unsafe startups: dev on non-loopback, or enforced with no bootstrap."""
+    mode = (auth_mode or "enforced").strip() or "enforced"
+    if mode == "dev":
+        if not is_loopback_host(host):
+            raise ValueError(
+                f"refusing dev mode on non-loopback {host}: "
+                "use enforced mode with API keys"
+            )
+        return
+    if mode == "enforced":
+        if not bootstrap_key and not has_principals:
+            raise ValueError(
+                "refusing enforced startup with no bootstrap key and no principals: "
+                "set LIBREF_BOOTSTRAP_ADMIN_KEY for first boot"
+            )
+        return
+    raise ValueError(f"unknown auth_mode: {mode}")
+
+
+def authenticate_request(
+    conn: MetadataSession,
+    settings,
+    *,
+    authorization: str | None,
+    origin: str | None,
+) -> Principal:
+    """Resolve one request to a principal; the only HTTP authentication entry."""
+    mode = str(getattr(settings, "auth_mode", "enforced") or "enforced")
+    if mode == "dev":
+        return dev_principal(settings)
+    allowed = list(getattr(settings, "allowed_origins", None) or [])
+    if not is_allowed_origin(origin, allowed):
+        raise AuthDenied(403, "origin_forbidden", "origin not allowed")
+    raw = parse_bearer(authorization)
+    if raw is None:
+        raise AuthDenied(401, "unauthorized", "unauthorized")
+    principal = lookup_principal(conn, raw)
+    if principal is None:
+        raise AuthDenied(401, "unauthorized", "unauthorized")
+    return principal
 
 
 def _parse_json_list(raw: str | None) -> list[str]:
@@ -94,28 +254,97 @@ def ensure_auth_tables(conn: MetadataSession) -> None:
     conn.commit()
 
 
-def _columns(conn: MetadataSession, table: str) -> set[str]:
-    if hasattr(conn, "table_columns"):
-        return conn.table_columns(table)
-    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+def _validate_roles(roles: list[str]) -> list[str]:
+    unknown = sorted({str(r) for r in (roles or []) if str(r) not in ROLE_SCOPES})
+    if unknown:
+        raise ValueError(f"unknown roles: {','.join(unknown)}")
+    return [str(r) for r in (roles or [])]
 
 
 def create_principal(
     conn: MetadataSession,
     *,
+    caller: Principal,
     tenant_id: str,
     kind: str,
     name: str,
     roles: list[str],
 ) -> int:
-    """Insert a principal row and return its id; unknown roles fail fast."""
+    """Insert a principal row; tenant and roles are constrained by the caller."""
     ensure_auth_tables(conn)
-    unknown = [r for r in (roles or []) if str(r) not in ROLE_SCOPES]
-    if unknown:
-        raise ValueError(f"unknown roles: {','.join(sorted(set(map(str, unknown))))}")
+    target = (tenant_id or "").strip()
+    if not target:
+        raise ValueError("tenant_id is required")
+    if not caller.can_administer(target):
+        raise ValueError("caller cannot administer target tenant")
+    checked_roles = _validate_roles(roles)
+    if not caller.has(PLATFORM_SCOPE):
+        excess = [r for r in checked_roles if r not in caller.roles]
+        if excess:
+            raise ValueError(f"caller cannot grant roles: {','.join(excess)}")
     cur = conn.execute(
         "INSERT INTO principals(tenant_id, kind, name, roles) VALUES(?,?,?,?)",
-        (tenant_id, kind, name, json.dumps(list(roles), ensure_ascii=False)),
+        (target, kind, name, json.dumps(checked_roles, ensure_ascii=False)),
+    )
+    conn.commit()
+    assert cur.lastrowid is not None
+    return int(cur.lastrowid)
+
+
+def _principal_row(conn: MetadataSession, principal_id: int) -> tuple | None:
+    return conn.execute(
+        "SELECT id, tenant_id, kind, name, roles, status FROM principals WHERE id=?",
+        (principal_id,),
+    ).fetchone()
+
+
+def validate_key_scopes(scopes: list[str] | None, caller: Principal) -> list[str]:
+    """Require known scopes that the caller already holds."""
+    requested = sorted({str(s) for s in (scopes or [])})
+    unknown = [s for s in requested if s not in KNOWN_SCOPES]
+    if unknown:
+        raise ValueError(f"unknown scopes: {','.join(unknown)}")
+    excess = [s for s in requested if s not in caller.scopes]
+    if excess:
+        raise ValueError(f"caller cannot grant scopes: {','.join(excess)}")
+    return requested
+
+
+def _expiry(settings, expires_at: float | None) -> float:
+    from libref.config import setting_or_default
+
+    default_hours = float(setting_or_default(settings, "api_key_default_ttl_hours"))
+    max_hours = float(setting_or_default(settings, "api_key_max_ttl_hours"))
+    now = time.time()
+    deadline = now + max_hours * 3600.0
+    value = now + default_hours * 3600.0 if expires_at is None else float(expires_at)
+    if not value <= deadline:
+        raise ValueError("expires_at exceeds the maximum key lifetime")
+    return value
+
+
+def _insert_key(
+    conn: MetadataSession,
+    *,
+    caller: Principal,
+    settings,
+    principal_id: int,
+    raw: str,
+    scopes: list[str],
+    expires_at: float | None,
+) -> int:
+    value = _expiry(settings, expires_at)
+    cur = conn.execute(
+        "INSERT INTO api_keys(principal_id, key_hash, key_prefix, scopes, expires_at, created_by)"
+        " VALUES(?,?,?,?,?,?)",
+        (
+            principal_id,
+            hash_key(raw),
+            raw[:12],
+            json.dumps(scopes, ensure_ascii=False),
+            value,
+            caller.id,
+        ),
     )
     conn.commit()
     assert cur.lastrowid is not None
@@ -125,35 +354,45 @@ def create_principal(
 def issue_api_key(
     conn: MetadataSession,
     *,
+    caller: Principal,
+    settings,
     principal_id: int,
     scopes: list[str] | None = None,
-    created_by: int | None = None,
     expires_at: float | None = None,
 ) -> tuple[int, str]:
-    """Mint a key for one principal; only the returned raw value is usable."""
+    """Mint a key bounded by the caller's scopes; only the raw value is usable."""
     ensure_auth_tables(conn)
+    target = _principal_row(conn, principal_id)
+    if target is None:
+        raise ValueError(f"unknown principal: {principal_id}")
+    if not caller.can_administer(str(target[1])):
+        raise ValueError("caller cannot administer target principal")
+    checked_scopes = validate_key_scopes(scopes, caller)
     raw = f"libref_{secrets.token_hex(24)}"
-    prefix = raw[:12]
-    cur = conn.execute(
-        "INSERT INTO api_keys(principal_id, key_hash, key_prefix, scopes, expires_at, created_by)"
-        " VALUES(?,?,?,?,?,?)",
-        (
-            principal_id,
-            hash_key(raw),
-            prefix,
-            json.dumps(list(scopes or []), ensure_ascii=False),
-            float(expires_at) if expires_at is not None else None,
-            created_by,
-        ),
+    key_id = _insert_key(
+        conn,
+        caller=caller,
+        settings=settings,
+        principal_id=principal_id,
+        raw=raw,
+        scopes=checked_scopes,
+        expires_at=expires_at,
     )
-    conn.commit()
-    assert cur.lastrowid is not None
-    return int(cur.lastrowid), raw
+    return key_id, raw
 
 
-def revoke_api_key(conn: MetadataSession, key_id: int) -> None:
-    """Mark a key revoked; revoked keys stop authenticating immediately."""
+def revoke_api_key(conn: MetadataSession, *, caller: Principal, key_id: int) -> None:
+    """Mark a key revoked; the key must belong to a tenant the caller owns."""
     ensure_auth_tables(conn)
+    row = conn.execute(
+        "SELECT p.tenant_id FROM api_keys k JOIN principals p ON p.id=k.principal_id"
+        " WHERE k.id=?",
+        (key_id,),
+    ).fetchone()
+    if row is None:
+        raise ValueError(f"unknown api key: {key_id}")
+    if not caller.can_administer(str(row[0])):
+        raise ValueError("caller cannot administer target key")
     cur = conn.execute(
         "UPDATE api_keys SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
         (time.time(), key_id),
@@ -163,11 +402,28 @@ def revoke_api_key(conn: MetadataSession, key_id: int) -> None:
         raise ValueError(f"unknown api key: {key_id}")
 
 
+def revoke_principal_keys(
+    conn: MetadataSession, *, caller: Principal, principal_id: int
+) -> int:
+    """Revoke every active key of one principal and return the affected count."""
+    ensure_auth_tables(conn)
+    row = _principal_row(conn, principal_id)
+    if row is None:
+        raise ValueError(f"unknown principal: {principal_id}")
+    if not caller.can_administer(str(row[1])):
+        raise ValueError("caller cannot administer target principal")
+    cur = conn.execute(
+        "UPDATE api_keys SET revoked_at=? WHERE principal_id=? AND revoked_at IS NULL",
+        (time.time(), principal_id),
+    )
+    conn.commit()
+    return int(cur.rowcount)
+
+
 def lookup_principal(
     conn: MetadataSession, raw_key: str, *, now: float | None = None
 ) -> Principal | None:
     """Resolve a bearer key to its principal; expired or revoked keys miss."""
-    ensure_auth_tables(conn)
     moment = time.time() if now is None else float(now)
     prefix = raw_key[:12] if len(raw_key) >= 12 else raw_key
     rows = conn.execute(
@@ -190,17 +446,13 @@ def lookup_principal(
             continue
         if not verify_hash(raw_key, str(key_hash)):
             continue
-        prow = conn.execute(
-            "SELECT id, tenant_id, kind, name, roles, status FROM principals WHERE id=?",
-            (principal_id,),
-        ).fetchone()
+        prow = _principal_row(conn, int(principal_id))
         if prow is None:
             continue
         principal = _principal_from_row(prow)
         if principal.status != "active":
             continue
-        key_scopes = set(_parse_json_list(scopes_raw))
-        principal.scopes |= key_scopes
+        principal.scopes |= set(_parse_json_list(scopes_raw))
         if last_used is None or moment - float(last_used) > 3600.0:
             conn.execute(
                 "UPDATE api_keys SET last_used_at=? WHERE id=?", (moment, key_id)
@@ -211,19 +463,19 @@ def lookup_principal(
 
 
 def dev_principal(settings) -> Principal:
-    """Fixed principal for loopback development without key checks."""
+    """Fixed principal for explicit loopback development without key checks."""
     name = str(getattr(settings, "dev_principal", "dev-operator") or "dev-operator")
     return Principal(
         id=None,
         tenant_id="default",
         kind="human",
         name=name,
-        roles=["sys_admin", "kb_admin", "developer"],
-        scopes=set().union(scopes_for_roles(["sys_admin", "kb_admin", "developer"])),
+        roles=[PLATFORM_ROLE],
+        scopes=set(ROLE_SCOPES[PLATFORM_ROLE]),
     )
 
 
-def bootstrap_admin(conn: MetadataSession, raw_key: str) -> Principal:
+def bootstrap_admin(conn: MetadataSession, raw_key: str, settings) -> Principal:
     """Idempotently create the first platform administrator from a bootstrap key."""
     ensure_auth_tables(conn)
     existing = lookup_principal(conn, raw_key)
@@ -232,32 +484,29 @@ def bootstrap_admin(conn: MetadataSession, raw_key: str) -> Principal:
     row = conn.execute("SELECT id FROM principals LIMIT 1").fetchone()
     if row is not None:
         raise ValueError("bootstrap key does not match any issued key")
+    system = _system_caller()
     principal_id = create_principal(
         conn,
-        tenant_id="*",
+        caller=system,
+        tenant_id=GLOBAL_TENANT,
         kind="human",
         name="bootstrap-admin",
-        roles=["sys_admin", "kb_admin", "developer"],
+        roles=[PLATFORM_ROLE],
     )
-    conn.execute(
-        "INSERT INTO api_keys(principal_id, key_hash, key_prefix, scopes, created_by)"
-        " VALUES(?,?,?,?,?)",
-        (
-            principal_id,
-            hash_key(raw_key),
-            raw_key[:12],
-            json.dumps(["read"], ensure_ascii=False),
-            principal_id,
-        ),
+    _insert_key(
+        conn,
+        caller=system,
+        settings=settings,
+        principal_id=principal_id,
+        raw=raw_key,
+        scopes=[PLATFORM_SCOPE],
+        expires_at=None,
     )
-    conn.commit()
     found = lookup_principal(conn, raw_key)
     assert found is not None
     return found
 
 
-import contextvars as _contextvars
-
-current_principal: _contextvars.ContextVar[Principal | None] = _contextvars.ContextVar(
+current_principal: contextvars.ContextVar[Principal | None] = contextvars.ContextVar(
     "libref_current_principal", default=None
 )

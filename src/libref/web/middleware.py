@@ -11,9 +11,12 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from libref import observe
-from libref.mcp_server.auth import is_allowed_origin, parse_bearer
 from libref.services.infra import metrics as request_metrics
-from libref.services.infra.auth import current_principal
+from libref.services.infra.auth import (
+    AuthDenied,
+    authenticate_request,
+    current_principal,
+)
 from libref.web.errors import error_body
 
 
@@ -24,11 +27,7 @@ def _public_path(path: str) -> bool:
 
 
 def _reject(status: int, detail: Any, code: str, request_id: str) -> JSONResponse:
-    """Single rejection shape: same builder as route-level ``HTTPException``.
-
-    The middleware knows its causes outright, so the code is passed in instead of
-    being re-derived from the detail text.
-    """
+    """Single rejection shape: same builder as route-level ``HTTPException``."""
     return JSONResponse(
         error_body(status, detail, request_id, code=code),
         status_code=status,
@@ -37,15 +36,78 @@ def _reject(status: int, detail: Any, code: str, request_id: str) -> JSONRespons
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
-    """Resolve bearer keys to principals and expose request context."""
+    """Resolve requests to principals and expose request context."""
 
-    def __init__(self, app: Any, context) -> None:
+    def __init__(
+        self,
+        app: Any,
+        context=None,
+        *,
+        conn=None,
+        settings=None,
+    ) -> None:
         super().__init__(app)
         self._context = context
+        self._conn = conn
+        self._settings = settings
+
+    def _context_for(self, request: Request | None):
+        if request is not None:
+            current = getattr(getattr(request.app, "state", None), "context", None)
+            if current is not None:
+                return current
+        return self._context
+
+    def _settings_snapshot(self, request: Request | None = None):
+        context = self._context_for(request)
+        if context is not None:
+            return context.settings
+        if request is not None:
+            current = getattr(getattr(request.app, "state", None), "settings", None)
+            if current is not None:
+                return current
+        return self._settings
+
+    def _connect(self, request: Request | None = None):
+        """Return a connection and whether this middleware owns its lifetime."""
+        context = self._context_for(request)
+        if context is not None:
+            return context.connect(check_same_thread=False), True
+        return self._conn, False
+
+    @staticmethod
+    def _close(conn, owned: bool) -> None:
+        if not owned:
+            return
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001, S110 — best effort close
+            pass
+
+    def _audit_denial(self, request: Request, code: str) -> None:
+        """Record authentication failures without turning them into outages."""
+        from libref.services.ops.audit import write_audit
+
+        try:
+            conn, owned = self._connect(request)
+        except Exception:  # noqa: BLE001 — audit must not block rejections
+            return
+        try:
+            write_audit(
+                conn,
+                tenant_id="default",
+                principal_id=None,
+                action="auth.denied",
+                target=request.url.path,
+                result=code,
+                request_id=str(getattr(request.state, "request_id", "")),
+            )
+        finally:
+            self._close(conn, owned)
 
     def _quota_gate(self, request: Request, principal) -> JSONResponse | None:
         """Count the request and enforce http_requests quota; None means allowed."""
-        settings = self._context.settings
+        settings = self._settings_snapshot(request)
         if not bool(getattr(settings, "quota_enabled", False)):
             return None
         from libref.services.infra import quota
@@ -53,7 +115,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         tenant_id = str(principal.tenant_id or "default")
         try:
-            conn = self._context.connect(check_same_thread=False)
+            conn, owned = self._connect(request)
         except Exception:  # noqa: BLE001
             return None  # fail open: bookkeeping never becomes an outage
         try:
@@ -107,10 +169,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         except Exception:  # noqa: BLE001 — quota bookkeeping must not block serving
             return None
         finally:
-            try:
-                conn.close()
-            except Exception:  # noqa: BLE001, S110 — best effort close
-                pass
+            self._close(conn, owned)
 
     def _record_metrics(self, route: str, status: int, elapsed_ms: int) -> None:
         request_metrics.incr(f"http_requests_total{{route={route},status={status}}}")
@@ -127,8 +186,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         observe.status_var.set(0)
         observe.duration_var.set(0)
         current_principal.set(None)
-        settings = self._context.settings
-        auth_mode = str(getattr(settings, "auth_mode", "dev") or "dev")
         if request.method == "OPTIONS":
             response = JSONResponse({}, status_code=200)
             response.headers["x-request-id"] = request_id
@@ -144,61 +201,22 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
             response.headers["x-request-id"] = request_id
             return response
-        if auth_mode == "dev":
-            from libref.services.infra.auth import dev_principal
-
-            principal = dev_principal(settings)
-            request.state.principal = principal
-            observe.principal_var.set(str(principal.id or principal.name))
-            observe.tenant_var.set(principal.tenant_id)
-            current_principal.set(principal)
-            gate = self._quota_gate(request, principal)
-            if gate is not None:
-                observe.status_var.set(429)
-                self._record_metrics(
-                    request.url.path, 429, int((time.monotonic() - started) * 1000)
-                )
-                return gate
-            response = await call_next(request)
-            observe.status_var.set(int(getattr(response, "status_code", 0) or 0))
-            observe.duration_var.set(int((time.monotonic() - started) * 1000))
-            self._record_metrics(
-                request.url.path,
-                int(getattr(response, "status_code", 0) or 0),
-                int((time.monotonic() - started) * 1000),
-            )
-            response.headers["x-request-id"] = request_id
-            return response
-        origin = request.headers.get("origin")
-        host = str(getattr(settings, "web_host", "127.0.0.1") or "127.0.0.1")
-        if not is_allowed_origin(origin, host=host):
-            return _reject(403, "origin not allowed", "origin_forbidden", request_id)
-        raw = parse_bearer(request.headers.get("authorization"))
-        if not raw:
-            return _reject(401, "unauthorized", "unauthorized", request_id)
         try:
-            import anyio as _anyio
-
-            def _lookup() -> Any:
-                try:
-                    conn = self._context.connect(check_same_thread=False)
-                except Exception:  # noqa: BLE001
-                    return None
-                try:
-                    from libref.services.infra.auth import lookup_principal
-
-                    return lookup_principal(conn, raw)
-                finally:
-                    try:
-                        conn.close()
-                    except Exception:  # noqa: BLE001, S110 — best effort close
-                        pass
-
-            principal = await _anyio.to_thread.run_sync(_lookup)
+            conn, owned = self._connect(request)
         except Exception:  # noqa: BLE001
             return _reject(503, "auth backend unavailable", "unavailable", request_id)
-        if principal is None:
-            return _reject(401, "unauthorized", "unauthorized", request_id)
+        try:
+            principal = authenticate_request(
+                conn,
+                self._settings_snapshot(request),
+                authorization=request.headers.get("authorization"),
+                origin=request.headers.get("origin"),
+            )
+        except AuthDenied as exc:
+            self._audit_denial(request, exc.code)
+            return _reject(exc.status, exc.detail, exc.code, request_id)
+        finally:
+            self._close(conn, owned)
         request.state.principal = principal
         observe.principal_var.set(str(principal.id or principal.name))
         observe.tenant_var.set(principal.tenant_id)
@@ -211,14 +229,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
             return gate
         response = await call_next(request)
-        observe.status_var.set(int(getattr(response, "status_code", 0) or 0))
+        status = int(getattr(response, "status_code", 0) or 0)
+        observe.status_var.set(status)
         observe.duration_var.set(int((time.monotonic() - started) * 1000))
-        self._record_metrics(
-            request.url.path,
-            int(getattr(response, "status_code", 0) or 0),
-            int((time.monotonic() - started) * 1000),
-        )
+        self._record_metrics(request.url.path, status, observe.duration_var.get(0))
         response.headers["x-request-id"] = request_id
-        elapsed_ms = int((time.monotonic() - started) * 1000)
-        response.headers["x-elapsed-ms"] = str(elapsed_ms)
+        response.headers["x-elapsed-ms"] = str(observe.duration_var.get(0))
         return response
