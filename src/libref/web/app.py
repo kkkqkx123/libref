@@ -31,6 +31,8 @@ from libref.web.api import (
     Envelope,
     FeedbackCreate,
     ImportInsightQuery,
+    IndexRequestCreate,
+    IndexRequestReject,
     JobCreate,
     JobQuery,
     KeyCreate,
@@ -179,6 +181,13 @@ def build_web_app(
     def _write_tenant_of(principal) -> str:
         return write_tenant(principal)
 
+    def _index_request_error(exc: Exception) -> HTTPException:
+        """Translate service failures while preserving the stable error code."""
+        from libref.services.ops.index_requests import IndexRequestError
+
+        assert isinstance(exc, IndexRequestError)
+        return ApiRejection(exc.status, exc.code, exc.message)
+
     def _quota_gate(request: Request, principal, resource: str, cost: int = 1) -> None:
         """Reject the submission with 429 when the subject is over quota."""
         est = _eff_settings(request)
@@ -253,13 +262,17 @@ def build_web_app(
             # Override settings inside bundle with latest effective settings
             return rc, True, est, bundle
         # Fallback single-connection path for tests without context
+        from libref.services.ops.index_requests import IndexRequestService
+
+        jobs = JobManager(conn)
         fb = {
             "search": svc,
             "pages": pages,
             "catalog": catalog,
             "mining": mining,
             "review": review,
-            "jobs": JobManager(conn),
+            "index_requests": IndexRequestService(conn, est, jobs=jobs),
+            "jobs": jobs,
             "rerank": rerank,
             "chat": chat,
             "gateway": None,
@@ -887,6 +900,204 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
+    @app.post("/index-requests")
+    async def index_request_create(
+        body: IndexRequestCreate,
+        request: Request,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "index:request")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            try:
+                return await bundle["index_requests"].submit(
+                    body.model_dump(exclude_none=True),
+                    principal,
+                    tenant_id=_tenant_of(principal),
+                    request_id=str(getattr(request.state, "request_id", "")),
+                )
+            except Exception as exc:
+                from libref.services.ops.index_requests import IndexRequestError
+
+                if isinstance(exc, IndexRequestError):
+                    raise _index_request_error(exc) from exc
+                raise
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+    @app.get("/index-requests")
+    def index_request_list(
+        request: Request,
+        status: str | None = None,
+        limit: int = 50,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "index:request")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            try:
+                items = bundle["index_requests"].list(
+                    principal,
+                    tenant_id=_tenant_of(principal),
+                    status=status,
+                    limit=limit,
+                )
+            except Exception as exc:
+                from libref.services.ops.index_requests import IndexRequestError
+
+                if isinstance(exc, IndexRequestError):
+                    raise _index_request_error(exc) from exc
+                raise
+            return envelope(items)
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+    @app.get("/index-requests/pending")
+    def index_request_pending(
+        request: Request,
+        limit: int = 50,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "index:approve")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            items = bundle["index_requests"].list(
+                principal,
+                tenant_id=_tenant_of(principal),
+                pending=True,
+                limit=limit,
+            )
+            return envelope(items)
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+    @app.get("/index-requests/{request_id}")
+    def index_request_show(
+        request_id: int,
+        request: Request,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            try:
+                return bundle["index_requests"].get(
+                    request_id, principal, tenant_id=_tenant_of(principal)
+                )
+            except Exception as exc:
+                from libref.services.ops.index_requests import IndexRequestError
+
+                if isinstance(exc, IndexRequestError):
+                    raise _index_request_error(exc) from exc
+                raise
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+    @app.post("/index-requests/{request_id}/cancel")
+    def index_request_cancel(
+        request_id: int,
+        request: Request,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "index:request")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            try:
+                return bundle["index_requests"].cancel(
+                    request_id,
+                    principal,
+                    tenant_id=_tenant_of(principal),
+                    request_id_header=str(getattr(request.state, "request_id", "")),
+                )
+            except Exception as exc:
+                from libref.services.ops.index_requests import IndexRequestError
+
+                if isinstance(exc, IndexRequestError):
+                    raise _index_request_error(exc) from exc
+                raise
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+    @app.post("/index-requests/{request_id}/approve")
+    def index_request_approve(
+        request_id: int,
+        request: Request,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "index:approve")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            try:
+                return bundle["index_requests"].approve(
+                    request_id,
+                    principal,
+                    tenant_id=_tenant_of(principal),
+                    request_id_header=str(getattr(request.state, "request_id", "")),
+                )
+            except Exception as exc:
+                from libref.services.ops.index_requests import IndexRequestError
+
+                if isinstance(exc, IndexRequestError):
+                    raise _index_request_error(exc) from exc
+                raise
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+    @app.post("/index-requests/{request_id}/reject")
+    def index_request_reject(
+        request_id: int,
+        body: IndexRequestReject,
+        request: Request,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "index:approve")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            try:
+                return bundle["index_requests"].reject(
+                    request_id,
+                    body.reason,
+                    principal,
+                    tenant_id=_tenant_of(principal),
+                    request_id_header=str(getattr(request.state, "request_id", "")),
+                )
+            except Exception as exc:
+                from libref.services.ops.index_requests import IndexRequestError
+
+                if isinstance(exc, IndexRequestError):
+                    raise _index_request_error(exc) from exc
+                raise
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
     @app.post("/scrape")
     def scrape(
         body: ScrapeRequest, request: Request, principal=Depends(_guard)
@@ -1448,6 +1659,13 @@ def build_web_app(
         principal=Depends(_guard),
     ) -> dict[str, Any]:
         _need(principal, "jobs:write")
+        from libref.services.ops.index_requests import INDEX_JOB_KINDS
+
+        if body.kind in INDEX_JOB_KINDS:
+            raise HTTPException(
+                status_code=400,
+                detail="indexing jobs must be submitted through index requests",
+            )
         _quota_gate(request, principal, "job_submissions")
         from libref.services.ops.audit import write_audit
 
@@ -1482,10 +1700,17 @@ def build_web_app(
     ) -> dict[str, Any]:
         _need(principal, "jobs:write")
         from libref.services.ops.audit import write_audit
+        from libref.services.ops.index_requests import INDEX_JOB_KINDS
 
         rc, should_close, est, bundle = _req_bundle(request, principal)
         mgr = bundle["jobs"]
         try:
+            job = mgr.get(job_id)
+            if job is not None and job.kind in INDEX_JOB_KINDS:
+                raise HTTPException(
+                    status_code=400,
+                    detail="indexing jobs must be cancelled through index requests",
+                )
             mgr.cancel(job_id, tenant_id=_tenant_of(principal))
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

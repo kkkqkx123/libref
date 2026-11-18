@@ -50,6 +50,7 @@ from libref.cli.registry_commands import (
     cmd_search_github,
     cmd_search_web,
 )
+from libref.cli.request_commands import cmd_request
 from libref.crawler.registry import REGISTRY_MIRRORS
 
 
@@ -929,4 +930,73 @@ def build_parser() -> argparse.ArgumentParser:
         help="Defaults to the config value deletion_log_ttl_days",
     )
     p_del.set_defaults(func=cmd_deletions)
+
+    p_request = sub.add_parser(
+        "request",
+        help="Submit, review, and wait on index requests",
+        parents=[_config_parent],
+    )
+    request_sub = p_request.add_subparsers(dest="request_action", required=True)
+    p_submit = request_sub.add_parser(
+        "submit",
+        help="Submit a repository or documentation index request",
+        parents=[_config_parent],
+    )
+    p_submit.add_argument("--kind", choices=["repo", "docs"], required=True)
+    p_submit.add_argument("--library", required=True)
+    p_submit.add_argument("--version", default=None)
+    p_submit.add_argument("--ecosystem", default=None)
+    p_submit.add_argument("--source", default=None, help="HTTP(S) Git URL")
+    p_submit.add_argument("--start-url", default=None)
+    p_submit.add_argument("--max-pages", type=int, default=None)
+    p_submit.add_argument("--scope", default=None, help="JSON scope object for docs")
+    p_submit.add_argument("--subdir", default=None)
+    p_submit.add_argument("--only-file", action="append", default=None)
+    p_submit.add_argument("--exclude-pattern", action="append", default=None)
+    p_submit.add_argument("--max-files", type=int, default=None)
+    for flag in (
+        "prefilter",
+        "update",
+        "fresh",
+        "include-prerelease",
+    ):
+        p_submit.add_argument(f"--{flag}", action="store_true")
+
+    p_list = request_sub.add_parser(
+        "list", help="List your index requests", parents=[_config_parent]
+    )
+    p_list.add_argument("--status", default=None)
+    p_list.add_argument(
+        "--pending", action="store_true", help="Show the approval queue"
+    )
+    p_list.add_argument("--limit", type=int, default=50)
+
+    p_show = request_sub.add_parser(
+        "show", help="Show one index request", parents=[_config_parent]
+    )
+    p_show.add_argument("request_id", type=int)
+
+    p_approve = request_sub.add_parser(
+        "approve", help="Approve a pending request", parents=[_config_parent]
+    )
+    p_approve.add_argument("request_id", type=int)
+
+    p_reject = request_sub.add_parser(
+        "reject", help="Reject a pending request", parents=[_config_parent]
+    )
+    p_reject.add_argument("request_id", type=int)
+    p_reject.add_argument("--reason", required=True)
+
+    p_cancel = request_sub.add_parser(
+        "cancel", help="Cancel your pending request", parents=[_config_parent]
+    )
+    p_cancel.add_argument("request_id", type=int)
+
+    p_wait = request_sub.add_parser(
+        "wait", help="Wait for a terminal request state", parents=[_config_parent]
+    )
+    p_wait.add_argument("request_id", type=int)
+    p_wait.add_argument("--timeout", type=float, default=300.0)
+
+    p_request.set_defaults(func=cmd_request)
     return parser

@@ -15,6 +15,7 @@ from libref.db.schema import (
     FEATURE_TREE_CLUSTER_SQL,
     GOVERNANCE_SQL,
     IMPORT_EDGES_SQL,
+    INDEX_REQUESTS_SQL,
     INITIAL_SCHEMA_SQL,
     MINING_PROVENANCE_INDEX_SQL,
     MINING_REVIEW_SCHEMA_SQL,
@@ -68,6 +69,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(22, "doc-link-edges", DOC_LINK_EDGES_SQL),
     Migration(23, "multi-tenant", MULTI_TENANT_SQL),
     Migration(24, "quota-tables", QUOTA_TABLES_SQL),
+    Migration(25, "index-requests", INDEX_REQUESTS_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

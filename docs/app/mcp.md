@@ -1,6 +1,6 @@
 # MCP 功能总览
 
-MCP 出口面向模型，共二十一个工具。实现在 `src/libref/mcp_server/server.py`，组装时按配置过滤可见工具，未知工具名启动即报错。向量、重排与对话能力在组装处显式建立并复用于检索与问答。所有工具只做参数校验与服务调用，不抛协议层错误，失败以载荷内错误返回。写操作按 scope 校验，缺凭据返回未授权，缺 scope 返回禁止。
+MCP 出口面向模型，共二十七个工具。实现在 `src/libref/mcp_server/server.py`，组装时按配置过滤可见工具，未知工具名启动即报错。向量、重排与对话能力在组装处显式建立并复用于检索与问答。所有工具只做参数校验与服务调用，不抛协议层错误，失败以载荷内错误返回。写操作按 scope 校验，缺凭据返回未授权，缺 scope 返回禁止。
 
 标准输入输出供本机客户端使用，由命令直接注入本地平台主体；流式 HTTP 只由组合 `serve` 的 `/mcp` 提供，与 Web 共用 `[web]` 监听和鉴权中间件。dev 模式必须显式开启且只许回环；enforced 模式每请求需 `Authorization: Bearer`，浏览器来源另需在 `allowed_origins` 中精确登记。工具可见性由允许名单减去拒绝名单决定，缺省全部可见，空允许名单表示零工具。
 
@@ -128,6 +128,12 @@ MCP 出口面向模型，共二十一个工具。实现在 `src/libref/mcp_serve
 ### submit_feedback
 
 提交开发者反馈，只记录不改审核状态。`body` 非空必填，`entity_type/entity_id/kind` 可选。需 `feedback:write` scope。
+
+## 索引申请闭环
+
+`request_repo_index` 与 `request_docs_index` 按坐标或 HTTP(S) 地址提交申请，返回请求编号；本地路径只允许本机 CLI 直连。`index_request_status` 与 `wait_index_request` 按编号读取状态，后者有界轮询并在超时时返回当前状态而非抛错；`list_index_requests` 查看自己的申请，`review_index_request` 列表、通过或驳回待审队列。工具输出携带下一步工具名及终态后的读取工具建议。
+
+申请与审批需 `index:request` / `index:approve`，状态与等待工具需 `read`。持有 `ingest:write` 的申请方直接入队；无该 scope 的审批者不能审批自己的申请。
 
 ## 可配置项
 

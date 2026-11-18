@@ -212,3 +212,11 @@ snapshot_quota_mb = 512
 # repos_dir = "data/repos"
 repos_quota_mb = 2048
 deletion_log_ttl_days = 30.0
+
+[quota]
+# 数据库策略优先；以下只是无匹配策略时的兜底值，0 表示不限
+quota_enabled = false
+quota_http_requests_per_hour = 0
+quota_llm_tokens_per_day = 0
+quota_job_submissions_per_hour = 0
+quota_index_requests_per_hour = 0

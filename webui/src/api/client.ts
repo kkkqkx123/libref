@@ -100,6 +100,33 @@ function resetOf(payload: unknown): string | null {
   return null;
 }
 
+export interface IndexRequestParams {
+  limit?: number;
+  status?: string;
+  pending?: boolean;
+}
+
+export function listIndexRequests<T>(params: IndexRequestParams = {}) {
+  const path = params.pending ? '/index-requests/pending' : '/index-requests';
+  return api<T>(path, {
+    params: {
+      limit: params.limit,
+      status: params.pending ? undefined : params.status,
+    },
+  });
+}
+
+export function submitIndexRequest<T>(body: unknown) {
+  return api<T>('/index-requests', { method: 'POST', body });
+}
+
+export function actOnIndexRequest<T>(id: number, action: 'cancel' | 'approve' | 'reject', reason?: string) {
+  return api<T>(`/index-requests/${id}/${action}`, {
+    method: 'POST',
+    body: reason === undefined ? undefined : { reason },
+  });
+}
+
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<{ data: T; requestId: string }> {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(options.params || {})) {

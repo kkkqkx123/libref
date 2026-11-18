@@ -24,8 +24,9 @@ def scrape_job_params(
     resolved_from: str | None = None,
     registry_confirmed: bool = True,
     fresh: bool = False,
+    index_request_id: int | None = None,
 ) -> dict[str, Any]:
-    """Build scrape job params, including the resolution source for replayability."""
+    """Build scrape job params, including the request id for replayability."""
     return {
         "library": library,
         "version": version,
@@ -37,6 +38,7 @@ def scrape_job_params(
         "resolved_from": resolved_from,
         "registry_confirmed": registry_confirmed,
         "fresh": fresh,
+        "index_request_id": index_request_id,
     }
 
 
@@ -53,6 +55,7 @@ def start_scrape_job(
     resolved_from: str | None = None,
     registry_confirmed: bool = True,
     fresh: bool = False,
+    index_request_id: int | None = None,
     tenant_id: str = "default",
     principal_id: int | None = None,
 ) -> int:
@@ -70,6 +73,7 @@ def start_scrape_job(
             resolved_from=resolved_from,
             registry_confirmed=registry_confirmed,
             fresh=fresh,
+            index_request_id=index_request_id,
         ),
         tenant_id=tenant_id,
         principal_id=principal_id,

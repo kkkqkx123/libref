@@ -11,8 +11,8 @@ import type { MessageCatalog } from '../../i18n/locales/zh-CN';
 const props = defineProps<{ status: string }>();
 
 const GOOD = new Set(['done', 'approved', 'resolved', 'acknowledged']);
-const BAD = new Set(['failed', 'conflict']);
-const WARN = new Set(['running', 'pending', 'open']);
+const BAD = new Set(['failed', 'conflict', 'rejected']);
+const WARN = new Set(['running', 'pending', 'queued', 'open']);
 
 const tagType = computed(() => {
   const status = props.status.toLowerCase();

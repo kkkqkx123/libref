@@ -124,6 +124,7 @@ libref/
 │   │   │   ├── mining_read.py  # 频次/共现/模式/树/聚类读模型
 │   │   │   └── mining_refresh.py # 序列模式/树/聚类重算
 │   │   └── ops/                # 治理与向量运维：被 docs/code 依赖，不反向依赖
+│   │       ├── index_requests.py # 索引申请：审批状态机与作业回写
 │   │       ├── maintenance.py  # 向量对账/重嵌/reconcile
 │   │       ├── retention.py    # 整版本 purge/配额/删除日志
 │   │       └── review.py       # [P3] 审核工作流：pending/approved/conflict
@@ -146,6 +147,7 @@ libref/
 │       ├── docs_commands.py    # 文档命令
 │       ├── code_commands.py    # 源码命令
 │       ├── registry_commands.py # 注册表与发现命令
+│       ├── request_commands.py # 索引申请命令（本地与远端同一路径）
 │       └── ops_commands.py     # 运维命令
 ├── webui/                      # [P3] 前端独立工程（npm/Vite + Vue 3 + Element Plus，不进 pyproject）
 └── tests/

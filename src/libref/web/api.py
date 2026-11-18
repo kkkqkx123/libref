@@ -145,6 +145,31 @@ class ScrapeRequest(BaseModel):
     max_pages: int | None = None
 
 
+class IndexRequestCreate(BaseModel):
+    kind: Literal["repo", "docs"]
+    library: str = Field(min_length=1)
+    version: str = Field(
+        default="", description="Defaults to the resolved stable version"
+    )
+    ecosystem: str | None = None
+    source: str | None = None
+    start_url: str | None = None
+    max_pages: int | None = Field(default=None, ge=1)
+    prefilter: bool = False
+    scope: dict[str, Any] | None = None
+    update: bool = False
+    fresh: bool = False
+    include_prerelease: bool = False
+    subdir: str | None = None
+    only_files: list[str] | None = None
+    exclude_patterns: list[str] | None = None
+    max_files: int | None = Field(default=None, ge=1)
+
+
+class IndexRequestReject(BaseModel):
+    reason: str = Field(min_length=1)
+
+
 class DocProbeRequest(BaseModel):
     start_url: str = Field(min_length=1)
     scope: dict[str, Any] | None = None

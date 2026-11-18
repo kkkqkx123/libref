@@ -424,6 +424,34 @@ CREATE TABLE IF NOT EXISTS feedback(
 CREATE INDEX IF NOT EXISTS idx_feedback_tenant ON feedback(tenant_id, status, id);
 CREATE INDEX IF NOT EXISTS idx_feedback_resolve ON feedback(status, resolved_at);
 
+CREATE TABLE IF NOT EXISTS index_requests(
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  principal_id BIGINT,
+  requester TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL CHECK (kind IN ('repo','docs')),
+  target TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT '',
+  params JSONB NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (status IN ('pending','approved','queued','running','done','failed',
+                        'rejected','cancelled')),
+  dedupe_key TEXT NOT NULL,
+  approved_by BIGINT,
+  reject_reason TEXT NOT NULL DEFAULT '',
+  job_id BIGINT,
+  error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
+  updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_index_requests_tenant_owner
+  ON index_requests(tenant_id, principal_id, id);
+CREATE INDEX IF NOT EXISTS idx_index_requests_status
+  ON index_requests(tenant_id, status, id);
+CREATE INDEX IF NOT EXISTS idx_index_requests_dedupe
+  ON index_requests(tenant_id, dedupe_key, status);
+
 CREATE TABLE IF NOT EXISTS audit_log(
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   tenant_id TEXT NOT NULL DEFAULT 'default',

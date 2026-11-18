@@ -214,6 +214,10 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 
 复用度与多样性信号，`--library/--version/--ecosystem` 全部可选。
 
+## 索引申请
+
+`request submit --kind repo|docs` 按坐标或 HTTP(S) 地址提交申请；`request list`、`request show <id>` 查看申请，`request approve <id>`、`request reject <id> --reason ...`、`request cancel <id>` 执行审批与撤回，`request wait <id> --timeout 300` 有界等待终态。本地直连同样走 `IndexRequestService`，不绕过审批；远端通过 Bearer 调用 `/index-requests`。终态退出码与远程 ingest 一致：仅 `done` 返回 0。
+
 ## 运维
 
 * `init-db`：建库并应用迁移，无参数，打印库路径与已应用迁移数。
@@ -245,6 +249,10 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 | job-show | GET /jobs 或 GET /jobs/{id} | 任务查看 |
 | ingest | POST /scrape 后轮询 GET /jobs/{id} | 抓取提交，显式形态，轮询复用等待语义 |
 | job-cancel | POST /jobs/{id}/cancel | 任务取消 |
+| request submit | POST /index-requests | 提交申请 |
+| request list/show | GET /index-requests、/index-requests/{id} | 申请列表与详情 |
+| request approve/reject/cancel | POST /index-requests/{id}/approve、/reject、/cancel | 审批与撤回 |
+| request wait | 轮询 GET /index-requests/{id} | 有界等待终态 |
 
 未列命令均为本地专用（解析、索引、挖掘、探查、运维等仍走本地库）。
 

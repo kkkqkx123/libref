@@ -61,6 +61,7 @@ class AppContext:
         from libref.services.docs.pages import PageService
         from libref.services.docs.search import SearchService
         from libref.services.infra.jobs import JobManager
+        from libref.services.ops.index_requests import IndexRequestService
         from libref.services.ops.review import ReviewService
         from libref.services.registry.libraries import LibraryService
 
@@ -80,18 +81,20 @@ class AppContext:
             embed=self.embed,
             rerank=rerank,
         )
+        jobs = JobManager(
+            conn,
+            instance_id=str(
+                getattr(self.settings, "instance_id", "libref-1") or "libref-1"
+            ),
+        )
         return {
             "search": search,
             "pages": PageService(conn),
             "catalog": LibraryService(conn),
             "mining": MiningReadService(conn, self.settings),
             "review": ReviewService(conn),
-            "jobs": JobManager(
-                conn,
-                instance_id=str(
-                    getattr(self.settings, "instance_id", "libref-1") or "libref-1"
-                ),
-            ),
+            "index_requests": IndexRequestService(conn, self.settings, jobs=jobs),
+            "jobs": jobs,
             "rerank": rerank,
             "chat": chat,
             "gateway": gateway,

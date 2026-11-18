@@ -21,6 +21,7 @@ RESOURCES = frozenset(
         "llm_prompt_tokens",
         "llm_completion_tokens",
         "scrape_pages",
+        "index_requests",
         "job_submissions",
         "snapshot_bytes",
         "repos_bytes",
@@ -34,6 +35,7 @@ _GLOBAL_FALLBACK: dict[str, tuple[str, str]] = {
     "llm_prompt_tokens": ("quota_llm_tokens_per_day", "day"),
     "llm_completion_tokens": ("quota_llm_tokens_per_day", "day"),
     "job_submissions": ("quota_job_submissions_per_hour", "hour"),
+    "index_requests": ("quota_index_requests_per_hour", "hour"),
 }
 
 TENANT_DEFAULT_SUBJECT = 0

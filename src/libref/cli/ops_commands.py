@@ -494,19 +494,48 @@ def cmd_serve(args: argparse.Namespace) -> int:
             async with mcp.session_manager.run():
                 worker_conn = ctx.connect(check_same_thread=False)
                 try:
-                    from libref.services.docs.scrape_jobs import build_scrape_runner
+                    from libref.services.code.code_ingest import (
+                        INDEX_REPO_JOB_KIND,
+                        build_repo_runner,
+                    )
+                    from libref.services.docs.scrape_jobs import (
+                        SCRAPE_JOB_KIND,
+                        build_scrape_runner,
+                    )
                     from libref.services.infra.jobs import JobManager
+                    from libref.services.ops.index_requests import (
+                        build_index_request_runner,
+                    )
 
                     mgr = JobManager(worker_conn, instance_id=str(settings.instance_id))
                     mgr.recover(requeue=True)
-                    runner = build_scrape_runner(
+                    scrape_runner = build_scrape_runner(
                         settings,
                         worker_conn,
                         vec_store=ctx.vec_store,
                         embed=ctx.embed,
                         mgr=mgr,
                     )
-                    mgr.start_worker(runner)
+                    repo_runner = build_repo_runner(
+                        settings,
+                        worker_conn,
+                        vec_store=ctx.vec_store,
+                        embed=ctx.embed,
+                        mgr=mgr,
+                    )
+
+                    async def dispatch(job):
+                        if job.kind == SCRAPE_JOB_KIND:
+                            return await scrape_runner(job)
+                        if job.kind == INDEX_REPO_JOB_KIND:
+                            return await repo_runner(job)
+                        raise ValueError(f"unsupported job kind: {job.kind}")
+
+                    mgr.start_worker(
+                        build_index_request_runner(
+                            settings, worker_conn, dispatch, jobs=mgr
+                        )
+                    )
                     try:
                         yield
                     finally:

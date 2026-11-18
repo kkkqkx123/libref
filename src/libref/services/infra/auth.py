@@ -24,13 +24,29 @@ PLATFORM_ROLE = "platform_admin"
 PLATFORM_SCOPE = "platform:admin"
 
 ROLE_SCOPES: dict[str, frozenset[str]] = {
-    "external": frozenset({"read"}),
-    "developer": frozenset({"read", "feedback:write"}),
+    "external": frozenset({"read", "index:request"}),
+    "developer": frozenset({"read", "feedback:write", "index:request"}),
     "kb_admin": frozenset(
-        {"read", "review:read", "review:write", "feedback:read", "feedback:resolve"}
+        {
+            "read",
+            "review:read",
+            "review:write",
+            "feedback:read",
+            "feedback:resolve",
+            "index:request",
+            "index:approve",
+        }
     ),
     "sys_admin": frozenset(
-        {"read", "ingest:write", "jobs:write", "admin:keys", "admin:config"}
+        {
+            "read",
+            "ingest:write",
+            "jobs:write",
+            "admin:keys",
+            "admin:config",
+            "index:request",
+            "index:approve",
+        }
     ),
     PLATFORM_ROLE: frozenset(
         {
@@ -40,6 +56,8 @@ ROLE_SCOPES: dict[str, frozenset[str]] = {
             "review:write",
             "feedback:read",
             "feedback:resolve",
+            "index:request",
+            "index:approve",
             "ingest:write",
             "jobs:write",
             "admin:keys",

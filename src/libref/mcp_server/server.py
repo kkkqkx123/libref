@@ -49,6 +49,15 @@ def _items(items: list[dict[str, Any]]) -> dict[str, Any]:
     return {"items": items, "count": len(items)}
 
 
+def _request_error(exc: Exception) -> dict[str, Any]:
+    """Keep index-request failures structured across every MCP tool."""
+    from libref.services.ops.index_requests import IndexRequestError
+
+    if isinstance(exc, IndexRequestError):
+        return {"error": exc.code, "message": exc.message}
+    return _failed(str(exc))
+
+
 def _check_limit(
     limit: int | None, *, low: int, high: int, name: str = "limit"
 ) -> str | None:
@@ -84,6 +93,12 @@ ALL_MCP_TOOLS: frozenset[str] = frozenset(
         "job_show",
         "resolve",
         "submit_feedback",
+        "request_repo_index",
+        "request_docs_index",
+        "index_request_status",
+        "wait_index_request",
+        "list_index_requests",
+        "review_index_request",
     }
 )
 
@@ -179,6 +194,10 @@ def build_mcp_server(
                     pass
                 raise
             return rc, bundle, True
+        from libref.services.infra.jobs import JobManager
+        from libref.services.ops.index_requests import IndexRequestService
+
+        local_jobs = JobManager(conn)
         return (
             conn,
             {
@@ -187,6 +206,10 @@ def build_mcp_server(
                 "catalog": catalog_svc,
                 "mining": mining,
                 "review": review_svc,
+                "jobs": local_jobs,
+                "index_requests": IndexRequestService(
+                    conn, resolve_settings, jobs=local_jobs
+                ),
                 "vec_store": vec_store,
                 "embed": embed_fn,
                 "rerank": rerank_fn,
@@ -1035,6 +1058,232 @@ def build_mcp_server(
             return _failed(str(exc))
         return {"id": fid, "ok": True}
 
+    def _request_service(rc, bundle):
+        return bundle.get(
+            "index_requests",
+            __import__(
+                "libref.services.ops.index_requests",
+                fromlist=["IndexRequestService"],
+            ).IndexRequestService(rc, resolve_settings),
+        )
+
+    def _with_next(item: dict[str, Any]) -> dict[str, Any]:
+        from libref.services.ops.index_requests import IndexRequestService
+
+        result = dict(item)
+        result["next_tools"] = IndexRequestService.next_tools(item)
+        if item["status"] in ("pending", "approved", "queued", "running"):
+            result["pending"] = True
+        return result
+
+    async def request_repo_index(
+        library: str,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        source: str | None = None,
+        include_prerelease: bool = False,
+        update: bool = False,
+        fresh: bool = False,
+        subdir: str | None = None,
+        only_files: list[str] | None = None,
+        exclude_patterns: list[str] | None = None,
+        max_files: int | None = None,
+    ) -> dict[str, Any]:
+        """Request repository indexing by package coordinates or an HTTP(S) Git URL."""
+        principal = _principal()
+        denied = _deny(principal, "index:request")
+        if denied is not None:
+            return denied
+        if not library.strip():
+            return _invalid("library is empty")
+        payload = {
+            "kind": "repo",
+            "library": library,
+            "version": version or "",
+            "ecosystem": ecosystem,
+            "source": source,
+            "include_prerelease": include_prerelease,
+            "update": update,
+            "fresh": fresh,
+            "subdir": subdir,
+            "only_files": only_files,
+            "exclude_patterns": exclude_patterns,
+            "max_files": max_files,
+        }
+        rc, bundle, should_close = _make_bundle()
+        try:
+            try:
+                item = await _request_service(rc, bundle).submit(
+                    payload, principal, tenant_id=_tenant(principal)
+                )
+            except Exception as exc:  # noqa: BLE001 — tools return failures as payloads
+                return _request_error(exc)
+            return _with_next(item)
+        finally:
+            _close(rc, should_close)
+
+    async def request_docs_index(
+        library: str,
+        version: str | None = None,
+        start_url: str | None = None,
+        ecosystem: str | None = None,
+        include_prerelease: bool = False,
+        max_pages: int | None = None,
+        prefilter: bool = False,
+    ) -> dict[str, Any]:
+        """Request documentation indexing by coordinates or an HTTP(S) start URL."""
+        principal = _principal()
+        denied = _deny(principal, "index:request")
+        if denied is not None:
+            return denied
+        if not library.strip():
+            return _invalid("library is empty")
+        payload = {
+            "kind": "docs",
+            "library": library,
+            "version": version or "",
+            "start_url": start_url,
+            "ecosystem": ecosystem,
+            "include_prerelease": include_prerelease,
+            "max_pages": max_pages,
+            "prefilter": prefilter,
+        }
+        rc, bundle, should_close = _make_bundle()
+        try:
+            try:
+                item = await _request_service(rc, bundle).submit(
+                    payload, principal, tenant_id=_tenant(principal)
+                )
+            except Exception as exc:  # noqa: BLE001 — tools return failures as payloads
+                return _request_error(exc)
+            return _with_next(item)
+        finally:
+            _close(rc, should_close)
+
+    def index_request_status(request_id: int) -> dict[str, Any]:
+        """Read one index request: status, job id, error, and the next tool to call."""
+        principal = _principal()
+        denied = _deny(principal, "read")
+        if denied is not None:
+            return denied
+        rc, bundle, should_close = _make_bundle()
+        try:
+            try:
+                item = _request_service(rc, bundle).get(
+                    request_id, principal, tenant_id=_tenant(principal)
+                )
+            except Exception as exc:  # noqa: BLE001 — tools return failures as payloads
+                return _request_error(exc)
+            return _with_next(item)
+        finally:
+            _close(rc, should_close)
+
+    async def wait_index_request(
+        request_id: int, timeout: float = 300.0, poll: float = 0.2
+    ) -> dict[str, Any]:
+        """Poll one index request up to a bounded timeout and return its state."""
+        principal = _principal()
+        denied = _deny(principal, "read")
+        if denied is not None:
+            return denied
+        if timeout < 0 or timeout > 900:
+            return _invalid("timeout must be between 0 and 900 seconds")
+        if poll <= 0 or poll > 5:
+            return _invalid("poll must be between 0 and 5 seconds")
+        rc, bundle, should_close = _make_bundle()
+        try:
+            try:
+                item = await _request_service(rc, bundle).wait(
+                    request_id,
+                    principal,
+                    tenant_id=_tenant(principal),
+                    timeout=timeout,
+                    poll=poll,
+                )
+            except Exception as exc:  # noqa: BLE001 — tools return failures as payloads
+                return _request_error(exc)
+            result = _with_next(item)
+            from libref.services.ops.index_requests import ACTIVE_STATUSES
+
+            if item["status"] in ACTIVE_STATUSES:
+                result["timed_out"] = True
+            return result
+        finally:
+            _close(rc, should_close)
+
+    def list_index_requests(
+        status: str | None = None, pending: bool = False, limit: int = 50
+    ) -> dict[str, Any]:
+        """List your own index requests, or the pending queue when allowed."""
+        principal = _principal()
+        denied = _deny(principal, "index:request")
+        if denied is not None:
+            return denied
+        bad = _check_limit(limit, low=1, high=200)
+        if bad is not None:
+            return _invalid(bad)
+        rc, bundle, should_close = _make_bundle()
+        try:
+            try:
+                items = _request_service(rc, bundle).list(
+                    principal,
+                    tenant_id=_tenant(principal),
+                    status=status,
+                    pending=pending,
+                    limit=limit,
+                )
+            except Exception as exc:  # noqa: BLE001 — tools return failures as payloads
+                return _request_error(exc)
+            return _items(items)
+        finally:
+            _close(rc, should_close)
+
+    def review_index_request(
+        action: Literal["list", "approve", "reject"],
+        request_id: int | None = None,
+        reason: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """List pending index requests, approve one, or reject one with a reason."""
+        principal = _principal()
+        denied = _deny(principal, "index:approve")
+        if denied is not None:
+            return denied
+        bad = _check_limit(limit, low=1, high=200)
+        if bad is not None:
+            return _invalid(bad)
+        if action != "list" and request_id is None:
+            return _invalid(f"{action} requires request_id")
+        if action == "reject" and not (reason or "").strip():
+            return _invalid("reject requires a reason")
+        rc, bundle, should_close = _make_bundle()
+        try:
+            try:
+                svc = _request_service(rc, bundle)
+                if action == "list":
+                    items = svc.list(
+                        principal,
+                        tenant_id=_tenant(principal),
+                        pending=True,
+                        limit=limit,
+                    )
+                    return _items(items)
+                if action == "approve":
+                    assert request_id is not None
+                    item = svc.approve(
+                        request_id, principal, tenant_id=_tenant(principal)
+                    )
+                else:
+                    assert request_id is not None and reason is not None
+                    item = svc.reject(
+                        request_id, reason, principal, tenant_id=_tenant(principal)
+                    )
+                return _with_next(item)
+            except Exception as exc:  # noqa: BLE001 — tools return failures as payloads
+                return _request_error(exc)
+        finally:
+            _close(rc, should_close)
+
     _read_tools = frozenset(
         {
             "search",
@@ -1056,6 +1305,8 @@ def build_mcp_server(
             "mining_health",
             "resolve",
             "job_show",
+            "index_request_status",
+            "wait_index_request",
         }
     )
 
@@ -1110,6 +1361,12 @@ def build_mcp_server(
         "job_show": job_show,
         "resolve": resolve,
         "submit_feedback": submit_feedback,
+        "request_repo_index": request_repo_index,
+        "request_docs_index": request_docs_index,
+        "index_request_status": index_request_status,
+        "wait_index_request": wait_index_request,
+        "list_index_requests": list_index_requests,
+        "review_index_request": review_index_request,
     }
     for name, func in visible.items():
         if name in enabled:

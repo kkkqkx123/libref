@@ -54,9 +54,11 @@ const GROUP_DEFS: NavGroupDef[] = [
   ]},
   { nameKey: 'ingestTasks', single: false, items: [
     { path: '/ingest', titleKey: 'ingest', scopes: ['ingest:write'] },
+    { path: '/requests', titleKey: 'requests', scopes: ['index:request'] },
     { path: '/jobs', titleKey: 'jobs', scopes: ['read'] },
   ]},
   { nameKey: 'governance', single: false, items: [
+    { path: '/requests/approvals', titleKey: 'requestApprovals', scopes: ['index:approve'] },
     { path: '/review', titleKey: 'review', scopes: ['review:read'] },
     { path: '/feedback', titleKey: 'feedback', scopes: ['feedback:read', 'feedback:write'], any: true },
     { path: '/admin', titleKey: 'admin', scopes: ['admin:keys', 'admin:config'] },

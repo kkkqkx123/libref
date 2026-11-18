@@ -302,6 +302,36 @@ CREATE TABLE api_clusters(
 CREATE INDEX idx_api_clusters_version ON api_clusters(version_id, cluster_id);
 """
 
+# ── Index requests: approval-gated doc and repository indexing ──
+INDEX_REQUESTS_SQL = """
+CREATE TABLE IF NOT EXISTS index_requests(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  principal_id INTEGER,
+  requester TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL CHECK (kind IN ('repo','docs')),
+  target TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT '',
+  params JSON NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (status IN ('pending','approved','queued','running','done','failed',
+                        'rejected','cancelled')),
+  dedupe_key TEXT NOT NULL,
+  approved_by INTEGER,
+  reject_reason TEXT NOT NULL DEFAULT '',
+  job_id INTEGER,
+  error TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_index_requests_tenant_owner
+  ON index_requests(tenant_id, principal_id, id);
+CREATE INDEX IF NOT EXISTS idx_index_requests_status
+  ON index_requests(tenant_id, status, id);
+CREATE INDEX IF NOT EXISTS idx_index_requests_dedupe
+  ON index_requests(tenant_id, dedupe_key, status);
+"""
+
 # ── Query support: url lookups, review state scan, job recovery, embeddable filter ──
 QUERY_SUPPORT_SQL = """
 CREATE INDEX IF NOT EXISTS idx_pages_url ON pages(url);

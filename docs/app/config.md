@@ -209,6 +209,18 @@
 | repos_quota_mb | 整数（≥0） | 2048 | LIBREF_REPOS_QUOTA_MB | 仓库配额，兆 |
 | deletion_log_ttl_days | 浮点（≥0） | 30.0 | LIBREF_DELETION_LOG_TTL_DAYS | 删除记录保留，天 |
 
+## 配额（[quota]）
+
+| 字段 | 类型 | 默认 | 环境变量 | 影响 |
+|---|---|---|---|---|
+| quota_enabled | 布尔 | 关 | LIBREF_QUOTA_ENABLED | 是否启用配额判定 |
+| quota_http_requests_per_hour | 整数（≥0） | 0 | LIBREF_QUOTA_HTTP_REQUESTS_PER_HOUR | 每小时 HTTP 请求数上限，0 不限 |
+| quota_llm_tokens_per_day | 整数（≥0） | 0 | LIBREF_QUOTA_LLM_TOKENS_PER_DAY | 每日 LLM 总 token 上限，0 不限 |
+| quota_job_submissions_per_hour | 整数（≥0） | 0 | LIBREF_QUOTA_JOB_SUBMISSIONS_PER_HOUR | 每小时任务提交上限，0 不限 |
+| quota_index_requests_per_hour | 整数（≥0） | 0 | LIBREF_QUOTA_INDEX_REQUESTS_PER_HOUR | 每小时索引申请上限，0 不限 |
+
+数据库策略优先；配置字段只是无匹配策略时的兜底上限。
+
 ## 日志（[logging]）
 
 | 字段 | 类型 | 默认 | 环境变量 | 影响 |

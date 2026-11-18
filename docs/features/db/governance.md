@@ -18,6 +18,23 @@
 
 另有 `idx_jobs_recovery(status, heartbeat_at)`。
 
+### index_requests
+
+| 列 | 类型与约束 | 说明 |
+|---|---|---|
+| id | INTEGER PRIMARY KEY AUTOINCREMENT | 行号 |
+| tenant_id / principal_id / requester | TEXT / INTEGER / TEXT | 租户、申请主体编号与名称 |
+| kind | TEXT CHECK (repo/docs) | 申请类型 |
+| target / source | TEXT | 归一化目标与实际地址 |
+| params | JSON | 可重放作业参数，含请求编号 |
+| status | TEXT CHECK（pending/approved/queued/running/done/failed/rejected/cancelled） | 状态机 |
+| dedupe_key | TEXT | 归一化去重键 |
+| approved_by / reject_reason | INTEGER / TEXT | 审批人与驳回原因 |
+| job_id / error | INTEGER / TEXT | 关联作业与失败原因 |
+| created_at / updated_at | TEXT | 时间戳 |
+
+索引覆盖 `(tenant_id, principal_id, id)`、`(tenant_id, status, id)`、`(tenant_id, dedupe_key, status)`。同一租户的活动申请按去重键复用；终态申请只读，重新申请写入新行。
+
 ### version_locks
 
 | 列 | 类型与约束 | 说明 |

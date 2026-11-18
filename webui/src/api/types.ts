@@ -113,6 +113,51 @@ export interface PageList {
   items: PageRow[];
 }
 
+export interface IndexRequest {
+  id: number;
+  tenant_id: string;
+  principal_id: number | null;
+  requester: string;
+  kind: 'repo' | 'docs';
+  target: string;
+  source: string;
+  params: Record<string, unknown>;
+  status:
+    | 'pending'
+    | 'approved'
+    | 'queued'
+    | 'running'
+    | 'done'
+    | 'failed'
+    | 'rejected'
+    | 'cancelled';
+  dedupe_key: string;
+  approved_by: number | null;
+  reject_reason: string;
+  job_id: number | null;
+  error: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IndexRequestCreate {
+  kind: 'repo' | 'docs';
+  library: string;
+  version?: string;
+  ecosystem?: string;
+  source?: string;
+  start_url?: string;
+  max_pages?: number;
+  prefilter?: boolean;
+  update?: boolean;
+  fresh?: boolean;
+  include_prerelease?: boolean;
+  subdir?: string;
+  only_files?: string[];
+  exclude_patterns?: string[];
+  max_files?: number;
+}
+
 export interface JobSummary {
   id: number;
   kind: string;
