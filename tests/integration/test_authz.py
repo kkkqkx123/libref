@@ -13,6 +13,8 @@ from libref.services.infra.auth import (
     issue_api_key,
     revoke_principal_keys,
 )
+from libref.services.infra.jobs import JobManager
+from libref.services.ops.feedback import FeedbackService
 from libref.web import build_web_app
 from tests.conftest import make_settings
 
@@ -187,6 +189,61 @@ def test_config_refresh_failure_is_visible_and_audited(tmp_path, monkeypatch) ->
             "SELECT action, result FROM audit_log WHERE action='config.refresh'"
         ).fetchall()
         assert rows == [("config.refresh", "denied")]
+    finally:
+        conn.close()
+
+
+def test_feedback_resolve_is_tenant_scoped(tmp_path, monkeypatch) -> None:
+    conn, settings, client = _setup(tmp_path, monkeypatch)
+    try:
+        _, tenant_key = _key(
+            conn, settings, name="reviewer", roles=["kb_admin"], tenant_id="t1"
+        )
+        foreign_pid, _ = _key(
+            conn, settings, name="foreign", roles=["developer"], tenant_id="t2"
+        )
+        feedback_id = FeedbackService(conn).submit(
+            tenant_id="t2", principal_id=foreign_pid, body="foreign feedback"
+        )
+        denied = client.post(
+            f"/feedback/{feedback_id}/resolve", headers=_auth(tenant_key)
+        )
+        assert denied.status_code == 404
+        status = conn.execute(
+            "SELECT status FROM feedback WHERE id=?", (feedback_id,)
+        ).fetchone()[0]
+        assert status == "open"
+        _, platform_key = _key(conn, settings, name="root", roles=[PLATFORM_ROLE])
+        assert (
+            client.post(
+                f"/feedback/{feedback_id}/resolve", headers=_auth(platform_key)
+            ).status_code
+            == 200
+        )
+    finally:
+        conn.close()
+
+
+def test_job_cancel_is_tenant_scoped(tmp_path, monkeypatch) -> None:
+    conn, settings, client = _setup(tmp_path, monkeypatch)
+    try:
+        _, tenant_key = _key(
+            conn, settings, name="sys", roles=["sys_admin"], tenant_id="t1"
+        )
+        job_id = JobManager(conn).submit("probe", {}, tenant_id="t2")
+        denied = client.post(f"/jobs/{job_id}/cancel", headers=_auth(tenant_key))
+        assert denied.status_code == 404
+        flag = conn.execute(
+            "SELECT cancel_requested FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()[0]
+        assert flag == 0
+        _, platform_key = _key(conn, settings, name="root", roles=[PLATFORM_ROLE])
+        assert (
+            client.post(
+                f"/jobs/{job_id}/cancel", headers=_auth(platform_key)
+            ).status_code
+            == 200
+        )
     finally:
         conn.close()
 

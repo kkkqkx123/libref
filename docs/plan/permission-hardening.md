@@ -55,3 +55,7 @@
 认证实现已收敛到 `services/infra/auth.py`，`mcp_server/auth.py` 与未使用的 `auth_required` 已移除。角色新增平台管理员，scope 与租户签发均受调用者权限约束，Key 有默认与最大有效期，并支持按主体批量吊销。Origin 改为精确匹配并接入 `allowed_origins`，默认鉴权模式改为强制。HTTP 应用统一在组装处挂载认证中间件，独立 MCP HTTP 与独立 Web 命令已移除。认证失败、授权拒绝、Key 列举与吊销、配置刷新失败均写入审计。
 
 验证已统一执行：`uv run pytest` 全绿，`uv run ruff check src tests`、`uv run ruff format --check src tests`、`uv run mypy src` 均通过。
+
+## 后续修正
+
+本文描述的是该轮加固的目标态；后续审查发现 Key scope 只能扩大、跨租户资源操作缺少归属校验、平台管理员的 `*` 被当作写入租户、来源与配额路径分散等问题。修正清单与分阶段方案见 `docs/plan/permission-boundaries-repair.md`。

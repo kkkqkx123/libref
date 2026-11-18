@@ -10,6 +10,7 @@ import pytest
 
 from libref.services.infra.auth import (
     PLATFORM_ROLE,
+    PLATFORM_SCOPE,
     bootstrap_admin,
     create_principal,
     dev_principal,
@@ -242,5 +243,54 @@ def test_key_lifetime_bounds_and_revoke_all(monkeypatch, tmp_path) -> None:
             )
         assert revoke_principal_keys(conn, caller=caller, principal_id=pid) == 1
         assert lookup_principal(conn, raw) is None
+    finally:
+        conn.close()
+
+
+def test_key_scopes_narrow_role_scopes(monkeypatch, tmp_path) -> None:
+    conn = _conn()
+    settings = _settings(monkeypatch, tmp_path)
+    try:
+        caller = _caller(settings)
+        pid = create_principal(
+            conn,
+            caller=caller,
+            tenant_id="default",
+            kind="human",
+            name="narrow-admin",
+            roles=[PLATFORM_ROLE],
+        )
+        _, raw = issue_api_key(
+            conn, caller=caller, settings=settings, principal_id=pid, scopes=["read"]
+        )
+        found = lookup_principal(conn, raw)
+        assert found is not None
+        assert found.scopes == {"read"}
+        assert PLATFORM_SCOPE not in found.scopes
+    finally:
+        conn.close()
+
+
+def test_key_scopes_cannot_exceed_target_roles(monkeypatch, tmp_path) -> None:
+    conn = _conn()
+    settings = _settings(monkeypatch, tmp_path)
+    try:
+        caller = _caller(settings)
+        pid = create_principal(
+            conn,
+            caller=caller,
+            tenant_id="default",
+            kind="human",
+            name="plain-dev",
+            roles=["developer"],
+        )
+        with pytest.raises(ValueError, match="cannot grant scopes"):
+            issue_api_key(
+                conn,
+                caller=caller,
+                settings=settings,
+                principal_id=pid,
+                scopes=["review:write"],
+            )
     finally:
         conn.close()

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from libref.services.infra.tenant import GLOBAL_TENANT
+
 
 class FeedbackService:
     """Append-only feedback with explicit resolve; never touches review rows."""
@@ -42,7 +44,6 @@ class FeedbackService:
     ) -> list[dict[str, Any]]:
         """List feedback inside one tenant, newest last for stable review order."""
         from libref.services.infra.auth import ensure_auth_tables
-        from libref.services.infra.tenant import GLOBAL_TENANT
 
         ensure_auth_tables(self._conn)
         if tenant_id == GLOBAL_TENANT:
@@ -91,17 +92,27 @@ class FeedbackService:
             for row in rows
         ]
 
-    def resolve(self, feedback_id: int, *, resolved_by: int | None) -> None:
-        """Mark one item resolved; resolving twice is rejected."""
+    def resolve(
+        self,
+        feedback_id: int,
+        *,
+        resolved_by: int | None,
+        tenant_id: str | None = None,
+    ) -> None:
+        """Mark one item resolved inside its tenant; repeat resolution is rejected."""
         from libref.services.infra.auth import ensure_auth_tables
 
         ensure_auth_tables(self._conn)
-        cur = self._conn.execute(
+        sql = (
             "UPDATE feedback SET status='resolved', resolved_by=?,"
             " resolved_at=datetime('now')"
-            " WHERE id=? AND status != 'resolved'",
-            (resolved_by, feedback_id),
+            " WHERE id=? AND status != 'resolved'"
         )
+        params: list[Any] = [resolved_by, feedback_id]
+        if tenant_id not in (None, GLOBAL_TENANT):
+            sql += " AND tenant_id=?"
+            params.append(tenant_id)
+        cur = self._conn.execute(sql, params)
         self._conn.commit()
         if cur.rowcount == 0:
             raise ValueError(f"unknown or resolved feedback: {feedback_id}")

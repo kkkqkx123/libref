@@ -155,7 +155,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### POST /admin/keys
 
-签发凭据，需 `admin:keys`。主体租户与 Key scope 都不得超过调用者权限；未知 scope 与越权 scope 返回请求错误。明文仅返回一次，默认有效期与最大有效期由 `[auth]` 控制。
+签发凭据，需 `admin:keys`。主体租户与 Key scope 都不得超过调用者权限，Key scope 也不得超过目标主体的角色 scope；非空 Key scope 会收窄角色权限，留空表示继承角色全部 scope。未知 scope 与越权 scope 返回请求错误。明文仅返回一次，默认有效期与最大有效期由 `[auth]` 控制。
 
 ### DELETE /admin/keys/{key_id}
 

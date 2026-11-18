@@ -469,8 +469,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
         if allowed_hosts or allowed_origins:
             from mcp.server.transport_security import TransportSecuritySettings
 
+            from libref.services.infra.auth import is_loopback_host
+
+            hosts = list(allowed_hosts)
+            if not hosts and is_loopback_host(host):
+                hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+            if not hosts:
+                hosts = [f"{host}:*"]
             transport_kwargs["transport_security"] = TransportSecuritySettings(
-                allowed_hosts=allowed_hosts,
+                allowed_hosts=hosts,
                 allowed_origins=allowed_origins,
             )
         transport_kwargs["host"] = host
@@ -515,6 +522,8 @@ def cmd_serve(args: argparse.Namespace) -> int:
         combined = _Starlette(routes=routes, lifespan=_lifespan)
         combined.state.context = ctx
         combined.state.settings = settings
+        combined.add_middleware(AuthMiddleware, context=ctx)
+        # CORS wraps Auth so browser preflight receives allowed-origin headers.
         combined.add_middleware(
             CORSMiddleware,
             allow_origins=allowed_origins,
@@ -528,7 +537,6 @@ def cmd_serve(args: argparse.Namespace) -> int:
             ],
             expose_headers=["Mcp-Session-Id", "x-request-id"],
         )
-        combined.add_middleware(AuthMiddleware, context=ctx)
         # Flattened web routes bypass the inner app stack, so the combined app
         # must restore the FastAPI route invariant and the SPA fallback itself.
         from fastapi.middleware.asyncexitstack import AsyncExitStackMiddleware

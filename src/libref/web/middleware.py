@@ -16,14 +16,13 @@ from libref.services.infra.auth import (
     AuthDenied,
     authenticate_request,
     current_principal,
+    write_tenant,
 )
 from libref.web.errors import error_body
 
 
 def _public_path(path: str) -> bool:
-    return path in ("/health", "/readyz", "/") or path.startswith(
-        ("/health", "/assets/")
-    )
+    return path in ("/health", "/readyz", "/") or path.startswith("/assets/")
 
 
 def _reject(status: int, detail: Any, code: str, request_id: str) -> JSONResponse:
@@ -84,8 +83,16 @@ class AuthMiddleware(BaseHTTPMiddleware):
         except Exception:  # noqa: BLE001, S110 — best effort close
             pass
 
-    def _audit_denial(self, request: Request, code: str) -> None:
-        """Record authentication failures without turning them into outages."""
+    def _audit_denial(
+        self,
+        request: Request,
+        code: str,
+        *,
+        action: str = "auth.denied",
+        principal=None,
+        target: str | None = None,
+    ) -> None:
+        """Record authorization failures without turning them into outages."""
         from libref.services.ops.audit import write_audit
 
         try:
@@ -95,11 +102,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         try:
             write_audit(
                 conn,
-                tenant_id="default",
-                principal_id=None,
-                action="auth.denied",
-                target=request.url.path,
-                result=code,
+                tenant_id=write_tenant(principal),
+                principal_id=getattr(principal, "id", None),
+                action=action,
+                target=target or request.url.path,
+                result="denied" if action == "auth.forbidden" else code,
                 request_id=str(getattr(request.state, "request_id", "")),
             )
         finally:
@@ -111,61 +118,35 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not bool(getattr(settings, "quota_enabled", False)):
             return None
         from libref.services.infra import quota
-        from libref.services.ops.audit import write_audit
 
-        tenant_id = str(principal.tenant_id or "default")
+        rid = str(getattr(request.state, "request_id", ""))
         try:
             conn, owned = self._connect(request)
         except Exception:  # noqa: BLE001
             return None  # fail open: bookkeeping never becomes an outage
         try:
-            decision = quota.check(
+            decision = quota.enforce(
                 conn,
-                tenant_id=tenant_id,
+                tenant_id=write_tenant(principal),
                 principal_id=principal.id,
                 resource="http_requests",
                 settings=settings,
+                request_id=rid,
             )
-            if not decision.allowed:
-                request_metrics.incr("quota_denied_total{resource=http_requests}")
-                quota.record_event(
-                    conn,
-                    tenant_id=tenant_id,
-                    principal_id=principal.id,
-                    resource="http_requests",
-                    result="denied",
-                    used=decision.used,
-                    limit_value=decision.limit_value,
-                    request_id=str(getattr(request.state, "request_id", "")),
-                )
-                write_audit(
-                    conn,
-                    tenant_id=tenant_id,
-                    principal_id=principal.id,
-                    action="quota",
-                    target="http_requests",
-                    result="denied",
-                    request_id=str(getattr(request.state, "request_id", "")),
-                )
-                rid = str(getattr(request.state, "request_id", ""))
-                return _reject(
-                    429,
-                    {
-                        "error": "quota exceeded",
-                        "resource": decision.resource,
-                        "reset_at": decision.reset_at,
-                        "request_id": rid,
-                    },
-                    "quota_exceeded",
-                    rid,
-                )
-            quota.add_usage(
-                conn,
-                tenant_id=tenant_id,
-                principal_id=principal.id,
-                resource="http_requests",
+            if decision is None:
+                return None
+            request_metrics.incr("quota_denied_total{resource=http_requests}")
+            return _reject(
+                429,
+                {
+                    "error": "quota exceeded",
+                    "resource": decision.resource,
+                    "reset_at": decision.reset_at,
+                    "request_id": rid,
+                },
+                "quota_exceeded",
+                rid,
             )
-            return None
         except Exception:  # noqa: BLE001 — quota bookkeeping must not block serving
             return None
         finally:
@@ -228,7 +209,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 request.url.path, 429, int((time.monotonic() - started) * 1000)
             )
             return gate
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except AuthDenied as exc:
+            self._audit_denial(
+                request,
+                exc.code,
+                action="auth.forbidden",
+                principal=principal,
+                target=exc.detail,
+            )
+            response = _reject(exc.status, exc.detail, exc.code, request_id)
         status = int(getattr(response, "status_code", 0) or 0)
         observe.status_var.set(status)
         observe.duration_var.set(int((time.monotonic() - started) * 1000))

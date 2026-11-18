@@ -124,3 +124,7 @@
 - 本文只增不删：任务一旦启动，移到新方案并在本文标注「已启动，见 <新方案路径>」，不删除原有证据与理由。
 - 主方案随代码落地持续更新；本文同步维护「现状证据」的 `file:line`，避免引用过期（`AGENTS.md:164-166` 一次变更同步所有镜像）。
 - 任一替代方案被启用时，必须同时说明它推翻了哪项既有决策（例如 A6 推翻 `docs/architecture/tech-stack.md:25`），并同步改写对应架构文档。
+
+## 8. 现状更正
+
+本文表格中的 `file:line` 是当时的历史基线，不再代表当前代码：`mcp_server/auth.py` 与静态 `mcp_token` 已移除，用户表、配额、WebUI 与部署文件已落地。当前权限边界与待修正问题以 `docs/plan/permission-hardening.md` 和 `docs/plan/permission-boundaries-repair.md` 为准。

@@ -18,10 +18,10 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from libref.db.contract import MetadataSession
+from libref.services.infra.tenant import GLOBAL_TENANT, owner_tenant
 
 PLATFORM_ROLE = "platform_admin"
 PLATFORM_SCOPE = "platform:admin"
-GLOBAL_TENANT = "*"
 
 ROLE_SCOPES: dict[str, frozenset[str]] = {
     "external": frozenset({"read"}),
@@ -83,6 +83,26 @@ class Principal:
         if self.has(PLATFORM_SCOPE):
             return True
         return tenant_id == self.tenant_id and tenant_id != GLOBAL_TENANT
+
+
+def missing_scopes(principal: Principal | None, *scopes: str) -> list[str]:
+    """List scopes a principal lacks; an absent principal lacks everything."""
+    held = set(getattr(principal, "scopes", set()) or ())
+    return [scope for scope in scopes if scope not in held]
+
+
+def require_scopes(principal: Principal | None, *scopes: str) -> None:
+    """Reject callers that lack any required scope."""
+    missing = missing_scopes(principal, *scopes)
+    if missing:
+        raise AuthDenied(
+            403, "missing_scope", f"forbidden: missing {','.join(missing)}"
+        )
+
+
+def write_tenant(principal: Principal | None) -> str:
+    """Resolve the concrete tenant for rows written by a principal."""
+    return owner_tenant(getattr(principal, "tenant_id", None))
 
 
 def _system_caller() -> Principal:
@@ -298,13 +318,17 @@ def _principal_row(conn: MetadataSession, principal_id: int) -> tuple | None:
     ).fetchone()
 
 
-def validate_key_scopes(scopes: list[str] | None, caller: Principal) -> list[str]:
-    """Require known scopes that the caller already holds."""
+def validate_key_scopes(
+    scopes: list[str] | None, caller: Principal, *, target_roles: list[str]
+) -> list[str]:
+    """Require known scopes held by the caller and granted by target roles."""
     requested = sorted({str(s) for s in (scopes or [])})
     unknown = [s for s in requested if s not in KNOWN_SCOPES]
     if unknown:
         raise ValueError(f"unknown scopes: {','.join(unknown)}")
-    excess = [s for s in requested if s not in caller.scopes]
+    role_scopes = scopes_for_roles(target_roles)
+    caller_scopes = set(caller.scopes)
+    excess = [s for s in requested if s not in caller_scopes or s not in role_scopes]
     if excess:
         raise ValueError(f"caller cannot grant scopes: {','.join(excess)}")
     return requested
@@ -367,7 +391,9 @@ def issue_api_key(
         raise ValueError(f"unknown principal: {principal_id}")
     if not caller.can_administer(str(target[1])):
         raise ValueError("caller cannot administer target principal")
-    checked_scopes = validate_key_scopes(scopes, caller)
+    checked_scopes = validate_key_scopes(
+        scopes, caller, target_roles=_parse_json_list(str(target[4]))
+    )
     raw = f"libref_{secrets.token_hex(24)}"
     key_id = _insert_key(
         conn,
@@ -452,7 +478,9 @@ def lookup_principal(
         principal = _principal_from_row(prow)
         if principal.status != "active":
             continue
-        principal.scopes |= set(_parse_json_list(scopes_raw))
+        key_scopes = set(_parse_json_list(scopes_raw))
+        if key_scopes:
+            principal.scopes &= key_scopes
         if last_used is None or moment - float(last_used) > 3600.0:
             conn.execute(
                 "UPDATE api_keys SET last_used_at=? WHERE id=?", (moment, key_id)
@@ -499,7 +527,7 @@ def bootstrap_admin(conn: MetadataSession, raw_key: str, settings) -> Principal:
         settings=settings,
         principal_id=principal_id,
         raw=raw_key,
-        scopes=[PLATFORM_SCOPE],
+        scopes=[],
         expires_at=None,
     )
     found = lookup_principal(conn, raw_key)

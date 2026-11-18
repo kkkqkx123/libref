@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from libref.db.contract import MetadataSession
+from libref.services.infra.tenant import GLOBAL_TENANT
 
 logger = logging.getLogger(__name__)
 
@@ -349,27 +350,38 @@ class JobManager:
             "finished_at": job.finished_at,
         }
 
-    def cancel(self, job_id: int) -> None:
-        """Request cancellation; pending rows fail fast, running rows observe the flag."""
+    def cancel(self, job_id: int, *, tenant_id: str | None = None) -> None:
+        """Request cancellation inside one tenant, if the tenant is constrained."""
         from libref.db.conn import write_lock
 
+        scoped = tenant_id not in (None, GLOBAL_TENANT)
         with write_lock(self._conn):
-            cur = self._conn.execute(
-                "UPDATE jobs SET cancel_requested=1 WHERE id=?", (job_id,)
-            )
+            sql = "UPDATE jobs SET cancel_requested=1 WHERE id=?"
+            params: tuple[Any, ...] = (job_id,)
+            if scoped:
+                sql += " AND tenant_id=?"
+                params += (tenant_id,)
+            cur = self._conn.execute(sql, params)
             self._conn.commit()
             if cur.rowcount == 0:
                 raise ValueError(f"unknown job: {job_id}")
-            row = self._conn.execute(
-                "SELECT status FROM jobs WHERE id=?", (job_id,)
-            ).fetchone()
+            status_sql = "SELECT status FROM jobs WHERE id=?"
+            status_params: tuple[Any, ...] = (job_id,)
+            if scoped:
+                status_sql += " AND tenant_id=?"
+                status_params += (tenant_id,)
+            row = self._conn.execute(status_sql, status_params).fetchone()
             if row is not None and row[0] == "pending":
-                self._conn.execute(
+                fail_sql = (
                     "UPDATE jobs SET status='failed', error='cancelled',"
                     f" finished_at={_dialect_now(self._conn)}"
-                    " WHERE id=? AND status='pending'",
-                    (job_id,),
+                    " WHERE id=? AND status='pending'"
                 )
+                fail_params: tuple[Any, ...] = (job_id,)
+                if scoped:
+                    fail_sql += " AND tenant_id=?"
+                    fail_params += (tenant_id,)
+                self._conn.execute(fail_sql, fail_params)
                 self._conn.commit()
 
     def heartbeat(self, job_id: int) -> None:

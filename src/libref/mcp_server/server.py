@@ -22,6 +22,12 @@ from libref.services.factory import (
     build_search_service,
     build_vector,
 )
+from libref.services.infra.auth import (
+    PLATFORM_SCOPE,
+    missing_scopes,
+    write_tenant,
+)
+from libref.services.infra.tenant import GLOBAL_TENANT
 from libref.services.ops.review import ReviewService
 from libref.services.registry.libraries import LibraryService
 from libref.services.registry.resolver import resolve as _resolve
@@ -138,12 +144,25 @@ def build_mcp_server(
     def _deny(principal, *scopes: str):
         if principal is None:
             return {"error": "unauthorized", "message": "missing credentials"}
-        missing = [s for s in scopes if s not in set(principal.scopes)]
+        missing = missing_scopes(principal, *scopes)
         if missing:
+            from libref.services.ops.audit import write_audit
+
+            write_audit(
+                conn,
+                tenant_id=write_tenant(principal),
+                principal_id=getattr(principal, "id", None),
+                action="auth.forbidden",
+                target=",".join(missing),
+                result="denied",
+            )
             return {"error": "forbidden", "message": f"missing {','.join(missing)}"}
         return None
 
     def _tenant(principal) -> str:
+        scopes = set(getattr(principal, "scopes", set()) or ())
+        if PLATFORM_SCOPE in scopes:
+            return GLOBAL_TENANT
         return str(getattr(principal, "tenant_id", "default") or "default")
 
     def _make_bundle():
@@ -910,9 +929,6 @@ def build_mcp_server(
     def job_show(job_id: int | None = None, limit: int = 20) -> dict[str, Any]:
         """Show job results, listing recent jobs when no id is given."""
         principal = _principal()
-        denied = _deny(principal, "read")
-        if denied is not None:
-            return denied
         bad = _check_limit(limit, low=1, high=200)
         if bad is not None:
             return _invalid(bad)
@@ -1054,8 +1070,7 @@ def build_mcp_server(
 
             @_ft.wraps(func)
             async def _guarded(*args: Any, **kwargs: Any) -> Any:
-                principal = _principal()
-                denied = _deny(principal, "read")
+                denied = _deny(_principal(), "read")
                 if denied is not None:
                     return denied
                 return await func(*args, **kwargs)
@@ -1065,8 +1080,7 @@ def build_mcp_server(
 
         @_ft.wraps(func)
         def _guarded_sync(*args: Any, **kwargs: Any) -> Any:
-            principal = _principal()
-            denied = _deny(principal, "read")
+            denied = _deny(_principal(), "read")
             if denied is not None:
                 return denied
             return func(*args, **kwargs)

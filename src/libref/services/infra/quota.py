@@ -294,6 +294,65 @@ def check(
     )
 
 
+def enforce(
+    conn: MetadataSession,
+    *,
+    tenant_id: str,
+    principal_id: int | None,
+    resource: str,
+    cost: int = 1,
+    settings=None,
+    request_id: str = "",
+) -> QuotaDecision | None:
+    """Charge one request; return the denial decision or None when allowed."""
+    from libref.services.infra.tenant import owner_tenant
+
+    tenant_id = owner_tenant(tenant_id)
+    decision = check(
+        conn,
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        resource=resource,
+        cost=cost,
+        settings=settings,
+    )
+    if decision.allowed:
+        try:
+            add_usage(
+                conn,
+                tenant_id=tenant_id,
+                principal_id=principal_id,
+                resource=resource,
+                amount=cost,
+                key=decision.period_key,
+            )
+        except Exception:  # noqa: BLE001, S110 — bookkeeping never blocks serving
+            pass
+        return None
+    record_event(
+        conn,
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        resource=resource,
+        result="denied",
+        used=decision.used,
+        limit_value=decision.limit_value,
+        request_id=request_id,
+    )
+    from libref.services.ops.audit import write_audit
+
+    write_audit(
+        conn,
+        tenant_id=tenant_id,
+        principal_id=principal_id,
+        action="quota",
+        target=resource,
+        result="denied",
+        request_id=request_id,
+    )
+    return decision
+
+
 def record_event(
     conn: MetadataSession,
     *,

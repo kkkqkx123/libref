@@ -13,7 +13,13 @@ from libref.db.contract import MetadataSession
 from libref.services.code.mining_read import MiningReadService
 from libref.services.docs.pages import PageService
 from libref.services.docs.search import SearchService
+from libref.services.infra.auth import (
+    PLATFORM_SCOPE,
+    require_scopes,
+    write_tenant,
+)
 from libref.services.infra.jobs import JobManager
+from libref.services.infra.tenant import GLOBAL_TENANT
 from libref.services.ops.review import ReviewService
 from libref.services.registry.libraries import LibraryService
 from libref.web.api import (
@@ -158,78 +164,47 @@ def build_web_app(
         return principal
 
     def _need(principal, *scopes: str) -> None:
-        missing = [
-            s for s in scopes if s not in set(getattr(principal, "scopes", set()))
-        ]
-        if not missing:
-            return
-        from libref.services.ops.audit import write_audit
-
-        write_audit(
-            conn,
-            tenant_id=str(getattr(principal, "tenant_id", "default") or "default"),
-            principal_id=_principal_id(principal),
-            action="auth.forbidden",
-            target=",".join(missing),
-            result="denied",
-        )
-        raise HTTPException(
-            status_code=403, detail=f"forbidden: missing {','.join(missing)}"
-        )
+        require_scopes(principal, *scopes)
 
     def _principal_id(principal) -> int | None:
         pid = getattr(principal, "id", None)
         return int(pid) if isinstance(pid, int) else None
 
     def _tenant_of(principal) -> str:
+        scopes = set(getattr(principal, "scopes", set()) or ())
+        if PLATFORM_SCOPE in scopes:
+            return GLOBAL_TENANT
         return str(getattr(principal, "tenant_id", "default") or "default")
 
+    def _write_tenant_of(principal) -> str:
+        return write_tenant(principal)
+
     def _quota_gate(request: Request, principal, resource: str, cost: int = 1) -> None:
-        """Reject the submission with 429 when the subject is over quota; audit on denial."""
+        """Reject the submission with 429 when the subject is over quota."""
         est = _eff_settings(request)
         if not bool(getattr(est, "quota_enabled", False)):
             return
         from libref.services.infra import quota as _quota
-        from libref.services.ops.audit import write_audit as _wa
 
         rc, should_close, _, _bundle = _req_bundle(request, principal)
         try:
-            decision = _quota.check(
+            decision = _quota.enforce(
                 rc,
-                tenant_id=_tenant_of(principal),
+                tenant_id=_write_tenant_of(principal),
                 principal_id=_principal_id(principal),
                 resource=resource,
                 cost=cost,
                 settings=est,
+                request_id=str(getattr(request.state, "request_id", "")),
             )
-            if not decision.allowed:
-                rid = str(getattr(getattr(request, "state", None), "request_id", ""))
-                _quota.record_event(
-                    rc,
-                    tenant_id=_tenant_of(principal),
-                    principal_id=_principal_id(principal),
-                    resource=resource,
-                    result="denied",
-                    used=decision.used,
-                    limit_value=decision.limit_value,
-                    request_id=rid,
-                )
-                _wa(
-                    rc,
-                    tenant_id=_tenant_of(principal),
-                    principal_id=_principal_id(principal),
-                    action="quota",
-                    target=resource,
-                    result="denied",
-                    request_id=rid,
-                )
+            if decision is not None:
                 raise HTTPException(
                     status_code=429,
                     detail={
                         "error": "quota exceeded",
                         "resource": resource,
                         "reset_at": decision.reset_at,
-                        "request_id": rid,
+                        "request_id": str(getattr(request.state, "request_id", "")),
                     },
                 )
         finally:
@@ -946,12 +921,12 @@ def build_web_app(
                 body.start_url,
                 max_pages=body.max_pages,
                 ecosystem=body.ecosystem,
-                tenant_id=_tenant_of(principal),
+                tenant_id=_write_tenant_of(principal),
                 principal_id=_principal_id(principal),
             )
             write_audit(
                 rc,
-                tenant_id=_tenant_of(principal),
+                tenant_id=_write_tenant_of(principal),
                 principal_id=_principal_id(principal),
                 action="scrape.submit",
                 target=f"{body.library}:{body.version}:{job_id}",
@@ -1393,7 +1368,7 @@ def build_web_app(
         svc = FeedbackService(rc)
         try:
             fid = svc.submit(
-                tenant_id=_tenant_of(principal),
+                tenant_id=_write_tenant_of(principal),
                 principal_id=_principal_id(principal),
                 entity_type=body.entity_type,
                 entity_id=body.entity_id,
@@ -1449,7 +1424,11 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         svc = FeedbackService(rc)
         try:
-            svc.resolve(feedback_id, resolved_by=_principal_id(principal))
+            svc.resolve(
+                feedback_id,
+                resolved_by=_principal_id(principal),
+                tenant_id=_tenant_of(principal),
+            )
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         write_audit(
@@ -1477,7 +1456,7 @@ def build_web_app(
         job_id = mgr.submit(
             body.kind,
             body.params,
-            tenant_id=_tenant_of(principal),
+            tenant_id=_write_tenant_of(principal),
             principal_id=_principal_id(principal),
         )
         write_audit(
@@ -1507,7 +1486,7 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         mgr = bundle["jobs"]
         try:
-            mgr.cancel(job_id)
+            mgr.cancel(job_id, tenant_id=_tenant_of(principal))
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         write_audit(

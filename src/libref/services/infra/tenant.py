@@ -59,6 +59,14 @@ def require_tenant(tenant_id: str | None) -> str:
     return text
 
 
+def owner_tenant(tenant_id: str | None) -> str:
+    """Resolve a visibility tenant to the concrete tenant used for writes."""
+    text = (tenant_id or "").strip()
+    if not text or is_global(text):
+        return DEFAULT_TENANT
+    return text
+
+
 def resolve_version_id(
     conn: Any,
     tenant_id: str,

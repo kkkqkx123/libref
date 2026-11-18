@@ -19,6 +19,7 @@ def write_audit(
     try:
         from libref.db.conn import write_lock as _guard
         from libref.services.infra.auth import ensure_auth_tables
+        from libref.services.infra.tenant import owner_tenant
 
         ensure_auth_tables(conn)
         with _guard(conn):
@@ -26,7 +27,7 @@ def write_audit(
                 "INSERT INTO audit_log(tenant_id, principal_id, action, target,"
                 " result, request_id) VALUES(?,?,?,?,?,?)",
                 (
-                    tenant_id or "default",
+                    owner_tenant(tenant_id),
                     principal_id,
                     action,
                     target,

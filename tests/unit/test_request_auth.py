@@ -11,10 +11,14 @@ from libref.services.infra.auth import (
     dev_principal,
     is_allowed_origin,
     is_loopback_host,
+    missing_scopes,
     parse_bearer,
+    require_scopes,
     validate_origin_config,
     verify_key,
+    write_tenant,
 )
+from libref.services.infra.tenant import owner_tenant
 from tests.conftest import make_settings
 
 
@@ -51,6 +55,20 @@ def test_parse_bearer() -> None:
     assert parse_bearer("Token abc") is None
     assert parse_bearer(None) is None
     assert parse_bearer("Bearer ") is None
+
+
+def test_shared_scope_and_tenant_primitives() -> None:
+    principal = dev_principal(None)
+    assert missing_scopes(principal, "read") == []
+    assert missing_scopes(principal, "read", "unknown:scope") == ["unknown:scope"]
+    require_scopes(principal, "read")
+    with pytest.raises(AuthDenied) as denied:
+        require_scopes(principal, "unknown:scope")
+    assert denied.value.code == "missing_scope"
+    assert owner_tenant("*") == "default"
+    assert owner_tenant("team-a") == "team-a"
+    principal.tenant_id = "*"
+    assert write_tenant(principal) == "default"
 
 
 def test_verify_key() -> None:
