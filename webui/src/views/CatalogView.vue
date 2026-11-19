@@ -154,6 +154,7 @@ const ecosystem = ref(readString(route.query.ecosystem));
 const libraries = ref<LibraryRow[]>([]);
 const currentVersions = ref<VersionRow[]>([]);
 const expanded = ref('');
+const expandedLibrary = ref<LibraryRow | null>(null);
 const loading = ref(false);
 const error = ref('');
 const requestId = ref('');
@@ -177,8 +178,8 @@ const pageLibrary = ref<LibraryRow | null>(null);
 const pageVersion = ref<VersionRow | null>(null);
 
 // Dependency dialog: reads the repo_dependencies table, which only holds rows
-// for versions already indexed. The library/version/ecosystem come from the
-// expanded version row, so no guessing is needed.
+// for versions already indexed. The clicked library and version rows provide
+// every lookup key, so no name-based guessing is needed.
 const depsOpen = ref(false);
 const depsLoading = ref(false);
 const depsError = ref('');
@@ -209,6 +210,7 @@ async function reload(): Promise<void> {
     });
     libraries.value = data.items;
     expanded.value = '';
+    expandedLibrary.value = null;
     currentVersions.value = [];
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : messages.value.common.loadFailed;
@@ -221,6 +223,7 @@ async function reload(): Promise<void> {
 async function toggleVersions(row: LibraryRow): Promise<void> {
   if (expanded.value === row.name) {
     expanded.value = '';
+    expandedLibrary.value = null;
     currentVersions.value = [];
     return;
   }
@@ -230,6 +233,7 @@ async function toggleVersions(row: LibraryRow): Promise<void> {
     });
     currentVersions.value = data.items;
     expanded.value = row.name;
+    expandedLibrary.value = row;
   } catch (err) {
     notifyError(err, messages.value.catalog.loadVersionsFailed);
   }
@@ -254,11 +258,13 @@ function asVersion(row: unknown): VersionRow {
 }
 
 function openPages(version: VersionRow): void {
-  const library = libraries.value.find((row) => row.name === expanded.value) || null;
+  const library = expandedLibrary.value;
   pageLibrary.value = library;
   pageVersion.value = version;
   pageOffset.value = 0;
   pageRows.value = [];
+  pagesError.value = '';
+  pagesRequestId.value = '';
   pagesOpen.value = true;
   void loadPages();
 }
@@ -269,6 +275,7 @@ async function loadPages(): Promise<void> {
   if (!library || !version) return;
   pagesLoading.value = true;
   pagesError.value = '';
+  pagesRequestId.value = '';
   try {
     const { data } = await api<PageList>('/pages', {
       params: {
@@ -302,10 +309,12 @@ function resetPages(): void {
 }
 
 function openDeps(version: VersionRow): void {
-  const library = libraries.value.find((row) => row.name === expanded.value) || null;
+  const library = expandedLibrary.value;
   depsLibrary.value = library;
   depsVersion.value = version;
   depsRows.value = [];
+  depsError.value = '';
+  depsRequestId.value = '';
   depsOpen.value = true;
   void loadDeps();
 }
@@ -316,6 +325,7 @@ async function loadDeps(): Promise<void> {
   if (!library || !version) return;
   depsLoading.value = true;
   depsError.value = '';
+  depsRequestId.value = '';
   try {
     const { data } = await api<Envelope<Row>>('/repo-deps', {
       params: {

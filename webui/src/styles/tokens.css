@@ -131,7 +131,11 @@
 .libref-note-list {
   margin: var(--sp-1) 0 0;
   padding-left: var(--sp-4-5);
-  list-style: disc inside;
+}
+
+/* Shared surface for shell elements that keep their own borders. */
+.libref-surface-card {
+  background: var(--surface-card);
 }
 
 /* Spacing utility used where a width class carried a compound inset. */

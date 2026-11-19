@@ -42,7 +42,7 @@
 | R13 | 审核 409 仅弹提示，不刷新该条当前状态，也不自动定位下一条 | `views/ReviewView.vue:86` | 四 |
 | R14 | 反馈页忽略 `entity_id` 深链参数；洞察页转发反馈时把标识塞进正文 | `views/FeedbackView.vue:85`、`views/CallInsightView.vue:213` | 四 |
 | R15 | 管理页指标只拉一次，无轮询；就绪检查不随标签切换刷新 | `views/AdminView.vue:159` | 四 |
-| R16 | 入库向导缺 `/web-search`、`/github-search` 发现入口与 `/repo-deps` 依赖区块；探测参数只传地址 | `views/IngestWizardView.vue:123`、`:174`、`pages.md:74` | 五 |
+| R16 | 入库向导缺 `/web-search`、`/github-search` 发现入口；探测参数只传地址。依赖查看最终落在目录页版本详情，不进向导 | `views/IngestWizardView.vue:123`、`:174`、`pages.md:74` | 五 |
 | R17 | 目录页只能下钻搜索与问答，缺洞察入口 | `views/CatalogView.vue:25` | 五 |
 | R18 | 文档漂移：开发期代理说法与实现不符；`gen:api` 实际产物名与 README 不一致 | `webui/vite.config.ts:8`、`webui/README.md` | 五 |
 
@@ -127,7 +127,7 @@
 
 - 入库向导：解析步骤并列三个发现入口（注册表联想、网页搜索、代码仓搜索），
   结果表支持一键填入名称与起始地址；探测步骤暴露文档探测的样本上限、页数上限、预过滤，
-  仓库探测的子目录与样本上限；仓库目标在解析结果处附依赖区块（`/repo-deps`）。
+  仓库探测的子目录与样本上限；已入库版本依赖改由目录页版本行查看（`/repo-deps`）。
 - 目录页：每个库行补充洞察入口（API、调用、模式），保留搜索与问答，
   下钻时同时写入全局筛选器。
 - 文档：修正 `webui/README.md` 对 `gen:api` 产物与开发期代理的描述，
@@ -165,7 +165,7 @@ cd webui && npm run check && npm run build
 | 二 | 新增 `utils/query.ts`（`useQuerySync`、`applyScopeFromQuery`、`scopeSnapshot`）；搜索、问答、阅读器、五个洞察页、任务、目录、反馈、审核共十二处状态回写地址栏 |
 | 三 | 阅读器未收录空态 + 入库引导 + 窗口前后段翻页；问答去掉伪造可回答性、429 转配额提示并保留检索出口；新增 `stores/health.ts` 与服务降级全站横幅 |
 | 四 | 任务列表轮询 + 深链 id 双向同步 + 权限计算属性；审核 409 后重取列表并聚焦下一条；反馈读取 `entity_id` 且洞察页正确带入实体；管理页指标 10 秒轮询且随标签启停 |
-| 五 | 入库向导补三个发现入口、探测参数（样本/页数/预过滤/子目录）与依赖区块；目录页补洞察下钻；`webui/README.md` 与托管文档对齐实现 |
+| 五 | 入库向导补三个发现入口、探测参数（样本/页数/预过滤/子目录）；目录页补洞察下钻与版本依赖入口（`/repo-deps`）；`webui/README.md` 与托管文档对齐实现 |
 | 六（后端配合） | 任务详情返回 `params`；版本项返回 `prerelease`；新增 `GET /pages`；错误响应统一带 `error` code；前端对应补“按原参数重提”、预发布标注与过滤、页面选择对话框、`ApiError.code` 与 `errorCodes` 词条 |
 
 ## 11. 剩余问题的设计决策与落地

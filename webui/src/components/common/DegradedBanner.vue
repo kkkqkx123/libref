@@ -7,7 +7,7 @@
     class="libref-degraded"
   >
     <template #title>{{ messages.common.degradedTitle(answerabilityText) }}</template>
-    <ul class="libref-degraded-list">
+    <ul class="libref-note-list">
       <li v-for="reason in reasons" :key="reason">{{ reason }}</li>
     </ul>
   </el-alert>
@@ -39,9 +39,5 @@ const answerabilityText = computed(() => {
 <style scoped>
 .libref-degraded {
   margin-bottom: var(--sp-4);
-}
-.libref-degraded-list {
-  margin: var(--sp-1) 0 0;
-  padding-left: var(--sp-4-5);
 }
 </style>

@@ -1,5 +1,5 @@
 <template>
-  <el-aside width="200px" class="libref-sidebar">
+  <el-aside width="200px" class="libref-sidebar libref-surface-card">
     <el-menu :default-active="active" router>
       <template v-for="group in visibleGroups" :key="group.name">
         <el-menu-item
@@ -57,6 +57,5 @@ const visibleGroups = computed(() => {
 <style scoped>
 .libref-sidebar {
   border-right: 1px solid var(--border-light);
-  background: var(--surface-card);
 }
 </style>

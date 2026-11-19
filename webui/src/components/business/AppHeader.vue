@@ -1,5 +1,5 @@
 <template>
-  <el-header class="libref-header">
+  <el-header class="libref-header libref-surface-card">
     <div class="libref-header-brand" @click="goHome">libref</div>
     <div class="libref-header-right">
       <HealthDot :state="healthState" :label="healthLabel" />
@@ -79,7 +79,6 @@ function onCommand(command: string): void {
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border-light);
-  background: var(--surface-card);
 }
 .libref-header-brand {
   font-weight: 700;

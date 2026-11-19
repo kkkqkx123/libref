@@ -17,11 +17,14 @@ Web 出口是纯 API 形态：约三十个根路径端点加挂载于 `/mcp` 的
 | 功能域 | 对应页面 | 后端端点组 |
 |---|---|---|
 | 检索问答 | 搜索页、问答页、文档阅读器 | `/search`、`/answer`、`/read`、`/pages`、`/catalog` |
-| 源码洞察 | API 洞察页、调用页、符号页、导入页、模式页 | `/api-insight`、`/call-insight`、`/symbol-insight`、`/import-insight`、`/pattern-insight`、`/mining-health`、`/repo-deps`、`/link-stats` |
+| 源码洞察 | API 洞察页、调用页、符号页、导入页、模式页 | `/api-insight`、`/call-insight`、`/symbol-insight`、`/import-insight`、`/pattern-insight`、`/mining-health`、`/repo-deps` |
 | 入库引导 | 入库向导页 | `/resolve`、`/library-search`、`/web-search`、`/github-search`、`/doc-probe`、`/repo-probe`、`/scrape` |
 | 任务运维 | 任务中心页 | `/jobs`、`/jobs/{id}`、`/jobs` 新建、`/jobs/{id}/cancel`、`/scrape` |
 | 审核反馈 | 审核页、反馈页 | `/review`（GET/POST）、`/feedback`（GET/POST）、`/feedback/{id}/resolve` |
 | 系统管理 | 管理页、状态条 | `/health`、`/readyz`、`/metrics`、`/admin/keys`、`/admin/config/refresh` |
+
+`/link-stats` 后端能力保留，前端列为后续项，见 `api-mapping.md`。
+`/repo-deps` 的实际入口在文库目录页的版本行，不在入库向导。
 
 ## 本目录文件
 

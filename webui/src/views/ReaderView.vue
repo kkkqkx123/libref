@@ -37,7 +37,7 @@
       </div>
       <div v-if="candidates.length > 0" class="libref-reader-candidates">
         <p class="libref-muted">{{ messages.reader.candidateHint(candidates.length) }}</p>
-        <ul>
+        <ul class="libref-note-list">
           <li v-for="row in candidates" :key="row.url">
             <el-button link type="primary" @click="openCandidate(row)">
               {{ row.title || row.url }}
@@ -264,9 +264,5 @@ if (url.value) void load();
 .libref-reader-candidates {
   margin-top: var(--sp-4);
   text-align: left;
-}
-.libref-reader-candidates ul {
-  margin: var(--sp-1) 0 0;
-  padding-left: var(--sp-4-5);
 }
 </style>

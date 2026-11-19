@@ -57,12 +57,58 @@ if (!css.includes('--el-color-primary: var(--brand)')) {
   throw new Error('Element Plus primary mapping missing in tokens.css');
 }
 
-const HEX = /#[0-9a-fA-F]{3,8}\b/g;
+const RAW_COLOR = /(#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\s*\([^)]*\))/g;
+const COLOR_DECL = /\b(?:color|background-color|border-color|fill|stroke)\s*:\s*([^;]+);/g;
+const NAMED_COLOR = /\b(?:black|white|red|green|blue|yellow|orange|purple|gray|grey|transparent)\b/i;
 // Spacing/type declarations must use tokens. Width/height/min-width/max-width
 // are layout sizes and stay as literal px (Element Plus controls vary), and
 // 1px borders are a convention, not a spacing token.
 const SPACING_DECL = /\b(font-size|margin|margin-top|margin-bottom|margin-left|margin-right|padding|padding-top|padding-bottom|padding-left|padding-right|gap|row-gap|column-gap)\s*:\s*([^;]+);/g;
-const INLINE_STYLE = /\sstyle="[^"]*"/;
+const INLINE_STYLE = /\s(?:style|:style)\s*=/;
+const TOKEN_REF = /var\(--((?:fs|sp)-[\w-]+)\)/g;
+
+function stripComments(text) {
+  return text
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[\s(])\/\/[^\n]*/gm, '$1');
+}
+
+function checkStyleText(text, where) {
+  const stripped = stripComments(text);
+  const colors = stripped.match(RAW_COLOR);
+  if (colors) throw new Error(`${where} uses raw color values: ${colors.join(', ')}`);
+  if (INLINE_STYLE.test(stripped)) {
+    throw new Error(`${where} uses inline style; use a token-backed utility class`);
+  }
+  for (const m of stripped.matchAll(COLOR_DECL)) {
+    const value = m[1].trim();
+    if (!/var\(--/.test(value) && NAMED_COLOR.test(value)) {
+      throw new Error(`${where} uses a named color: ${value}`);
+    }
+  }
+  for (const m of stripped.matchAll(SPACING_DECL)) {
+    const value = m[2].trim();
+    // A token-backed value contains var(--...); numeric px without it is drift.
+    if (/\d+px/.test(value) && !/var\(--/.test(value)) {
+      throw new Error(`${where} hardcodes ${m[1]}: ${value}; use a spacing/type token`);
+    }
+    // Guard against a bad bulk rewrite that left the property name as its own
+    // value (e.g. `margin: margin`), which is invalid CSS yet parses cleanly.
+    if (/^[a-z-]+$/i.test(value) && value !== 'auto' && value !== 'normal' && value !== 'inherit') {
+      throw new Error(`${where} has malformed ${m[1]}: ${value}`);
+    }
+  }
+  for (const m of stripped.matchAll(TOKEN_REF)) {
+    const name = `--${m[1]}`;
+    if (!light.has(name)) throw new Error(`${where} references undeclared token ${name}`);
+  }
+}
+
+const utilities = css.split('/* Shared utilities */')[1];
+if (!utilities || !utilities.trim()) {
+  throw new Error('shared utilities section missing in tokens.css');
+}
+checkStyleText(utilities, 'tokens.css utilities');
 
 function walk(dir) {
   for (const entry of readdirSync(dir)) {
@@ -72,33 +118,7 @@ function walk(dir) {
       continue;
     }
     if (!/\.(vue|ts)$/.test(entry) || entry.endsWith('.d.ts') || entry.endsWith('.spec.ts')) continue;
-    const text = readFileSync(full, 'utf8');
-    if (/\.ts$/.test(entry)) {
-      // TS files: colours only (no templates/styles there).
-      const stripped = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-      const hits = stripped.match(HEX);
-      if (hits) throw new Error(`${full} uses raw color values: ${hits.join(', ')}`);
-      continue;
-    }
-    const stripped = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-    const hits = stripped.match(HEX);
-    if (hits) throw new Error(`${full} uses raw color values: ${hits.join(', ')}`);
-
-    if (INLINE_STYLE.test(text)) {
-      throw new Error(`${full} uses inline style; use a token-backed utility class`);
-    }
-    for (const m of stripped.matchAll(SPACING_DECL)) {
-      const value = m[2].trim();
-      // A token-backed value contains var(--...); numeric px without it is drift.
-      if (/\d+px/.test(value) && !/var\(--/.test(value)) {
-        throw new Error(`${full} hardcodes ${m[1]}: ${value}; use a spacing/type token`);
-      }
-      // Guard against a bad bulk rewrite that left the property name as its own
-      // value (e.g. `margin: margin`), which is invalid CSS yet parses cleanly.
-      if (/^[a-z-]+$/i.test(value) && value !== 'auto' && value !== 'normal' && value !== 'inherit') {
-        throw new Error(`${full} has malformed ${m[1]}: ${value}`);
-      }
-    }
+    checkStyleText(readFileSync(full, 'utf8'), full);
   }
 }
 walk(root);
