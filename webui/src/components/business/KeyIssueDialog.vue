@@ -67,7 +67,7 @@ const canSubmit = computed(() => canIssueKey(form.name, form.roles));
 
 async function submit(): Promise<void> {
   try {
-    const { data } = await api<{ id: number; key: string; prefix: string }>('/admin/keys', {
+    const { data } = await api('/admin/keys', {
       method: 'POST',
       body: {
         name: form.name,

@@ -89,7 +89,7 @@ async function search(): Promise<void> {
   loading.value = true;
   error.value = '';
   try {
-    const { data } = await api<SearchResponse>('/search', {
+    const { data } = await api('/search', {
       params: {
         query: query.value.trim(),
         ...scopeParams(),

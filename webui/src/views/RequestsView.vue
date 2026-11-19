@@ -100,7 +100,12 @@ import {
 import { ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { Envelope, IndexRequest, IndexRequestCreate } from '../api/types';
+import type {
+  DocProbeRequest,
+  IndexRequest,
+  IndexRequestCreate,
+  RepoProbeRequest,
+} from '../api/types';
 import { readString } from '../utils/query';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
@@ -143,7 +148,7 @@ async function reload(): Promise<void> {
   loading.value = true;
   error.value = '';
   try {
-    const { data } = await api<Envelope<IndexRequest>>('/index-requests', { params: { limit: 50 } });
+    const { data } = await api('/index-requests', { params: { limit: 50 } });
     items.value = data.items;
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : messages.value.common.loadFailed;
@@ -158,6 +163,10 @@ function payload(): IndexRequestCreate {
     kind: form.value.kind,
     library: form.value.library,
     version: form.value.version,
+    prefilter: form.value.prefilter,
+    update: form.value.update,
+    fresh: form.value.fresh,
+    include_prerelease: scopeStore.includePrerelease,
   };
   if (form.value.ecosystem) base.ecosystem = form.value.ecosystem;
   if (form.value.kind === 'repo') {
@@ -166,21 +175,17 @@ function payload(): IndexRequestCreate {
   } else {
     base.start_url = form.value.startUrl;
     if (form.value.max_pages) base.max_pages = form.value.max_pages;
-    if (form.value.prefilter) base.prefilter = true;
   }
   if (form.value.max_files) base.max_files = form.value.max_files;
   if (form.value.only_files.length > 0) base.only_files = form.value.only_files;
   if (form.value.exclude_patterns.length > 0) base.exclude_patterns = form.value.exclude_patterns;
-  if (form.value.update) base.update = true;
-  if (form.value.fresh) base.fresh = true;
-  if (scopeStore.includePrerelease) base.include_prerelease = true;
   return base;
 }
 
 async function submit(): Promise<void> {
   submitting.value = true;
   try {
-    const { data } = await api<IndexRequest>('/index-requests', { method: 'POST', body: payload() });
+    const { data } = await api('/index-requests', { method: 'POST', body: payload() });
     notifySuccess(messages.value.requests.submitted(String(data.id)));
     await reload();
   } catch (err) {
@@ -195,25 +200,27 @@ async function probe(): Promise<void> {
   probeResult.value = '';
   try {
     if (form.value.kind === 'repo') {
-      const body: Record<string, unknown> = { source: form.value.source };
+      const body: RepoProbeRequest = { source: form.value.source };
       if (form.value.subdir) body.subdir = form.value.subdir;
       if (form.value.max_files) body.max_files = form.value.max_files;
       if (form.value.only_files.length > 0) body.only_files = form.value.only_files;
       if (form.value.exclude_patterns.length > 0) body.exclude_patterns = form.value.exclude_patterns;
-      const { data } = await api<{ root_kind: string; effective_files: number }>('/repo-probe', {
+      const { data } = await api('/repo-probe', {
         method: 'POST',
         body,
       });
       probeResult.value = messages.value.requests.probeResult(data.root_kind, data.effective_files);
     } else {
-      const body: Record<string, unknown> = { start_url: form.value.startUrl };
+      const body: DocProbeRequest = {
+        start_url: form.value.startUrl,
+        prefilter: form.value.prefilter,
+      };
       if (form.value.max_pages) body.max_pages = form.value.max_pages;
-      if (form.value.prefilter) body.prefilter = true;
-      const { data } = await api<{ total_pages?: number; eligible?: number }>('/doc-probe', {
+      const { data } = await api('/doc-probe', {
         method: 'POST',
         body,
       });
-      probeResult.value = messages.value.requests.probeResult(String(data.total_pages ?? data.eligible ?? 0), '');
+      probeResult.value = messages.value.requests.probeResult('docs', data.accepted);
     }
   } catch (err) {
     notifyError(err, messages.value.requests.probeFailed);
@@ -224,7 +231,10 @@ async function probe(): Promise<void> {
 
 async function cancel(item: IndexRequest): Promise<void> {
   try {
-    await api<IndexRequest>(`/index-requests/${item.id}/cancel`, { method: 'POST' });
+    await api('/index-requests/{request_id}/cancel', {
+      method: 'POST',
+      pathParams: { request_id: item.id },
+    });
     await reload();
   } catch (err) {
     notifyError(err, messages.value.requests.cancelFailed);
@@ -232,7 +242,7 @@ async function cancel(item: IndexRequest): Promise<void> {
 }
 
 function reapply(item: IndexRequest): void {
-  form.value.kind = item.kind;
+  form.value.kind = item.kind === 'docs' ? 'docs' : 'repo';
   form.value.library = String(item.params.library || '');
   form.value.version = String(item.params.version || '');
   form.value.ecosystem = String(item.params.ecosystem || '');

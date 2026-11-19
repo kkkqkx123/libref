@@ -1,209 +1,44 @@
-// Response shapes mirror the backend envelopes in src/libref/web/api.py.
-// Refresh the raw snapshot with `npm run gen:api` and keep these in sync.
+// Wire shapes come from the checked-in OpenAPI schema; no field lists are
+// mirrored by hand. Callers send defaulted request fields explicitly.
+import type { components } from './schema';
 
-export interface Envelope<T> {
+type Schema<K extends keyof components['schemas']> = components['schemas'][K];
+
+export type Envelope<T> = Pick<Schema<'ReviewResponse'>, 'degraded' | 'count'> & {
   items: T[];
-  degraded: boolean;
-  count: number;
-}
+};
 
-export interface SearchItem {
-  id: number;
-  url: string;
-  score: number;
-  snippet: string;
-  title?: string | null;
-  path?: string | null;
-  library?: string | null;
-  version?: string | null;
-  source_group_id?: string;
-  chunk_id?: string;
-  page_id?: number | null;
-  sort_order?: number | null;
-  [key: string]: unknown;
-}
-
-export interface SearchResponse extends Envelope<SearchItem> {
-  reasons: string[];
-  answerable: boolean;
-  answerability: number;
-  suggestions?: Array<Record<string, unknown>>;
-  suggest_error?: string | null;
-}
-
-export interface Citation {
-  url: string;
-  title?: string | null;
-  id: number;
-  library?: string | null;
-  version?: string | null;
-  source_group_id: string;
-  chunk_id: string;
-  page_id?: number | null;
-  sort_order?: number | null;
-}
-
-export interface AnswerResponse {
-  answer: string;
-  citations: Citation[];
-  degraded: boolean;
-  reasons: string[];
-  model: string;
-  confidence: string;
-  cited_ids: number[];
-}
-
-export interface ChunkLocator {
-  source_group_id: string;
-  chunk_id: string;
-  [key: string]: unknown;
-}
-
-export interface ReadResponse {
-  url: string;
-  content: string;
-  library?: string | null;
-  version?: string | null;
-  title?: string | null;
-  path?: string | null;
-  source_group_id?: string | null;
-  center?: number | null;
-  radius?: number | null;
-  chunks: number;
-  chunk_details: ChunkLocator[];
-  docs: ChunkLocator[];
-}
-
-export interface LibraryRow {
-  id: number;
-  ecosystem: string;
-  name: string;
-  description?: string | null;
-  homepage?: string | null;
-  docs_url?: string | null;
-  repo_url?: string | null;
-  versions: number;
-  [key: string]: unknown;
-}
-
-export interface VersionRow {
-  id: number;
-  version: string;
-  registry_confirmed: boolean;
-  prerelease?: boolean;
-  created_at?: string | null;
-  ecosystem: string;
-  pages: number;
-  [key: string]: unknown;
-}
-
-export interface PageRow {
-  id: number;
-  url: string;
-  title?: string | null;
-  chunks: number;
-}
-
-export interface PageList {
-  library: string;
-  version: string;
-  total: number;
-  limit: number;
-  offset: number;
-  items: PageRow[];
-}
-
-export interface IndexRequest {
-  id: number;
-  tenant_id: string;
-  principal_id: number | null;
-  requester: string;
-  kind: 'repo' | 'docs';
-  target: string;
-  source: string;
-  params: Record<string, unknown>;
-  status:
-    | 'pending'
-    | 'approved'
-    | 'queued'
-    | 'running'
-    | 'done'
-    | 'failed'
-    | 'rejected'
-    | 'cancelled';
-  dedupe_key: string;
-  approved_by: number | null;
-  reject_reason: string;
-  job_id: number | null;
-  error: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface IndexRequestCreate {
-  kind: 'repo' | 'docs';
-  library: string;
-  version?: string;
-  ecosystem?: string;
-  source?: string;
-  start_url?: string;
-  max_pages?: number;
-  prefilter?: boolean;
-  update?: boolean;
-  fresh?: boolean;
-  include_prerelease?: boolean;
-  subdir?: string;
-  only_files?: string[];
-  exclude_patterns?: string[];
-  max_files?: number;
-}
-
-export interface JobSummary {
-  id: number;
-  kind: string;
-  status: string;
-  finished_at?: string | null;
-  error?: string | null;
-}
-
-export interface JobDetail extends JobSummary {
-  result?: unknown;
-  params?: Record<string, unknown>;
-}
-
-export interface ReviewItem {
-  entity_id: number;
-  status: string;
-  updated_at?: string | null;
-  callee?: string | null;
-  caller_file?: string | null;
-  caller?: string | null;
-  confidence?: string | null;
-  args?: unknown;
-  line_start?: number | null;
-  line_end?: number | null;
-  [key: string]: unknown;
-}
-
-export interface FeedbackItem {
-  id: number;
-  tenant_id: string;
-  entity_type: string;
-  entity_id: number;
-  kind: string;
-  body: string;
-  status: string;
-  created_at?: string | null;
-  [key: string]: unknown;
-}
-
-export interface Principal {
-  id: number | null;
-  name: string;
-  kind: string;
-  tenant_id: string;
-  roles: string[];
-  scopes: string[];
-}
-
+export type SearchResponse = Schema<'SearchResponse'>;
+export type SearchItem = Schema<'SearchItem'>;
+export type AnswerResponse = Schema<'AnswerResponse'>;
+export type Citation = Schema<'AnswerCitation'>;
+export type ReadResponse = Schema<'ReadResponse'>;
+export type ChunkLocator = NonNullable<ReadResponse['chunk_details']>[number];
+export type LibraryRow = Schema<'LibraryRow'>;
+export type VersionRow = Schema<'VersionRow'>;
+export type PageRow = Schema<'PageRow'>;
+export type PageList = Schema<'PageList'>;
+export type IndexRequest = Schema<'IndexRequestItem'>;
+export type IndexRequestCreate = Schema<'IndexRequestCreate'>;
+export type DocProbeRequest = Schema<'DocProbeRequest'>;
+export type RepoProbeRequest = Schema<'RepoProbeRequest'>;
+export type JobSummary = Schema<'JobSummary'>;
+export type JobDetail = Schema<'JobDetail'>;
+export type ReviewItem = Schema<'ReviewItem'>;
+export type FeedbackItem = Schema<'FeedbackItem'>;
+export type Principal = Schema<'PrincipalResponse'>;
+export type PrincipalSummary = Schema<'PrincipalSummary'>;
+export type ApiKeyRow = Schema<'ApiKeyRow'>;
+export type IssuedKey = Schema<'IssuedKey'>;
+export type QuotaPolicy = Schema<'QuotaPolicy'>;
+export type DiscoveryCandidate = Schema<'DiscoveryCandidate'>;
+export type DocProbeResponse = Schema<'DocProbeResponse'>;
+export type RepoProbeResponse = Schema<'RepoProbeResponse'>;
+export type ResolutionResponse = Schema<'ResolutionResponse'>;
+export type MiningHealthResponse = Schema<'MiningHealthResponse'>;
+export type HealthResponse = Schema<'HealthResponse'>;
+export type ReadyResponse = Schema<'ReadyResponse'>;
+export type OkResponse = Schema<'OkResponse'>;
+export type OkIdResponse = Schema<'OkIdResponse'>;
+export type ConfigRefreshResponse = Schema<'ConfigRefreshResponse'>;
 export type Row = Record<string, unknown>;

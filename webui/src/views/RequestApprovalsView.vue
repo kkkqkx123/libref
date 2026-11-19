@@ -30,7 +30,7 @@
 import { ElButton, ElMessageBox } from 'element-plus';
 import { ref } from 'vue';
 import { api, ApiError } from '../api/client';
-import type { Envelope, IndexRequest } from '../api/types';
+import type { IndexRequest } from '../api/types';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
@@ -48,7 +48,7 @@ async function reload(): Promise<void> {
   loading.value = true;
   error.value = '';
   try {
-    const { data } = await api<Envelope<IndexRequest>>('/index-requests/pending', {
+    const { data } = await api('/index-requests/pending', {
       params: { limit: 50 },
     });
     items.value = data.items;
@@ -79,10 +79,18 @@ async function act(item: IndexRequest, action: 'approve' | 'reject'): Promise<vo
     }
   }
   try {
-    await api<IndexRequest>(`/index-requests/${item.id}/${action}`, {
-      method: 'POST',
-      body: action === 'reject' ? { reason } : undefined,
-    });
+    if (action === 'approve') {
+      await api('/index-requests/{request_id}/approve', {
+        method: 'POST',
+        pathParams: { request_id: item.id },
+      });
+    } else {
+      await api('/index-requests/{request_id}/reject', {
+        method: 'POST',
+        pathParams: { request_id: item.id },
+        body: { reason },
+      });
+    }
     notifySuccess(messages.value.requests.processed);
     await reload();
   } catch (err) {

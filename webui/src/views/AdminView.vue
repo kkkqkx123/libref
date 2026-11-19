@@ -180,7 +180,7 @@ import {
 import { ElMessageBox } from 'element-plus';
 import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import { api, ApiError } from '../api/client';
-import type { Envelope, Row } from '../api/types';
+import type { PrincipalSummary, Row } from '../api/types';
 import KeyIssueDialog from '../components/business/KeyIssueDialog.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
@@ -191,17 +191,6 @@ import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue'
 import { hasScope } from '../stores/auth';
 import { notifyError, notifySuccess } from '../stores/notify';
 
-interface PrincipalRow {
-  id: number;
-  tenant_id: string;
-  kind: string;
-  name: string;
-  status: string;
-  roles: string[];
-  scopes: string[];
-  conflicting: string[][];
-}
-
 const format = useFormatters();
 const canKeys = computed(() => hasScope('admin:keys'));
 const canConfig = computed(() => hasScope('admin:config'));
@@ -209,7 +198,7 @@ const tab = ref(canKeys.value ? 'keys' : 'status');
 let metricsTimer: number | null = null;
 
 const keys = ref<Row[]>([]);
-const principals = ref<PrincipalRow[]>([]);
+const principals = ref<PrincipalSummary[]>([]);
 const conflictCount = computed(
   () => principals.value.filter((row) => row.conflicting.length > 0).length,
 );
@@ -256,7 +245,7 @@ const metricEntries = computed<KeyValueEntry[]>(() =>
 async function loadKeys(): Promise<void> {
   if (!canKeys.value) return;
   try {
-    const { data } = await api<Envelope<Row>>('/admin/keys');
+    const { data } = await api('/admin/keys');
     keys.value = data.items;
   } catch (err) {
     notifyError(err, messages.value.admin.loadKeysFailed);
@@ -266,7 +255,7 @@ async function loadKeys(): Promise<void> {
 async function loadPrincipals(): Promise<void> {
   if (!canKeys.value) return;
   try {
-    const { data } = await api<Envelope<PrincipalRow>>('/admin/principals');
+    const { data } = await api('/admin/principals');
     principals.value = data.items;
   } catch (err) {
     notifyError(err, messages.value.admin.loadPrincipalsFailed);
@@ -288,7 +277,7 @@ async function revoke(id: number): Promise<void> {
     return;
   }
   try {
-    await api<{ ok: boolean }>(`/admin/keys/${id}`, { method: 'DELETE' });
+    await api('/admin/keys/{key_id}', { method: 'DELETE', pathParams: { key_id: id } });
     notifySuccess(messages.value.admin.revokedDone);
     await loadKeys();
   } catch (err) {
@@ -312,10 +301,7 @@ async function copyKey(): Promise<void> {
 
 async function refreshConfig(): Promise<void> {
   try {
-    const { data } = await api<{ ok: boolean; old_fingerprint: string; fingerprint: string }>(
-      '/admin/config/refresh',
-      { method: 'POST' },
-    );
+    const { data } = await api('/admin/config/refresh', { method: 'POST' });
     if (data.old_fingerprint === data.fingerprint) notifySuccess(messages.value.admin.configUnchanged);
     else notifySuccess(messages.value.admin.configRefreshed(data.fingerprint.slice(0, 12)));
   } catch (err) {
@@ -328,7 +314,7 @@ async function loadReadiness(): Promise<void> {
   if (!canConfig.value) return;
   readyLoading.value = true;
   try {
-    const { data } = await api<Row>('/readyz', { auth: false });
+    const { data } = await api('/readyz', { auth: false });
     ready.value = data;
   } catch {
     ready.value = {};
@@ -341,7 +327,7 @@ async function loadMetrics(): Promise<void> {
   if (!canConfig.value) return;
   metricsLoading.value = !metricsLoaded.value;
   try {
-    const { data } = await api<Row>('/metrics');
+    const { data } = await api('/metrics');
     metrics.value = data;
   } catch {
     metrics.value = {};
@@ -355,7 +341,7 @@ async function loadQuotas(): Promise<void> {
   if (!canConfig.value) return;
   quotaLoading.value = true;
   try {
-    const { data } = await api<Envelope<Row>>('/admin/quota/policies');
+    const { data } = await api('/admin/quota/policies');
     quotas.value = data.items;
   } catch (err) {
     notifyError(err, messages.value.admin.quotaLoadFailed);
@@ -379,7 +365,7 @@ async function saveQuota(): Promise<void> {
   if (!quotaForm.resource.trim()) return;
   quotaSaving.value = true;
   try {
-    await api<{ ok: boolean }>('/admin/quota/policies', {
+    await api('/admin/quota/policies', {
       method: 'PUT',
       body: {
         resource: quotaForm.resource.trim(),

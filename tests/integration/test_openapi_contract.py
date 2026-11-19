@@ -15,6 +15,16 @@ from tests.conftest import make_settings
 pytestmark = pytest.mark.integration
 
 _CONTRACT_PATHS = ("/search", "/answer", "/read", "/pages", "/review")
+_METHODS = frozenset({"get", "post", "put", "delete"})
+
+
+def _schema_refs(schema: dict) -> list[str]:
+    if "$ref" in schema:
+        return [schema["$ref"]]
+    refs: list[str] = []
+    for variant in schema.get("anyOf", []):
+        refs.extend(_schema_refs(variant))
+    return refs
 
 
 def _open(tmp_path, name: str = "contract.db") -> sqlite3.Connection:
@@ -75,6 +85,29 @@ def test_contract_routes_in_openapi(tmp_path, monkeypatch) -> None:
             name = ref.rsplit("/", 1)[-1]
             assert components[name].get("type") == "object", route
             assert components[name].get("properties"), route
+    finally:
+        conn.close()
+
+
+def test_all_routes_expose_named_object_schemas(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    conn = _open(tmp_path)
+    try:
+        client = _client(conn, monkeypatch, tmp_path)
+        document = client.get("/openapi.json").json()
+        components = document.get("components", {}).get("schemas", {})
+        for route, operations in document["paths"].items():
+            for method, operation in operations.items():
+                if method not in _METHODS:
+                    continue
+                response = operation["responses"]["200"]
+                schema = response["content"]["application/json"]["schema"]
+                refs = _schema_refs(schema)
+                assert refs, f"{method.upper()} {route}"
+                for ref in refs:
+                    assert ref.startswith("#/components/schemas/"), ref
+                    name = ref.rsplit("/", 1)[-1]
+                    assert components[name].get("type") == "object", name
     finally:
         conn.close()
 

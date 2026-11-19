@@ -39,7 +39,7 @@ import { ElButton, ElForm, ElFormItem, ElInput, ElRadioButton, ElRadioGroup } fr
 import { ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { Envelope, Row } from '../api/types';
+import type { Row } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
@@ -84,7 +84,7 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = '';
   try {
-    const { data } = await api<Envelope<Row>>('/import-insight', {
+    const { data } = await api('/import-insight', {
       params: {
         view: view.value,
         api: apiName.value.trim() || undefined,

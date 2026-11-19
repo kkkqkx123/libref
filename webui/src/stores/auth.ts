@@ -35,7 +35,7 @@ export async function detectMode(): Promise<void> {
   // "enforced + anonymous" on every reload and drop a live session.
   if (authStore.key) {
     try {
-      const { data } = await api<Principal>('/me');
+      const { data } = await api('/me');
       authStore.me = data;
       authStore.mode = 'enforced';
       authStore.ready = true;
@@ -45,7 +45,7 @@ export async function detectMode(): Promise<void> {
     }
   }
   try {
-    const { data } = await api<Principal>('/me', { auth: false });
+    const { data } = await api('/me', { auth: false });
     authStore.me = data;
     authStore.mode = 'dev';
   } catch {
@@ -59,7 +59,7 @@ export async function detectMode(): Promise<void> {
 export async function login(key: string): Promise<Principal> {
   const trimmed = key.trim();
   authStore.key = trimmed;
-  const { data } = await api<Principal>('/me');
+  const { data } = await api('/me');
   authStore.me = data;
   authStore.mode = 'enforced';
   authStore.ready = true;

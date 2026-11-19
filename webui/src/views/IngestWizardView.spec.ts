@@ -40,7 +40,7 @@ beforeEach(() => {
   apiMock.mockImplementation((url: string) =>
     Promise.resolve(
       url === '/resolve'
-        ? { data: { name: 'org/repo', repo: 'https://github.com/org/repo' }, requestId: 'r1' }
+        ? { data: { name: 'org/repo', repo_url: 'https://github.com/org/repo' }, requestId: 'r1' }
         : url === '/catalog'
           ? { data: { items: [] }, requestId: 'r1' }
           : { data: {}, requestId: 'r1' },

@@ -51,7 +51,7 @@
 import { ElForm, ElFormItem, ElInput, ElInputNumber, ElOption, ElRadioButton, ElRadioGroup, ElSelect } from 'element-plus';
 import { computed, onMounted, watch } from 'vue';
 import { api } from '../../api/client';
-import type { Envelope, LibraryRow, VersionRow } from '../../api/types';
+import type { LibraryRow, VersionRow } from '../../api/types';
 import { catalogStore } from '../../stores/catalog';
 import { notifyError } from '../../stores/notify';
 import { RESULT_LIMIT_MAX, RESULT_LIMIT_MIN, scopeStore, setLibrary } from '../../stores/scope';
@@ -68,8 +68,8 @@ const versions = computed<VersionRow[]>(() => catalogStore.versionsByLibrary[sco
 async function ensureLibraries(): Promise<void> {
   if (catalogStore.loaded) return;
   try {
-    const { data } = await api<Envelope<LibraryRow>>('/catalog');
-    catalogStore.libraries = data.items;
+    const { data } = await api('/catalog');
+    catalogStore.libraries = data.items as LibraryRow[];
     catalogStore.loaded = true;
   } catch (error) {
     notifyError(error, messages.value.errors.loadCatalogFailed);
@@ -80,10 +80,10 @@ async function ensureVersions(): Promise<void> {
   if (!scopeStore.library) return;
   if (catalogStore.versionsByLibrary[scopeStore.library]) return;
   try {
-    const { data } = await api<Envelope<VersionRow>>('/catalog', {
+    const { data } = await api('/catalog', {
       params: { library: scopeStore.library, ecosystem: scopeStore.ecosystem || undefined },
     });
-    catalogStore.versionsByLibrary[scopeStore.library] = data.items;
+    catalogStore.versionsByLibrary[scopeStore.library] = data.items as VersionRow[];
   } catch (error) {
     notifyError(error, messages.value.errors.loadVersionsFailed);
   }

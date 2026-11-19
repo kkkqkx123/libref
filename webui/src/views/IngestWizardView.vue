@@ -128,7 +128,7 @@ import { ElButton, ElCheckbox, ElForm, ElFormItem, ElInput, ElInputNumber, ElSte
 import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { Envelope, Row } from '../api/types';
+import type { ResolutionResponse, Row } from '../api/types';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue';
@@ -149,7 +149,7 @@ const error = ref('');
 const requestId = ref('');
 
 const form = reactive({ ecosystem: '', name: '', version: '' });
-const resolution = ref<Row | null>(null);
+const resolution = ref<ResolutionResponse | null>(null);
 const probeResult = ref<Row | null>(null);
 const repoRedirect = ref(false);
 const submitVersion = ref('');
@@ -171,7 +171,7 @@ const resolutionEntries = computed<KeyValueEntry[]>(() => {
 
 const probeAddress = computed(() => {
   if (!resolution.value) return '';
-  const value = resolution.value['start_url'] ?? resolution.value['url'];
+  const value = resolution.value.repo_url ?? resolution.value.docs_url ?? '';
   return typeof value === 'string' ? value : '';
 });
 
@@ -213,14 +213,20 @@ async function discover(source: DiscoverySource): Promise<void> {
   error.value = '';
   discovered.value = false;
   try {
-    const path =
-      source === 'registry' ? '/library-search' : source === 'web' ? '/web-search' : '/github-search';
-    const params =
+    const { data } =
       source === 'registry'
-        ? { query, ecosystem: form.ecosystem || undefined, limit: 10, include_prerelease: scopeStore.includePrerelease }
-        : { query, limit: 10 };
-    const { data } = await api<Envelope<Row>>(path, { params });
-    discovery.value = data.items;
+        ? await api('/library-search', {
+            params: {
+              query,
+              ecosystem: form.ecosystem || undefined,
+              limit: 10,
+              include_prerelease: scopeStore.includePrerelease,
+            },
+          })
+        : source === 'web'
+          ? await api('/web-search', { params: { query, limit: 10 } })
+          : await api('/github-search', { params: { query, limit: 10 } });
+    discovery.value = data.items as Row[];
     discoverySource.value =
       source === 'registry'
         ? messages.value.ingest.discoverRegistry
@@ -250,7 +256,7 @@ async function resolve(): Promise<void> {
   resolution.value = null;
   repoRedirect.value = false;
   try {
-    const { data } = await api<Row>('/resolve', {
+    const { data } = await api('/resolve', {
       params: {
         ecosystem: form.ecosystem || undefined,
         name: form.name.trim(),
@@ -260,8 +266,8 @@ async function resolve(): Promise<void> {
       },
     });
     resolution.value = data;
-    const address = data['start_url'] ?? data['url'] ?? data['repo'];
-    const value = typeof address === 'string' ? address : '';
+    const address = data.repo_url ?? data.docs_url;
+    const value = address || '';
     if (isRepoAddress(value)) {
       repoRedirect.value = true;
     } else if (!submitUrl.value && value) {
@@ -292,7 +298,7 @@ async function probe(): Promise<void> {
   error.value = '';
   probeResult.value = null;
   try {
-    const { data } = await api<Row>('/doc-probe', {
+    const { data } = await api('/doc-probe', {
       method: 'POST',
       body: {
         start_url: probeAddress.value || submitUrl.value,
@@ -315,7 +321,7 @@ async function submit(): Promise<void> {
   busy.value = true;
   error.value = '';
   try {
-    const { data } = await api<{ id: number; ok: boolean }>('/scrape', {
+    const { data } = await api('/scrape', {
       method: 'POST',
       body: {
         library: form.name.trim(),

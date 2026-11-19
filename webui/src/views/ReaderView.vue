@@ -60,13 +60,13 @@
         <p class="libref-muted">{{ page.library }} {{ page.version }} {{ page.path }}</p>
         <pre class="libref-reader-body">{{ page.content }}</pre>
       </div>
-      <div v-if="page.chunk_details.length > 0" class="libref-card">
-        <h4>{{ messages.reader.chunkLocatorCount(page.chunks) }}</h4>
-        <RowTable :rows="page.chunk_details" />
+      <div v-if="(page.chunk_details?.length || 0) > 0" class="libref-card">
+        <h4>{{ messages.reader.chunkLocatorCount(page.chunks || 0) }}</h4>
+        <RowTable :rows="page.chunk_details || []" />
       </div>
-      <div v-if="page.docs.length > 0" class="libref-card">
+      <div v-if="(page.docs?.length || 0) > 0" class="libref-card">
         <h4>{{ messages.reader.windowChunks }}</h4>
-        <RowTable :rows="page.docs" />
+        <RowTable :rows="page.docs || []" />
       </div>
     </template>
     <EmptyState v-else :description="messages.reader.empty" />
@@ -78,7 +78,7 @@ import { ElButton, ElForm, ElFormItem, ElInput, ElInputNumber, ElRadioButton, El
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { PageList, PageRow, ReadResponse } from '../api/types';
+import type { PageRow, ReadResponse } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
@@ -142,8 +142,13 @@ async function loadCandidates(target: string): Promise<void> {
   candidates.value = [];
   if (!library || !version) return;
   try {
-    const { data } = await api<PageList>('/pages', {
-      params: { library, version, ecosystem: scope.ecosystem, limit: 20 },
+    const { data } = await api('/pages', {
+      params: {
+        library,
+        version,
+        ecosystem: typeof scope.ecosystem === 'string' ? scope.ecosystem : undefined,
+        limit: 20,
+      },
     });
     const base = pathOf(target);
     // Ordering only: pages sharing more of the missed path come first. No scoring
@@ -213,7 +218,7 @@ async function load(): Promise<void> {
   notFound.value = false;
   page.value = null;
   try {
-    const { data } = await api<ReadResponse>('/read', {
+    const { data } = await api('/read', {
       params: {
         url: url.value,
         mode: mode.value,

@@ -1,12 +1,14 @@
-// Typed fetch wrapper: injects the API key, normalizes FastAPI errors,
-// and surfaces the backend request id for audit correlation.
+// Typed fetch wrapper: paths, query strings, request bodies and responses come
+// from the checked-in OpenAPI schema. It also injects the API key, normalizes
+// FastAPI errors, and surfaces the backend request id for audit correlation.
+import type { paths } from './schema';
 import { authStore } from '../stores/auth';
 import { messages } from '../i18n';
 
 export class ApiError extends Error {
   status: number;
-  // Stable backend code (``page_not_found``, ``quota_exceeded``, ...); falls back
-  // to ``http_<status>`` when the cause is not mapped.
+  // Stable backend code (`page_not_found`, `quota_exceeded`, ...); falls back
+  // to `http_<status>` when the cause is not mapped.
   code: string;
   // Raw backend detail, kept so a generic code can still name the culprit
   // (which argument, which upstream).
@@ -31,10 +33,51 @@ export class ApiError extends Error {
   }
 }
 
-export interface ApiOptions {
-  method?: string;
-  body?: unknown;
-  params?: Record<string, string | number | boolean | null | undefined>;
+export type ApiPath = keyof paths & string;
+export type ApiMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
+
+type Operation<P extends ApiPath, M extends ApiMethod> = Extract<
+  paths[P][Lowercase<M> & keyof paths[P]],
+  { responses: unknown }
+>;
+
+type QueryOf<P extends ApiPath, M extends ApiMethod> =
+  Operation<P, M>['parameters'] extends { query?: infer Q }
+    ? Q extends never
+      ? never
+      : NonNullable<Q>
+    : never;
+
+type PathParamsOf<P extends ApiPath, M extends ApiMethod> =
+  Operation<P, M>['parameters'] extends { path?: infer T }
+    ? T extends never
+      ? never
+      : NonNullable<T>
+    : never;
+
+type BodyOf<P extends ApiPath, M extends ApiMethod> =
+  Operation<P, M>['requestBody'] extends {
+    content: { 'application/json': infer B };
+  }
+    ? B
+    : never;
+
+type ResponseContent<T> = T extends {
+  content: { 'application/json': infer B };
+}
+  ? B
+  : never;
+
+export type ResponseOf<
+  P extends ApiPath,
+  M extends ApiMethod = 'GET',
+> = ResponseContent<Operation<P, M>['responses'][200]>;
+
+export interface ApiOptions<P extends ApiPath, M extends ApiMethod> {
+  method?: M;
+  params?: QueryOf<P, M>;
+  body?: BodyOf<P, M>;
+  pathParams?: PathParamsOf<P, M>;
   auth?: boolean;
 }
 
@@ -54,7 +97,7 @@ function statusFallback(status: number): string {
 
 // Precedence: a known error code (localised) beats the raw detail text, which in
 // turn beats generic status wording. A known code still carries its detail when
-// the code is generic (``invalid_argument``), so the two are combined rather than
+// the code is generic (`invalid_argument`), so the two are combined rather than
 // letting the wording swallow the cause.
 function describeFailure(
   status: number,
@@ -100,46 +143,38 @@ function resetOf(payload: unknown): string | null {
   return null;
 }
 
-export interface IndexRequestParams {
-  limit?: number;
-  status?: string;
-  pending?: boolean;
-}
-
-export function listIndexRequests<T>(params: IndexRequestParams = {}) {
-  const path = params.pending ? '/index-requests/pending' : '/index-requests';
-  return api<T>(path, {
-    params: {
-      limit: params.limit,
-      status: params.pending ? undefined : params.status,
-    },
+function renderPath<P extends ApiPath, M extends ApiMethod>(
+  path: P,
+  values: PathParamsOf<P, M> | undefined,
+): string {
+  const record = values as Record<string, string | number> | undefined;
+  return path.replace(/\{([^}]+)\}/g, (_match, key: string) => {
+    const value = record?.[key];
+    if (value === undefined) throw new Error(`missing path parameter: ${key}`);
+    return encodeURIComponent(String(value));
   });
 }
 
-export function submitIndexRequest<T>(body: unknown) {
-  return api<T>('/index-requests', { method: 'POST', body });
-}
-
-export function actOnIndexRequest<T>(id: number, action: 'cancel' | 'approve' | 'reject', reason?: string) {
-  return api<T>(`/index-requests/${id}/${action}`, {
-    method: 'POST',
-    body: reason === undefined ? undefined : { reason },
-  });
-}
-
-export async function api<T>(path: string, options: ApiOptions = {}): Promise<{ data: T; requestId: string }> {
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(options.params || {})) {
+export async function api<P extends ApiPath, M extends ApiMethod = 'GET'>(
+  path: P,
+  options: ApiOptions<P, M> = {},
+): Promise<{ data: ResponseOf<P, M>; requestId: string }> {
+  const query = new URLSearchParams();
+  const params = options.params as
+    | Record<string, string | number | boolean | null | undefined>
+    | undefined;
+  for (const [key, value] of Object.entries(params || {})) {
     if (value === undefined || value === null || value === '') continue;
-    params.append(key, String(value));
+    query.append(key, String(value));
   }
-  const query = params.toString();
+  const rendered = renderPath(path, options.pathParams);
+  const suffix = query.toString();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (options.auth !== false) {
     const key = authStore.key;
     if (key) headers['Authorization'] = `Bearer ${key}`;
   }
-  const response = await fetch(`${baseUrl()}${path}${query ? `?${query}` : ''}`, {
+  const response = await fetch(`${baseUrl()}${rendered}${suffix ? `?${suffix}` : ''}`, {
     method: options.method || 'GET',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -163,5 +198,5 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<{ 
       resetOf(payload),
     );
   }
-  return { data: payload as T, requestId };
+  return { data: payload as ResponseOf<P, M>, requestId };
 }

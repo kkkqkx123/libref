@@ -178,7 +178,7 @@ async function reload(): Promise<void> {
   loading.value = true;
   error.value = '';
   try {
-    const { data } = await api<{ jobs: JobSummary[] }>('/jobs', { params: { limit: limit.value } });
+    const { data } = await api('/jobs', { params: { limit: limit.value } });
     jobs.value = data.jobs;
     ensureListPolling();
   } catch (err) {
@@ -192,7 +192,7 @@ async function reload(): Promise<void> {
 async function loadDetail(id: number): Promise<void> {
   detailLoading.value = true;
   try {
-    const { data } = await api<JobDetail>(`/jobs/${id}`);
+    const { data } = await api('/jobs/{job_id}', { pathParams: { job_id: id } });
     detail.value = data;
     if (data.status === 'pending' || data.status === 'running') startPolling(id);
     else stopPolling();
@@ -252,7 +252,7 @@ async function resubmit(): Promise<void> {
   const current = detail.value;
   if (!current) return;
   try {
-    const { data } = await api<{ id: number }>('/jobs', {
+    const { data } = await api('/jobs', {
       method: 'POST',
       body: { kind: current.kind, params: current.params || {} },
     });
@@ -271,7 +271,7 @@ async function cancel(id: number): Promise<void> {
     return;
   }
   try {
-    await api<{ ok: boolean }>(`/jobs/${id}/cancel`, { method: 'POST' });
+    await api('/jobs/{job_id}/cancel', { method: 'POST', pathParams: { job_id: id } });
     notifySuccess(messages.value.jobs.cancelled);
     await loadDetail(id);
     await reload();
@@ -289,7 +289,7 @@ async function create(): Promise<void> {
     return;
   }
   try {
-    const { data } = await api<{ id: number; ok: boolean }>('/jobs', {
+    const { data } = await api('/jobs', {
       method: 'POST',
       body: { kind: createForm.kind, params },
     });

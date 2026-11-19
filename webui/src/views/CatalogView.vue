@@ -137,7 +137,7 @@ import { ElButton, ElCheckbox, ElDialog, ElDropdown, ElDropdownItem, ElDropdownM
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { Envelope, LibraryRow, PageList, PageRow, Row, VersionRow } from '../api/types';
+import type { LibraryRow, PageRow, Row, VersionRow } from '../api/types';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
@@ -205,10 +205,10 @@ async function reload(): Promise<void> {
   loading.value = true;
   error.value = '';
   try {
-    const { data } = await api<Envelope<LibraryRow>>('/catalog', {
+    const { data } = await api('/catalog', {
       params: { ecosystem: ecosystem.value || undefined },
     });
-    libraries.value = data.items;
+    libraries.value = data.items as LibraryRow[];
     expanded.value = '';
     expandedLibrary.value = null;
     currentVersions.value = [];
@@ -228,10 +228,10 @@ async function toggleVersions(row: LibraryRow): Promise<void> {
     return;
   }
   try {
-    const { data } = await api<Envelope<VersionRow>>('/catalog', {
+    const { data } = await api('/catalog', {
       params: { library: row.name, ecosystem: row.ecosystem || undefined },
     });
-    currentVersions.value = data.items;
+    currentVersions.value = data.items as VersionRow[];
     expanded.value = row.name;
     expandedLibrary.value = row;
   } catch (err) {
@@ -277,7 +277,7 @@ async function loadPages(): Promise<void> {
   pagesError.value = '';
   pagesRequestId.value = '';
   try {
-    const { data } = await api<PageList>('/pages', {
+    const { data } = await api('/pages', {
       params: {
         library: library.name,
         version: version.version,
@@ -327,7 +327,7 @@ async function loadDeps(): Promise<void> {
   depsError.value = '';
   depsRequestId.value = '';
   try {
-    const { data } = await api<Envelope<Row>>('/repo-deps', {
+    const { data } = await api('/repo-deps', {
       params: {
         library: library.name,
         version: version.version,

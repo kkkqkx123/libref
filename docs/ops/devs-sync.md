@@ -31,7 +31,6 @@ Python/uv/解释器/cc 包装等环境已按项目约定一次性配置完毕（
 以仓库根为基准，打包时排除：`*/.git`（含 submodule 的 gitlink 文件）、
 `.venv/`、`ref/`（只读外部参考仓库）、`.env`/`.env.*`、本地实例配置
 `libref.toml`、`.atomcode/`、`webui/node_modules/`、`webui/dist/`、
-前端契约生成物（`webui/openapi.snapshot.json`、`webui/src/api/schema.d.ts`）、
 `crates/simvec/target/`、`data/`、`logs/`、
 `tests/e2e/repos|outputs|snapshots/`、`tests/e2e/bench/fixtures|data|outputs/`、
 各级 `node_modules/`、`__pycache__/`、`.mypy_cache/`、`.ruff_cache/`、
@@ -53,8 +52,6 @@ tar -czf ~/sync-pkgs/libref-src-$sha.tar.gz \
   --exclude='libref/.env' --exclude='libref/.env.*' --exclude='libref/libref.toml' \
   --exclude='libref/.atomcode' \
   --exclude='libref/webui/node_modules' --exclude='libref/webui/dist' \
-  --exclude='libref/webui/openapi.snapshot.json' \
-  --exclude='libref/webui/src/api/schema.d.ts' \
   --exclude='libref/crates/simvec/target' \
   --exclude='libref/tests/e2e/repos' --exclude='libref/tests/e2e/outputs' \
   --exclude='libref/tests/e2e/snapshots' \

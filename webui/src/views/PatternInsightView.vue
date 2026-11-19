@@ -66,7 +66,7 @@ import { ElButton, ElCheckbox, ElForm, ElFormItem, ElInput, ElInputNumber, ElRad
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { Envelope, Row } from '../api/types';
+import type { Row } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
 import EvidenceList from '../components/business/EvidenceList.vue';
 import EmptyState from '../components/common/EmptyState.vue';
@@ -124,7 +124,7 @@ const healthEntries = computed<KeyValueEntry[]>(() => {
 async function loadHealth(): Promise<void> {
   healthLoading.value = true;
   try {
-    const { data } = await api<Row>('/mining-health', { params: { ...scopeParams() } });
+    const { data } = await api('/mining-health', { params: { ...scopeParams() } });
     health.value = data;
   } catch {
     health.value = null;
@@ -147,7 +147,7 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = '';
   try {
-    const { data } = await api<Envelope<Row>>('/pattern-insight', {
+    const { data } = await api('/pattern-insight', {
       params: {
         view: view.value,
         pattern: pattern.value.length > 0 ? pattern.value.join(',') : undefined,

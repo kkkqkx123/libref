@@ -363,24 +363,23 @@ C 后端在 `/read` 的 404 响应体里带候选。
 
 **验收**。`uv run pytest tests/integration/test_web_error_contract.py -q`。
 
-#### R7 `gen:api` 改为离线可用，不建自动门禁
+#### R7 契约生成物入库并纳入门禁
 
-**事实**。`webui/scripts/gen-api.mjs:9` 默认对 `http://127.0.0.1:8001` 取 `/openapi.json`，必须先把
-后端跑起来；`webui/README.md:23` 明确产物 `src/api/schema.d.ts` 不入库，`types.ts` 手写镜像
-`api.py`。仓库里既无 `openapi.snapshot.json` 也无 `schema.d.ts`，`npm run check` 不含任何契约校验。
-结论是这条链路“存在但从未跑通”，契约漂移没有机器检测。
+**事实**。离线导出本身可用，但快照与 `schema.d.ts` 被忽略，`types.ts` 手写镜像 `api.py`，
+`api<T>(path: string)` 接受任意路径与泛型强转；`npm run check` 不含契约校验。更严重的是
+48 个操作里只有 5 个带命名响应模型，其余成功响应在 OpenAPI 中都是无字段对象。
 
-**备选**。A 引入快照入库 + CI 比对（跨语言字段比对脆弱、每次契约改动都要提交生成物）；
-B 让工具离线可用（用 app 对象直接导出 schema，不起服务），不做自动门禁，README 写清“仅本地参考”；
-C 删除脚本与 `openapi-typescript` 依赖。
+**备选**。A 快照与生成物入库，客户端直接消费生成类型并加漂移门禁；B 保持离线生成但产物仅作
+本地参考、不做门禁；C 删除生成链路。
 
-**决策：B**。新增 `tools/export_openapi.py`，用 `build_web_app(conn, settings).openapi()` 落盘
-`webui/openapi.snapshot.json`（无需 HTTP 服务与鉴权），`gen-api.mjs` 优先读本地快照、缺失时再回落到
-在线探测。A 否决：字段名比对要靠正则解析 TS，误报率高于真实收益；C 否决：`gen:api` 是阶段零列明的
-交付物，删掉等于放弃“描述文件可复核”。R2 落地后快照里会出现 `PageList`，正好验证链路可用。
+**决策：A**（取代此前的 B）。后端为全部路由补 `response_model`，契约测试要求成功响应必须引用
+命名对象 schema；快照与 `schema.d.ts` 入库，`gen:api --check` 在临时目录重生成后逐字节比对，
+并纳入 `npm run check`；`api/client.ts` 从生成的 `paths` 推导路径、query、body 与响应类型，
+`types.ts` 退化为生成类型别名。不采用正则解析 TS 做跨语言字段比对：生成类型已让 `vue-tsc`
+在编译期完成同一件事，重复实现只会制造误报。
 
-**验收**。后端未启动时 `npm run gen:api` 仍能生成 `schema.d.ts`；`openapi.snapshot.json` 的
-`/paths` 含 `/pages`。
+**验收**。后端未启动时 `npm run gen:api` 生成 42 条路径的快照；`npm run check` 校验生成物未过期；
+`test_openapi_contract.py` 覆盖全部路由；前端字段改名或请求参数拼写错误由 `vue-tsc` 报出。
 
 ### 12.3 批次
 
@@ -420,7 +419,7 @@ cd webui && npm run check && npm run build
 | R3 | `errors.py` 增 `ApiRejection` 与 400 兜底 `invalid_argument`；handler 优先读实例 `code`；`/answer` 区分 `LlmConfigError`，502 分支改显式码；前端 `ApiError.detail` + “词条 + 原文”两级文案 | 契约测试 9 例（含 `invalid_argument`/`chat_disabled`/`upstream_unavailable`）；`npm run check` 保证中英词条成对 |
 | R4 | `ReaderView` 在 404 且 scope 含 library+version 时查一次 `/pages`，按公共路径前缀排序取前 5，失败静默 | 类型与构建通过；无 scope 时不发请求；无头浏览器实测见下 |
 | R5 | 新增 `QuotaNotice`，问答、任务、入库、反馈四处 429 统一用它，附手动重试；`api-mapping.md` 撤掉倒计时承诺 | `npm run check` + `build` 通过 |
-| R7 | 新增 `tools/export_openapi.py`（构建 app 对象直接导出），`gen-api.mjs` 优先离线、在线仅作回落，产物进 `.gitignore` | 后端未启动时 `npm run gen:api` 产出 33 条路径快照与 `schema.d.ts` |
+| R7 | 快照与 `schema.d.ts` 入库，`gen:api --check` 纳入 `npm run check`；客户端消费生成类型，`types.ts` 改为别名；全部路由补响应模型并纳入契约测试 | `npm run check` 全绿；`test_openapi_contract.py` 覆盖全部路由；`vue-tsc` 能拦住字段漂移 |
 
 **与 12.2 决策的三处偏差**（都是收窄，不是扩大）：
 

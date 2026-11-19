@@ -10,11 +10,6 @@ interface HealthState {
   loaded: boolean;
 }
 
-interface ReadyResponse {
-  ok: boolean;
-  checks?: Record<string, string>;
-}
-
 export const healthStore = reactive<HealthState>({
   fingerprint: '',
   degraded: false,
@@ -32,13 +27,13 @@ function failingChecks(checks: Record<string, string>): string[] {
 
 export async function refreshHealth(): Promise<void> {
   try {
-    const { data } = await api<{ ok: boolean; fingerprint: string }>('/health', { auth: false });
+    const { data } = await api('/health', { auth: false });
     healthStore.fingerprint = data.fingerprint || '';
   } catch {
     healthStore.fingerprint = '';
   }
   try {
-    const { data } = await api<ReadyResponse>('/readyz', { auth: false });
+    const { data } = await api('/readyz', { auth: false });
     healthStore.failing = failingChecks(data.checks || {});
     healthStore.degraded = !data.ok || healthStore.failing.length > 0;
   } catch {

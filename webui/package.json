@@ -7,10 +7,11 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
-    "check": "vue-tsc --noEmit && node --experimental-strip-types --no-warnings scripts/check-i18n.mjs && node scripts/check-design-tokens.mjs",
+    "check": "vue-tsc --noEmit && node scripts/gen-api.mjs --check && node --experimental-strip-types --no-warnings scripts/check-i18n.mjs && node scripts/check-design-tokens.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "gen:api": "node scripts/gen-api.mjs",
+    "check:api": "node scripts/gen-api.mjs --check",
     "check:i18n": "node --experimental-strip-types --no-warnings scripts/check-i18n.mjs"
   },
   "dependencies": {

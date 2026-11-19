@@ -53,7 +53,3 @@ tests/e2e/snapshots/
 tests/e2e/bench/fixtures/
 tests/e2e/bench/data/
 tests/e2e/bench/outputs/
-
-# 前端契约生成物（本地按需生成，不入库）
-webui/openapi.snapshot.json
-webui/src/api/schema.d.ts

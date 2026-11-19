@@ -79,7 +79,7 @@ import { ElButton, ElForm, ElFormItem, ElInput, ElInputNumber, ElOption, ElSelec
 import { computed, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { Envelope, FeedbackItem } from '../api/types';
+import type { FeedbackItem } from '../api/types';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
@@ -131,7 +131,7 @@ async function submit(): Promise<void> {
   if (!form.body.trim()) return;
   submitting.value = true;
   try {
-    await api<{ id: number; ok: boolean }>('/feedback', {
+    await api('/feedback', {
       method: 'POST',
       body: {
         entity_type: form.entity_type || 'call_instance',
@@ -159,7 +159,7 @@ async function reload(): Promise<void> {
   loading.value = true;
   error.value = '';
   try {
-    const { data } = await api<Envelope<FeedbackItem>>('/feedback', {
+    const { data } = await api('/feedback', {
       params: { limit: 50, status: status.value || undefined },
     });
     items.value = data.items;
@@ -173,7 +173,10 @@ async function reload(): Promise<void> {
 
 async function resolve(item: FeedbackItem): Promise<void> {
   try {
-    await api<{ ok: boolean }>(`/feedback/${item.id}/resolve`, { method: 'POST' });
+    await api('/feedback/{feedback_id}/resolve', {
+      method: 'POST',
+      pathParams: { feedback_id: item.id },
+    });
     notifySuccess(messages.value.feedback.resolvedDone);
     item.status = 'resolved';
   } catch (err) {

@@ -1,8 +1,9 @@
 # libref webui
 
 Vue 3 + Element Plus single-page app. The Python service is the only backend;
-this project never talks to any other layer. Interface types mirror
-`src/libref/web/api.py` (refresh the snapshot with `npm run gen:api`).
+this project never talks to any other layer. Wire types are generated from the
+backend's OpenAPI document (`npm run gen:api`); no field lists are mirrored by
+hand.
 
 ## Develop
 
@@ -22,6 +23,7 @@ npm test           # vitest: unit and component specs under src/**/*.spec.ts
 npm run check      # vue-tsc, message catalogue check, design token check
 npm run build      # type check then production build into dist/
 npm run gen:api    # export the OpenAPI snapshot and regenerate src/api/schema.d.ts
+npm run check:api  # regenerate into a temp dir and verify both files are current
 ```
 
 Specs sit next to the code they cover and are type-checked by `vue-tsc` along with
@@ -31,11 +33,14 @@ left real unless a dialog needs its inputs driven, in which case only the widget
 under test are stubbed. Rationale and coverage map: `docs/plan/frontend-testing.md`.
 
 `gen:api` runs `tools/export_openapi.py` from the repository root, which builds the
-app object directly — no backend has to be running. Both the snapshot and
-`schema.d.ts` are local-only (see `.gitignore`); `src/api/types.ts` is the
-hand-maintained mirror, and `tests/integration/test_openapi_contract.py` keeps the
-response models honest. A reachable backend at `LIBREF_BASE_URL` is used only when
-the offline export is unavailable.
+app object directly — no backend has to be running. The snapshot, generated
+`schema.d.ts` and the thin aliases in `src/api/types.ts` are versioned. The
+request wrapper in `src/api/client.ts` takes paths, query strings, bodies and
+responses from the generated `paths` interface, so a backend field change fails
+`vue-tsc`. `npm run check` includes `check:api`, and
+`tests/integration/test_openapi_contract.py` requires every route to declare a
+named object response schema. A reachable backend at `LIBREF_BASE_URL` is used
+only when the offline export is unavailable.
 
 ## Deploy
 

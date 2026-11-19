@@ -27,30 +27,58 @@ from libref.web.api import (
     AnswerQuery,
     AnswerResponse,
     ApiInsightQuery,
+    ApiKeyResponse,
     CallInsightQuery,
+    ConfigRefreshResponse,
+    DependencyResponse,
+    DiscoveryResponse,
     DocProbeRequest,
-    Envelope,
+    DocProbeResponse,
     FeedbackCreate,
+    FeedbackResponse,
+    HealthResponse,
     ImportInsightQuery,
     IndexRequestCreate,
+    IndexRequestItem,
     IndexRequestReject,
+    IndexRequestResponse,
+    InsightResponse,
+    IssuedKey,
     JobCreate,
+    JobDetail,
+    JobListResponse,
     JobQuery,
     KeyCreate,
+    LibraryResponse,
     LinkStatsQuery,
+    MetricsResponse,
+    MiningHealthResponse,
+    OkIdResponse,
+    OkResponse,
+    PageLinkStats,
     PageList,
     PatternInsightQuery,
+    PrincipalListResponse,
+    PrincipalResponse,
+    QuotaPolicyResponse,
     QuotaPolicyUpsert,
     ReadQuery,
     ReadResponse,
+    ReadyResponse,
     RepoProbeRequest,
+    RepoProbeResponse,
+    ResolutionResponse,
     ResolveQuery,
     ReviewAction,
     ReviewQuery,
+    ReviewResponse,
+    RevokedKeys,
     ScrapeRequest,
     SearchQuery,
     SearchResponse,
     SymbolInsightQuery,
+    VersionLinkStats,
+    VersionResponse,
     envelope,
 )
 from libref.web.errors import ApiRejection
@@ -295,11 +323,11 @@ def build_web_app(
     def _read_guard(principal=Depends(_guard)):
         _need(principal, "read")
 
-    @app.get("/health")
+    @app.get("/health", response_model=HealthResponse)
     def health(request: Request) -> dict[str, Any]:
         return {"ok": True, "fingerprint": settings_fingerprint(_eff_settings(request))}
 
-    @app.get("/me")
+    @app.get("/me", response_model=PrincipalResponse)
     def me(principal=Depends(_guard)) -> dict[str, Any]:
         return {
             "id": _principal_id(principal),
@@ -310,7 +338,7 @@ def build_web_app(
             "scopes": sorted(set(getattr(principal, "scopes", set()) or set())),
         }
 
-    @app.get("/metrics")
+    @app.get("/metrics", response_model=MetricsResponse)
     def metrics_route(principal=Depends(_guard)) -> dict[str, Any]:
         """Read-only process counters: requests, quota denials, token usage, latency."""
         _need(principal, "read")
@@ -318,7 +346,7 @@ def build_web_app(
 
         return _snapshot()
 
-    @app.get("/catalog")
+    @app.get("/catalog", response_model=LibraryResponse | VersionResponse)
     def catalog_route(
         request: Request,
         library: str | None = None,
@@ -408,7 +436,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/library-search")
+    @app.get("/library-search", response_model=DiscoveryResponse)
     async def library_search(
         query: str,
         ecosystem: str | None = None,
@@ -578,7 +606,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/api-insight")
+    @app.get("/api-insight", response_model=InsightResponse)
     def api_insight(
         request: Request,
         view: Literal["usage", "related", "args", "common"],
@@ -624,7 +652,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/pattern-insight")
+    @app.get("/pattern-insight", response_model=InsightResponse)
     def pattern_insight(
         request: Request,
         view: Literal[
@@ -687,7 +715,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/symbol-insight")
+    @app.get("/symbol-insight", response_model=InsightResponse)
     def symbol_insight(
         request: Request,
         view: Literal["detail", "file", "children", "signature"],
@@ -736,7 +764,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/call-insight")
+    @app.get("/call-insight", response_model=InsightResponse)
     def call_insight(
         request: Request,
         view: Literal["callee", "caller", "file"],
@@ -794,7 +822,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/import-insight")
+    @app.get("/import-insight", response_model=InsightResponse)
     def import_insight(
         request: Request,
         view: Literal["importers", "imports"],
@@ -840,7 +868,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/review", response_model=Envelope)
+    @app.get("/review", response_model=ReviewResponse)
     def review_list(
         request: Request,
         action: Literal["list"] = "list",
@@ -868,7 +896,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.post("/review")
+    @app.post("/review", response_model=ReviewResponse | OkResponse)
     def review_apply(
         body: ReviewAction, request: Request, principal=Depends(_guard)
     ) -> dict[str, Any]:
@@ -910,7 +938,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.post("/index-requests")
+    @app.post("/index-requests", response_model=IndexRequestItem)
     async def index_request_create(
         body: IndexRequestCreate,
         request: Request,
@@ -939,7 +967,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/index-requests")
+    @app.get("/index-requests", response_model=IndexRequestResponse)
     def index_request_list(
         request: Request,
         status: str | None = None,
@@ -970,7 +998,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/index-requests/pending")
+    @app.get("/index-requests/pending", response_model=IndexRequestResponse)
     def index_request_pending(
         request: Request,
         limit: int = 50,
@@ -993,7 +1021,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/index-requests/{request_id}")
+    @app.get("/index-requests/{request_id}", response_model=IndexRequestItem)
     def index_request_show(
         request_id: int,
         request: Request,
@@ -1019,7 +1047,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.post("/index-requests/{request_id}/cancel")
+    @app.post("/index-requests/{request_id}/cancel", response_model=IndexRequestItem)
     def index_request_cancel(
         request_id: int,
         request: Request,
@@ -1048,7 +1076,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.post("/index-requests/{request_id}/approve")
+    @app.post("/index-requests/{request_id}/approve", response_model=IndexRequestItem)
     def index_request_approve(
         request_id: int,
         request: Request,
@@ -1077,7 +1105,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.post("/index-requests/{request_id}/reject")
+    @app.post("/index-requests/{request_id}/reject", response_model=IndexRequestItem)
     def index_request_reject(
         request_id: int,
         body: IndexRequestReject,
@@ -1108,7 +1136,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.post("/scrape")
+    @app.post("/scrape", response_model=OkIdResponse)
     def scrape(
         body: ScrapeRequest, request: Request, principal=Depends(_guard)
     ) -> dict[str, Any]:
@@ -1163,7 +1191,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.post("/doc-probe")
+    @app.post("/doc-probe", response_model=DocProbeResponse)
     async def doc_probe(
         request: Request, body: DocProbeRequest, principal=Depends(_guard)
     ) -> dict[str, Any]:
@@ -1214,7 +1242,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.post("/repo-probe")
+    @app.post("/repo-probe", response_model=RepoProbeResponse)
     def repo_probe(
         request: Request, body: RepoProbeRequest, principal=Depends(_guard)
     ) -> dict[str, Any]:
@@ -1259,7 +1287,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/jobs")
+    @app.get("/jobs", response_model=JobListResponse)
     def jobs(
         request: Request,
         job_id: int | None = None,
@@ -1282,7 +1310,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/jobs/{job_id}")
+    @app.get("/jobs/{job_id}", response_model=JobDetail)
     def job_detail(
         request: Request, job_id: int, principal=Depends(_guard)
     ) -> dict[str, Any]:
@@ -1301,7 +1329,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/resolve")
+    @app.get("/resolve", response_model=ResolutionResponse)
     async def resolve_route(
         name: str,
         ecosystem: str | None = None,
@@ -1340,7 +1368,7 @@ def build_web_app(
             raise ApiRejection(502, "upstream_unavailable", str(exc)) from exc
         return resolution.model_dump()
 
-    @app.get("/web-search")
+    @app.get("/web-search", response_model=DiscoveryResponse)
     async def web_search(
         query: str,
         limit: int = 10,
@@ -1362,7 +1390,7 @@ def build_web_app(
             ) from exc
         return envelope(items)
 
-    @app.get("/github-search")
+    @app.get("/github-search", response_model=DiscoveryResponse)
     async def github_search(
         query: str,
         limit: int = 10,
@@ -1384,7 +1412,7 @@ def build_web_app(
             ) from exc
         return envelope(items)
 
-    @app.get("/repo-deps")
+    @app.get("/repo-deps", response_model=DependencyResponse)
     def repo_deps(
         request: Request,
         library: str,
@@ -1440,7 +1468,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/link-stats")
+    @app.get("/link-stats", response_model=PageLinkStats | VersionLinkStats)
     def link_stats(
         request: Request,
         library: str,
@@ -1502,7 +1530,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/mining-health")
+    @app.get("/mining-health", response_model=MiningHealthResponse)
     def mining_health(
         request: Request,
         library: str | None = None,
@@ -1529,7 +1557,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/readyz")
+    @app.get("/readyz", response_model=ReadyResponse)
     def readyz(request: Request) -> dict[str, Any]:
         est = _eff_settings(request)
         ectx = _eff_context(request)
@@ -1576,7 +1604,7 @@ def build_web_app(
             out["degraded"] = True
         return out
 
-    @app.post("/feedback")
+    @app.post("/feedback", response_model=OkIdResponse)
     def feedback_create(
         body: FeedbackCreate,
         request: Request,
@@ -1614,7 +1642,7 @@ def build_web_app(
                 pass
         return {"id": fid, "ok": True}
 
-    @app.get("/feedback")
+    @app.get("/feedback", response_model=FeedbackResponse)
     def feedback_list(
         request: Request,
         limit: int = 50,
@@ -1638,7 +1666,7 @@ def build_web_app(
         )
         return envelope(items)
 
-    @app.post("/feedback/{feedback_id}/resolve")
+    @app.post("/feedback/{feedback_id}/resolve", response_model=OkResponse)
     def feedback_resolve(
         feedback_id: int,
         request: Request,
@@ -1668,7 +1696,7 @@ def build_web_app(
         )
         return {"ok": True}
 
-    @app.post("/jobs")
+    @app.post("/jobs", response_model=OkIdResponse)
     def jobs_create(
         body: JobCreate,
         request: Request,
@@ -1708,7 +1736,7 @@ def build_web_app(
                 pass
         return {"id": job_id, "ok": True}
 
-    @app.post("/jobs/{job_id}/cancel")
+    @app.post("/jobs/{job_id}/cancel", response_model=OkResponse)
     def jobs_cancel(
         job_id: int,
         request: Request,
@@ -1745,7 +1773,7 @@ def build_web_app(
                 pass
         return {"ok": True}
 
-    @app.get("/admin/principals")
+    @app.get("/admin/principals", response_model=PrincipalListResponse)
     def admin_principals_list(
         request: Request,
         tenant_id: str | None = None,
@@ -1767,7 +1795,7 @@ def build_web_app(
         )
         return envelope([dict(row) for row in rows])
 
-    @app.get("/admin/keys")
+    @app.get("/admin/keys", response_model=ApiKeyResponse)
     def admin_keys_list(request: Request, principal=Depends(_guard)) -> dict[str, Any]:
         _need(principal, "admin:keys")
         from libref.services.infra.auth import PLATFORM_SCOPE
@@ -1807,7 +1835,7 @@ def build_web_app(
         ]
         return envelope(items)
 
-    @app.post("/admin/keys")
+    @app.post("/admin/keys", response_model=IssuedKey)
     def admin_keys_create(
         body: KeyCreate, request: Request, principal=Depends(_guard)
     ) -> dict[str, Any]:
@@ -1853,7 +1881,7 @@ def build_web_app(
         )
         return {"id": key_id, "key": raw, "prefix": raw[:12]}
 
-    @app.delete("/admin/keys/{key_id}")
+    @app.delete("/admin/keys/{key_id}", response_model=OkResponse)
     def admin_keys_revoke(
         key_id: int, request: Request, principal=Depends(_guard)
     ) -> dict[str, Any]:
@@ -1884,7 +1912,7 @@ def build_web_app(
         )
         return {"ok": True}
 
-    @app.delete("/admin/principals/{principal_id}/keys")
+    @app.delete("/admin/principals/{principal_id}/keys", response_model=RevokedKeys)
     def admin_principal_keys_revoke(
         principal_id: int, request: Request, principal=Depends(_guard)
     ) -> dict[str, Any]:
@@ -1908,7 +1936,7 @@ def build_web_app(
         )
         return {"ok": True, "revoked": count}
 
-    @app.get("/admin/quota/policies")
+    @app.get("/admin/quota/policies", response_model=QuotaPolicyResponse)
     def admin_quota_policies(
         request: Request, principal=Depends(_guard)
     ) -> dict[str, Any]:
@@ -1928,7 +1956,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.put("/admin/quota/policies")
+    @app.put("/admin/quota/policies", response_model=OkResponse)
     def admin_quota_policies_upsert(
         body: QuotaPolicyUpsert, request: Request, principal=Depends(_guard)
     ) -> dict[str, Any]:
@@ -1983,7 +2011,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.post("/admin/config/refresh")
+    @app.post("/admin/config/refresh", response_model=ConfigRefreshResponse)
     def admin_config_refresh(
         request: Request, principal=Depends(_guard)
     ) -> dict[str, Any]:

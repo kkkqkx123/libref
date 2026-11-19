@@ -37,7 +37,7 @@ import { ElButton, ElForm, ElFormItem, ElInput, ElRadioButton, ElRadioGroup } fr
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { Envelope, Row } from '../api/types';
+import type { Row } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
 import EvidenceList from '../components/business/EvidenceList.vue';
 import EmptyState from '../components/common/EmptyState.vue';
@@ -97,7 +97,7 @@ async function load(): Promise<void> {
   loading.value = true;
   error.value = '';
   try {
-    const { data } = await api<Envelope<Row>>('/api-insight', {
+    const { data } = await api('/api-insight', {
       params: {
         view: view.value,
         api: apiName.value.trim() || undefined,

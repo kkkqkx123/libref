@@ -1,7 +1,7 @@
 // Catalog cache: library and version lists with explicit invalidation.
 import { reactive } from 'vue';
 import { api } from '../api/client';
-import type { Envelope, LibraryRow, VersionRow } from '../api/types';
+import type { LibraryRow, VersionRow } from '../api/types';
 
 interface CatalogState {
   libraries: LibraryRow[];
@@ -16,20 +16,18 @@ export const catalogStore = reactive<CatalogState>({
 });
 
 export async function loadLibraries(ecosystem?: string): Promise<LibraryRow[]> {
-  const { data } = await api<Envelope<LibraryRow>>('/catalog', {
-    params: { ecosystem },
-  });
-  catalogStore.libraries = data.items;
+  const { data } = await api('/catalog', { params: { ecosystem } });
+  const items = data.items as LibraryRow[];
+  catalogStore.libraries = items;
   catalogStore.loaded = true;
-  return data.items;
+  return items;
 }
 
 export async function loadVersions(library: string, ecosystem?: string): Promise<VersionRow[]> {
-  const { data } = await api<Envelope<VersionRow>>('/catalog', {
-    params: { library, ecosystem },
-  });
-  catalogStore.versionsByLibrary[library] = data.items;
-  return data.items;
+  const { data } = await api('/catalog', { params: { library, ecosystem } });
+  const items = data.items as VersionRow[];
+  catalogStore.versionsByLibrary[library] = items;
+  return items;
 }
 
 export function invalidateCatalog(): void {

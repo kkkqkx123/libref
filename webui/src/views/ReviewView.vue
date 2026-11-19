@@ -40,7 +40,7 @@
 import { ElButton, ElForm, ElFormItem, ElInputNumber } from 'element-plus';
 import { computed, nextTick, ref } from 'vue';
 import { api, ApiError } from '../api/client';
-import type { Envelope, ReviewItem } from '../api/types';
+import type { ReviewItem } from '../api/types';
 import ConfidenceBadge from '../components/common/ConfidenceBadge.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
@@ -67,7 +67,7 @@ async function reload(): Promise<void> {
   loading.value = true;
   error.value = '';
   try {
-    const { data } = await api<Envelope<ReviewItem>>('/review', { params: { limit: limit.value } });
+    const { data } = await api('/review', { params: { limit: limit.value } });
     items.value = data.items;
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : messages.value.common.loadFailed;
@@ -85,7 +85,7 @@ function formatArgs(args: unknown): string {
 
 async function act(item: ReviewItem, action: 'approve' | 'conflict' | 'reopen'): Promise<void> {
   try {
-    await api<{ ok: boolean }>('/review', {
+    await api('/review', {
       method: 'POST',
       body: { action, entity_id: item.entity_id, limit: limit.value },
     });

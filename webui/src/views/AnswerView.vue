@@ -92,7 +92,7 @@ async function ask(): Promise<void> {
   quotaReset.value = null;
   answer.value = null;
   try {
-    const { data } = await api<AnswerResponse>('/answer', {
+    const { data } = await api('/answer', {
       params: {
         query: query.value.trim(),
         ...scopeParams(),
