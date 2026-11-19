@@ -118,6 +118,8 @@ uv run pytest -q          # 全量；e2e 默认跳过，requires_qdrant / requir
 
 ## 镜像构建
 
+镜像分层、devs 运行时约束与网络处理的完整说明见 `docs/dev/`。
+
 devs 的 Docker 是系统包安装：`/usr/bin/docker` 与 `/usr/bin/dockerd`，daemon 由 systemd 管理，socket 为 `/var/run/docker.sock`，数据目录为 `/var/lib/docker`，`itc` 已加入 `docker` 组。镜像源写在 `/etc/docker/daemon.json`，当前使用 `https://docker.m.daocloud.io`。不再使用用户目录下的临时 Docker 工具链。
 
 构建前按上文同步源码。GHCR 基础镜像在该机拉取 blob 会卡在 GHCR CDN，可先从可联网机器导出后用 `sudo docker load -i` 载入；Docker Hub 基础镜像走镜像源直接拉取。构建命令（当前镜像无 buildx 组件，显式关闭 BuildKit）：
