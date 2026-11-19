@@ -1,7 +1,7 @@
 # Example reverse proxy: TLS termination + request limits + MCP streamable-http headers.
 # The libref service itself never terminates TLS.
-# The service is API-only and serves no static files, so this proxy has
-# no static-hosting duties; it forwards every path to the Python app.
+# The image bundles the SPA and serves it from its single port, so this proxy
+# forwards every path and never splits API and static routes.
 server {
     listen 443 ssl;
     server_name libref.example.com;

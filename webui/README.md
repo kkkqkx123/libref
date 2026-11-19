@@ -39,6 +39,9 @@ the offline export is unavailable.
 
 ## Deploy
 
-Copy `dist/` to the directory configured as `web_spa_dir`; the Python service
-hosts it with a last-resort SPA fallback. Missing directory or `index.html`
-keeps pure-API mode with a startup warning.
+The image builds `dist/` in a Node stage and the Python service serves it with a
+last-resort SPA fallback, so no manual copy is needed in the compose stack.
+For nginx-side static delivery, copy `dist/` to the nginx root and use
+`deploy/nginx.static.conf.example`; the backend must serve the same artifact
+for client-side deep links. A missing directory or `index.html` keeps pure-API
+mode with a startup warning.

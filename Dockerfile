@@ -1,4 +1,4 @@
-# Multi-stage build: compile/install deps in the builder, ship only runtime files.
+# Multi-stage build: compile deps and frontend separately, ship only runtime files.
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim AS builder
 
 # gcc: vendored tree-sitter grammars are C extensions built by their setup.py.
@@ -22,6 +22,14 @@ RUN cargo build --release --features c_api --manifest-path crates/simvec/Cargo.t
     && cp target/release/libsimvec.so /usr/local/lib/libsimvec.so \
     && ldconfig
 
+FROM node:22-bookworm-slim AS frontend
+
+WORKDIR /webui
+COPY webui/package.json webui/package-lock.json ./
+RUN npm ci
+COPY webui ./
+RUN npm run build
+
 FROM python:3.14-slim-bookworm AS runtime
 
 # Run as an unprivileged user; data lives in mounted volumes.
@@ -31,12 +39,14 @@ WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /usr/local/lib/libsimvec.so /usr/local/lib/libsimvec.so
 COPY --from=builder /app/crates/simvec/bindings /app/crates/simvec/bindings
+COPY --from=frontend /webui/dist /app/webui/dist
 COPY src /app/src
 COPY pyproject.toml uv.lock .python-version README.md* ./
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
+    LIBREF_WEB_SPA_DIR=/app/webui/dist \
     SIMVEC_LIB=/usr/local/lib/libsimvec.so
 
 # ldconfig cache for the copied simvec shared object.

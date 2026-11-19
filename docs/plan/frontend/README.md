@@ -8,7 +8,7 @@
 
 ## 后端现状摘要
 
-Web 出口是纯 API 形态：约三十个根路径端点加挂载于 `/mcp` 的 MCP 应用，无任何静态资源。
+Web 出口提供约三十个根路径端点与挂载于 `/mcp` 的 MCP 应用，并托管自带的前端产物。
 路由层只做参数解析与 `services/` 调用转发，业务逻辑全部在服务层，因此前端与 CLI/MCP
 看到的数据口径天然一致。FastAPI 自带 OpenAPI 描述，前端以其为接口契约来源。
 
@@ -45,5 +45,6 @@ Web 出口是纯 API 形态：约三十个根路径端点加挂载于 `/mcp` 的
   按请求会话隔离修复了上下文连接复用，见 `tests/integration/test_combined_serve.py`。
 - 前端校验：`npm run check`（类型、词条门禁、令牌）与 `npm run build`；
   后端校验：全量 pytest 加 ruff 加 mypy。
+- 部署落地：镜像内置前端产物，`docs/plan/frontend-deployment.md` 记录后端自托管与 nginx 静态两种拓扑的实施方式。
 - 落地顺序建议：检索问答先行（只读），其次源码洞察（只读），再入库引导与任务中心，
   最后审核反馈与系统管理（写操作多、权限要求高）。

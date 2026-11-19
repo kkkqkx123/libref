@@ -183,7 +183,7 @@ mcp_path = "/mcp"
 # dev_principal = "dev-operator"
 # allowed_hosts = ["libref.internal"]
 # 浏览器来源精确匹配，禁止通配符与带路径的来源。
-# allowed_origins = ["https://app.internal"]
+# allowed_origins = ["https://libref.internal"]
 # api_key_default_ttl_hours = 168
 # api_key_max_ttl_hours = 8760
 # bootstrap_admin_key must come from env, never here.
@@ -202,6 +202,9 @@ log_format = "text"
 # Web 出口：默认只绑本地回环，对外暴露以前置鉴权为前置条件
 web_host = "127.0.0.1"
 web_port = 8001
+# The container image sets LIBREF_WEB_SPA_DIR to the bundled frontend dist.
+# web_spa_enabled = true
+# web_spa_dir = "/app/webui/dist"
 
 [retention]
 # 抓取审计与本地治理：原始快照开关目录配额、仓库目录配额、删除日志保留期

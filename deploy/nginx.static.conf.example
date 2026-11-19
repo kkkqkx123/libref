@@ -1,0 +1,47 @@
+# Optional reverse proxy with nginx-served SPA assets.
+# Copy webui/dist to /usr/share/nginx/html/libref before enabling this config.
+# The libref service must still see the same dist via LIBREF_WEB_SPA_DIR so
+# browser navigations to client-side routes fall back to index.html.
+server {
+    listen 443 ssl;
+    server_name libref.example.com;
+
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    # Request-body cap guards ingestion endpoints from oversized payloads.
+    client_max_body_size 32m;
+    root /usr/share/nginx/html/libref;
+
+    # Hashed assets are immutable; unknown assets must not fall back to HTML.
+    location ^~ /assets/ {
+        try_files $uri =404;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+    }
+
+    location = / {
+        try_files /index.html =404;
+        add_header Cache-Control "no-store" always;
+    }
+
+    # API, MCP and client-side deep links stay on the Python service.
+    location / {
+        proxy_pass http://127.0.0.1:8001;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_send_timeout  300s;
+        # Required for MCP streamable-http long-lived responses:
+        proxy_buffering off;
+        proxy_set_header Connection "";
+        proxy_read_timeout 3600s;
+    }
+}
+
+server {
+    listen 80;
+    server_name libref.example.com;
+    return 301 https://$host$request_uri;
+}

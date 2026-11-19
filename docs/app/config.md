@@ -195,6 +195,8 @@
 | instance_id | 字符串 | libref-1 | LIBREF_INSTANCE_ID | DB 认领与版本锁的进程标识 |
 | web_host | 字符串 | 127.0.0.1 | LIBREF_WEB_HOST | Web 监听地址 |
 | web_port | 整数（1–65535） | 8001 | LIBREF_WEB_PORT | Web 监听端口 |
+| web_spa_enabled | 布尔 | true | LIBREF_WEB_SPA_ENABLED | 是否启用前端外壳与静态资产托管 |
+| web_spa_dir | 路径/空 | 空 | LIBREF_WEB_SPA_DIR | 前端产物目录；镜像默认指向内置 `dist`，缺 `index.html` 时退回纯 API |
 
 未知工具名启动即报错。所有 HTTP 出口共用一套鉴权：enforced 下每请求需 Bearer Key，带 Origin 的浏览器请求还必须命中 `allowed_origins`；健康检查与静态资源除外。开发模式只供本机显式使用，反向代理到回环地址不改变模式。
 

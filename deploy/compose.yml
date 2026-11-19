@@ -2,6 +2,7 @@
 # Secrets come from an env file, never baked into the image.
 # Qdrant is only required when the service runs with LIBREF_VECTOR_BACKEND=qdrant;
 # the default local simvec backend keeps its index inside the libref-data volume.
+# The image bundles webui/dist and sets LIBREF_WEB_SPA_DIR; no static volume is needed.
 services:
   libref:
     build: .

@@ -1,8 +1,10 @@
 # 部署示例配置
 
-本目录提供**可直接起用的示例栈**：镜像构建（根 `Dockerfile`）、`compose.yml`（libref + Qdrant）、nginx 反向代理示例，以及鉴权模式切换配置。服务本身是纯 API（无静态资源），nginx 只做 TLS 终止与转发，不承担静态托管职责；前端立项后的托管方案见 `docs/architecture/frontend-hosting.md`。
+本目录提供**可直接起用的示例栈**：镜像构建（根 `Dockerfile`）、`compose.yml`（libref + Qdrant）、nginx 反向代理示例，以及鉴权模式切换配置。镜像在 Node 构建阶段产出 `webui/dist`，运行时由 Python 服务直接托管前端，nginx 默认只做 TLS 终止与全量转发；需要 nginx 托管静态资产时改用 `deploy/nginx.static.conf.example`。托管设计见 `docs/architecture/frontend-hosting.md`，实施顺序见 `docs/plan/frontend-deployment.md`。
 
 服务端口以 `[web]` 的 `web_port`（默认 `8001`）为唯一真相源，`Dockerfile`、`compose.yml`、`nginx.conf.example` 中的端口都与之对齐；改端口时三处随配置一起改。
+
+Podman 使用独立入口 `deploy/podman/deploy.sh`，本目录的 Docker 配置不做 Podman 适配；用法与边界见 `deploy/podman/README.md` 与 `docs/plan/podman-deployment.md`。
 
 | 文件 | 用途 |
 |---|---|
@@ -11,6 +13,7 @@
 | `libref.toml.example` | 非密钥配置文件示例（`[auth]` / `[client]` / `[server]` / `[mcp]` / `[web]` / `[logging]`） |
 | `compose.yml` | 示例编排：libref + Qdrant，数据走命名卷，libref 只绑回环 |
 | `nginx.conf.example` | 反向代理示例：TLS 终止、请求体上限、MCP 长连接头 |
+| `nginx.static.conf.example` | 可选静态示例：nginx 发 `/assets/` 与 `/`，其余路径代理到后端 |
 | 本文件 | 切换步骤与约束 |
 
 ## 命名约束
@@ -56,6 +59,12 @@ cp deploy/libref.toml.example libref.toml
 - **请求侧凭据**（用户/助手 API Key、引导 Key）与**上游密钥**（`LIBREF_EMBEDDING_API_KEY` / `LIBREF_CHAT_API_KEY` / `LIBREF_DISCOVERY_GITHUB_TOKEN`）只走环境变量，写入 `libref.toml` 会在加载时被拒绝（`src/libref/config.py:490-494`）。
 - 修改上游密钥后调用 `POST /admin/config/refresh` 重建冻结快照；不做热更新。
 - `config-show` 打印脱敏快照，`/health` 只回配置指纹，均不泄露密钥。
+
+## 前端产物
+
+- 默认：`docker compose -f deploy/compose.yml up --build` 会在镜像内执行 `npm ci` 与 `npm run build`，把 `webui/dist` 拷入运行时镜像；`LIBREF_WEB_SPA_DIR` 由镜像设为 `/app/webui/dist`，无需额外卷。源码直接运行时未构建前端则保持纯 API 并告警。
+- nginx 静态模式：先在 `webui/` 执行 `npm ci && npm run build`，把 `dist/` 部署到 nginx 静态目录并套用 `nginx.static.conf.example`；后端继续持有同一份产物以提供深链回退。两种模式的前端版本必须一致。
+- 同源部署把 `LIBREF_ALLOWED_ORIGINS` 与 `LIBREF_BASE_URL` 都设为对外站点源；跨源部署让前端在构建期写入 `VITE_API_BASE`，并把 `allowed_origins` 设为页面源、`allowed_hosts` 设为 API 对外 Host。
 
 ## 示例栈启动
 

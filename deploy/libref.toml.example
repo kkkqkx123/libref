@@ -10,7 +10,7 @@ db_path = "/var/lib/libref/libref.db"
 auth_mode = "enforced"
 dev_principal = "dev-operator"
 allowed_hosts = ["libref.internal"]
-allowed_origins = ["https://app.internal"]
+allowed_origins = ["https://libref.internal"]
 
 [client]
 base_url = "https://libref.internal"
@@ -25,6 +25,9 @@ mcp_path = "/mcp"
 [web]
 web_host = "127.0.0.1"
 web_port = 8001
+# The image sets LIBREF_WEB_SPA_DIR; override only for a mounted artifact.
+web_spa_enabled = true
+# web_spa_dir = "/app/webui/dist"
 
 [logging]
 log_level = "INFO"

@@ -4,7 +4,7 @@
 
 ## 现状与结论
 
-服务当前是纯 API：约三十个根路径端点加挂载在 `/mcp` 的 MCP 应用，无任何静态资源。`deploy/nginx.conf.example` 因此只有 TLS 终止、暴露面收敛、MCP 长连接调参三项职责，不存在静态托管分工。结论有两条：现在不引入任何 Python 静态托管（无产物可托，属过度设计）；前端落地时默认由 Python 自托管，nginx 保持纯反代，必要时只叠加资产缓存，不做动静路径拆分。
+服务已有约三十个根路径端点与挂载在 `/mcp` 的 MCP 应用，同时具备 SPA 外壳与 `/assets` 静态能力。前端落地后默认由 Python 自托管：镜像内置构建产物，nginx 保持纯反代，不做动静路径拆分。只有在需要静态卸载时才改用 `deploy/nginx.static.conf.example`，且深链仍由后端末位回退兜底。
 
 ## 为什么默认 Python 自托管
 
@@ -22,22 +22,24 @@ API 端点占据根路径且数量多，MCP 以 `Mount("/")` 挂在最后，因�
 
 ## 配置
 
-新增两个 `[web]` 键，优先级沿用统一约定（显式参数高于环境变量，高于配置文件，高于内置默认）：总开关默认开，产物目录默认空。目录不存在或缺 `index.html` 时只告警并继续以纯 API 形态运行，绝不因此拒绝启动：同一个镜像在前端构建前后都能跑，这是防误用的关键。
+新增两个 `[web]` 键，优先级沿用统一约定（显式参数高于环境变量，高于配置文件，高于内置默认）：总开关默认开，产物目录默认空。镜像通过 `LIBREF_WEB_SPA_DIR` 指向内置产物，源码运行未构建前端时保持纯 API。目录不存在或缺 `index.html` 时只告警并继续以纯 API 形态运行，绝不因此拒绝启动：同一个镜像在前端构建前后都能跑，这是防误用的关键。
 
 ## 构建与镜像
 
-`webui/` 保持独立 npm 工程，不进 `pyproject`。镜像构建时把预构建产物拷入运行时镜像指定目录即可；`.dockerignore` 当前排除项不含该产物路径，届时确认放行。开发期前端 dev 服务器通过 `VITE_API_BASE` 直连本地 `8001`（`.env.development` 指定，服务端 CORS 已放开），不经过 Python 托管链路，也不额外配置代理。
+`webui/` 保持独立 npm 工程，不进 `pyproject`。`Dockerfile` 用 Node 构建阶段执行 `npm ci` 与 `npm run build`，运行时镜像只拷入 `webui/dist` 并设置 `LIBREF_WEB_SPA_DIR` 指向它；`.dockerignore` 排除本地 `webui/dist` 与 `webui/node_modules`，产物只来自构建阶段。开发期前端 dev 服务器通过 `VITE_API_BASE` 直连本地 `8001`（`.env.development` 指定，服务端 CORS 已放开），不经过 Python 托管链路，也不额外配置代理。
 
 ## nginx 叠加（生产可选）
 
-nginx 侧不做路径拆分，继续全量转发到 `8001`；如需优化，可对资产扩展名或内容类型开反向代理缓存，上游仍是单一 Python 源站。`deploy/nginx.conf.example` 届时追加缓存段，不改分流结构。
+默认 `deploy/nginx.conf.example` 全量转发到 `8001`，不对资产做路径拆分，也不缓存外壳。需要静态卸载时改用 `deploy/nginx.static.conf.example`：nginx 只对 `/assets/` 与 `/` 发静态响应，其余路径继续代理；后端仍持有同一份产物以提供深链回退。跨源部署时前端构建期写入 `VITE_API_BASE`，后端 `allowed_origins` 指向页面源、`allowed_hosts` 指向 API 对外 Host；同源部署两者取同一站点源，前端基址留空。
 
-## 落地步骤（已启动）
+## 落地步骤（已实现）
 
 配置项（`web_spa_enabled/web_spa_dir`）、末位 SPA 回退（文本导航回退 `index.html`、
 API 与 `/mcp` 前缀不受回退吞没）及公开路径扩展（根路径与产物目录）已实现，
-组合服务同时补齐了拍平路由绕过的 FastAPI 路由不变量；`webui/` 工程已立项并全阶段实现。
+组合服务同时补齐了拍平路由绕过的 FastAPI 路由不变量；`webui/` 工程已全阶段实现。
+部署侧已补齐镜像内前端构建、`LIBREF_WEB_SPA_DIR` 注入、nginx 反代与静态示例、
+配置模板与运维文档，详见 `docs/plan/frontend-deployment.md`。
 
 ## 与既有文档的对应
 
-端口以 `web_port`（默认 `8001`）为准，容器与代理示例已对齐；`deploy/README.md` 描述示例栈现状；`tech-stack.md` 与 `module-layout.md` 的 `webui/` 预留位置是前端工程的落点；`multi-user-production-deferred.md` 的 T9（前端不在本阶段）在本设计落地时标注已启动。
+端口以 `web_port`（默认 `8001`）为准，容器与代理示例已对齐；`deploy/README.md` 描述示例栈现状，`docs/plan/frontend-deployment.md` 记录部署实施顺序；`tech-stack.md` 与 `module-layout.md` 的 `webui/` 预留位置是前端工程的落点；`multi-user-production-deferred.md` 的 T9（前端不在本阶段）在本设计落地时标注已启动。

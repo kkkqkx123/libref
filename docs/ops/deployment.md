@@ -7,6 +7,7 @@
 - 向量集合设置分两档：**结构档**（`qdrant_on_disk_*`、`qdrant_shard_number`、`qdrant_replication_factor`、`qdrant_write_consistency_factor`）只在建集合时生效，改动即删集合重建并按真源重灌；**调优档**（`qdrant_hnsw_*`、`qdrant_full_scan_threshold`、`qdrant_memmap_threshold_kb`、`qdrant_indexing_threshold_kb`）改写活动集合、已有点保留。两档都记在 `schema_meta`，漂移自动纠正；本地引擎的建图参数属结构档（引擎在创建时固定）。
 - 运维探针：`libref vectors-status` 输出集合画像、可达性、点数、过滤索引（不可达时退出码 1）；`libref vectors-optimize` 就地应用调优档并立即触发本地引擎建图（引擎后台维护周期为 30 s，批量灌库后不必等待）。
 - 密钥经环境变量或仓库根环境文件注入，模板见 `.env.example`，真实文件不进版本库。
+- 镜像构建阶段用 Node 产出 `webui/dist` 并拷入运行时，`LIBREF_WEB_SPA_DIR` 默认指向该目录；前端属于镜像层，数据卷只存数据库、快照与仓库。源码运行未构建前端时服务保持纯 API 并告警。
 
 ## 隔离语义
 
@@ -24,6 +25,14 @@
 
 - 接口默认只绑本地回环。默认 `enforced` 模式每请求需 `Authorization: Bearer`，浏览器来源必须精确命中 `allowed_origins`；首次启动需 `LIBREF_BOOTSTRAP_ADMIN_KEY` 或已有主体，否则拒绝启动。`dev` 必须显式开启、只许回环，且不得经反向代理对外提供。
 - 密钥只走环境变量，不进配置文件；请求侧用 Authorization Bearer 传递。模板见 `deploy/env.dev.example` 与 `deploy/env.prod.example`，真实文件不进版本库。
+
+## 前端托管
+
+- 默认单镜像单端口：Python 服务托管外壳、`/assets` 与深链回退，nginx 全量反代；`/` 与 `/assets/*` 公开且不计配额，深链导航经末位回退返回 `index.html`。
+- 可选静态示例 `deploy/nginx.static.conf.example` 由 nginx 发 `/assets/` 与 `/`，其余路径仍走后端；后端必须持有同一份产物以兜底深链，禁止在 nginx 对 `location /` 使用整站 HTML 回退。
+- 同源部署时 `LIBREF_ALLOWED_ORIGINS` 必须包含页面源（同源 POST 也带 Origin），`VITE_API_BASE` 留空；跨源部署时构建期写入 API 基址，并精确配置来源与 Host。
+- 资产走长缓存、`index.html` 走 `no-store`；更换前端产物需重建镜像并滚动重启，配置指纹覆盖 `web_spa_dir`。
+- Podman 使用独立入口 `deploy/podman/deploy.sh`，与 Docker compose 示例相互独立，说明见 `deploy/podman/README.md`。
 
 ## 常用操作
 

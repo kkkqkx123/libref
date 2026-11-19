@@ -9,5 +9,7 @@ tests/e2e/bench
 ref
 docs
 target
+webui/node_modules
+webui/dist
 **/__pycache__
 *.pyc
