@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 
 import pytest
 
+from libref.services.infra import quota
 from libref.services.infra.auth import ROLE_SCOPES, Principal
 from libref.services.infra.jobs import JobManager
+from libref.services.ops import index_requests as index_request_module
 from libref.services.ops.index_requests import (
     IndexRequestError,
     IndexRequestService,
+    QuotaDenied,
     build_index_request_runner,
 )
 from tests.conftest import make_settings
@@ -171,6 +175,138 @@ def test_runner_writes_terminal_state(conn, monkeypatch, tmp_path) -> None:
     with pytest.raises(RuntimeError, match="boom"):
         asyncio.run(failing(failed_job))
     assert svc.get(failed_item["id"], admin)["status"] == "failed"
+
+
+def test_transition_rejects_stale_expected_status(conn, monkeypatch, tmp_path) -> None:
+    settings = make_settings(monkeypatch, tmp_path)
+    svc = _svc(conn, settings)
+    actor = _principal(1, "dev", {"read", "index:request"})
+    item = asyncio.run(svc.submit(_repo_payload(), actor))
+
+    with pytest.raises(IndexRequestError, match="stale index request"):
+        svc._transition(
+            item["id"],
+            "rejected",
+            expected="approved",
+            reject_reason="wrong state",
+        )
+    assert svc.get(item["id"], actor)["status"] == "pending"
+
+
+def test_active_dedupe_has_database_unique_guard(conn, monkeypatch, tmp_path) -> None:
+    settings = make_settings(monkeypatch, tmp_path)
+    svc = _svc(conn, settings)
+    actor = _principal(1, "dev", {"read", "index:request"})
+    item = asyncio.run(svc.submit(_repo_payload(), actor))
+    values = (
+        item["tenant_id"],
+        item["principal_id"],
+        item["requester"],
+        item["kind"],
+        item["target"],
+        item["source"],
+        "{}",
+        "pending",
+        item["dedupe_key"],
+    )
+    sql = (
+        "INSERT INTO index_requests(tenant_id, principal_id, requester, kind,"
+        " target, source, params, status, dedupe_key) VALUES(?,?,?,?,?,?,?,?,?)"
+    )
+    with pytest.raises(sqlite3.IntegrityError):
+        conn.execute(sql, values)
+
+    conn.execute("UPDATE index_requests SET status='failed' WHERE id=?", (item["id"],))
+    conn.commit()
+    conn.execute(sql, values)
+    conn.commit()
+
+
+def test_cancel_running_job_is_rejected(conn, monkeypatch, tmp_path) -> None:
+    settings = make_settings(monkeypatch, tmp_path)
+    jobs = JobManager(conn)
+    svc = _svc(conn, settings, jobs=jobs)
+    admin = _principal(1, "sys", {"read", "index:request", "ingest:write"})
+    item = asyncio.run(svc.submit(_repo_payload(), admin))
+    job = jobs.get(int(item["job_id"]))
+    assert job is not None
+    jobs._update(job.id, status="running")
+
+    with pytest.raises(IndexRequestError, match="running"):
+        svc.cancel(item["id"], admin)
+    assert svc.get(item["id"], admin)["status"] == "queued"
+
+
+def test_runner_skips_request_with_cancelled_job(conn, monkeypatch, tmp_path) -> None:
+    settings = make_settings(monkeypatch, tmp_path)
+    jobs = JobManager(conn)
+    svc = _svc(conn, settings, jobs=jobs)
+    admin = _principal(1, "sys", {"read", "index:request", "ingest:write"})
+    item = asyncio.run(svc.submit(_repo_payload(), admin))
+    job = jobs.get(int(item["job_id"]))
+    assert job is not None
+    jobs.cancel(job.id)
+    called: list[int] = []
+    runner = build_index_request_runner(
+        settings, conn, lambda _job: called.append(1), jobs=jobs
+    )
+
+    with pytest.raises(IndexRequestError, match="cancelled"):
+        asyncio.run(runner(job))
+    assert called == []
+    assert svc.get(item["id"], admin)["status"] == "cancelled"
+
+
+def test_approval_revalidates_target(conn, monkeypatch, tmp_path) -> None:
+    settings = make_settings(monkeypatch, tmp_path)
+    svc = _svc(conn, settings)
+    actor = _principal(1, "dev", {"read", "index:request"})
+    approver = _principal(2, "kb", {"read", "index:approve"})
+    item = asyncio.run(svc.submit(_repo_payload(), actor))
+
+    def _blocked(source: str, settings: object) -> str:
+        raise IndexRequestError("target no longer allowed")
+
+    monkeypatch.setattr(index_request_module, "_validate_repo_source", _blocked)
+    with pytest.raises(IndexRequestError, match="no longer allowed"):
+        svc.approve(item["id"], approver)
+    assert svc.get(item["id"], actor)["status"] == "pending"
+
+
+def test_quota_is_charged_before_resolution(conn, monkeypatch, tmp_path) -> None:
+    quota.invalidate_policy_cache()
+    settings = make_settings(
+        monkeypatch,
+        tmp_path,
+        quota_enabled=True,
+        quota_index_requests_per_hour=1,
+    )
+    svc = _svc(conn, settings)
+    actor = _principal(7, "dev", {"read", "index:request"})
+    original = svc._resolve_payload
+    calls: list[dict[str, object]] = []
+
+    async def _counting(payload: dict[str, object]) -> dict[str, object]:
+        calls.append(payload)
+        return await original(payload)
+
+    svc._resolve_payload = _counting  # type: ignore[method-assign]
+    try:
+        asyncio.run(svc.submit(_repo_payload(), actor))
+        with pytest.raises(QuotaDenied):
+            asyncio.run(svc.submit(_repo_payload(), actor))
+    finally:
+        quota.invalidate_policy_cache()
+    assert len(calls) == 1
+
+
+def test_prerelease_is_persisted(conn, monkeypatch, tmp_path) -> None:
+    settings = make_settings(monkeypatch, tmp_path)
+    svc = _svc(conn, settings)
+    actor = _principal(1, "dev", {"read", "index:request"})
+    payload = {**_repo_payload(), "include_prerelease": True}
+    item = asyncio.run(svc.submit(payload, actor))
+    assert item["params"]["include_prerelease"] is True
 
 
 def test_job_params_carry_request_id(conn, monkeypatch, tmp_path) -> None:

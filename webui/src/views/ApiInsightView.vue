@@ -5,10 +5,10 @@
       <el-form @submit.prevent="load">
         <el-form-item :label="messages.common.view">
           <el-radio-group v-model="view">
-            <el-radio-button label="usage">{{ messages.apiInsight.usage }}</el-radio-button>
-            <el-radio-button label="related">{{ messages.apiInsight.related }}</el-radio-button>
-            <el-radio-button label="args">{{ messages.apiInsight.args }}</el-radio-button>
-            <el-radio-button label="common">{{ messages.apiInsight.common }}</el-radio-button>
+            <el-radio-button value="usage">{{ messages.apiInsight.usage }}</el-radio-button>
+            <el-radio-button value="related">{{ messages.apiInsight.related }}</el-radio-button>
+            <el-radio-button value="args">{{ messages.apiInsight.args }}</el-radio-button>
+            <el-radio-button value="common">{{ messages.apiInsight.common }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item v-if="needsApi" label="API">

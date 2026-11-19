@@ -501,6 +501,7 @@ export const zhCN = {
     startUrl: '文档地址',
     startUrlPlaceholder: 'https://example.com/docs/',
     job: '作业',
+    params: '申请参数',
     empty: '暂无索引申请',
     emptyApprovals: '暂无待审批申请',
     reapply: '重新申请',

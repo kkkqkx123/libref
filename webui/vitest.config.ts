@@ -10,6 +10,7 @@ export default mergeConfig(
     test: {
       environment: 'happy-dom',
       include: ['src/**/*.spec.ts'],
+      setupFiles: ['./src/test-setup.ts'],
       restoreMocks: true,
       clearMocks: true,
       unstubGlobals: true,

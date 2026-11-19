@@ -8,9 +8,9 @@
         </el-form-item>
         <el-form-item :label="messages.common.mode">
           <el-radio-group v-model="mode">
-            <el-radio-button label="page">{{ messages.reader.page }}</el-radio-button>
-            <el-radio-button label="window">{{ messages.reader.window }}</el-radio-button>
-            <el-radio-button label="section">{{ messages.reader.section }}</el-radio-button>
+            <el-radio-button value="page">{{ messages.reader.page }}</el-radio-button>
+            <el-radio-button value="window">{{ messages.reader.window }}</el-radio-button>
+            <el-radio-button value="section">{{ messages.reader.section }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item v-if="mode === 'window'" :label="messages.reader.position">

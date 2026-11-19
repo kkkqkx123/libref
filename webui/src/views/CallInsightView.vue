@@ -5,9 +5,9 @@
       <el-form @submit.prevent="load">
         <el-form-item :label="messages.common.view">
           <el-radio-group v-model="view">
-            <el-radio-button label="callee">{{ messages.callInsight.callee }}</el-radio-button>
-            <el-radio-button label="caller">{{ messages.callInsight.caller }}</el-radio-button>
-            <el-radio-button label="file">{{ messages.common.file }}</el-radio-button>
+            <el-radio-button value="callee">{{ messages.callInsight.callee }}</el-radio-button>
+            <el-radio-button value="caller">{{ messages.callInsight.caller }}</el-radio-button>
+            <el-radio-button value="file">{{ messages.common.file }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="API">

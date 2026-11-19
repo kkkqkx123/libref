@@ -5,10 +5,10 @@
       <el-form @submit.prevent="load">
         <el-form-item :label="messages.common.view">
           <el-radio-group v-model="view">
-            <el-radio-button label="detail">{{ messages.symbolInsight.detail }}</el-radio-button>
-            <el-radio-button label="file">{{ messages.symbolInsight.file }}</el-radio-button>
-            <el-radio-button label="children">{{ messages.symbolInsight.children }}</el-radio-button>
-            <el-radio-button label="signature">{{ messages.symbolInsight.signature }}</el-radio-button>
+            <el-radio-button value="detail">{{ messages.symbolInsight.detail }}</el-radio-button>
+            <el-radio-button value="file">{{ messages.symbolInsight.file }}</el-radio-button>
+            <el-radio-button value="children">{{ messages.symbolInsight.children }}</el-radio-button>
+            <el-radio-button value="signature">{{ messages.symbolInsight.signature }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="API">

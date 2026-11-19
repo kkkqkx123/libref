@@ -216,7 +216,7 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 
 ## 索引申请
 
-`request submit --kind repo|docs` 按坐标或 HTTP(S) 地址提交申请；`request list`、`request show <id>` 查看申请，`request approve <id>`、`request reject <id> --reason ...`、`request cancel <id>` 执行审批与撤回，`request wait <id> --timeout 300` 有界等待终态。本地直连同样走 `IndexRequestService`，不绕过审批；远端通过 Bearer 调用 `/index-requests`。终态退出码与远程 ingest 一致：仅 `done` 返回 0。
+`request submit --kind repo|docs` 按坐标或 HTTP(S) 地址提交申请；`request list`、`request show <id>` 查看申请，`request approve <id>`、`request reject <id> --reason ...`、`request cancel <id>` 执行审批与撤回，`request wait <id> --timeout 300` 有界等待终态。本地直连同样走 `IndexRequestService`，不绕过审批；远端通过 Bearer 调用 `/index-requests`。撤回只适用于作业运行前，已运行的作业返回冲突。终态退出码与远程 ingest 一致：仅 `done` 返回 0。
 
 ## 运维
 

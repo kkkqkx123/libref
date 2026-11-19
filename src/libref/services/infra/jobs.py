@@ -350,6 +350,13 @@ class JobManager:
             "finished_at": job.finished_at,
         }
 
+    def is_cancel_requested(self, job_id: int) -> bool:
+        """Report whether a worker has been asked to stop this job."""
+        row = self._conn.execute(
+            "SELECT cancel_requested FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()
+        return row is not None and int(row[0] or 0) == 1
+
     def cancel(self, job_id: int, *, tenant_id: str | None = None) -> None:
         """Request cancellation inside one tenant, if the tenant is constrained."""
         from libref.db.conn import write_lock

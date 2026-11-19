@@ -501,6 +501,7 @@ export const en = {
     startUrl: 'Documentation URL',
     startUrlPlaceholder: 'https://example.com/docs/',
     job: 'Job',
+    params: 'Request parameters',
     empty: 'No index requests yet',
     emptyApprovals: 'No requests waiting for approval',
     reapply: 'Reapply',

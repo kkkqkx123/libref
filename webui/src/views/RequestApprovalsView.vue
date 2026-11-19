@@ -15,6 +15,8 @@
           {{ item.requester || messages.common.unknown }} · {{ item.created_at }} ·
           {{ messages.requests.source }} {{ item.source || messages.common.none }}
         </div>
+        <div class="libref-muted">{{ messages.requests.params }}</div>
+        <pre class="libref-request-params">{{ formatParams(item.params) }}</pre>
         <div class="libref-review-actions">
           <el-button type="success" size="small" @click="act(item, 'approve')">{{ messages.requests.approve }}</el-button>
           <el-button type="warning" size="small" @click="act(item, 'reject')">{{ messages.requests.reject }}</el-button>
@@ -58,6 +60,10 @@ async function reload(): Promise<void> {
   }
 }
 
+function formatParams(params: Record<string, unknown>): string {
+  return JSON.stringify(params, null, 2);
+}
+
 async function act(item: IndexRequest, action: 'approve' | 'reject'): Promise<void> {
   let reason = '';
   if (action === 'reject') {
@@ -90,4 +96,10 @@ void reload();
 
 <style scoped>
 .libref-request-row { margin-bottom: var(--sp-2); }
+.libref-request-params {
+  margin: var(--sp-1) 0;
+  max-height: 12rem;
+  overflow: auto;
+  font-size: var(--fs-sm, 0.8rem);
+}
 </style>

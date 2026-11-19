@@ -33,9 +33,9 @@
     </el-form-item>
     <el-form-item v-if="showPreset" :label="messages.common.preset">
       <el-radio-group v-model="scopeStore.preset">
-        <el-radio-button label="precise">{{ messages.common.precise }}</el-radio-button>
-        <el-radio-button label="balanced">{{ messages.common.balanced }}</el-radio-button>
-        <el-radio-button label="thorough">{{ messages.common.thorough }}</el-radio-button>
+        <el-radio-button value="precise">{{ messages.common.precise }}</el-radio-button>
+        <el-radio-button value="balanced">{{ messages.common.balanced }}</el-radio-button>
+        <el-radio-button value="thorough">{{ messages.common.thorough }}</el-radio-button>
       </el-radio-group>
     </el-form-item>
     <el-form-item v-if="showLimit" :label="messages.common.limit">

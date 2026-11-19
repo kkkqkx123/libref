@@ -11,11 +11,13 @@ import asyncio
 import builtins
 import hashlib
 import json
+import sqlite3
 import time
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from libref.db.contract import DbIntegrityError
 from libref.services.infra.auth import PLATFORM_SCOPE, Principal
 from libref.services.infra.jobs import Job, JobManager
 from libref.services.infra.tenant import owner_tenant
@@ -162,20 +164,6 @@ class IndexRequestService:
         self._conn = conn
         self._settings = settings
         self._jobs = jobs if jobs is not None else JobManager(conn)
-        self._ensure_table()
-
-    def _ensure_table(self) -> None:
-        from libref.db.schema import INDEX_REQUESTS_SQL
-
-        probe = getattr(self._conn, "diagnostics", None)
-        if callable(probe):
-            try:
-                if str(probe().get("backend", "sqlite")) == "postgres":
-                    return
-            except Exception:  # noqa: BLE001, S110 — unreadable snapshot means embedded default
-                pass
-        self._conn.executescript(INDEX_REQUESTS_SQL)
-        self._conn.commit()
 
     def _insert(self, sql: str, params: tuple[Any, ...]) -> int:
         inserter = getattr(self._conn, "insert", None)
@@ -333,6 +321,7 @@ class IndexRequestService:
                 "fresh": bool(payload.get("fresh", False)),
                 "resolved_from": resolved_from,
                 "registry_confirmed": confirmed,
+                "include_prerelease": include_prerelease,
                 "subdir": payload.get("subdir"),
                 "only_files": payload.get("only_files"),
                 "exclude_patterns": payload.get("exclude_patterns"),
@@ -384,10 +373,19 @@ class IndexRequestService:
             "scope": payload.get("scope") or {},
             "resolved_from": resolved_from,
             "registry_confirmed": confirmed,
+            "include_prerelease": include_prerelease,
             "fresh": bool(payload.get("fresh", False)),
         }
         target = f"docs|{ecosystem}|{library}|{version}|{address}"
         return {"kind": kind, "source": address, "target": target, "params": params}
+
+    def _active_by_dedupe(self, tenant_id: str, dedupe: str) -> int | None:
+        row = self._conn.execute(
+            "SELECT id FROM index_requests WHERE tenant_id=? AND dedupe_key=?"
+            " AND status IN ('pending','approved','queued','running') ORDER BY id LIMIT 1",
+            (tenant_id, dedupe),
+        ).fetchone()
+        return int(row[0]) if row is not None else None
 
     @staticmethod
     def _dedupe_key(kind: str, target: str, params: dict[str, Any]) -> str:
@@ -421,54 +419,71 @@ class IndexRequestService:
             else getattr(principal, "tenant_id", "default")
         )
         write_tenant = owner_tenant(visibility)
-        normalized = await self._resolve_payload(payload)
         self._charge_quota(principal, write_tenant, request_id)
+        normalized = await self._resolve_payload(payload)
         dedupe = self._dedupe_key(kind, normalized["target"], normalized["params"])
-        existing = self._conn.execute(
-            "SELECT id FROM index_requests WHERE tenant_id=? AND dedupe_key=?"
-            " AND status IN ('pending','approved','queued','running') ORDER BY id LIMIT 1",
-            (write_tenant, dedupe),
-        ).fetchone()
-        if existing is not None:
-            item = self._row(int(existing[0]))
-            assert item is not None
-            self._audit(
-                principal,
-                "index_request.create",
-                str(item["id"]),
-                tenant_id=write_tenant,
-                result="reused",
-                request_id=request_id,
-            )
-            return item
 
         from libref.db.conn import write_lock
 
-        params = dict(normalized["params"])
         with write_lock(self._conn):
-            new_id = self._insert(
-                "INSERT INTO index_requests(tenant_id, principal_id, requester,"
-                " kind, target, source, params, status, dedupe_key)"
-                " VALUES(?,?,?,?,?,?,?,?,?)",
-                (
-                    write_tenant,
-                    _actor_id(principal),
-                    _actor_name(principal),
-                    kind,
-                    normalized["target"],
-                    normalized["source"],
-                    json.dumps(params, ensure_ascii=False),
-                    "pending",
-                    dedupe,
-                ),
-            )
-            self._conn.commit()
-        params["index_request_id"] = new_id
-        self._conn.execute(
-            "UPDATE index_requests SET params=? WHERE id=?",
-            (json.dumps(params, ensure_ascii=False), new_id),
-        )
-        self._conn.commit()
+            reused_id = self._active_by_dedupe(write_tenant, dedupe)
+            if reused_id is not None:
+                item = self._row(reused_id)
+                assert item is not None
+                self._audit(
+                    principal,
+                    "index_request.create",
+                    str(reused_id),
+                    tenant_id=write_tenant,
+                    result="reused",
+                    request_id=request_id,
+                )
+                return item
+
+            params = dict(normalized["params"])
+            try:
+                new_id = self._insert(
+                    "INSERT INTO index_requests(tenant_id, principal_id, requester,"
+                    " kind, target, source, params, status, dedupe_key)"
+                    " VALUES(?,?,?,?,?,?,?,?,?)",
+                    (
+                        write_tenant,
+                        _actor_id(principal),
+                        _actor_name(principal),
+                        kind,
+                        normalized["target"],
+                        normalized["source"],
+                        json.dumps(params, ensure_ascii=False),
+                        "pending",
+                        dedupe,
+                    ),
+                )
+                params["index_request_id"] = new_id
+                self._conn.execute(
+                    "UPDATE index_requests SET params=? WHERE id=?",
+                    (json.dumps(params, ensure_ascii=False), new_id),
+                )
+                self._conn.commit()
+            except DbIntegrityError, sqlite3.IntegrityError:
+                self._conn.rollback()
+                reused_id = self._active_by_dedupe(write_tenant, dedupe)
+                if reused_id is None:
+                    raise
+                item = self._row(reused_id)
+                assert item is not None
+                self._audit(
+                    principal,
+                    "index_request.create",
+                    str(reused_id),
+                    tenant_id=write_tenant,
+                    result="reused",
+                    request_id=request_id,
+                )
+                return item
+            except Exception:
+                self._conn.rollback()
+                raise
+
         item = self._row(new_id)
         assert item is not None
         self._audit(
@@ -506,11 +521,18 @@ class IndexRequestService:
                 f"unknown index request: {request_id}", status=404, code="not_found"
             )
         params = dict(item["params"])
-        if approved and item["status"] == "pending":
+        if approved:
+            if item["status"] != "pending":
+                raise IndexRequestError(
+                    f"cannot approve request in {item['status']}",
+                    code="conflict",
+                    status=409,
+                )
             self._transition(
                 request_id,
                 "approved",
                 approved_by=_actor_id(principal),
+                expected="pending",
             )
         try:
             if item["kind"] == "docs":
@@ -538,20 +560,33 @@ class IndexRequestService:
                     principal_id=item["principal_id"],
                 )
         except Exception as exc:  # noqa: BLE001 — a failed queue keeps the request retryable
+            try:
+                self._transition(
+                    request_id,
+                    "pending",
+                    error=f"{type(exc).__name__}: {exc}",
+                    approved_by=_actor_id(principal) if approved else None,
+                    expected="approved" if approved else item["status"],
+                )
+            except IndexRequestError as transition_error:
+                if transition_error.code != "conflict":
+                    raise
+            return self._row(request_id) or item
+        try:
             self._transition(
                 request_id,
-                "pending",
-                error=f"{type(exc).__name__}: {exc}",
+                "queued",
+                job_id=job_id,
+                error="",
                 approved_by=_actor_id(principal) if approved else None,
+                expected="approved" if approved else item["status"],
             )
-            return self._row(request_id) or item
-        self._transition(
-            request_id,
-            "queued",
-            job_id=job_id,
-            error="",
-            approved_by=_actor_id(principal) if approved else None,
-        )
+        except IndexRequestError:
+            try:
+                self._jobs.cancel(job_id, tenant_id=item["tenant_id"])
+            except ValueError, KeyError:
+                pass
+            raise
         return self._row(request_id) or item
 
     def list(
@@ -588,7 +623,8 @@ class IndexRequestService:
             clauses.append("status=?")
             values.append(status)
         platform = _has(principal, PLATFORM_SCOPE)
-        if not pending and not platform:
+        approver = _has(principal, "index:approve")
+        if not pending and not platform and not approver:
             pid = _actor_id(principal)
             name = _actor_name(principal)
             if pid is not None:
@@ -632,6 +668,13 @@ class IndexRequestService:
             )
         return item
 
+    def _revalidate_target(self, item: dict[str, Any]) -> None:
+        if item["kind"] == "repo":
+            _validate_repo_source(item["source"], self._settings)
+            return
+        address = item["params"].get("start_url") or item["source"]
+        _validate_docs_source(str(address), self._settings)
+
     def _require_actor(self, principal: Principal | None) -> None:
         if principal is None:
             raise IndexRequestError("unauthorized", code="unauthorized", status=401)
@@ -644,7 +687,7 @@ class IndexRequestService:
         tenant_id: str | None = None,
         request_id_header: str = "",
     ) -> dict[str, Any]:
-        """Cancel a pending request owned by the caller, including its queued job."""
+        """Cancel a request before its job starts running."""
         self._require_actor(principal)
         item = self.get(request_id, principal, tenant_id=tenant_id)
         if not self._owned(item, principal):
@@ -658,11 +701,18 @@ class IndexRequestService:
                 status=409,
             )
         if item["job_id"] is not None:
+            job = self._jobs.get(int(item["job_id"]))
+            if job is not None and job.status == "running":
+                raise IndexRequestError(
+                    "cannot cancel a running index job",
+                    code="conflict",
+                    status=409,
+                )
             try:
                 self._jobs.cancel(int(item["job_id"]), tenant_id=item["tenant_id"])
             except ValueError:
                 pass
-        self._transition(request_id, "cancelled")
+        self._transition(request_id, "cancelled", expected=item["status"])
         self._audit(
             principal,
             "index_request.cancel",
@@ -697,6 +747,7 @@ class IndexRequestService:
             raise IndexRequestError(
                 "cannot approve own request", code="forbidden", status=403
             )
+        self._revalidate_target(item)
         result = self._queue(
             request_id,
             principal,
@@ -741,7 +792,12 @@ class IndexRequestService:
             raise IndexRequestError(
                 "cannot reject own request", code="forbidden", status=403
             )
-        self._transition(request_id, "rejected", reject_reason=reason.strip())
+        self._transition(
+            request_id,
+            "rejected",
+            reject_reason=reason.strip(),
+            expected=item["status"],
+        )
         self._audit(
             principal,
             "index_request.reject",
@@ -755,9 +811,11 @@ class IndexRequestService:
         self,
         request_id: int,
         target: str,
+        *,
+        expected: str | None = None,
         **fields: Any,
     ) -> dict[str, Any]:
-        """Apply one legal state transition; illegal transitions raise."""
+        """Apply one legal transition with a database-level state guard."""
         from libref.db.conn import write_lock
 
         item = self._row(request_id)
@@ -765,7 +823,13 @@ class IndexRequestService:
             raise IndexRequestError(
                 f"unknown index request: {request_id}", status=404, code="not_found"
             )
-        source = item["status"]
+        source = expected or item["status"]
+        if source != item["status"]:
+            raise IndexRequestError(
+                f"stale index request {request_id}: expected {source}, found {item['status']}",
+                code="conflict",
+                status=409,
+            )
         if source == target:
             return item
         if target not in _TRANSITIONS.get(source, frozenset()):
@@ -786,22 +850,30 @@ class IndexRequestService:
                 raise IndexRequestError(f"unsupported request field: {key}")
             columns.append(f"{key}=?")
             values.append(value)
-        values.append(request_id)
+        values.extend((request_id, source))
         with write_lock(self._conn):
-            self._conn.execute(
-                f"UPDATE index_requests SET {', '.join(columns)} WHERE id=?",
+            cur = self._conn.execute(
+                f"UPDATE index_requests SET {', '.join(columns)} WHERE id=? AND status=?",
                 tuple(values),
             )
             self._conn.commit()
+            if cur.rowcount == 0:
+                raise IndexRequestError(
+                    f"cannot transition index request {source} -> {target}",
+                    code="conflict",
+                    status=409,
+                )
         return self._row(request_id) or item
 
-    def start(self, request_id: int) -> None:
-        """Mark a queued request as running when its job is claimed."""
+    def start(self, request_id: int) -> bool:
+        """Claim a queued request for execution; report whether the claim won."""
         try:
-            self._transition(request_id, "running")
+            self._transition(request_id, "running", expected="queued")
         except IndexRequestError as exc:
-            if exc.status != 409:
-                raise
+            if exc.code == "conflict":
+                return False
+            raise
+        return True
 
     def finish(
         self,
@@ -821,7 +893,17 @@ class IndexRequestService:
             )
         if item["status"] in TERMINAL_STATUSES:
             return item
-        result = self._transition(request_id, status, error=error)
+        try:
+            result = self._transition(
+                request_id, status, error=error, expected=item["status"]
+            )
+        except IndexRequestError as exc:
+            if exc.code != "conflict":
+                raise
+            current = self._row(request_id)
+            if current is not None and current["status"] in TERMINAL_STATUSES:
+                return current
+            raise
         self._audit(
             None,
             "index_request.complete",
@@ -932,7 +1014,22 @@ def build_index_request_runner(
         )
         if rid is None:
             return await inner(job)
-        svc.start(rid)
+        if jobs is not None and jobs.is_cancel_requested(job.id):
+            svc.finish(rid, status="cancelled", error="cancelled")
+            raise IndexRequestError(
+                "index request cancelled", code="cancelled", status=409
+            )
+        if not svc.start(rid):
+            current = svc._row(rid)
+            raise IndexRequestError(
+                "index request cancelled"
+                if current is not None and current["status"] == "cancelled"
+                else "index request is not queued",
+                code="cancelled"
+                if current is not None and current["status"] == "cancelled"
+                else "conflict",
+                status=409,
+            )
         try:
             produced = inner(job)
             if asyncio.iscoroutine(produced):
@@ -940,6 +1037,11 @@ def build_index_request_runner(
         except BaseException as exc:
             svc.finish(rid, status="failed", error=f"{type(exc).__name__}: {exc}")
             raise
+        current = svc._row(rid)
+        if current is not None and current["status"] == "cancelled":
+            raise IndexRequestError(
+                "index request cancelled", code="cancelled", status=409
+            )
         svc.finish(rid, status="done")
         return produced
 

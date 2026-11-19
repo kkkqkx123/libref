@@ -38,7 +38,7 @@
 | job_id / error | INTEGER / TEXT | 关联作业与失败原因 |
 | created_at / updated_at | TEXT | 时间戳 |
 
-索引覆盖 `(tenant_id, principal_id, id)`、`(tenant_id, status, id)`、`(tenant_id, dedupe_key, status)`。同一租户的活动申请按去重键复用；终态申请只读，重新申请写入新行。
+索引覆盖 `(tenant_id, principal_id, id)`、`(tenant_id, status, id)`、`(tenant_id, dedupe_key, status)`。活跃状态另有 `(tenant_id, dedupe_key)` 唯一索引，仅覆盖 `pending/approved/queued/running`，由数据库保证同一去重键只对应一条活动申请；终态申请只读且不占唯一槽，重新申请写入新行。
 
 ### version_locks
 

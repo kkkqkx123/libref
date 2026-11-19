@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import inspect
 import sqlite3
 from typing import Any, Literal
 
@@ -1318,7 +1318,7 @@ def build_mcp_server(
             return func
         import functools as _ft
 
-        if asyncio.iscoroutinefunction(func):
+        if inspect.iscoroutinefunction(func):
 
             @_ft.wraps(func)
             async def _guarded(*args: Any, **kwargs: Any) -> Any:

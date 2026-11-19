@@ -13,13 +13,13 @@
       <el-form @submit.prevent="load">
         <el-form-item :label="messages.common.view">
           <el-radio-group v-model="view">
-            <el-radio-button label="patterns">{{ messages.patternInsight.patterns }}</el-radio-button>
-            <el-radio-button label="evidence">{{ messages.patternInsight.evidence }}</el-radio-button>
-            <el-radio-button label="tree">{{ messages.patternInsight.tree }}</el-radio-button>
-            <el-radio-button label="clusters">{{ messages.patternInsight.clusters }}</el-radio-button>
-            <el-radio-button label="health">{{ messages.patternInsight.health }}</el-radio-button>
-            <el-radio-button label="labels">{{ messages.common.labels }}</el-radio-button>
-            <el-radio-button label="snippets">{{ messages.patternInsight.snippets }}</el-radio-button>
+            <el-radio-button value="patterns">{{ messages.patternInsight.patterns }}</el-radio-button>
+            <el-radio-button value="evidence">{{ messages.patternInsight.evidence }}</el-radio-button>
+            <el-radio-button value="tree">{{ messages.patternInsight.tree }}</el-radio-button>
+            <el-radio-button value="clusters">{{ messages.patternInsight.clusters }}</el-radio-button>
+            <el-radio-button value="health">{{ messages.patternInsight.health }}</el-radio-button>
+            <el-radio-button value="labels">{{ messages.common.labels }}</el-radio-button>
+            <el-radio-button value="snippets">{{ messages.patternInsight.snippets }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item :label="messages.patternInsight.pattern">

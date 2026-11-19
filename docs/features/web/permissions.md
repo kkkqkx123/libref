@@ -139,7 +139,7 @@ MCP 拒绝以工具结果形式返回 `unauthorized` / `forbidden`，不产生 H
 
 ## 9. 配额与审计
 
-配额按 `(tenant_id, principal_id, resource, period)` 计数，资源包括 `http_requests`、`index_requests`、`job_submissions`、LLM token 等。`http_requests` 由统一中间件拦截，业务资源由路由入口拦截；两者共用同一执行函数，拒绝返回 429，并写 `quota_events` 与审计。策略行经 `[admin:config]` 的配额接口读写，缺省回落到配置字段；配额数据访问失败时放行，属于可用性优先的取舍。
+配额按 `(tenant_id, principal_id, resource, period)` 计数，资源包括 `http_requests`、`index_requests`、`job_submissions`、LLM token 等。`http_requests` 由统一中间件拦截，业务资源由路由入口拦截；两者共用同一执行函数，拒绝返回 429，并写 `quota_events` 与审计。`index_requests` 在参数解析前扣减，每次提交都计数，包括命中去重的重复提交。策略行经 `[admin:config]` 的配额接口读写，缺省回落到配置字段；配额数据访问失败时放行，属于可用性优先的取舍。
 
 审计记录覆盖：`auth.denied`、`auth.forbidden`、`keys.list`、`keys.issue`、`keys.issue.platform`、`keys.revoke`、`keys.revoke_all`、`principals.list`、`roles.split`、`config.refresh`、`quota.policy`、`scrape.reject`、`scrape.submit`、`probe.reject`、`feedback.create`、`feedback.resolve`、`jobs.create`、`jobs.cancel`、`review.*`、`index_request.create`、`index_request.approve`、`index_request.reject`、`index_request.cancel`、`index_request.complete`、`index_request.auto_approve`、`quota`。含平台角色的签发单独记 `keys.issue.platform`，因为该角色是互斥的唯一豁免项。审计写入失败不阻断业务。
 

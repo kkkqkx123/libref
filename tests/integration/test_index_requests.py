@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from libref.db import apply_migrations, open_db
+from libref.services.infra import quota
 from libref.services.infra.auth import (
     create_principal,
     dev_principal,
@@ -34,7 +35,7 @@ _DOCS = {
 }
 
 
-def _setup(tmp_path, monkeypatch):
+def _setup(tmp_path, monkeypatch, **overrides):
     db_path = tmp_path / "requests.db"
     conn = open_db(db_path, check_same_thread=False)
     apply_migrations(conn)
@@ -43,6 +44,7 @@ def _setup(tmp_path, monkeypatch):
         tmp_path,
         db_path=str(db_path),
         auth_mode="enforced",
+        **overrides,
     )
     client = TestClient(build_web_app(conn, settings, context=None))
     return conn, settings, client
@@ -148,6 +150,35 @@ def test_generic_jobs_endpoint_cannot_bypass_approval(tmp_path, monkeypatch) -> 
             == 200
         )
     finally:
+        conn.close()
+
+
+def test_quota_rejection_carries_resource_and_reset(tmp_path, monkeypatch) -> None:
+    quota.invalidate_policy_cache()
+    conn, settings, client = _setup(
+        tmp_path,
+        monkeypatch,
+        quota_enabled=True,
+        quota_index_requests_per_hour=1,
+    )
+    try:
+        _, requester = _key(conn, settings, "requester", ["external"])
+        assert (
+            client.post("/index-requests", json=_DOCS, headers=requester).status_code
+            == 200
+        )
+        denied = client.post(
+            "/index-requests",
+            json={**_DOCS, "start_url": f"{_DOCS['start_url']}/other"},
+            headers=requester,
+        )
+        assert denied.status_code == 429, denied.text
+        body = denied.json()
+        assert body["error"] == "quota_exceeded"
+        assert body["resource"] == "index_requests"
+        assert body["reset_at"]
+    finally:
+        quota.invalidate_policy_cache()
         conn.close()
 
 

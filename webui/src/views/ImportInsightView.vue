@@ -5,8 +5,8 @@
       <el-form @submit.prevent="load">
         <el-form-item :label="messages.common.view">
           <el-radio-group v-model="view">
-            <el-radio-button label="importers">{{ messages.importInsight.importers }}</el-radio-button>
-            <el-radio-button label="imports">{{ messages.importInsight.imports }}</el-radio-button>
+            <el-radio-button value="importers">{{ messages.importInsight.importers }}</el-radio-button>
+            <el-radio-button value="imports">{{ messages.importInsight.imports }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item label="API">

@@ -185,9 +185,17 @@ def build_web_app(
 
     def _index_request_error(exc: Exception) -> HTTPException:
         """Translate service failures while preserving the stable error code."""
-        from libref.services.ops.index_requests import IndexRequestError
+        from libref.services.ops.index_requests import IndexRequestError, QuotaDenied
 
         assert isinstance(exc, IndexRequestError)
+        if isinstance(exc, QuotaDenied):
+            detail = {
+                "error": "quota exceeded",
+                "detail": exc.message,
+                "resource": exc.resource,
+                "reset_at": exc.reset_at,
+            }
+            return ApiRejection(exc.status, exc.code, detail)
         return ApiRejection(exc.status, exc.code, exc.message)
 
     def _quota_gate(request: Request, principal, resource: str, cost: int = 1) -> None:

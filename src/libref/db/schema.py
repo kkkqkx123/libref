@@ -330,6 +330,9 @@ CREATE INDEX IF NOT EXISTS idx_index_requests_status
   ON index_requests(tenant_id, status, id);
 CREATE INDEX IF NOT EXISTS idx_index_requests_dedupe
   ON index_requests(tenant_id, dedupe_key, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_index_requests_active_dedupe
+  ON index_requests(tenant_id, dedupe_key)
+  WHERE status IN ('pending','approved','queued','running');
 """
 
 # ── Query support: url lookups, review state scan, job recovery, embeddable filter ──
