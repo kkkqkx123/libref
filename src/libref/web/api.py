@@ -6,6 +6,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from libref.astminer.models import Confidence
 from libref.services.infra.jobs import JobKind
 
 JobStatus = Literal["pending", "running", "done", "failed"]
@@ -64,7 +65,6 @@ IndexRequestStatus = Literal[
 ]
 ReviewStatus = Literal["pending", "approved", "conflict"]
 FeedbackStatus = Literal["open", "acknowledged", "resolved"]
-ConfidenceLevel = Literal["EXTRACTED", "INFERRED", "AMBIGUOUS"]
 type JsonValue = (
     None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
 )
@@ -525,7 +525,7 @@ class ReviewItem(ContractModel):
     callee: str | None
     caller_file: str | None
     caller: str | None
-    confidence: ConfidenceLevel | None
+    confidence: Confidence | None
     args: JsonValue
     line_start: int | None
     line_end: int | None
@@ -630,7 +630,7 @@ class EvidenceCall(ContractModel):
     args: JsonValue
     line_start: int | None
     line_end: int | None
-    confidence: str | None
+    confidence: Confidence | None
     resolve_kind: str | None
     callee_signature: str | None = None
     callee_params: list[JsonValue] | None = None
@@ -731,7 +731,7 @@ class CallRow(ContractModel):
     line_end: int
     start_byte: int
     end_byte: int
-    confidence: str
+    confidence: Confidence
     resolve_kind: str
     receiver: str | None
     func: str

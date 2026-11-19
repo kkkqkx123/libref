@@ -4043,6 +4043,11 @@
           },
           "confidence": {
             "type": "string",
+            "enum": [
+              "EXTRACTED",
+              "INFERRED",
+              "AMBIGUOUS"
+            ],
             "title": "Confidence"
           },
           "resolve_kind": {
@@ -4660,7 +4665,12 @@
           "confidence": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "EXTRACTED",
+                  "INFERRED",
+                  "AMBIGUOUS"
+                ]
               },
               {
                 "type": "null"

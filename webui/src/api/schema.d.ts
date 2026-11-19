@@ -885,8 +885,11 @@ export interface components {
             start_byte: number;
             /** End Byte */
             end_byte: number;
-            /** Confidence */
-            confidence: string;
+            /**
+             * Confidence
+             * @enum {string}
+             */
+            confidence: "EXTRACTED" | "INFERRED" | "AMBIGUOUS";
             /** Resolve Kind */
             resolve_kind: string;
             /** Receiver */
@@ -1095,7 +1098,7 @@ export interface components {
             /** Line End */
             line_end: number | null;
             /** Confidence */
-            confidence: string | null;
+            confidence: ("EXTRACTED" | "INFERRED" | "AMBIGUOUS") | null;
             /** Resolve Kind */
             resolve_kind: string | null;
             /** Callee Signature */
