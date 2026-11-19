@@ -128,7 +128,7 @@ import { ElButton, ElCheckbox, ElForm, ElFormItem, ElInput, ElInputNumber, ElSte
 import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { ResolutionResponse, Row } from '../api/types';
+import type { DiscoveryCandidate, DocProbeResponse, ResolutionResponse } from '../api/types';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue';
@@ -150,7 +150,7 @@ const requestId = ref('');
 
 const form = reactive({ ecosystem: '', name: '', version: '' });
 const resolution = ref<ResolutionResponse | null>(null);
-const probeResult = ref<Row | null>(null);
+const probeResult = ref<DocProbeResponse | null>(null);
 const repoRedirect = ref(false);
 const submitVersion = ref('');
 const submitUrl = ref('');
@@ -158,7 +158,7 @@ const maxPages = ref<number | undefined>(undefined);
 const docSampleLimit = ref<number | undefined>(undefined);
 const docMaxPages = ref<number | undefined>(undefined);
 const docPrefilter = ref(false);
-const discovery = ref<Row[]>([]);
+const discovery = ref<DiscoveryCandidate[]>([]);
 const discoverySource = ref('');
 const discovered = ref(false);
 
@@ -226,7 +226,7 @@ async function discover(source: DiscoverySource): Promise<void> {
         : source === 'web'
           ? await api('/web-search', { params: { query, limit: 10 } })
           : await api('/github-search', { params: { query, limit: 10 } });
-    discovery.value = data.items as Row[];
+    discovery.value = data.items;
     discoverySource.value =
       source === 'registry'
         ? messages.value.ingest.discoverRegistry
@@ -241,13 +241,13 @@ async function discover(source: DiscoverySource): Promise<void> {
   }
 }
 
-function applyDiscovery(row: Row): void {
-  const name = row['name'] ?? row['title'] ?? row['full_name'];
-  const version = row['version'];
-  const url = row['url'] ?? row['start_url'] ?? row['repo'] ?? row['repo_url'] ?? row['html_url'];
-  if (typeof name === 'string' && name) form.name = name;
-  if (typeof version === 'string' && version) form.version = version;
-  if (typeof url === 'string' && url) submitUrl.value = url;
+function applyDiscovery(row: unknown): void {
+  const candidate = row as DiscoveryCandidate;
+  if (candidate.name) form.name = candidate.name;
+  if (candidate.version) form.version = candidate.version;
+  const url =
+    candidate.repo_url || candidate.docs_url || candidate.homepage || candidate.candidates[0];
+  if (url) submitUrl.value = url;
 }
 
 async function resolve(): Promise<void> {

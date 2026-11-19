@@ -40,7 +40,7 @@
 import { ElButton, ElForm, ElFormItem, ElInputNumber } from 'element-plus';
 import { computed, nextTick, ref } from 'vue';
 import { api, ApiError } from '../api/client';
-import type { ReviewItem } from '../api/types';
+import type { JsonValue, ReviewItem } from '../api/types';
 import ConfidenceBadge from '../components/common/ConfidenceBadge.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
@@ -49,6 +49,7 @@ import PageHeader from '../components/common/PageHeader.vue';
 import { messages } from '../i18n';
 import { hasScope } from '../stores/auth';
 import { notifyError, notifySuccess } from '../stores/notify';
+import { formatCell } from '../utils/format';
 import { readNumber, useQuerySync } from '../utils/query';
 import { useRoute } from 'vue-router';
 
@@ -77,10 +78,8 @@ async function reload(): Promise<void> {
   }
 }
 
-function formatArgs(args: unknown): string {
-  if (args === null || args === undefined) return messages.value.common.none;
-  if (Array.isArray(args)) return args.map((item) => String(item)).join(', ') || messages.value.common.none;
-  return String(args);
+function formatArgs(args: JsonValue): string {
+  return formatCell(args) || messages.value.common.none;
 }
 
 async function act(item: ReviewItem, action: 'approve' | 'conflict' | 'reopen'): Promise<void> {

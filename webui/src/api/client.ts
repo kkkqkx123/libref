@@ -1,7 +1,7 @@
 // Typed fetch wrapper: paths, query strings, request bodies and responses come
 // from the checked-in OpenAPI schema. It also injects the API key, normalizes
 // FastAPI errors, and surfaces the backend request id for audit correlation.
-import type { paths } from './schema';
+import type { components, paths } from './schema';
 import { authStore } from '../stores/auth';
 import { messages } from '../i18n';
 
@@ -62,6 +62,14 @@ type BodyOf<P extends ApiPath, M extends ApiMethod> =
     ? B
     : never;
 
+type MethodsOf<P extends ApiPath> = {
+  [M in ApiMethod]: [Operation<P, M>] extends [never] ? never : M;
+}[ApiMethod];
+
+type RequiredKeys<T> = {
+  [K in keyof T]-?: {} extends Pick<T, K> ? never : K;
+}[keyof T];
+
 type ResponseContent<T> = T extends {
   content: { 'application/json': infer B };
 }
@@ -73,13 +81,38 @@ export type ResponseOf<
   M extends ApiMethod = 'GET',
 > = ResponseContent<Operation<P, M>['responses'][200]>;
 
-export interface ApiOptions<P extends ApiPath, M extends ApiMethod> {
-  method?: M;
-  params?: QueryOf<P, M>;
-  body?: BodyOf<P, M>;
-  pathParams?: PathParamsOf<P, M>;
-  auth?: boolean;
-}
+type MethodOption<P extends ApiPath, M extends ApiMethod> = [M] extends [
+  MethodsOf<P>
+]
+  ? { method?: M }
+  : never;
+
+type QueryOption<P extends ApiPath, M extends ApiMethod> = [QueryOf<P, M>] extends [
+  never
+]
+  ? { params?: never }
+  : [RequiredKeys<QueryOf<P, M>>] extends [never]
+    ? { params?: QueryOf<P, M> }
+    : { params: QueryOf<P, M> };
+
+type BodyOption<P extends ApiPath, M extends ApiMethod> = [BodyOf<P, M>] extends [
+  never
+]
+  ? { body?: never }
+  : { body: BodyOf<P, M> };
+
+type PathOption<P extends ApiPath, M extends ApiMethod> = [
+  PathParamsOf<P, M>
+] extends [never]
+  ? { pathParams?: never }
+  : { pathParams: PathParamsOf<P, M> };
+
+export type ApiOptions<P extends ApiPath, M extends ApiMethod> = MethodOption<P, M> &
+  QueryOption<P, M> &
+  BodyOption<P, M> &
+  PathOption<P, M> & {
+    auth?: boolean;
+  };
 
 function baseUrl(): string {
   return (import.meta.env.VITE_API_BASE as string | undefined) || '';
@@ -99,22 +132,25 @@ function statusFallback(status: number): string {
 // turn beats generic status wording. A known code still carries its detail when
 // the code is generic (`invalid_argument`), so the two are combined rather than
 // letting the wording swallow the cause.
+type ErrorBody = components['schemas']['ErrorResponse'];
+
+function errorBodyOf(payload: unknown): ErrorBody | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const body = payload as ErrorBody;
+  return typeof body.error === 'string' ? body : null;
+}
+
 function describeFailure(
   status: number,
   payload: unknown,
 ): { code: string; message: string; detail: string } {
+  const body = errorBodyOf(payload);
   let code = '';
   let detailText = '';
-  if (payload && typeof payload === 'object') {
-    const record = payload as Record<string, unknown>;
-    if (typeof record['error'] === 'string') code = record['error'];
-    const detail = record['detail'];
-    if (typeof detail === 'string') detailText = detail;
-    else if (detail && typeof detail === 'object') {
-      const inner = detail as Record<string, unknown>;
-      if (typeof inner['error'] === 'string') detailText = inner['error'] as string;
-    }
-    if (!detailText && typeof record['message'] === 'string') detailText = record['message'];
+  if (body) {
+    code = body.error;
+    if (typeof body.detail === 'string') detailText = body.detail;
+    else if (body.detail) detailText = body.detail.error;
   }
   if (!code) code = `http_${status}`;
   const localised = (messages.value.errorCodes as Record<string, string>)[code];
@@ -130,15 +166,11 @@ function describeFailure(
 }
 
 function resetOf(payload: unknown): string | null {
-  if (payload && typeof payload === 'object') {
-    const record = payload as Record<string, unknown>;
-    const detail = record['detail'];
-    if (detail && typeof detail === 'object') {
-      const reset = (detail as Record<string, unknown>)['reset_at'];
-      if (typeof reset === 'string') return reset;
-    }
-    const reset = record['reset_at'];
-    if (typeof reset === 'string') return reset;
+  const body = errorBodyOf(payload);
+  if (!body) return null;
+  if (typeof body.reset_at === 'string') return body.reset_at;
+  if (typeof body.detail !== 'string' && typeof body.detail?.reset_at === 'string') {
+    return body.detail.reset_at;
   }
   return null;
 }
@@ -157,7 +189,7 @@ function renderPath<P extends ApiPath, M extends ApiMethod>(
 
 export async function api<P extends ApiPath, M extends ApiMethod = 'GET'>(
   path: P,
-  options: ApiOptions<P, M> = {},
+  options: ApiOptions<P, M>,
 ): Promise<{ data: ResponseOf<P, M>; requestId: string }> {
   const query = new URLSearchParams();
   const params = options.params as

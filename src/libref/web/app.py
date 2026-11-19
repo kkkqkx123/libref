@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -28,12 +30,14 @@ from libref.web.api import (
     AnswerResponse,
     ApiInsightQuery,
     ApiKeyResponse,
+    ApiValidationError,
     CallInsightQuery,
     ConfigRefreshResponse,
     DependencyResponse,
     DiscoveryResponse,
     DocProbeRequest,
     DocProbeResponse,
+    ErrorResponse,
     FeedbackCreate,
     FeedbackResponse,
     HealthResponse,
@@ -82,6 +86,24 @@ from libref.web.api import (
     envelope,
 )
 from libref.web.errors import ApiRejection
+
+
+def _iso_time(value: object) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(float(value), tz=UTC).isoformat()
+    return str(value)
+
+
+def _scope_list(raw: object) -> list[str]:
+    try:
+        parsed = json.loads(str(raw))
+    except ValueError:
+        return []
+    return [str(item) for item in parsed] if isinstance(parsed, list) else []
 
 
 def _split_list(raw: str | None) -> list[str] | None:
@@ -344,7 +366,18 @@ def build_web_app(
         _need(principal, "read")
         from libref.services.infra.metrics import snapshot as _snapshot
 
-        return _snapshot()
+        snapshot = _snapshot()
+        counters = {
+            key: int(value)
+            for key, value in snapshot.items()
+            if key not in ("uptime_seconds", "duration_ms_p50", "duration_ms_p95")
+        }
+        return {
+            "uptime_seconds": int(snapshot["uptime_seconds"]),
+            "duration_ms_p50": snapshot.get("duration_ms_p50"),
+            "duration_ms_p95": snapshot.get("duration_ms_p95"),
+            "counters": counters,
+        }
 
     @app.get("/catalog", response_model=LibraryResponse | VersionResponse)
     def catalog_route(
@@ -356,11 +389,13 @@ def build_web_app(
         _need(principal, "read")
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
-            return envelope(
+            result = envelope(
                 bundle["catalog"].catalog(
                     library, ecosystem, tenant_id=_tenant_of(principal)
                 )
             )
+            result["kind"] = "versions" if library else "libraries"
+            return result
         finally:
             if should_close:
                 try:
@@ -896,7 +931,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.post("/review", response_model=ReviewResponse | OkResponse)
+    @app.post("/review", response_model=OkResponse)
     def review_apply(
         body: ReviewAction, request: Request, principal=Depends(_guard)
     ) -> dict[str, Any]:
@@ -906,7 +941,7 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
-                result = bundle["review"].apply(
+                bundle["review"].apply(
                     body.action,
                     body.entity_id,
                     body.limit,
@@ -928,9 +963,7 @@ def build_web_app(
                     getattr(getattr(request, "state", None), "request_id", "")
                 ),
             )
-            if isinstance(result, list):
-                return envelope(result)
-            return result
+            return {"ok": True}
         finally:
             if should_close:
                 try:
@@ -1496,7 +1529,7 @@ def build_web_app(
         try:
             try:
                 if params.url:
-                    return page_link_stats(
+                    result = page_link_stats(
                         rc,
                         params.url,
                         params.library,
@@ -1504,7 +1537,10 @@ def build_web_app(
                         params.ecosystem,
                         tenant_id=_tenant_of(principal),
                     )
+                    result["kind"] = "page"
+                    return result
                 return {
+                    "kind": "version",
                     "summary": version_link_summary(
                         rc,
                         params.library,
@@ -1825,11 +1861,11 @@ def build_web_app(
                 "id": int(r[0]),
                 "principal_id": r[1],
                 "key_prefix": str(r[2]),
-                "scopes": str(r[3]),
-                "expires_at": r[4],
-                "revoked_at": r[5],
-                "last_used_at": r[6],
-                "created_at": r[7],
+                "scopes": _scope_list(r[3]),
+                "expires_at": _iso_time(r[4]),
+                "revoked_at": _iso_time(r[5]),
+                "last_used_at": _iso_time(r[6]),
+                "created_at": _iso_time(r[7]),
             }
             for r in rows
         ]
@@ -2067,5 +2103,34 @@ def build_web_app(
             request_id=str(getattr(request.state, "request_id", "")),
         )
         return {"ok": True, "old_fingerprint": old_fp, "fingerprint": new_fp}
+
+    base_openapi = app.openapi
+
+    def openapi_with_errors() -> dict[str, Any]:
+        document = base_openapi()
+        schemas = document.setdefault("components", {}).setdefault("schemas", {})
+        error_schema = ErrorResponse.model_json_schema(
+            ref_template="#/components/schemas/{model}"
+        )
+        schemas.update(error_schema.pop("$defs", {}))
+        schemas["ErrorResponse"] = error_schema
+        validation_schema = ApiValidationError.model_json_schema(
+            ref_template="#/components/schemas/{model}"
+        )
+        schemas.update(validation_schema.pop("$defs", {}))
+        schemas["HTTPValidationError"] = validation_schema
+        schemas.pop("ValidationError", None)
+        error_ref = {"$ref": "#/components/schemas/ErrorResponse"}
+        for operations in document["paths"].values():
+            for method, operation in operations.items():
+                if method not in ("get", "post", "put", "delete", "patch"):
+                    continue
+                operation.setdefault("responses", {})["default"] = {
+                    "description": "Rejection",
+                    "content": {"application/json": {"schema": error_ref}},
+                }
+        return document
+
+    app.openapi = openapi_with_errors  # type: ignore[method-assign]
 
     return app

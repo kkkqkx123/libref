@@ -136,3 +136,42 @@ def test_contract_search_response_shape(tmp_path, monkeypatch) -> None:
             assert field in review, field
     finally:
         conn.close()
+
+
+def test_response_contract_is_strict(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    conn = _open(tmp_path)
+    try:
+        document = _client(conn, monkeypatch, tmp_path).get("/openapi.json").json()
+        schemas = document["components"]["schemas"]
+        for name, schema in schemas.items():
+            assert schema.get("additionalProperties") is not True, name
+        for name, field in (
+            ("JobDetail", "status"),
+            ("JobSummary", "status"),
+            ("IndexRequestItem", "status"),
+            ("ReviewItem", "status"),
+            ("FeedbackItem", "status"),
+            ("QuotaPolicy", "window_type"),
+        ):
+            assert "enum" in schemas[name]["properties"][field], (name, field)
+        for field in ("expires_at", "revoked_at", "last_used_at", "created_at"):
+            prop = schemas["ApiKeyRow"]["properties"][field]
+            types = {variant["type"] for variant in prop.get("anyOf", [prop])}
+            assert types == {"string", "null"}, field
+        for name, expected in (
+            ("LibraryResponse", "libraries"),
+            ("VersionResponse", "versions"),
+            ("PageLinkStats", "page"),
+            ("VersionLinkStats", "version"),
+        ):
+            assert schemas[name]["properties"]["kind"]["const"] == expected, name
+        for operations in document["paths"].values():
+            for method, operation in operations.items():
+                if method not in _METHODS:
+                    continue
+                default = operation["responses"]["default"]["content"]
+                schema = default["application/json"]["schema"]
+                assert schema["$ref"].endswith("/ErrorResponse"), (method, operation)
+    finally:
+        conn.close()

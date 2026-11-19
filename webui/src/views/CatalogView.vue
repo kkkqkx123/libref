@@ -137,7 +137,7 @@ import { ElButton, ElCheckbox, ElDialog, ElDropdown, ElDropdownItem, ElDropdownM
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { LibraryRow, PageRow, Row, VersionRow } from '../api/types';
+import type { DependencyRow, LibraryRow, PageRow, VersionRow } from '../api/types';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
@@ -184,7 +184,7 @@ const depsOpen = ref(false);
 const depsLoading = ref(false);
 const depsError = ref('');
 const depsRequestId = ref('');
-const depsRows = ref<Row[]>([]);
+const depsRows = ref<DependencyRow[]>([]);
 const depsLibrary = ref<LibraryRow | null>(null);
 const depsVersion = ref<VersionRow | null>(null);
 
@@ -208,7 +208,7 @@ async function reload(): Promise<void> {
     const { data } = await api('/catalog', {
       params: { ecosystem: ecosystem.value || undefined },
     });
-    libraries.value = data.items as LibraryRow[];
+    if (data.kind === 'libraries') libraries.value = data.items;
     expanded.value = '';
     expandedLibrary.value = null;
     currentVersions.value = [];
@@ -231,7 +231,7 @@ async function toggleVersions(row: LibraryRow): Promise<void> {
     const { data } = await api('/catalog', {
       params: { library: row.name, ecosystem: row.ecosystem || undefined },
     });
-    currentVersions.value = data.items as VersionRow[];
+    if (data.kind === 'versions') currentVersions.value = data.items;
     expanded.value = row.name;
     expandedLibrary.value = row;
   } catch (err) {

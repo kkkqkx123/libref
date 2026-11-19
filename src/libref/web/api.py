@@ -6,6 +6,24 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+JobStatus = Literal["pending", "running", "done", "failed"]
+IndexRequestStatus = Literal[
+    "pending",
+    "approved",
+    "queued",
+    "running",
+    "done",
+    "failed",
+    "rejected",
+    "cancelled",
+]
+ReviewStatus = Literal["pending", "approved", "conflict"]
+FeedbackStatus = Literal["open", "acknowledged", "resolved"]
+ConfidenceLevel = Literal["EXTRACTED", "INFERRED", "AMBIGUOUS"]
+type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[
+    str, JsonValue
+]
+
 
 class SearchQuery(BaseModel):
     query: str = Field(min_length=1)
@@ -156,7 +174,7 @@ class IndexRequestCreate(BaseModel):
     start_url: str | None = None
     max_pages: int | None = Field(default=None, ge=1)
     prefilter: bool = False
-    scope: dict[str, Any] | None = None
+    scope: dict[str, JsonValue] | None = None
     update: bool = False
     fresh: bool = False
     include_prerelease: bool = False
@@ -172,7 +190,7 @@ class IndexRequestReject(BaseModel):
 
 class DocProbeRequest(BaseModel):
     start_url: str = Field(min_length=1)
-    scope: dict[str, Any] | None = None
+    scope: dict[str, JsonValue] | None = None
     sample_limit: int | None = Field(default=None, ge=1, le=100)
     fetch_sample_limit: int | None = Field(default=None, ge=0, le=100)
     max_pages: int | None = Field(default=None, ge=1)
@@ -199,9 +217,35 @@ class LinkStatsQuery(BaseModel):
 
 
 class ContractModel(BaseModel):
-    """Response base: document known fields without dropping service rows."""
+    """Response base: known fields are the wire contract; extras are dropped."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="ignore")
+
+
+class QuotaErrorDetail(BaseModel):
+    error: str
+    resource: str
+    reset_at: float | str
+
+
+class ErrorResponse(BaseModel):
+    error: str
+    detail: str | QuotaErrorDetail
+    request_id: str = ""
+    resource: str | None = None
+    reset_at: float | str | None = None
+
+
+class ValidationErrorModel(BaseModel):
+    loc: list[str | int]
+    msg: str
+    type: str
+    input: JsonValue | None = None
+    ctx: dict[str, JsonValue] | None = None
+
+
+class ApiValidationError(BaseModel):
+    detail: list[ValidationErrorModel]
 
 
 class HealthResponse(ContractModel):
@@ -226,7 +270,7 @@ class FeedbackResolve(BaseModel):
 
 class JobCreate(BaseModel):
     kind: str = Field(min_length=1)
-    params: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, JsonValue] = Field(default_factory=dict)
 
 
 class KeyCreate(BaseModel):
@@ -274,7 +318,7 @@ class SearchResponse(Envelope[SearchItem]):
     reasons: list[str] = Field(default_factory=list)
     answerable: bool = True
     answerability: float = 0.0
-    suggestions: list[dict[str, Any]] = Field(default_factory=list)
+    suggestions: list[DiscoveryCandidate] = Field(default_factory=list)
     suggest_error: str | None = None
 
 
@@ -300,6 +344,21 @@ class AnswerResponse(ContractModel):
     cited_ids: list[int]
 
 
+class ChunkLocator(ContractModel):
+    source_group_id: str = ""
+    chunk_id: str = ""
+    span_kind: str = "document_range"
+    merged_from: list[JsonValue] = Field(default_factory=list)
+    overlap_from: JsonValue | None = None
+    overlap_text: str = ""
+    chunk_index: int = 0
+    total_chunks: int = 1
+    length: int = 0
+    id: int | None = None
+    url: str | None = None
+    sort_order: int | None = None
+
+
 class ReadResponse(ContractModel):
     url: str = ""
     content: str = ""
@@ -311,8 +370,8 @@ class ReadResponse(ContractModel):
     center: int | None = None
     radius: int | None = None
     chunks: int = 0
-    chunk_details: list[dict[str, Any]] = Field(default_factory=list)
-    docs: list[dict[str, Any]] = Field(default_factory=list)
+    chunk_details: list[ChunkLocator] = Field(default_factory=list)
+    docs: list[ChunkLocator] = Field(default_factory=list)
 
 
 class PageRow(ContractModel):
@@ -346,6 +405,9 @@ class PrincipalResponse(ContractModel):
 
 class MetricsResponse(ContractModel):
     uptime_seconds: int
+    duration_ms_p50: int | None = None
+    duration_ms_p95: int | None = None
+    counters: dict[str, int] = Field(default_factory=dict)
 
 
 class LibraryRow(ContractModel):
@@ -372,22 +434,22 @@ class VersionRow(ContractModel):
 
 
 class LibraryResponse(Envelope[LibraryRow]):
-    pass
+    kind: Literal["libraries"]
 
 
 class VersionResponse(Envelope[VersionRow]):
-    pass
+    kind: Literal["versions"]
 
 
 class ReviewItem(ContractModel):
     entity_id: int
-    status: str
+    status: ReviewStatus
     updated_at: str | None
     callee: str | None
     caller_file: str | None
     caller: str | None
-    confidence: str | None
-    args: Any
+    confidence: ConfidenceLevel | None
+    args: JsonValue
     line_start: int | None
     line_end: int | None
 
@@ -410,11 +472,11 @@ class IndexRequestItem(ContractModel):
     tenant_id: str
     principal_id: int | None
     requester: str
-    kind: str
+    kind: Literal["repo", "docs"]
     target: str
     source: str
-    params: dict[str, Any]
-    status: str
+    params: dict[str, JsonValue]
+    status: IndexRequestStatus
     dedupe_key: str
     approved_by: int | None
     reject_reason: str
@@ -448,7 +510,7 @@ class DiscoveryResponse(Envelope[DiscoveryCandidate]):
     pass
 
 
-class InsightResponse(Envelope[dict[str, Any]]):
+class InsightResponse(Envelope[dict[str, JsonValue]]):
     pass
 
 
@@ -503,6 +565,12 @@ class RepoProbeSamples(ContractModel):
     files: list[str]
 
 
+class ManifestDependency(ContractModel):
+    ecosystem: str
+    name: str
+    req: str
+
+
 class RepoProbeResponse(ContractModel):
     source: str
     root_kind: str
@@ -525,13 +593,13 @@ class RepoProbeResponse(ContractModel):
     suffix_groups: list[RepoProbeSuffix]
     top_dirs: list[RepoProbeDir]
     samples: list[str]
-    manifest_deps: list[dict[str, Any]]
+    manifest_deps: list[ManifestDependency]
 
 
 class JobSummary(ContractModel):
     id: int
     kind: str
-    status: str
+    status: JobStatus
     finished_at: str | None
     error: str | None
 
@@ -543,10 +611,10 @@ class JobListResponse(ContractModel):
 class JobDetail(ContractModel):
     id: int
     kind: str
-    status: str
+    status: JobStatus
     error: str | None
-    result: Any
-    params: dict[str, Any]
+    result: JsonValue | None = None
+    params: dict[str, JsonValue] = Field(default_factory=dict)
     finished_at: str | None
 
 
@@ -580,6 +648,7 @@ class TopLink(ContractModel):
 
 
 class PageLinkStats(ContractModel):
+    kind: Literal["page"]
     url: str
     outlinks: int
     outlink_external: int
@@ -598,6 +667,7 @@ class VersionLinkSummary(ContractModel):
 
 
 class VersionLinkStats(ContractModel):
+    kind: Literal["version"]
     summary: VersionLinkSummary
     items: list[TopLink]
 
@@ -625,7 +695,7 @@ class FeedbackItem(ContractModel):
     entity_id: int
     kind: str
     body: str
-    status: str
+    status: FeedbackStatus
     created_at: str
     resolved_by: int | None
     resolved_at: str | None
@@ -639,11 +709,11 @@ class ApiKeyRow(ContractModel):
     id: int
     principal_id: int | None
     key_prefix: str
-    scopes: str
-    expires_at: float | str | None
-    revoked_at: float | str | None
-    last_used_at: float | str | None
-    created_at: float | str | None
+    scopes: list[str]
+    expires_at: str | None
+    revoked_at: str | None
+    last_used_at: str | None
+    created_at: str | None
 
 
 class ApiKeyResponse(Envelope[ApiKeyRow]):
@@ -681,7 +751,7 @@ class QuotaPolicy(ContractModel):
     principal_id: int | None
     resource: str
     limit_value: int
-    window_type: str
+    window_type: Literal["hour", "day", "month"]
     updated_at: str
 
 

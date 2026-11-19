@@ -54,7 +54,7 @@ describe('detectMode', () => {
     expect(authStore.ready).toBe(true);
     // Exactly one call, and it carried credentials.
     expect(apiMock).toHaveBeenCalledTimes(1);
-    expect(apiMock.mock.calls[0][1]).toBeUndefined();
+    expect(apiMock.mock.calls[0][1]).toEqual({});
   });
 
   it('falls back to dev mode when a stale key fails but the server is open', async () => {

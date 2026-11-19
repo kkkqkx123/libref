@@ -34,9 +34,11 @@ beforeEach(() => {
   apiMock.mockReset();
   apiMock.mockImplementation((url: string) =>
     Promise.resolve(
-      url === '/catalog' || url === '/search'
-        ? { data: { items: [] }, requestId: 'r1' }
-        : { data: {}, requestId: 'r1' },
+      url === '/catalog'
+        ? { data: { items: [], kind: 'libraries' }, requestId: 'r1' }
+        : url === '/search'
+          ? { data: { items: [] }, requestId: 'r1' }
+          : { data: {}, requestId: 'r1' },
     ),
   );
 });

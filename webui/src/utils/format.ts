@@ -1,6 +1,8 @@
-// Shared value formatting for heterogeneous backend rows.
-export function formatCell(value: unknown): string {
-  if (value === null || value === undefined) return '';
+// Shared value formatting for JSON wire values.
+import type { JsonValue } from '../api/types';
+
+export function formatCell(value: JsonValue): string {
+  if (value === null) return '';
   if (Array.isArray(value)) {
     if (value.length === 0) return '';
     if (value.every((item) => typeof item !== 'object')) return value.join(', ');

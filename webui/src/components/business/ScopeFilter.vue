@@ -51,7 +51,7 @@
 import { ElForm, ElFormItem, ElInput, ElInputNumber, ElOption, ElRadioButton, ElRadioGroup, ElSelect } from 'element-plus';
 import { computed, onMounted, watch } from 'vue';
 import { api } from '../../api/client';
-import type { LibraryRow, VersionRow } from '../../api/types';
+import type { VersionRow } from '../../api/types';
 import { catalogStore } from '../../stores/catalog';
 import { notifyError } from '../../stores/notify';
 import { RESULT_LIMIT_MAX, RESULT_LIMIT_MIN, scopeStore, setLibrary } from '../../stores/scope';
@@ -68,8 +68,8 @@ const versions = computed<VersionRow[]>(() => catalogStore.versionsByLibrary[sco
 async function ensureLibraries(): Promise<void> {
   if (catalogStore.loaded) return;
   try {
-    const { data } = await api('/catalog');
-    catalogStore.libraries = data.items as LibraryRow[];
+    const { data } = await api('/catalog', {});
+    if (data.kind === 'libraries') catalogStore.libraries = data.items;
     catalogStore.loaded = true;
   } catch (error) {
     notifyError(error, messages.value.errors.loadCatalogFailed);
@@ -83,7 +83,9 @@ async function ensureVersions(): Promise<void> {
     const { data } = await api('/catalog', {
       params: { library: scopeStore.library, ecosystem: scopeStore.ecosystem || undefined },
     });
-    catalogStore.versionsByLibrary[scopeStore.library] = data.items as VersionRow[];
+    if (data.kind === 'versions') {
+      catalogStore.versionsByLibrary[scopeStore.library] = data.items;
+    }
   } catch (error) {
     notifyError(error, messages.value.errors.loadVersionsFailed);
   }

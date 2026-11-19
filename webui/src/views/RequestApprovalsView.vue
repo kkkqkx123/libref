@@ -30,7 +30,7 @@
 import { ElButton, ElMessageBox } from 'element-plus';
 import { ref } from 'vue';
 import { api, ApiError } from '../api/client';
-import type { IndexRequest } from '../api/types';
+import type { IndexRequest, JsonValue } from '../api/types';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
@@ -60,7 +60,7 @@ async function reload(): Promise<void> {
   }
 }
 
-function formatParams(params: Record<string, unknown>): string {
+function formatParams(params: Record<string, JsonValue>): string {
   return JSON.stringify(params, null, 2);
 }
 

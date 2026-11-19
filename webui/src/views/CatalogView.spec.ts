@@ -86,8 +86,8 @@ const versions: Record<string, Record<string, unknown>[]> = {
   pypi: [{ id: 20, version: '2.0.0', ecosystem: 'pypi', pages: 0, registry_confirmed: true }],
 };
 
-function envelope(items: Record<string, unknown>[]) {
-  return { data: { items, degraded: false, count: items.length }, requestId: 'r1' };
+function envelope(items: Record<string, unknown>[], kind: 'libraries' | 'versions') {
+  return { data: { items, degraded: false, count: items.length, kind }, requestId: 'r1' };
 }
 
 let depsResponse: Record<string, unknown>;
@@ -130,15 +130,17 @@ beforeEach(() => {
   authStore.me = {
     id: 1, name: 'tester', kind: 'human', tenant_id: 'default', roles: [], scopes: ['read'],
   };
-  depsResponse = envelope([]);
+  depsResponse = { data: { items: [], degraded: false, count: 0 }, requestId: 'r1' };
   depsFailure = null;
   apiMock.mockReset();
   apiMock.mockImplementation(
     (url: string, options?: { params?: Record<string, string | number | undefined> }) => {
       if (url === '/catalog') {
-        if (!options?.params?.library) return Promise.resolve(envelope(libraries));
+        if (!options?.params?.library) {
+          return Promise.resolve(envelope(libraries, 'libraries'));
+        }
         const ecosystem = String(options.params.ecosystem ?? '');
-        return Promise.resolve(envelope(versions[ecosystem] ?? []));
+        return Promise.resolve(envelope(versions[ecosystem] ?? [], 'versions'));
       }
       if (url === '/repo-deps') {
         return depsFailure

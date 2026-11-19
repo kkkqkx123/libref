@@ -19,6 +19,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -34,6 +44,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PrincipalResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -53,6 +73,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MetricsResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -123,6 +153,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -258,6 +298,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -330,6 +380,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -442,6 +502,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -589,6 +659,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -671,6 +751,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -812,6 +902,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1007,6 +1107,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1155,6 +1265,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1350,6 +1470,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1483,6 +1613,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1534,6 +1674,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -1556,15 +1706,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/ReviewResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/OkResponse"
-                    }
-                  ],
-                  "title": "Response Review Apply Review Post"
+                  "$ref": "#/components/schemas/OkResponse"
                 }
               }
             }
@@ -1575,6 +1717,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1613,6 +1765,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1670,6 +1832,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1707,6 +1879,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1749,6 +1931,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1788,6 +1980,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1824,6 +2026,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1876,6 +2088,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1911,6 +2133,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -1952,6 +2184,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1987,6 +2229,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2046,6 +2298,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       },
@@ -2079,6 +2341,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2118,6 +2390,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2216,6 +2498,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -2265,6 +2557,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -2311,6 +2613,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2391,6 +2703,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2498,6 +2820,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -2576,6 +2908,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -2591,6 +2933,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2629,6 +2981,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2686,6 +3048,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -2725,6 +3097,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -2761,6 +3143,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2811,6 +3203,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -2826,6 +3228,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiKeyResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2862,6 +3274,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2904,6 +3326,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -2943,6 +3375,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -2959,6 +3401,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QuotaPolicyResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -2999,6 +3451,16 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -3014,6 +3476,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ConfigRefreshResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Rejection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -3098,7 +3570,6 @@
             "title": "Sort Order"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "url",
@@ -3153,7 +3624,6 @@
             "title": "Cited Ids"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "answer",
@@ -3184,7 +3654,6 @@
             "title": "Count"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "items",
@@ -3215,14 +3684,14 @@
             "title": "Key Prefix"
           },
           "scopes": {
-            "type": "string",
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
             "title": "Scopes"
           },
           "expires_at": {
             "anyOf": [
-              {
-                "type": "number"
-              },
               {
                 "type": "string"
               },
@@ -3235,9 +3704,6 @@
           "revoked_at": {
             "anyOf": [
               {
-                "type": "number"
-              },
-              {
                 "type": "string"
               },
               {
@@ -3248,9 +3714,6 @@
           },
           "last_used_at": {
             "anyOf": [
-              {
-                "type": "number"
-              },
               {
                 "type": "string"
               },
@@ -3263,9 +3726,6 @@
           "created_at": {
             "anyOf": [
               {
-                "type": "number"
-              },
-              {
                 "type": "string"
               },
               {
@@ -3275,7 +3735,6 @@
             "title": "Created At"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
@@ -3288,6 +3747,97 @@
           "created_at"
         ],
         "title": "ApiKeyRow"
+      },
+      "ChunkLocator": {
+        "properties": {
+          "source_group_id": {
+            "type": "string",
+            "title": "Source Group Id",
+            "default": ""
+          },
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id",
+            "default": ""
+          },
+          "span_kind": {
+            "type": "string",
+            "title": "Span Kind",
+            "default": "document_range"
+          },
+          "merged_from": {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
+            "type": "array",
+            "title": "Merged From"
+          },
+          "overlap_from": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "overlap_text": {
+            "type": "string",
+            "title": "Overlap Text",
+            "default": ""
+          },
+          "chunk_index": {
+            "type": "integer",
+            "title": "Chunk Index",
+            "default": 0
+          },
+          "total_chunks": {
+            "type": "integer",
+            "title": "Total Chunks",
+            "default": 1
+          },
+          "length": {
+            "type": "integer",
+            "title": "Length",
+            "default": 0
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "sort_order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sort Order"
+          }
+        },
+        "type": "object",
+        "title": "ChunkLocator"
       },
       "ConfigRefreshResponse": {
         "properties": {
@@ -3304,7 +3854,6 @@
             "title": "Fingerprint"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "ok",
@@ -3331,7 +3880,6 @@
             "title": "Count"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "items",
@@ -3359,7 +3907,6 @@
             "title": "Source File"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "ecosystem",
@@ -3448,7 +3995,6 @@
             "title": "Source"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "ecosystem",
@@ -3485,7 +4031,6 @@
             "title": "Count"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "items",
@@ -3504,7 +4049,9 @@
           "scope": {
             "anyOf": [
               {
-                "additionalProperties": true,
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue-Input"
+                },
                 "type": "object"
               },
               {
@@ -3649,7 +4196,6 @@
             "title": "Errors"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "start_url",
@@ -3742,6 +4288,11 @@
           },
           "status": {
             "type": "string",
+            "enum": [
+              "open",
+              "acknowledged",
+              "resolved"
+            ],
             "title": "Status"
           },
           "created_at": {
@@ -3771,7 +4322,6 @@
             "title": "Resolved At"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
@@ -3806,7 +4356,6 @@
             "title": "Count"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "items",
@@ -3819,14 +4368,17 @@
         "properties": {
           "detail": {
             "items": {
-              "$ref": "#/components/schemas/ValidationError"
+              "$ref": "#/components/schemas/ValidationErrorModel"
             },
-            "type": "array",
-            "title": "Detail"
+            "title": "Detail",
+            "type": "array"
           }
         },
-        "type": "object",
-        "title": "HTTPValidationError"
+        "required": [
+          "detail"
+        ],
+        "title": "ApiValidationError",
+        "type": "object"
       },
       "HealthResponse": {
         "properties": {
@@ -3839,7 +4391,6 @@
             "title": "Fingerprint"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "ok",
@@ -3921,7 +4472,9 @@
           "scope": {
             "anyOf": [
               {
-                "additionalProperties": true,
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue-Input"
+                },
                 "type": "object"
               },
               {
@@ -4031,6 +4584,10 @@
           },
           "kind": {
             "type": "string",
+            "enum": [
+              "repo",
+              "docs"
+            ],
             "title": "Kind"
           },
           "target": {
@@ -4042,12 +4599,24 @@
             "title": "Source"
           },
           "params": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
             "type": "object",
             "title": "Params"
           },
           "status": {
             "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "queued",
+              "running",
+              "done",
+              "failed",
+              "rejected",
+              "cancelled"
+            ],
             "title": "Status"
           },
           "dedupe_key": {
@@ -4093,7 +4662,6 @@
             "title": "Updated At"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
@@ -4147,7 +4715,6 @@
             "title": "Count"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "items",
@@ -4160,7 +4727,9 @@
         "properties": {
           "items": {
             "items": {
-              "additionalProperties": true,
+              "additionalProperties": {
+                "$ref": "#/components/schemas/JsonValue-Output"
+              },
               "type": "object"
             },
             "type": "array",
@@ -4175,7 +4744,6 @@
             "title": "Count"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "items",
@@ -4199,7 +4767,6 @@
             "title": "Prefix"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
@@ -4216,7 +4783,9 @@
             "title": "Kind"
           },
           "params": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Input"
+            },
             "type": "object",
             "title": "Params"
           }
@@ -4239,6 +4808,12 @@
           },
           "status": {
             "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed"
+            ],
             "title": "Status"
           },
           "error": {
@@ -4253,10 +4828,19 @@
             "title": "Error"
           },
           "result": {
-            "title": "Result"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "params": {
-            "additionalProperties": true,
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
             "type": "object",
             "title": "Params"
           },
@@ -4272,15 +4856,12 @@
             "title": "Finished At"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
           "kind",
           "status",
           "error",
-          "result",
-          "params",
           "finished_at"
         ],
         "title": "JobDetail"
@@ -4295,7 +4876,6 @@
             "title": "Jobs"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "jobs"
@@ -4314,6 +4894,12 @@
           },
           "status": {
             "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed"
+            ],
             "title": "Status"
           },
           "finished_at": {
@@ -4339,7 +4925,6 @@
             "title": "Error"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
@@ -4349,6 +4934,68 @@
           "error"
         ],
         "title": "JobSummary"
+      },
+      "JsonValue-Input": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue-Input"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Input"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "JsonValue-Output": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "KeyCreate": {
         "properties": {
@@ -4416,14 +5063,19 @@
           "count": {
             "type": "integer",
             "title": "Count"
+          },
+          "kind": {
+            "type": "string",
+            "const": "libraries",
+            "title": "Kind"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "items",
           "degraded",
-          "count"
+          "count",
+          "kind"
         ],
         "title": "LibraryResponse"
       },
@@ -4512,7 +5164,6 @@
             "title": "Versions"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
@@ -4528,14 +5179,65 @@
         ],
         "title": "LibraryRow"
       },
+      "ManifestDependency": {
+        "properties": {
+          "ecosystem": {
+            "type": "string",
+            "title": "Ecosystem"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "req": {
+            "type": "string",
+            "title": "Req"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ecosystem",
+          "name",
+          "req"
+        ],
+        "title": "ManifestDependency"
+      },
       "MetricsResponse": {
         "properties": {
           "uptime_seconds": {
             "type": "integer",
             "title": "Uptime Seconds"
+          },
+          "duration_ms_p50": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms P50"
+          },
+          "duration_ms_p95": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms P95"
+          },
+          "counters": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Counters"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "uptime_seconds"
@@ -4565,7 +5267,6 @@
             "title": "Clusters"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "patterns",
@@ -4587,7 +5288,6 @@
             "title": "Ok"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
@@ -4602,7 +5302,6 @@
             "title": "Ok"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "ok"
@@ -4611,6 +5310,11 @@
       },
       "PageLinkStats": {
         "properties": {
+          "kind": {
+            "type": "string",
+            "const": "page",
+            "title": "Kind"
+          },
           "url": {
             "type": "string",
             "title": "Url"
@@ -4635,9 +5339,9 @@
             "title": "Inlink Sources"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
+          "kind",
           "url",
           "outlinks",
           "outlink_external",
@@ -4676,7 +5380,6 @@
             "title": "Items"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "library",
@@ -4715,7 +5418,6 @@
             "title": "Chunks"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
@@ -4737,7 +5439,6 @@
             "title": "Count"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "prefix",
@@ -4763,7 +5464,6 @@
             "title": "Count"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "items",
@@ -4812,7 +5512,6 @@
             "title": "Scopes"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
@@ -4871,7 +5570,6 @@
             "title": "Conflicting"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
@@ -4912,6 +5610,11 @@
           },
           "window_type": {
             "type": "string",
+            "enum": [
+              "hour",
+              "day",
+              "month"
+            ],
             "title": "Window Type"
           },
           "updated_at": {
@@ -4919,7 +5622,6 @@
             "title": "Updated At"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "tenant_id",
@@ -4949,7 +5651,6 @@
             "title": "Count"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "items",
@@ -5101,22 +5802,19 @@
           },
           "chunk_details": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/ChunkLocator"
             },
             "type": "array",
             "title": "Chunk Details"
           },
           "docs": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/ChunkLocator"
             },
             "type": "array",
             "title": "Docs"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "title": "ReadResponse"
       },
@@ -5142,7 +5840,6 @@
             "title": "Generation"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "ok",
@@ -5163,7 +5860,6 @@
             "title": "Files"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "directory",
@@ -5415,14 +6111,12 @@
           },
           "manifest_deps": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/ManifestDependency"
             },
             "type": "array",
             "title": "Manifest Deps"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "source",
@@ -5464,7 +6158,6 @@
             "title": "Files"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "directory",
@@ -5483,7 +6176,6 @@
             "title": "Count"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "suffix",
@@ -5565,7 +6257,6 @@
             "title": "Source"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "ecosystem",
@@ -5626,6 +6317,11 @@
           },
           "status": {
             "type": "string",
+            "enum": [
+              "pending",
+              "approved",
+              "conflict"
+            ],
             "title": "Status"
           },
           "updated_at": {
@@ -5675,7 +6371,12 @@
           "confidence": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "EXTRACTED",
+                  "INFERRED",
+                  "AMBIGUOUS"
+                ]
               },
               {
                 "type": "null"
@@ -5684,7 +6385,7 @@
             "title": "Confidence"
           },
           "args": {
-            "title": "Args"
+            "$ref": "#/components/schemas/JsonValue-Output"
           },
           "line_start": {
             "anyOf": [
@@ -5709,7 +6410,6 @@
             "title": "Line End"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "entity_id",
@@ -5743,7 +6443,6 @@
             "title": "Count"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "items",
@@ -5763,7 +6462,6 @@
             "title": "Revoked"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "ok",
@@ -5820,7 +6518,6 @@
             "title": "Head Truncated"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "url",
@@ -5970,7 +6667,6 @@
             "title": "Sort Order"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
@@ -6024,8 +6720,7 @@
           },
           "suggestions": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/DiscoveryCandidate"
             },
             "type": "array",
             "title": "Suggestions"
@@ -6042,7 +6737,6 @@
             "title": "Suggest Error"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "items",
@@ -6062,7 +6756,6 @@
             "title": "Inlinks"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "url",
@@ -6070,48 +6763,13 @@
         ],
         "title": "TopLink"
       },
-      "ValidationError": {
-        "properties": {
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "type": "array",
-            "title": "Location"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Message"
-          },
-          "type": {
-            "type": "string",
-            "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
-          }
-        },
-        "type": "object",
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError"
-      },
       "VersionLinkStats": {
         "properties": {
+          "kind": {
+            "type": "string",
+            "const": "version",
+            "title": "Kind"
+          },
           "summary": {
             "$ref": "#/components/schemas/VersionLinkSummary"
           },
@@ -6123,9 +6781,9 @@
             "title": "Items"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
+          "kind",
           "summary",
           "items"
         ],
@@ -6162,7 +6820,6 @@
             "title": "Structure Edges"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "library",
@@ -6191,14 +6848,19 @@
           "count": {
             "type": "integer",
             "title": "Count"
+          },
+          "kind": {
+            "type": "string",
+            "const": "versions",
+            "title": "Kind"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "items",
           "degraded",
-          "count"
+          "count",
+          "kind"
         ],
         "title": "VersionResponse"
       },
@@ -6240,7 +6902,6 @@
             "title": "Pages"
           }
         },
-        "additionalProperties": true,
         "type": "object",
         "required": [
           "id",
@@ -6252,6 +6913,183 @@
           "pages"
         ],
         "title": "VersionRow"
+      },
+      "QuotaErrorDetail": {
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "resource": {
+            "title": "Resource",
+            "type": "string"
+          },
+          "reset_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Reset At"
+          }
+        },
+        "required": [
+          "error",
+          "resource",
+          "reset_at"
+        ],
+        "title": "QuotaErrorDetail",
+        "type": "object"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "title": "Error",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/components/schemas/QuotaErrorDetail"
+              }
+            ],
+            "title": "Detail"
+          },
+          "request_id": {
+            "default": "",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resource"
+          },
+          "reset_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reset At"
+          }
+        },
+        "required": [
+          "error",
+          "detail"
+        ],
+        "title": "ErrorResponse",
+        "type": "object"
+      },
+      "JsonValue": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ValidationErrorModel": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Loc",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Msg",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          },
+          "input": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "ctx": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ctx"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationErrorModel",
+        "type": "object"
       }
     }
   }

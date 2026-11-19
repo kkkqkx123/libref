@@ -42,7 +42,7 @@ beforeEach(() => {
       url === '/resolve'
         ? { data: { name: 'org/repo', repo_url: 'https://github.com/org/repo' }, requestId: 'r1' }
         : url === '/catalog'
-          ? { data: { items: [] }, requestId: 'r1' }
+          ? { data: { items: [], kind: 'libraries' }, requestId: 'r1' }
           : { data: {}, requestId: 'r1' },
     ),
   );

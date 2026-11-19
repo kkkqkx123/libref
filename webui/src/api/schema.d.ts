@@ -763,8 +763,6 @@ export interface components {
             page_id: number | null;
             /** Sort Order */
             sort_order: number | null;
-        } & {
-            [key: string]: unknown;
         };
         /** AnswerResponse */
         AnswerResponse: {
@@ -782,8 +780,6 @@ export interface components {
             confidence: string;
             /** Cited Ids */
             cited_ids: number[];
-        } & {
-            [key: string]: unknown;
         };
         /** ApiKeyResponse */
         ApiKeyResponse: {
@@ -793,8 +789,6 @@ export interface components {
             degraded: boolean;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
         };
         /** ApiKeyRow */
         ApiKeyRow: {
@@ -805,17 +799,62 @@ export interface components {
             /** Key Prefix */
             key_prefix: string;
             /** Scopes */
-            scopes: string;
+            scopes: string[];
             /** Expires At */
-            expires_at: number | string | null;
+            expires_at: string | null;
             /** Revoked At */
-            revoked_at: number | string | null;
+            revoked_at: string | null;
             /** Last Used At */
-            last_used_at: number | string | null;
+            last_used_at: string | null;
             /** Created At */
-            created_at: number | string | null;
-        } & {
-            [key: string]: unknown;
+            created_at: string | null;
+        };
+        /** ChunkLocator */
+        ChunkLocator: {
+            /**
+             * Source Group Id
+             * @default
+             */
+            source_group_id: string;
+            /**
+             * Chunk Id
+             * @default
+             */
+            chunk_id: string;
+            /**
+             * Span Kind
+             * @default document_range
+             */
+            span_kind: string;
+            /** Merged From */
+            merged_from?: components["schemas"]["JsonValue-Output"][];
+            overlap_from?: components["schemas"]["JsonValue-Output"] | null;
+            /**
+             * Overlap Text
+             * @default
+             */
+            overlap_text: string;
+            /**
+             * Chunk Index
+             * @default 0
+             */
+            chunk_index: number;
+            /**
+             * Total Chunks
+             * @default 1
+             */
+            total_chunks: number;
+            /**
+             * Length
+             * @default 0
+             */
+            length: number;
+            /** Id */
+            id?: number | null;
+            /** Url */
+            url?: string | null;
+            /** Sort Order */
+            sort_order?: number | null;
         };
         /** ConfigRefreshResponse */
         ConfigRefreshResponse: {
@@ -825,8 +864,6 @@ export interface components {
             old_fingerprint: string;
             /** Fingerprint */
             fingerprint: string;
-        } & {
-            [key: string]: unknown;
         };
         /** DependencyResponse */
         DependencyResponse: {
@@ -836,8 +873,6 @@ export interface components {
             degraded: boolean;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
         };
         /** DependencyRow */
         DependencyRow: {
@@ -849,8 +884,6 @@ export interface components {
             req: string;
             /** Source File */
             source_file: string;
-        } & {
-            [key: string]: unknown;
         };
         /** DiscoveryCandidate */
         DiscoveryCandidate: {
@@ -880,8 +913,6 @@ export interface components {
             rank: number;
             /** Source */
             source: string;
-        } & {
-            [key: string]: unknown;
         };
         /** DiscoveryResponse */
         DiscoveryResponse: {
@@ -891,8 +922,6 @@ export interface components {
             degraded: boolean;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
         };
         /** DocProbeRequest */
         DocProbeRequest: {
@@ -900,7 +929,7 @@ export interface components {
             start_url: string;
             /** Scope */
             scope?: {
-                [key: string]: unknown;
+                [key: string]: components["schemas"]["JsonValue-Input"];
             } | null;
             /** Sample Limit */
             sample_limit?: number | null;
@@ -950,8 +979,6 @@ export interface components {
             errors: {
                 [key: string]: string;
             };
-        } & {
-            [key: string]: unknown;
         };
         /** FeedbackCreate */
         FeedbackCreate: {
@@ -989,16 +1016,17 @@ export interface components {
             kind: string;
             /** Body */
             body: string;
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "acknowledged" | "resolved";
             /** Created At */
             created_at: string;
             /** Resolved By */
             resolved_by: number | null;
             /** Resolved At */
             resolved_at: string | null;
-        } & {
-            [key: string]: unknown;
         };
         /** FeedbackResponse */
         FeedbackResponse: {
@@ -1008,13 +1036,11 @@ export interface components {
             degraded: boolean;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
         };
-        /** HTTPValidationError */
+        /** ApiValidationError */
         HTTPValidationError: {
             /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
+            detail: components["schemas"]["ValidationErrorModel"][];
         };
         /** HealthResponse */
         HealthResponse: {
@@ -1022,8 +1048,6 @@ export interface components {
             ok: boolean;
             /** Fingerprint */
             fingerprint: string;
-        } & {
-            [key: string]: unknown;
         };
         /** IndexRequestCreate */
         IndexRequestCreate: {
@@ -1055,7 +1079,7 @@ export interface components {
             prefilter: boolean;
             /** Scope */
             scope?: {
-                [key: string]: unknown;
+                [key: string]: components["schemas"]["JsonValue-Input"];
             } | null;
             /**
              * Update
@@ -1091,18 +1115,24 @@ export interface components {
             principal_id: number | null;
             /** Requester */
             requester: string;
-            /** Kind */
-            kind: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "repo" | "docs";
             /** Target */
             target: string;
             /** Source */
             source: string;
             /** Params */
             params: {
-                [key: string]: unknown;
+                [key: string]: components["schemas"]["JsonValue-Output"];
             };
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "queued" | "running" | "done" | "failed" | "rejected" | "cancelled";
             /** Dedupe Key */
             dedupe_key: string;
             /** Approved By */
@@ -1117,8 +1147,6 @@ export interface components {
             created_at: string;
             /** Updated At */
             updated_at: string;
-        } & {
-            [key: string]: unknown;
         };
         /** IndexRequestReject */
         IndexRequestReject: {
@@ -1133,21 +1161,17 @@ export interface components {
             degraded: boolean;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
         };
         /** InsightResponse */
         InsightResponse: {
             /** Items */
             items: {
-                [key: string]: unknown;
+                [key: string]: components["schemas"]["JsonValue-Output"];
             }[];
             /** Degraded */
             degraded: boolean;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
         };
         /** IssuedKey */
         IssuedKey: {
@@ -1157,8 +1181,6 @@ export interface components {
             key: string;
             /** Prefix */
             prefix: string;
-        } & {
-            [key: string]: unknown;
         };
         /** JobCreate */
         JobCreate: {
@@ -1166,7 +1188,7 @@ export interface components {
             kind: string;
             /** Params */
             params?: {
-                [key: string]: unknown;
+                [key: string]: components["schemas"]["JsonValue-Input"];
             };
         };
         /** JobDetail */
@@ -1175,27 +1197,25 @@ export interface components {
             id: number;
             /** Kind */
             kind: string;
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed";
             /** Error */
             error: string | null;
-            /** Result */
-            result: unknown;
+            result?: components["schemas"]["JsonValue-Output"] | null;
             /** Params */
-            params: {
-                [key: string]: unknown;
+            params?: {
+                [key: string]: components["schemas"]["JsonValue-Output"];
             };
             /** Finished At */
             finished_at: string | null;
-        } & {
-            [key: string]: unknown;
         };
         /** JobListResponse */
         JobListResponse: {
             /** Jobs */
             jobs: components["schemas"]["JobSummary"][];
-        } & {
-            [key: string]: unknown;
         };
         /** JobSummary */
         JobSummary: {
@@ -1203,15 +1223,22 @@ export interface components {
             id: number;
             /** Kind */
             kind: string;
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed";
             /** Finished At */
             finished_at: string | null;
             /** Error */
             error: string | null;
-        } & {
-            [key: string]: unknown;
         };
+        "JsonValue-Input": boolean | number | string | components["schemas"]["JsonValue-Input"][] | {
+            [key: string]: components["schemas"]["JsonValue-Input"];
+        } | null;
+        "JsonValue-Output": boolean | number | string | components["schemas"]["JsonValue-Output"][] | {
+            [key: string]: components["schemas"]["JsonValue-Output"];
+        } | null;
         /** KeyCreate */
         KeyCreate: {
             /** Name */
@@ -1241,8 +1268,11 @@ export interface components {
             degraded: boolean;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "libraries";
         };
         /** LibraryRow */
         LibraryRow: {
@@ -1266,15 +1296,28 @@ export interface components {
             resolved_at: string | null;
             /** Versions */
             versions: number;
-        } & {
-            [key: string]: unknown;
+        };
+        /** ManifestDependency */
+        ManifestDependency: {
+            /** Ecosystem */
+            ecosystem: string;
+            /** Name */
+            name: string;
+            /** Req */
+            req: string;
         };
         /** MetricsResponse */
         MetricsResponse: {
             /** Uptime Seconds */
             uptime_seconds: number;
-        } & {
-            [key: string]: unknown;
+            /** Duration Ms P50 */
+            duration_ms_p50?: number | null;
+            /** Duration Ms P95 */
+            duration_ms_p95?: number | null;
+            /** Counters */
+            counters?: {
+                [key: string]: number;
+            };
         };
         /** MiningHealthResponse */
         MiningHealthResponse: {
@@ -1288,8 +1331,6 @@ export interface components {
             diversity: number;
             /** Clusters */
             clusters: number;
-        } & {
-            [key: string]: unknown;
         };
         /** OkIdResponse */
         OkIdResponse: {
@@ -1297,18 +1338,19 @@ export interface components {
             id: number;
             /** Ok */
             ok: boolean;
-        } & {
-            [key: string]: unknown;
         };
         /** OkResponse */
         OkResponse: {
             /** Ok */
             ok: boolean;
-        } & {
-            [key: string]: unknown;
         };
         /** PageLinkStats */
         PageLinkStats: {
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "page";
             /** Url */
             url: string;
             /** Outlinks */
@@ -1319,8 +1361,6 @@ export interface components {
             inlinks: number;
             /** Inlink Sources */
             inlink_sources: string[];
-        } & {
-            [key: string]: unknown;
         };
         /**
          * PageList
@@ -1339,8 +1379,6 @@ export interface components {
             offset: number;
             /** Items */
             items: components["schemas"]["PageRow"][];
-        } & {
-            [key: string]: unknown;
         };
         /**
          * PageRow
@@ -1355,8 +1393,6 @@ export interface components {
             title: string | null;
             /** Chunks */
             chunks: number;
-        } & {
-            [key: string]: unknown;
         };
         /** PrefixGroup */
         PrefixGroup: {
@@ -1364,8 +1400,6 @@ export interface components {
             prefix: string;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
         };
         /** PrincipalListResponse */
         PrincipalListResponse: {
@@ -1375,8 +1409,6 @@ export interface components {
             degraded: boolean;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
         };
         /** PrincipalResponse */
         PrincipalResponse: {
@@ -1392,8 +1424,6 @@ export interface components {
             roles: string[];
             /** Scopes */
             scopes: string[];
-        } & {
-            [key: string]: unknown;
         };
         /** PrincipalSummary */
         PrincipalSummary: {
@@ -1413,8 +1443,6 @@ export interface components {
             scopes: string[];
             /** Conflicting */
             conflicting: string[][];
-        } & {
-            [key: string]: unknown;
         };
         /** QuotaPolicy */
         QuotaPolicy: {
@@ -1426,12 +1454,13 @@ export interface components {
             resource: string;
             /** Limit Value */
             limit_value: number;
-            /** Window Type */
-            window_type: string;
+            /**
+             * Window Type
+             * @enum {string}
+             */
+            window_type: "hour" | "day" | "month";
             /** Updated At */
             updated_at: string;
-        } & {
-            [key: string]: unknown;
         };
         /** QuotaPolicyResponse */
         QuotaPolicyResponse: {
@@ -1441,8 +1470,6 @@ export interface components {
             degraded: boolean;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
         };
         /** QuotaPolicyUpsert */
         QuotaPolicyUpsert: {
@@ -1496,15 +1523,9 @@ export interface components {
              */
             chunks: number;
             /** Chunk Details */
-            chunk_details?: {
-                [key: string]: unknown;
-            }[];
+            chunk_details?: components["schemas"]["ChunkLocator"][];
             /** Docs */
-            docs?: {
-                [key: string]: unknown;
-            }[];
-        } & {
-            [key: string]: unknown;
+            docs?: components["schemas"]["ChunkLocator"][];
         };
         /** ReadyResponse */
         ReadyResponse: {
@@ -1518,8 +1539,6 @@ export interface components {
             fingerprint: string;
             /** Generation */
             generation: number;
-        } & {
-            [key: string]: unknown;
         };
         /** RepoProbeDir */
         RepoProbeDir: {
@@ -1527,8 +1546,6 @@ export interface components {
             directory: string;
             /** Files */
             files: number;
-        } & {
-            [key: string]: unknown;
         };
         /** RepoProbeRequest */
         RepoProbeRequest: {
@@ -1594,11 +1611,7 @@ export interface components {
             /** Samples */
             samples: string[];
             /** Manifest Deps */
-            manifest_deps: {
-                [key: string]: unknown;
-            }[];
-        } & {
-            [key: string]: unknown;
+            manifest_deps: components["schemas"]["ManifestDependency"][];
         };
         /** RepoProbeSamples */
         RepoProbeSamples: {
@@ -1606,8 +1619,6 @@ export interface components {
             directory: string;
             /** Files */
             files: string[];
-        } & {
-            [key: string]: unknown;
         };
         /** RepoProbeSuffix */
         RepoProbeSuffix: {
@@ -1615,8 +1626,6 @@ export interface components {
             suffix: string;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
         };
         /** ResolutionResponse */
         ResolutionResponse: {
@@ -1640,8 +1649,6 @@ export interface components {
             repo_url: string | null;
             /** Source */
             source: string;
-        } & {
-            [key: string]: unknown;
         };
         /** ReviewAction */
         ReviewAction: {
@@ -1662,8 +1669,11 @@ export interface components {
         ReviewItem: {
             /** Entity Id */
             entity_id: number;
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "conflict";
             /** Updated At */
             updated_at: string | null;
             /** Callee */
@@ -1673,15 +1683,12 @@ export interface components {
             /** Caller */
             caller: string | null;
             /** Confidence */
-            confidence: string | null;
-            /** Args */
-            args: unknown;
+            confidence: ("EXTRACTED" | "INFERRED" | "AMBIGUOUS") | null;
+            args: components["schemas"]["JsonValue-Output"];
             /** Line Start */
             line_start: number | null;
             /** Line End */
             line_end: number | null;
-        } & {
-            [key: string]: unknown;
         };
         /** ReviewResponse */
         ReviewResponse: {
@@ -1691,8 +1698,6 @@ export interface components {
             degraded: boolean;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
         };
         /** RevokedKeys */
         RevokedKeys: {
@@ -1700,8 +1705,6 @@ export interface components {
             ok: boolean;
             /** Revoked */
             revoked: number;
-        } & {
-            [key: string]: unknown;
         };
         /** SampleFetch */
         SampleFetch: {
@@ -1723,8 +1726,6 @@ export interface components {
             external_domains: string[];
             /** Head Truncated */
             head_truncated: boolean;
-        } & {
-            [key: string]: unknown;
         };
         /** ScrapeRequest */
         ScrapeRequest: {
@@ -1768,8 +1769,6 @@ export interface components {
             page_id: number | null;
             /** Sort Order */
             sort_order: number | null;
-        } & {
-            [key: string]: unknown;
         };
         /** SearchResponse */
         SearchResponse: {
@@ -1792,13 +1791,9 @@ export interface components {
              */
             answerability: number;
             /** Suggestions */
-            suggestions?: {
-                [key: string]: unknown;
-            }[];
+            suggestions?: components["schemas"]["DiscoveryCandidate"][];
             /** Suggest Error */
             suggest_error?: string | null;
-        } & {
-            [key: string]: unknown;
         };
         /** TopLink */
         TopLink: {
@@ -1806,29 +1801,17 @@ export interface components {
             url: string;
             /** Inlinks */
             inlinks: number;
-        } & {
-            [key: string]: unknown;
-        };
-        /** ValidationError */
-        ValidationError: {
-            /** Location */
-            loc: (string | number)[];
-            /** Message */
-            msg: string;
-            /** Error Type */
-            type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
         };
         /** VersionLinkStats */
         VersionLinkStats: {
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "version";
             summary: components["schemas"]["VersionLinkSummary"];
             /** Items */
             items: components["schemas"]["TopLink"][];
-        } & {
-            [key: string]: unknown;
         };
         /** VersionLinkSummary */
         VersionLinkSummary: {
@@ -1846,8 +1829,6 @@ export interface components {
             external_edges: number;
             /** Structure Edges */
             structure_edges: number;
-        } & {
-            [key: string]: unknown;
         };
         /** VersionResponse */
         VersionResponse: {
@@ -1857,8 +1838,11 @@ export interface components {
             degraded: boolean;
             /** Count */
             count: number;
-        } & {
-            [key: string]: unknown;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "versions";
         };
         /** VersionRow */
         VersionRow: {
@@ -1876,8 +1860,58 @@ export interface components {
             ecosystem: string;
             /** Pages */
             pages: number;
-        } & {
-            [key: string]: unknown;
+        };
+        /** QuotaErrorDetail */
+        QuotaErrorDetail: {
+            /** Error */
+            error: string;
+            /** Resource */
+            resource: string;
+            /** Reset At */
+            reset_at: number | string;
+        };
+        /** ErrorResponse */
+        ErrorResponse: {
+            /** Error */
+            error: string;
+            /** Detail */
+            detail: string | components["schemas"]["QuotaErrorDetail"];
+            /**
+             * Request Id
+             * @default
+             */
+            request_id: string;
+            /**
+             * Resource
+             * @default null
+             */
+            resource: string | null;
+            /**
+             * Reset At
+             * @default null
+             */
+            reset_at: number | string | null;
+        };
+        JsonValue: boolean | number | string | components["schemas"]["JsonValue"][] | {
+            [key: string]: components["schemas"]["JsonValue"];
+        } | null;
+        /** ValidationErrorModel */
+        ValidationErrorModel: {
+            /** Loc */
+            loc: (string | number)[];
+            /** Msg */
+            msg: string;
+            /** Type */
+            type: string;
+            /** @default null */
+            input: components["schemas"]["JsonValue"] | null;
+            /**
+             * Ctx
+             * @default null
+             */
+            ctx: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
         };
     };
     responses: never;
@@ -1906,6 +1940,15 @@ export interface operations {
                     "application/json": components["schemas"]["HealthResponse"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     me_me_get: {
@@ -1926,6 +1969,15 @@ export interface operations {
                     "application/json": components["schemas"]["PrincipalResponse"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     metrics_route_metrics_get: {
@@ -1944,6 +1996,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MetricsResponse"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -1976,6 +2037,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2016,6 +2086,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     library_search_library_search_get: {
@@ -2048,6 +2127,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2084,6 +2172,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2124,6 +2221,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     pages_route_pages_get: {
@@ -2157,6 +2263,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2194,6 +2309,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2236,6 +2360,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     symbol_insight_symbol_insight_get: {
@@ -2272,6 +2405,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2315,6 +2457,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     import_insight_import_insight_get: {
@@ -2352,6 +2503,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     review_list_review_get: {
@@ -2384,6 +2544,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     review_apply_review_post: {
@@ -2405,7 +2574,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReviewResponse"] | components["schemas"]["OkResponse"];
+                    "application/json": components["schemas"]["OkResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2415,6 +2584,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2447,6 +2625,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2482,6 +2669,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     index_request_pending_index_requests_pending_get: {
@@ -2511,6 +2707,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2544,6 +2749,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     index_request_cancel_index_requests__request_id__cancel_post: {
@@ -2575,6 +2789,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     index_request_approve_index_requests__request_id__approve_post: {
@@ -2604,6 +2827,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2641,6 +2873,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     scrape_scrape_post: {
@@ -2672,6 +2913,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2707,6 +2957,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     repo_probe_repo_probe_post: {
@@ -2740,6 +2999,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     jobs_jobs_get: {
@@ -2770,6 +3038,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2805,6 +3082,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     job_detail_jobs__job_id__get: {
@@ -2834,6 +3120,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2871,6 +3166,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     web_search_web_search_get: {
@@ -2901,6 +3205,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -2935,6 +3248,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     repo_deps_repo_deps_get: {
@@ -2967,6 +3289,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3004,6 +3335,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     mining_health_mining_health_get: {
@@ -3037,6 +3377,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     readyz_readyz_get: {
@@ -3055,6 +3404,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadyResponse"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3087,6 +3445,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3122,6 +3489,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     feedback_resolve_feedback__feedback_id__resolve_post: {
@@ -3151,6 +3527,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3184,6 +3569,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     admin_principals_list_admin_principals_get: {
@@ -3215,6 +3609,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     admin_keys_list_admin_keys_get: {
@@ -3233,6 +3636,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiKeyResponse"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3268,6 +3680,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     admin_keys_revoke_admin_keys__key_id__delete: {
@@ -3297,6 +3718,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3330,6 +3760,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     admin_quota_policies_admin_quota_policies_get: {
@@ -3348,6 +3787,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuotaPolicyResponse"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
@@ -3383,6 +3831,15 @@ export interface operations {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     admin_config_refresh_admin_config_refresh_post: {
@@ -3401,6 +3858,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ConfigRefreshResponse"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };

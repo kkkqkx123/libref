@@ -79,7 +79,7 @@ import { ElMessageBox } from 'element-plus';
 import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { JobDetail, JobSummary } from '../api/types';
+import type { JobCreate, JobDetail, JobSummary } from '../api/types';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue';
@@ -281,9 +281,9 @@ async function cancel(id: number): Promise<void> {
 }
 
 async function create(): Promise<void> {
-  let params: Record<string, unknown> = {};
+  let params: NonNullable<JobCreate['params']> = {};
   try {
-    params = JSON.parse(createForm.paramsText || '{}') as Record<string, unknown>;
+    params = JSON.parse(createForm.paramsText || '{}') as NonNullable<JobCreate['params']>;
   } catch {
     notifyError(new Error(messages.value.jobs.invalidJson), messages.value.common.paramError);
     return;

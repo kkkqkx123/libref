@@ -180,7 +180,13 @@ import {
 import { ElMessageBox } from 'element-plus';
 import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import { api, ApiError } from '../api/client';
-import type { PrincipalSummary, Row } from '../api/types';
+import type {
+  ApiKeyRow,
+  MetricsResponse,
+  PrincipalSummary,
+  QuotaPolicy,
+  ReadyResponse,
+} from '../api/types';
 import KeyIssueDialog from '../components/business/KeyIssueDialog.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
@@ -197,7 +203,7 @@ const canConfig = computed(() => hasScope('admin:config'));
 const tab = ref(canKeys.value ? 'keys' : 'status');
 let metricsTimer: number | null = null;
 
-const keys = ref<Row[]>([]);
+const keys = ref<ApiKeyRow[]>([]);
 const principals = ref<PrincipalSummary[]>([]);
 const conflictCount = computed(
   () => principals.value.filter((row) => row.conflicting.length > 0).length,
@@ -207,15 +213,15 @@ const issueOpen = ref(false);
 const readyLoading = ref(false);
 const metricsLoading = ref(false);
 const metricsLoaded = ref(false);
-const ready = ref<Record<string, unknown>>({});
-const metrics = ref<Record<string, unknown>>({});
+const ready = ref<ReadyResponse | null>(null);
+const metrics = ref<MetricsResponse | null>(null);
 
 const QUOTA_RESOURCES = [
   'http_requests', 'llm_prompt_tokens', 'llm_completion_tokens', 'scrape_pages',
   'index_requests', 'job_submissions', 'snapshot_bytes', 'repos_bytes',
 ];
 const quotaResources = QUOTA_RESOURCES;
-const quotas = ref<Row[]>([]);
+const quotas = ref<QuotaPolicy[]>([]);
 const quotaLoading = ref(false);
 const quotaDialog = ref(false);
 const quotaEditing = ref(false);
@@ -223,29 +229,35 @@ const quotaSaving = ref(false);
 const quotaForm = reactive<{
   resource: string;
   limit_value: number;
-  window_type: 'hour' | 'day' | 'month';
+  window_type: QuotaPolicy['window_type'];
   tenant_id: string;
   principal_id: number | undefined;
 }>({ resource: 'http_requests', limit_value: 0, window_type: 'hour', tenant_id: '', principal_id: undefined });
 
-const readyEntries = computed<KeyValueEntry[]>(() =>
-  Object.entries(ready.value).map(([label, value]) => ({
+const readyEntries = computed<KeyValueEntry[]>(() => {
+  const value = ready.value;
+  if (!value) return [];
+  return Object.entries(value).map(([label, entry]) => ({
     label,
-    value: typeof value === 'object' ? JSON.stringify(value) : String(value ?? ''),
-  })),
-);
+    value: typeof entry === 'object' ? JSON.stringify(entry) : String(entry ?? ''),
+  }));
+});
 
-const metricEntries = computed<KeyValueEntry[]>(() =>
-  Object.entries(metrics.value).map(([label, value]) => ({
+const metricEntries = computed<KeyValueEntry[]>(() => {
+  const value = metrics.value;
+  if (!value) return [];
+  const scalars = Object.entries(value).filter(([label]) => label !== 'counters');
+  const counters = Object.entries(value.counters || {});
+  return [...scalars, ...counters].map(([label, entry]) => ({
     label,
-    value: typeof value === 'object' ? JSON.stringify(value) : String(value ?? ''),
-  })),
-);
+    value: String(entry ?? ''),
+  }));
+});
 
 async function loadKeys(): Promise<void> {
   if (!canKeys.value) return;
   try {
-    const { data } = await api('/admin/keys');
+    const { data } = await api('/admin/keys', {});
     keys.value = data.items;
   } catch (err) {
     notifyError(err, messages.value.admin.loadKeysFailed);
@@ -255,7 +267,7 @@ async function loadKeys(): Promise<void> {
 async function loadPrincipals(): Promise<void> {
   if (!canKeys.value) return;
   try {
-    const { data } = await api('/admin/principals');
+    const { data } = await api('/admin/principals', {});
     principals.value = data.items;
   } catch (err) {
     notifyError(err, messages.value.admin.loadPrincipalsFailed);
@@ -317,7 +329,7 @@ async function loadReadiness(): Promise<void> {
     const { data } = await api('/readyz', { auth: false });
     ready.value = data;
   } catch {
-    ready.value = {};
+    ready.value = null;
   } finally {
     readyLoading.value = false;
   }
@@ -327,10 +339,10 @@ async function loadMetrics(): Promise<void> {
   if (!canConfig.value) return;
   metricsLoading.value = !metricsLoaded.value;
   try {
-    const { data } = await api('/metrics');
+    const { data } = await api('/metrics', {});
     metrics.value = data;
   } catch {
-    metrics.value = {};
+    metrics.value = null;
   } finally {
     metricsLoaded.value = true;
     metricsLoading.value = false;
@@ -341,7 +353,7 @@ async function loadQuotas(): Promise<void> {
   if (!canConfig.value) return;
   quotaLoading.value = true;
   try {
-    const { data } = await api('/admin/quota/policies');
+    const { data } = await api('/admin/quota/policies', {});
     quotas.value = data.items;
   } catch (err) {
     notifyError(err, messages.value.admin.quotaLoadFailed);
@@ -350,25 +362,26 @@ async function loadQuotas(): Promise<void> {
   }
 }
 
-function openQuota(row?: Row): void {
-  quotaEditing.value = Boolean(row);
-  quotaForm.resource = row ? String(row['resource'] ?? 'http_requests') : 'http_requests';
-  quotaForm.limit_value = row ? Number(row['limit_value'] ?? 0) : 0;
-  quotaForm.window_type = (row?.['window_type'] as 'hour' | 'day' | 'month') || 'hour';
-  quotaForm.tenant_id = row ? String(row['tenant_id'] ?? '') : '';
-  const principalId = row ? Number(row['principal_id']) : NaN;
+function openQuota(row?: unknown): void {
+  const policy = row as QuotaPolicy | undefined;
+  quotaEditing.value = Boolean(policy);
+  quotaForm.resource = policy?.resource || 'http_requests';
+  quotaForm.limit_value = policy?.limit_value || 0;
+  quotaForm.window_type = policy?.window_type || 'hour';
+  quotaForm.tenant_id = policy?.tenant_id || '';
+  const principalId = policy ? Number(policy.principal_id) : NaN;
   quotaForm.principal_id = Number.isFinite(principalId) && principalId > 0 ? principalId : undefined;
   quotaDialog.value = true;
 }
 
 async function saveQuota(): Promise<void> {
-  if (!quotaForm.resource.trim()) return;
+  if (!quotaForm.resource) return;
   quotaSaving.value = true;
   try {
     await api('/admin/quota/policies', {
       method: 'PUT',
       body: {
-        resource: quotaForm.resource.trim(),
+        resource: quotaForm.resource,
         limit_value: quotaForm.limit_value,
         window_type: quotaForm.window_type,
         tenant_id: quotaForm.tenant_id.trim(),

@@ -17,7 +17,8 @@ export const catalogStore = reactive<CatalogState>({
 
 export async function loadLibraries(ecosystem?: string): Promise<LibraryRow[]> {
   const { data } = await api('/catalog', { params: { ecosystem } });
-  const items = data.items as LibraryRow[];
+  if (data.kind !== 'libraries') return catalogStore.libraries;
+  const items = data.items;
   catalogStore.libraries = items;
   catalogStore.loaded = true;
   return items;
@@ -25,7 +26,8 @@ export async function loadLibraries(ecosystem?: string): Promise<LibraryRow[]> {
 
 export async function loadVersions(library: string, ecosystem?: string): Promise<VersionRow[]> {
   const { data } = await api('/catalog', { params: { library, ecosystem } });
-  const items = data.items as VersionRow[];
+  if (data.kind !== 'versions') return catalogStore.versionsByLibrary[library] || [];
+  const items = data.items;
   catalogStore.versionsByLibrary[library] = items;
   return items;
 }

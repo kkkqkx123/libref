@@ -26,7 +26,7 @@
 <script setup lang="ts">
 import { ElButton, ElTable, ElTableColumn } from 'element-plus';
 import { computed } from 'vue';
-import type { Row } from '../../api/types';
+import type { JsonValue, Row } from '../../api/types';
 import { messages } from '../../i18n';
 import { formatCell } from '../../utils/format';
 
@@ -49,11 +49,11 @@ const columns = computed(() => {
   return names;
 });
 
-function isTechnical(value: unknown): boolean {
+function isTechnical(value: JsonValue): boolean {
   return typeof value === 'number' || (typeof value === 'string' && value.includes('/'));
 }
 
-function format(value: unknown): string {
+function format(value: JsonValue): string {
   return formatCell(value);
 }
 </script>
