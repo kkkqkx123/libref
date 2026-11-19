@@ -21,6 +21,7 @@ from libref.db.contract import DbIntegrityError
 from libref.services.infra.auth import PLATFORM_SCOPE, Principal
 from libref.services.infra.jobs import Job, JobManager
 from libref.services.infra.tenant import owner_tenant
+from libref.services.infra.timestamps import iso_utc
 
 ACTIVE_STATUSES = frozenset({"pending", "approved", "queued", "running"})
 TERMINAL_STATUSES = frozenset({"done", "failed", "rejected", "cancelled"})
@@ -204,8 +205,8 @@ class IndexRequestService:
             reject_reason=str(row[11] or ""),
             job_id=row[12],
             error=str(row[13] or ""),
-            created_at=str(row[14] or ""),
-            updated_at=str(row[15] or ""),
+            created_at=iso_utc(row[14]) or "",
+            updated_at=iso_utc(row[15]) or "",
         ).model_dump()
 
     def _visible(

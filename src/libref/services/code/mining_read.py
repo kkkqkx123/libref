@@ -1045,7 +1045,8 @@ class MiningReadService:
             " FROM call_instances LEFT JOIN review_status rs"
             " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
             f" WHERE version_id IN ({placeholders}) AND callee_name = ?{extra}"
-            " ORDER BY caller_file, line_start, start_byte, call_order, id"
+            " ORDER BY caller_file, line_start, start_byte, call_order,"
+            " call_instances.id"
             " LIMIT ? OFFSET ?",
             (*vids, callee, *params, max(1, int(limit)), max(0, int(offset))),
         ).fetchall()
@@ -1080,7 +1081,8 @@ class MiningReadService:
             " FROM call_instances LEFT JOIN review_status rs"
             " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
             f" WHERE version_id IN ({placeholders}) AND caller = ?{extra}"
-            " ORDER BY caller_file, line_start, start_byte, call_order, id"
+            " ORDER BY caller_file, line_start, start_byte, call_order,"
+            " call_instances.id"
             " LIMIT ? OFFSET ?",
             (*vids, caller, *params, max(1, int(limit)), max(0, int(offset))),
         ).fetchall()
@@ -1114,7 +1116,7 @@ class MiningReadService:
             " FROM call_instances LEFT JOIN review_status rs"
             " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
             f" WHERE version_id IN ({placeholders}) AND caller_file = ?{extra}"
-            " ORDER BY line_start, start_byte, call_order, id"
+            " ORDER BY line_start, start_byte, call_order, call_instances.id"
             " LIMIT ? OFFSET ?",
             (*vids, importer_file, *params, max(1, int(limit)), max(0, int(offset))),
         ).fetchall()

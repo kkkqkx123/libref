@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 
 from libref.config import LibrefSettings, settings_fingerprint
 from libref.crawler.registry import RegistryError
@@ -23,15 +22,18 @@ from libref.services.infra.auth import (
 )
 from libref.services.infra.jobs import JobManager
 from libref.services.infra.tenant import GLOBAL_TENANT
+from libref.services.infra.timestamps import epoch_utc, iso_utc
 from libref.services.ops.review import ReviewService
 from libref.services.registry.libraries import LibraryService
 from libref.web.api import (
     AnswerQuery,
     AnswerResponse,
     ApiInsightQuery,
+    ApiInsightResult,
     ApiKeyResponse,
     ApiValidationError,
     CallInsightQuery,
+    CallInsightResult,
     ConfigRefreshResponse,
     DependencyResponse,
     DiscoveryResponse,
@@ -40,13 +42,15 @@ from libref.web.api import (
     ErrorResponse,
     FeedbackCreate,
     FeedbackResponse,
+    FeedbackStatus,
     HealthResponse,
     ImportInsightQuery,
+    ImportInsightResult,
     IndexRequestCreate,
     IndexRequestItem,
     IndexRequestReject,
     IndexRequestResponse,
-    InsightResponse,
+    IndexRequestStatus,
     IssuedKey,
     JobCreate,
     JobDetail,
@@ -62,6 +66,7 @@ from libref.web.api import (
     PageLinkStats,
     PageList,
     PatternInsightQuery,
+    PatternInsightResult,
     PrincipalListResponse,
     PrincipalResponse,
     QuotaPolicyResponse,
@@ -81,21 +86,13 @@ from libref.web.api import (
     SearchQuery,
     SearchResponse,
     SymbolInsightQuery,
+    SymbolInsightResult,
     VersionLinkStats,
     VersionResponse,
     envelope,
+    insight_envelope,
 )
-from libref.web.errors import ApiRejection
-
-
-def _iso_time(value: object) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(float(value), tz=UTC).isoformat()
-    return str(value)
+from libref.web.errors import ApiRejection, known_error_code
 
 
 def _scope_list(raw: object) -> list[str]:
@@ -104,14 +101,6 @@ def _scope_list(raw: object) -> list[str]:
     except ValueError:
         return []
     return [str(item) for item in parsed] if isinstance(parsed, list) else []
-
-
-def _split_list(raw: str | None) -> list[str] | None:
-    if raw is None:
-        return None
-    items = [part.strip() for part in raw.split(",")]
-    items = [part for part in items if part]
-    return items or None
 
 
 def build_web_app(
@@ -164,7 +153,7 @@ def build_web_app(
         """Emit a stable ``error`` code next to the original ``detail`` text."""
         from fastapi.responses import JSONResponse
 
-        from libref.web.errors import error_body
+        from libref.web.errors import error_body, fallback_code
 
         rid = str(getattr(getattr(request, "state", None), "request_id", ""))
         headers = dict(exc.headers or {})
@@ -175,7 +164,7 @@ def build_web_app(
                 exc.status_code,
                 exc.detail,
                 rid,
-                code=str(getattr(exc, "code", "") or ""),
+                code=getattr(exc, "code", None) or fallback_code(exc.status_code),
             ),
             status_code=exc.status_code,
             headers=headers,
@@ -214,7 +203,7 @@ def build_web_app(
     def _guard(request: Request):
         principal = getattr(request.state, "principal", None)
         if principal is None:
-            raise HTTPException(status_code=401, detail="unauthorized")
+            raise ApiRejection(401, "unauthorized", "unauthorized")
         return principal
 
     def _need(principal, *scopes: str) -> None:
@@ -245,8 +234,8 @@ def build_web_app(
                 "resource": exc.resource,
                 "reset_at": exc.reset_at,
             }
-            return ApiRejection(exc.status, exc.code, detail)
-        return ApiRejection(exc.status, exc.code, exc.message)
+            return ApiRejection(exc.status, known_error_code(exc.code), detail)
+        return ApiRejection(exc.status, known_error_code(exc.code), exc.message)
 
     def _quota_gate(request: Request, principal, resource: str, cost: int = 1) -> None:
         """Reject the submission with 429 when the subject is over quota."""
@@ -267,9 +256,10 @@ def build_web_app(
                 request_id=str(getattr(request.state, "request_id", "")),
             )
             if decision is not None:
-                raise HTTPException(
-                    status_code=429,
-                    detail={
+                raise ApiRejection(
+                    429,
+                    "quota_exceeded",
+                    {
                         "error": "quota exceeded",
                         "resource": resource,
                         "reset_at": decision.reset_at,
@@ -440,7 +430,7 @@ def build_web_app(
                     tenant_id=_tenant_of(principal),
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             out = envelope(results, degraded=bool(status.get("degraded", False)))
             out["reasons"] = list(status.get("reasons", []) or [])
             out["answerable"] = bool(status["answerable"])
@@ -459,7 +449,7 @@ def build_web_app(
                         include_prerelease=params.include_prerelease,
                     )
                 except ValueError as exc:
-                    raise HTTPException(status_code=400, detail=str(exc)) from exc
+                    raise ApiRejection(400, "invalid_argument", str(exc)) from exc
                 except RegistryError as exc:
                     out["suggestions"] = []
                     out["suggest_error"] = f"{exc.kind}: {exc}"
@@ -495,7 +485,7 @@ def build_web_app(
                 include_prerelease=params.include_prerelease,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         except RegistryError as exc:
             raise ApiRejection(
                 502, "upstream_unavailable", f"{exc.kind}: {exc}"
@@ -548,7 +538,7 @@ def build_web_app(
                 # instead of showing the raw English detail.
                 raise ApiRejection(400, "chat_disabled", str(exc)) from exc
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
             if should_close:
                 try:
@@ -595,9 +585,9 @@ def build_web_app(
                     tenant_id=_tenant_of(principal),
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             if page is None:
-                raise HTTPException(status_code=404, detail="page not found")
+                raise ApiRejection(404, "page_not_found", "page not found")
             return page
         finally:
             if should_close:
@@ -619,11 +609,9 @@ def build_web_app(
         """List page URLs under one library version; the reader is URL-addressed."""
         _need(principal, "read")
         if limit < 1 or limit > 200:
-            raise HTTPException(
-                status_code=400, detail="limit must be between 1 and 200"
-            )
+            raise ApiRejection(400, "invalid_limit", "limit must be between 1 and 200")
         if offset < 0:
-            raise HTTPException(status_code=400, detail="offset must be non-negative")
+            raise ApiRejection(400, "invalid_offset", "offset must be non-negative")
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             return bundle["pages"].list_pages(
@@ -641,12 +629,12 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/api-insight", response_model=InsightResponse)
+    @app.get("/api-insight", response_model=ApiInsightResult)
     def api_insight(
         request: Request,
         view: Literal["usage", "related", "args", "common"],
         api: str | None = None,
-        apis: str | None = None,
+        apis: Annotated[list[str] | None, Query()] = None,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
@@ -666,20 +654,21 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
-                return envelope(
+                return insight_envelope(
+                    view,
                     bundle["mining"].api_insight(
                         params.view,
                         params.api,
-                        apis=_split_list(params.apis),
+                        apis=params.apis,
                         library=params.library,
                         version=params.version,
                         ecosystem=params.ecosystem,
                         limit=params.limit,
                         tenant_id=_tenant_of(principal),
-                    )
+                    ),
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
             if should_close:
                 try:
@@ -687,7 +676,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/pattern-insight", response_model=InsightResponse)
+    @app.get("/pattern-insight", response_model=PatternInsightResult)
     def pattern_insight(
         request: Request,
         view: Literal[
@@ -699,8 +688,8 @@ def build_web_app(
             "labels",
             "snippets",
         ],
-        pattern: str | None = None,
-        containing: str | None = None,
+        pattern: Annotated[list[str] | None, Query()] = None,
+        containing: Annotated[list[str] | None, Query()] = None,
         prefix: str | None = None,
         library: str | None = None,
         version: str | None = None,
@@ -726,11 +715,12 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
-                return envelope(
+                return insight_envelope(
+                    view,
                     bundle["mining"].pattern_insight(
                         params.view,
-                        pattern=_split_list(params.pattern),
-                        containing=_split_list(params.containing),
+                        pattern=params.pattern,
+                        containing=params.containing,
                         prefix=params.prefix,
                         library=params.library,
                         version=params.version,
@@ -739,10 +729,10 @@ def build_web_app(
                         per_file_limit=params.per_file_limit,
                         dedup=params.dedup,
                         tenant_id=_tenant_of(principal),
-                    )
+                    ),
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
             if should_close:
                 try:
@@ -750,12 +740,12 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/symbol-insight", response_model=InsightResponse)
+    @app.get("/symbol-insight", response_model=SymbolInsightResult)
     def symbol_insight(
         request: Request,
         view: Literal["detail", "file", "children", "signature"],
         api: str | None = None,
-        apis: str | None = None,
+        apis: Annotated[list[str] | None, Query()] = None,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
@@ -777,21 +767,22 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
-                return envelope(
+                return insight_envelope(
+                    view,
                     bundle["mining"].symbol_insight(
                         params.view,
                         params.api,
-                        apis=_split_list(params.apis),
+                        apis=params.apis,
                         library=params.library,
                         version=params.version,
                         ecosystem=params.ecosystem,
                         limit=params.limit,
                         offset=params.offset,
                         tenant_id=_tenant_of(principal),
-                    )
+                    ),
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
             if should_close:
                 try:
@@ -799,7 +790,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/call-insight", response_model=InsightResponse)
+    @app.get("/call-insight", response_model=CallInsightResult)
     def call_insight(
         request: Request,
         view: Literal["callee", "caller", "file"],
@@ -810,7 +801,7 @@ def build_web_app(
         limit: int | None = None,
         offset: int = 0,
         include_ambiguous: bool = False,
-        resolve_kinds: str | None = None,
+        resolve_kinds: Annotated[list[str] | None, Query()] = None,
         min_args: int | None = None,
         max_args: int | None = None,
         principal=Depends(_guard),
@@ -832,7 +823,8 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
-                return envelope(
+                return insight_envelope(
+                    view,
                     bundle["mining"].call_insight(
                         params.view,
                         params.api,
@@ -842,14 +834,14 @@ def build_web_app(
                         limit=params.limit,
                         offset=params.offset,
                         include_ambiguous=params.include_ambiguous,
-                        resolve_kinds=_split_list(params.resolve_kinds),
+                        resolve_kinds=params.resolve_kinds,
                         min_args=params.min_args,
                         max_args=params.max_args,
                         tenant_id=_tenant_of(principal),
-                    )
+                    ),
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
             if should_close:
                 try:
@@ -857,7 +849,7 @@ def build_web_app(
                 except Exception:  # noqa: BLE001, S110
                     pass
 
-    @app.get("/import-insight", response_model=InsightResponse)
+    @app.get("/import-insight", response_model=ImportInsightResult)
     def import_insight(
         request: Request,
         view: Literal["importers", "imports"],
@@ -882,7 +874,8 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
-                return envelope(
+                return insight_envelope(
+                    view,
                     bundle["mining"].import_insight(
                         params.view,
                         params.api,
@@ -892,10 +885,10 @@ def build_web_app(
                         limit=params.limit,
                         offset=params.offset,
                         tenant_id=_tenant_of(principal),
-                    )
+                    ),
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
             if should_close:
                 try:
@@ -922,7 +915,7 @@ def build_web_app(
                     tenant_id=_tenant_of(principal),
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             return envelope(items)
         finally:
             if should_close:
@@ -951,8 +944,8 @@ def build_web_app(
             except ValueError as exc:
                 text = str(exc)
                 if "cannot transition" in text or "cannot reopen" in text:
-                    raise HTTPException(status_code=409, detail=text) from exc
-                raise HTTPException(status_code=400, detail=text) from exc
+                    raise ApiRejection(409, "review_conflict", text) from exc
+                raise ApiRejection(400, "invalid_argument", text) from exc
             write_audit(
                 rc,
                 tenant_id=_tenant_of(principal),
@@ -1003,7 +996,7 @@ def build_web_app(
     @app.get("/index-requests", response_model=IndexRequestResponse)
     def index_request_list(
         request: Request,
-        status: str | None = None,
+        status: IndexRequestStatus | None = None,
         limit: int = 50,
         principal=Depends(_guard),
     ) -> dict[str, Any]:
@@ -1194,7 +1187,7 @@ def build_web_app(
                         getattr(getattr(request, "state", None), "request_id", "")
                     ),
                 )
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             mgr = bundle["jobs"]
             job_id = start_scrape_job(
                 mgr,
@@ -1234,7 +1227,7 @@ def build_web_app(
         from libref.services.ops.audit import write_audit as _wa
 
         if body.scope is not None and not isinstance(body.scope, dict):
-            raise HTTPException(status_code=400, detail="scope must be an object")
+            raise ApiRejection(400, "invalid_scope", "scope must be an object")
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
@@ -1253,7 +1246,7 @@ def build_web_app(
                     )
                 except Exception:  # noqa: BLE001, S110
                     pass
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             try:
                 probe = await probe_docs_async(
                     rc,
@@ -1266,7 +1259,7 @@ def build_web_app(
                     prefilter=body.prefilter,
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             return probe.model_dump()
         finally:
             if should_close:
@@ -1284,15 +1277,15 @@ def build_web_app(
         if body.only_files is not None and (
             not body.only_files or any(not item.strip() for item in body.only_files)
         ):
-            raise HTTPException(
-                status_code=400, detail="only_files must be non-empty strings"
+            raise ApiRejection(
+                400, "invalid_argument", "only_files must be non-empty strings"
             )
         if body.exclude_patterns is not None and (
             not body.exclude_patterns
             or any(not item.strip() for item in body.exclude_patterns)
         ):
-            raise HTTPException(
-                status_code=400, detail="exclude_patterns must be non-empty strings"
+            raise ApiRejection(
+                400, "invalid_argument", "exclude_patterns must be non-empty strings"
             )
         _need(principal, "read")
         rc, should_close, est, bundle = _req_bundle(request, principal)
@@ -1311,7 +1304,7 @@ def build_web_app(
                     allow_local=False,
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             return probe.model_dump()
         finally:
             if should_close:
@@ -1334,7 +1327,7 @@ def build_web_app(
             mgr = bundle["jobs"]
             out = mgr.show(params.job_id, params.limit, tenant_id=_tenant_of(principal))
             if "error" in out and "id" not in out:
-                raise HTTPException(status_code=404, detail="job not found")
+                raise ApiRejection(404, "job_not_found", "job not found")
             return out
         finally:
             if should_close:
@@ -1353,7 +1346,7 @@ def build_web_app(
             mgr = bundle["jobs"]
             out = mgr.show(job_id, tenant_id=_tenant_of(principal))
             if "error" in out and "id" not in out:
-                raise HTTPException(status_code=404, detail="job not found")
+                raise ApiRejection(404, "job_not_found", "job not found")
             return out
         finally:
             if should_close:
@@ -1394,10 +1387,10 @@ def build_web_app(
                     params.include_prerelease,
                 )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         except RegistryError as exc:
             if exc.kind in ("no_docs", "no_repo"):
-                raise HTTPException(status_code=404, detail=str(exc)) from exc
+                raise ApiRejection(404, "not_found", str(exc)) from exc
             raise ApiRejection(502, "upstream_unavailable", str(exc)) from exc
         return resolution.model_dump()
 
@@ -1408,15 +1401,13 @@ def build_web_app(
         _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         if not query.strip():
-            raise HTTPException(status_code=400, detail="query is empty")
+            raise ApiRejection(400, "invalid_argument", "query is empty")
         if limit < 1 or limit > 100:
-            raise HTTPException(
-                status_code=400, detail="limit must be between 1 and 100"
-            )
+            raise ApiRejection(400, "invalid_limit", "limit must be between 1 and 100")
         try:
             items = await discovery.search_web_async(query, limit)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         except RegistryError as exc:
             raise ApiRejection(
                 502, "upstream_unavailable", f"{exc.kind}: {exc}"
@@ -1430,15 +1421,13 @@ def build_web_app(
         _: None = Depends(_read_guard),
     ) -> dict[str, Any]:
         if not query.strip():
-            raise HTTPException(status_code=400, detail="query is empty")
+            raise ApiRejection(400, "invalid_argument", "query is empty")
         if limit < 1 or limit > 100:
-            raise HTTPException(
-                status_code=400, detail="limit must be between 1 and 100"
-            )
+            raise ApiRejection(400, "invalid_limit", "limit must be between 1 and 100")
         try:
             items = await discovery.search_github_async(query, limit)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         except RegistryError as exc:
             raise ApiRejection(
                 502, "upstream_unavailable", f"{exc.kind}: {exc}"
@@ -1457,9 +1446,9 @@ def build_web_app(
         from libref.services.code.code_ingest import list_repo_dependencies
 
         if not library.strip():
-            raise HTTPException(status_code=400, detail="library is empty")
+            raise ApiRejection(400, "invalid_argument", "library is empty")
         if not version.strip():
-            raise HTTPException(status_code=400, detail="version is empty")
+            raise ApiRejection(400, "invalid_argument", "version is empty")
         _need(principal, "read")
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
@@ -1477,8 +1466,8 @@ def build_web_app(
                     try:
                         _rvid(rc, str(_ten), library, version, ecosystem)
                     except ValueError:
-                        raise HTTPException(
-                            status_code=404, detail="page not found"
+                        raise ApiRejection(
+                            404, "page_not_found", "page not found"
                         ) from None
                 rows = list_repo_dependencies(
                     rc,
@@ -1491,8 +1480,8 @@ def build_web_app(
             except ValueError as exc:
                 # preserve 404 for tenant-miss vs 400 for bad input
                 if "unknown" in str(exc).lower() or "not found" in str(exc).lower():
-                    raise HTTPException(status_code=404, detail=str(exc)) from exc
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                    raise ApiRejection(404, "not_found", str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             return envelope(rows)
         finally:
             if should_close:
@@ -1558,7 +1547,7 @@ def build_web_app(
                     ),
                 }
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
             if should_close:
                 try:
@@ -1585,7 +1574,7 @@ def build_web_app(
                     tenant_id=_tenant_of(principal),
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
             if should_close:
                 try:
@@ -1662,7 +1651,7 @@ def build_web_app(
                 body=body.body,
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         write_audit(
             rc,
             tenant_id=_tenant_of(principal),
@@ -1682,7 +1671,7 @@ def build_web_app(
     def feedback_list(
         request: Request,
         limit: int = 50,
-        status: str | None = None,
+        status: FeedbackStatus | None = None,
         principal=Depends(_guard),
     ) -> dict[str, Any]:
         scope = require_any_scope(principal, "feedback:read", "feedback:read:own")
@@ -1721,7 +1710,7 @@ def build_web_app(
                 tenant_id=_tenant_of(principal),
             )
         except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise ApiRejection(404, "not_found", str(exc)) from exc
         write_audit(
             conn,
             tenant_id=_tenant_of(principal),
@@ -1739,13 +1728,6 @@ def build_web_app(
         principal=Depends(_guard),
     ) -> dict[str, Any]:
         _need(principal, "jobs:write")
-        from libref.services.ops.index_requests import INDEX_JOB_KINDS
-
-        if body.kind in INDEX_JOB_KINDS:
-            raise HTTPException(
-                status_code=400,
-                detail="indexing jobs must be submitted through index requests",
-            )
         _quota_gate(request, principal, "job_submissions")
         from libref.services.ops.audit import write_audit
 
@@ -1753,7 +1735,7 @@ def build_web_app(
         mgr = bundle["jobs"]
         job_id = mgr.submit(
             body.kind,
-            body.params,
+            body.params.model_dump(exclude_none=True),
             tenant_id=_write_tenant_of(principal),
             principal_id=_principal_id(principal),
         )
@@ -1787,13 +1769,14 @@ def build_web_app(
         try:
             job = mgr.get(job_id)
             if job is not None and job.kind in INDEX_JOB_KINDS:
-                raise HTTPException(
-                    status_code=400,
-                    detail="indexing jobs must be cancelled through index requests",
+                raise ApiRejection(
+                    400,
+                    "invalid_argument",
+                    "indexing jobs must be cancelled through index requests",
                 )
             mgr.cancel(job_id, tenant_id=_tenant_of(principal))
         except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise ApiRejection(404, "not_found", str(exc)) from exc
         write_audit(
             rc,
             tenant_id=_tenant_of(principal),
@@ -1862,10 +1845,10 @@ def build_web_app(
                 "principal_id": r[1],
                 "key_prefix": str(r[2]),
                 "scopes": _scope_list(r[3]),
-                "expires_at": _iso_time(r[4]),
-                "revoked_at": _iso_time(r[5]),
-                "last_used_at": _iso_time(r[6]),
-                "created_at": _iso_time(r[7]),
+                "expires_at": iso_utc(r[4]),
+                "revoked_at": iso_utc(r[5]),
+                "last_used_at": iso_utc(r[6]),
+                "created_at": iso_utc(r[7]),
             }
             for r in rows
         ]
@@ -1898,10 +1881,10 @@ def build_web_app(
                 settings=_eff_settings(request),
                 principal_id=pid,
                 scopes=list(body.scopes),
-                expires_at=body.expires_at,
+                expires_at=epoch_utc(body.expires_at),
             )
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         # The platform role is exempt from separation of duties, so granting it
         # deserves its own audit action rather than blending in with tenant keys.
         action = (
@@ -1937,7 +1920,7 @@ def build_web_app(
                 result="denied",
                 request_id=str(getattr(request.state, "request_id", "")),
             )
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise ApiRejection(404, "not_found", str(exc)) from exc
         write_audit(
             conn,
             tenant_id=_tenant_of(principal),
@@ -1961,7 +1944,7 @@ def build_web_app(
                 conn, caller=principal, principal_id=principal_id
             )
         except ValueError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+            raise ApiRejection(404, "not_found", str(exc)) from exc
         write_audit(
             conn,
             tenant_id=_tenant_of(principal),
@@ -2004,20 +1987,22 @@ def build_web_app(
 
         target = (body.tenant_id or "").strip() or _write_tenant_of(principal)
         if not principal.can_administer(target):
-            raise HTTPException(status_code=403, detail="forbidden: target tenant")
+            raise ApiRejection(403, "forbidden", "forbidden: target tenant")
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             if body.principal_id is not None:
                 owner = principal_tenant(rc, body.principal_id)
                 if owner is None:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"unknown principal: {body.principal_id}",
+                    raise ApiRejection(
+                        400,
+                        "invalid_argument",
+                        f"unknown principal: {body.principal_id}",
                     )
                 if owner != target:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="principal does not belong to the target tenant",
+                    raise ApiRejection(
+                        400,
+                        "invalid_argument",
+                        "principal does not belong to the target tenant",
                     )
             try:
                 quota.set_policy(
@@ -2029,7 +2014,7 @@ def build_web_app(
                     principal_id=body.principal_id,
                 )
             except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             quota.invalidate_policy_cache()
             write_audit(
                 rc,
@@ -2070,8 +2055,8 @@ def build_web_app(
                 result="denied",
                 request_id=str(getattr(request.state, "request_id", "")),
             )
-            raise HTTPException(
-                status_code=400, detail=f"config refresh failed: {exc}"
+            raise ApiRejection(
+                400, "config_refresh_failed", f"config refresh failed: {exc}"
             ) from exc
         new_fp = settings_fingerprint(fresh)
         try:
@@ -2091,8 +2076,8 @@ def build_web_app(
                 result="failed",
                 request_id=str(getattr(request.state, "request_id", "")),
             )
-            raise HTTPException(
-                status_code=500, detail=f"config rebuild failed: {exc}"
+            raise ApiRejection(
+                500, "config_refresh_failed", f"config rebuild failed: {exc}"
             ) from exc
         write_audit(
             conn,

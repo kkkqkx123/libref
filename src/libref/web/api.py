@@ -2,11 +2,56 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from libref.services.infra.jobs import JobKind
+
 JobStatus = Literal["pending", "running", "done", "failed"]
+IsoDateTime = Annotated[str, Field(json_schema_extra={"format": "date-time"})]
+KnownErrorCode = Literal[
+    "unauthorized",
+    "forbidden",
+    "missing_scope",
+    "origin_forbidden",
+    "not_found",
+    "page_not_found",
+    "job_not_found",
+    "quota_exceeded",
+    "review_conflict",
+    "invalid_limit",
+    "invalid_offset",
+    "invalid_scope",
+    "invalid_ecosystem",
+    "invalid_argument",
+    "chat_disabled",
+    "upstream_unavailable",
+    "unavailable",
+    "index_request_conflict",
+    "config_refresh_failed",
+]
+ALL_CODES: tuple[KnownErrorCode, ...] = (
+    "unauthorized",
+    "forbidden",
+    "missing_scope",
+    "origin_forbidden",
+    "not_found",
+    "page_not_found",
+    "job_not_found",
+    "quota_exceeded",
+    "review_conflict",
+    "invalid_limit",
+    "invalid_offset",
+    "invalid_scope",
+    "invalid_ecosystem",
+    "invalid_argument",
+    "chat_disabled",
+    "upstream_unavailable",
+    "unavailable",
+    "index_request_conflict",
+    "config_refresh_failed",
+)
 IndexRequestStatus = Literal[
     "pending",
     "approved",
@@ -20,9 +65,9 @@ IndexRequestStatus = Literal[
 ReviewStatus = Literal["pending", "approved", "conflict"]
 FeedbackStatus = Literal["open", "acknowledged", "resolved"]
 ConfidenceLevel = Literal["EXTRACTED", "INFERRED", "AMBIGUOUS"]
-type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[
-    str, JsonValue
-]
+type JsonValue = (
+    None | bool | int | float | str | list[JsonValue] | dict[str, JsonValue]
+)
 
 
 class SearchQuery(BaseModel):
@@ -66,7 +111,7 @@ class ReadQuery(BaseModel):
 class ApiInsightQuery(BaseModel):
     view: Literal["usage", "related", "args", "common"]
     api: str | None = None
-    apis: str | None = None
+    apis: list[str] | None = None
     library: str | None = None
     version: str | None = None
     ecosystem: str | None = None
@@ -83,8 +128,8 @@ class PatternInsightQuery(BaseModel):
         "labels",
         "snippets",
     ]
-    pattern: str | None = None
-    containing: str | None = None
+    pattern: list[str] | None = None
+    containing: list[str] | None = None
     prefix: str | None = None
     library: str | None = None
     version: str | None = None
@@ -97,7 +142,7 @@ class PatternInsightQuery(BaseModel):
 class SymbolInsightQuery(BaseModel):
     view: Literal["detail", "file", "children", "signature"]
     api: str | None = None
-    apis: str | None = None
+    apis: list[str] | None = None
     library: str | None = None
     version: str | None = None
     ecosystem: str | None = None
@@ -114,7 +159,7 @@ class CallInsightQuery(BaseModel):
     limit: int | None = Field(default=None, ge=1, le=500)
     offset: int = Field(default=0, ge=0)
     include_ambiguous: bool = False
-    resolve_kinds: str | None = None
+    resolve_kinds: list[str] | None = None
     min_args: int | None = Field(default=None, ge=0)
     max_args: int | None = Field(default=None, ge=0)
 
@@ -223,17 +268,17 @@ class ContractModel(BaseModel):
 
 
 class QuotaErrorDetail(BaseModel):
-    error: str
+    error: KnownErrorCode
     resource: str
-    reset_at: float | str
+    reset_at: IsoDateTime
 
 
 class ErrorResponse(BaseModel):
-    error: str
+    error: KnownErrorCode
     detail: str | QuotaErrorDetail
     request_id: str = ""
     resource: str | None = None
-    reset_at: float | str | None = None
+    reset_at: IsoDateTime | None = None
 
 
 class ValidationErrorModel(BaseModel):
@@ -268,9 +313,41 @@ class FeedbackResolve(BaseModel):
     pass
 
 
-class JobCreate(BaseModel):
-    kind: str = Field(min_length=1)
-    params: dict[str, JsonValue] = Field(default_factory=dict)
+class MineJobParams(ContractModel):
+    library: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    ecosystem: str | None = None
+    minsup: int | None = Field(default=None, ge=1)
+    topn: int | None = Field(default=None, ge=1)
+    maxlen: int | None = Field(default=None, ge=1)
+    minlen: int | None = Field(default=None, ge=1)
+    include_ambiguous: bool = False
+    cluster_threshold: float | None = None
+    cluster_min_size: int | None = Field(default=None, ge=1)
+    resolve_kinds: list[str] | None = None
+    min_args: int | None = Field(default=None, ge=0)
+    max_args: int | None = Field(default=None, ge=0)
+
+
+class InduceJobParams(ContractModel):
+    library: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    ecosystem: str | None = None
+    topn: int | None = Field(default=None, ge=1)
+    include_ambiguous: bool = False
+
+
+class MineJobCreate(ContractModel):
+    kind: Literal["mine_patterns"]
+    params: MineJobParams
+
+
+class InduceJobCreate(ContractModel):
+    kind: Literal["induce_labels"]
+    params: InduceJobParams
+
+
+JobCreate = Annotated[MineJobCreate | InduceJobCreate, Field(discriminator="kind")]
 
 
 class KeyCreate(BaseModel):
@@ -281,7 +358,7 @@ class KeyCreate(BaseModel):
     # every role must be one the caller already holds (platform role exempt).
     roles: list[str] = Field(default_factory=list)
     scopes: list[str] = Field(default_factory=list)
-    expires_at: float | None = None
+    expires_at: IsoDateTime | None = None
 
 
 class QuotaPolicyUpsert(BaseModel):
@@ -340,7 +417,7 @@ class AnswerResponse(ContractModel):
     degraded: bool
     reasons: list[str]
     model: str
-    confidence: str
+    confidence: Literal["high", "low"]
     cited_ids: list[int]
 
 
@@ -419,7 +496,7 @@ class LibraryRow(ContractModel):
     docs_url: str | None
     repo_url: str | None
     resolved_from: str | None
-    resolved_at: str | None
+    resolved_at: IsoDateTime | None
     versions: int
 
 
@@ -428,7 +505,7 @@ class VersionRow(ContractModel):
     version: str
     registry_confirmed: bool
     prerelease: bool
-    created_at: str | None
+    created_at: IsoDateTime | None
     ecosystem: str
     pages: int
 
@@ -444,7 +521,7 @@ class VersionResponse(Envelope[VersionRow]):
 class ReviewItem(ContractModel):
     entity_id: int
     status: ReviewStatus
-    updated_at: str | None
+    updated_at: IsoDateTime | None
     callee: str | None
     caller_file: str | None
     caller: str | None
@@ -467,6 +544,28 @@ class OkIdResponse(ContractModel):
     ok: bool
 
 
+class IndexRequestParams(ContractModel):
+    kind: Literal["repo", "docs"] | None = None
+    library: str = ""
+    version: str = ""
+    ecosystem: str | None = None
+    source: str | None = None
+    start_url: str | None = None
+    max_pages: int | None = None
+    prefilter: bool = False
+    scope: dict[str, JsonValue] | None = None
+    update: bool = False
+    fresh: bool = False
+    include_prerelease: bool = False
+    subdir: str | None = None
+    only_files: list[str] | None = None
+    exclude_patterns: list[str] | None = None
+    max_files: int | None = None
+    resolved_from: str | None = None
+    registry_confirmed: bool | None = None
+    index_request_id: int | None = None
+
+
 class IndexRequestItem(ContractModel):
     id: int
     tenant_id: str
@@ -475,15 +574,15 @@ class IndexRequestItem(ContractModel):
     kind: Literal["repo", "docs"]
     target: str
     source: str
-    params: dict[str, JsonValue]
+    params: IndexRequestParams
     status: IndexRequestStatus
     dedupe_key: str
     approved_by: int | None
     reject_reason: str
     job_id: int | None
     error: str
-    created_at: str
-    updated_at: str
+    created_at: IsoDateTime
+    updated_at: IsoDateTime
 
 
 class IndexRequestResponse(Envelope[IndexRequestItem]):
@@ -510,8 +609,219 @@ class DiscoveryResponse(Envelope[DiscoveryCandidate]):
     pass
 
 
-class InsightResponse(Envelope[dict[str, JsonValue]]):
-    pass
+class ApiRankRow(ContractModel):
+    api: str
+    calls: int
+    scopes: int
+
+
+class ApiArgRow(ContractModel):
+    args: JsonValue
+    count: int
+
+
+class PatternRow(ContractModel):
+    pattern: list[str]
+    support: int
+
+
+class EvidenceCall(ContractModel):
+    callee: str
+    args: JsonValue
+    line_start: int | None
+    line_end: int | None
+    confidence: str | None
+    resolve_kind: str | None
+    callee_signature: str | None = None
+    callee_params: list[JsonValue] | None = None
+    callee_return_type: str | None = None
+
+
+class EvidenceRow(ContractModel):
+    library: str
+    version: str
+    caller_file: str
+    caller: str | None
+    calls: list[EvidenceCall]
+    matched: list[int]
+    rendered: str
+    snippet: JsonValue | None = None
+    caller_signature: str | None = None
+    caller_params: list[JsonValue] | None = None
+
+
+class FeatureNodeRow(ContractModel):
+    path: str
+    parent: str | None
+    depth: int
+    kind: str
+    calls: int
+    scopes: int
+
+
+class ClusterRow(ContractModel):
+    cluster_id: int
+    members: list[str]
+    size: int
+    representative: str | None
+
+
+class PatternHealthRow(ContractModel):
+    patterns: int
+    total_support: int
+    reusability: float
+    diversity: float
+    clusters: int
+    resolve_kinds: dict[str, int]
+    confidence: dict[str, int]
+    unresolved_rate: float
+    caller_link_rate: float
+    signature_missing_rate: float
+
+
+class PatternLabelRow(ContractModel):
+    pattern: list[str]
+    pattern_hash: str
+    model: str | None
+    prompt_version: str | None
+    name: str | None
+    summary: str | None
+    category_path: list[str]
+    workflow: str | None
+    related_apis: list[str]
+
+
+class PatternSnippetRow(ContractModel):
+    caller_file: str | None
+    caller: str | None
+    snippet: JsonValue | None
+    rendered: str | None
+
+
+class SymbolRow(ContractModel):
+    qualified_name: str
+    kind: str
+    parent: str | None
+    signature: str
+    params: list[JsonValue]
+    bases: list[JsonValue]
+    depth: int
+    file: str
+    line_start: int
+    line_end: int
+    param_types: list[JsonValue]
+    return_type: str
+    has_doc: bool
+
+
+class SignatureRow(ContractModel):
+    api: str
+    kind: str
+    signature: str
+    params: list[JsonValue] | None = None
+    return_type: str | None = None
+    short: str
+
+
+class CallRow(ContractModel):
+    callee: str
+    caller: str | None
+    caller_file: str
+    line_start: int
+    line_end: int
+    start_byte: int
+    end_byte: int
+    confidence: str
+    resolve_kind: str
+    receiver: str | None
+    func: str
+    args: JsonValue
+    argument_count: int
+    call_order: int
+    callee_entity_id: int | None
+    caller_entity_id: int | None
+
+
+class ImportEdgeRow(ContractModel):
+    importer_file: str
+    alias: str
+    target: str
+    kind: str
+
+
+class InsightEnvelope[ItemT](Envelope[ItemT]):
+    view: str
+
+
+class ApiRankInsightResponse(InsightEnvelope[ApiRankRow]):
+    view: Literal["usage", "related", "common"]
+
+
+class ApiArgInsightResponse(InsightEnvelope[ApiArgRow]):
+    view: Literal["args"]
+
+
+class PatternListInsightResponse(InsightEnvelope[PatternRow]):
+    view: Literal["patterns"]
+
+
+class PatternEvidenceInsightResponse(InsightEnvelope[EvidenceRow]):
+    view: Literal["evidence"]
+
+
+class PatternTreeInsightResponse(InsightEnvelope[FeatureNodeRow]):
+    view: Literal["tree"]
+
+
+class PatternClusterInsightResponse(InsightEnvelope[ClusterRow]):
+    view: Literal["clusters"]
+
+
+class PatternHealthInsightResponse(InsightEnvelope[PatternHealthRow]):
+    view: Literal["health"]
+
+
+class PatternLabelInsightResponse(InsightEnvelope[PatternLabelRow]):
+    view: Literal["labels"]
+
+
+class PatternSnippetInsightResponse(InsightEnvelope[PatternSnippetRow]):
+    view: Literal["snippets"]
+
+
+class SymbolInsightResponse(InsightEnvelope[SymbolRow]):
+    view: Literal["detail", "file", "children"]
+
+
+class SignatureInsightResponse(InsightEnvelope[SignatureRow]):
+    view: Literal["signature"]
+
+
+class CallInsightResponse(InsightEnvelope[CallRow]):
+    view: Literal["callee", "caller", "file"]
+
+
+class ImportInsightResponse(InsightEnvelope[ImportEdgeRow]):
+    view: Literal["importers", "imports"]
+
+
+ApiInsightResult = ApiRankInsightResponse | ApiArgInsightResponse
+PatternInsightResult = (
+    PatternListInsightResponse
+    | PatternEvidenceInsightResponse
+    | PatternTreeInsightResponse
+    | PatternClusterInsightResponse
+    | PatternHealthInsightResponse
+    | PatternLabelInsightResponse
+    | PatternSnippetInsightResponse
+)
+SymbolInsightResult = SymbolInsightResponse | SignatureInsightResponse
+CallInsightResult = CallInsightResponse
+ImportInsightResult = ImportInsightResponse
+
+
+def insight_envelope(view: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"view": view, **envelope(items)}
 
 
 class PrefixGroup(ContractModel):
@@ -598,9 +908,9 @@ class RepoProbeResponse(ContractModel):
 
 class JobSummary(ContractModel):
     id: int
-    kind: str
+    kind: JobKind
     status: JobStatus
-    finished_at: str | None
+    finished_at: IsoDateTime | None
     error: str | None
 
 
@@ -608,14 +918,33 @@ class JobListResponse(ContractModel):
     jobs: list[JobSummary]
 
 
-class JobDetail(ContractModel):
+class JobDetailBase(ContractModel):
     id: int
-    kind: str
     status: JobStatus
     error: str | None
     result: JsonValue | None = None
-    params: dict[str, JsonValue] = Field(default_factory=dict)
-    finished_at: str | None
+    finished_at: IsoDateTime | None
+
+
+class MineJobDetail(JobDetailBase):
+    kind: Literal["mine_patterns"]
+    params: MineJobParams
+
+
+class InduceJobDetail(JobDetailBase):
+    kind: Literal["induce_labels"]
+    params: InduceJobParams
+
+
+class IndexJobDetail(JobDetailBase):
+    kind: Literal["scrape_docs", "index_repo"]
+    params: IndexRequestParams
+
+
+JobDetail = Annotated[
+    MineJobDetail | InduceJobDetail | IndexJobDetail,
+    Field(discriminator="kind"),
+]
 
 
 class ResolutionResponse(ContractModel):
@@ -696,9 +1025,9 @@ class FeedbackItem(ContractModel):
     kind: str
     body: str
     status: FeedbackStatus
-    created_at: str
+    created_at: IsoDateTime
     resolved_by: int | None
-    resolved_at: str | None
+    resolved_at: IsoDateTime | None
 
 
 class FeedbackResponse(Envelope[FeedbackItem]):
@@ -710,10 +1039,10 @@ class ApiKeyRow(ContractModel):
     principal_id: int | None
     key_prefix: str
     scopes: list[str]
-    expires_at: str | None
-    revoked_at: str | None
-    last_used_at: str | None
-    created_at: str | None
+    expires_at: IsoDateTime | None
+    revoked_at: IsoDateTime | None
+    last_used_at: IsoDateTime | None
+    created_at: IsoDateTime | None
 
 
 class ApiKeyResponse(Envelope[ApiKeyRow]):
@@ -752,7 +1081,7 @@ class QuotaPolicy(ContractModel):
     resource: str
     limit_value: int
     window_type: Literal["hour", "day", "month"]
-    updated_at: str
+    updated_at: IsoDateTime
 
 
 class QuotaPolicyResponse(Envelope[QuotaPolicy]):

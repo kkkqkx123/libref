@@ -18,14 +18,16 @@ from libref.services.infra.auth import (
     current_principal,
     write_tenant,
 )
-from libref.web.errors import error_body
+from libref.web.errors import KnownErrorCode, error_body, known_error_code
 
 
 def _public_path(path: str) -> bool:
     return path in ("/health", "/readyz", "/") or path.startswith("/assets/")
 
 
-def _reject(status: int, detail: Any, code: str, request_id: str) -> JSONResponse:
+def _reject(
+    status: int, detail: Any, code: KnownErrorCode, request_id: str
+) -> JSONResponse:
     """Single rejection shape: same builder as route-level ``HTTPException``."""
     return JSONResponse(
         error_body(status, detail, request_id, code=code),
@@ -195,7 +197,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
         except AuthDenied as exc:
             self._audit_denial(request, exc.code)
-            return _reject(exc.status, exc.detail, exc.code, request_id)
+            return _reject(
+                exc.status, exc.detail, known_error_code(exc.code), request_id
+            )
         finally:
             self._close(conn, owned)
         request.state.principal = principal
@@ -219,7 +223,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 principal=principal,
                 target=exc.detail,
             )
-            response = _reject(exc.status, exc.detail, exc.code, request_id)
+            response = _reject(
+                exc.status, exc.detail, known_error_code(exc.code), request_id
+            )
         status = int(getattr(response, "status_code", 0) or 0)
         observe.status_var.set(status)
         observe.duration_var.set(int((time.monotonic() - started) * 1000))

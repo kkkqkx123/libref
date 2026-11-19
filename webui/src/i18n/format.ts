@@ -1,29 +1,10 @@
 // Locale-aware number, date and relative-time formatting. Backend timestamps
-// arrive either as ISO strings or as naive UTC text (`YYYY-MM-DD HH:MM:SS`).
+// are ISO 8601 UTC strings; no unit or timezone guessing remains here.
 import { computed } from 'vue';
 import { locale } from './index';
 
-const NAIVE_UTC = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/;
-
-export function parseTimestamp(value: string | number | null | undefined): Date | null {
-  if (value === null || value === undefined || value === '') return null;
-  if (typeof value === 'number') {
-    return new Date(value < 1e12 ? value * 1000 : value);
-  }
-  const match = NAIVE_UTC.exec(value.trim());
-  if (match) {
-    const [, year, month, day, hour, minute, second] = match;
-    return new Date(
-      Date.UTC(
-        Number(year),
-        Number(month) - 1,
-        Number(day),
-        Number(hour),
-        Number(minute),
-        Number(second),
-      ),
-    );
-  }
+export function parseTimestamp(value: string | null | undefined): Date | null {
+  if (!value) return null;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
@@ -63,14 +44,14 @@ export function useFormatters() {
   return {
     number: (value: number): string => numberFormat.value.format(value),
     percent: (value: number): string => percentFormat.value.format(value),
-    dateTime: (value: string | number | null | undefined): string => {
+    dateTime: (value: string | null | undefined): string => {
       const date = parseTimestamp(value);
-      if (!date) return typeof value === 'string' ? value : '';
+      if (!date) return value || '';
       return dateTimeFormat.value.format(date);
     },
-    relative: (value: string | number | null | undefined): string => {
+    relative: (value: string | null | undefined): string => {
       const date = parseTimestamp(value);
-      if (!date) return typeof value === 'string' ? value : '';
+      if (!date) return value || '';
       const [amount, unit] = relativeParts(date, new Date());
       return relativeFormat.value.format(amount, unit);
     },

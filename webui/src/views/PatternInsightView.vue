@@ -66,7 +66,13 @@ import { ElButton, ElCheckbox, ElForm, ElFormItem, ElInput, ElInputNumber, ElRad
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { Row } from '../api/types';
+import {
+  field,
+  type JsonRow,
+  type MiningHealthResponse,
+  type PatternInsightRow,
+  type Row,
+} from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
 import EvidenceList from '../components/business/EvidenceList.vue';
 import EmptyState from '../components/common/EmptyState.vue';
@@ -109,8 +115,8 @@ const loading = ref(false);
 const loaded = ref(false);
 const error = ref('');
 const requestId = ref('');
-const rows = ref<Row[]>([]);
-const health = ref<Row | null>(null);
+const rows = ref<PatternInsightRow[]>([]);
+const health = ref<MiningHealthResponse | null>(null);
 const healthLoading = ref(false);
 
 const healthEntries = computed<KeyValueEntry[]>(() => {
@@ -150,8 +156,8 @@ async function load(): Promise<void> {
     const { data } = await api('/pattern-insight', {
       params: {
         view: view.value,
-        pattern: pattern.value.length > 0 ? pattern.value.join(',') : undefined,
-        containing: containing.value.length > 0 ? containing.value.join(',') : undefined,
+        pattern: pattern.value,
+        containing: containing.value,
         prefix: prefix.value || undefined,
         ...scopeParams(),
         limit: scopeStore.resultLimit,
@@ -170,16 +176,18 @@ async function load(): Promise<void> {
 }
 
 function forwardCalls(row: Row): void {
-  const api = row['callee_name'];
+  const calls = field(row, 'calls');
+  const first = Array.isArray(calls) && calls.length > 0 && calls[0] ? calls[0] : null;
+  const callee = first && typeof first === 'object' ? (first as JsonRow).callee : field(row, 'callee');
   void router.push({
     path: '/insights/calls',
-    query: { view: 'callee', api: typeof api === 'string' ? api : undefined },
+    query: { view: 'callee', api: typeof callee === 'string' ? callee : undefined },
   });
 }
 
 function forwardFeedback(row: Row): void {
-  const entityId = Number(row['entity_id']);
-  const pattern = String(row['pattern'] || '');
+  const entityId = Number(field(row, 'entity_id'));
+  const pattern = String(field(row, 'pattern') || '');
   void router.push({
     path: '/feedback',
     query: {

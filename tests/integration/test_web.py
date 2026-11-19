@@ -92,10 +92,55 @@ def test_health_and_search_and_read(tmp_path, monkeypatch) -> None:
         assert window.status_code == 200
         usage = client.get("/api-insight", params={"view": "usage"})
         assert usage.status_code == 200
+        assert usage.json()["view"] == "usage"
         tree = client.get("/pattern-insight", params={"view": "tree"})
         assert tree.status_code == 200
+        assert tree.json()["view"] == "tree"
         jobs = client.get("/jobs")
         assert jobs.status_code == 200
+    finally:
+        conn.close()
+
+
+def test_insight_rows_with_data(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    conn = _open(tmp_path)
+    try:
+        _seed(conn)
+        for uid, callee, line in (
+            ("uid-a", "alpha", 1),
+            ("uid-b", "beta", 2),
+        ):
+            conn.execute(
+                "INSERT INTO call_instances(call_uid, callee_name, args, repo,"
+                " caller_file, line_start, line_end, confidence, library_id, version_id)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (uid, callee, "[]", "repo", "src/a.py", line, line, "EXTRACTED", 1, 1),
+            )
+        conn.commit()
+        client = _client(conn, monkeypatch, tmp_path)
+
+        evidence = client.get(
+            "/pattern-insight",
+            params={"view": "evidence", "pattern": ["alpha", "beta"]},
+        )
+        assert evidence.status_code == 200
+        assert evidence.json()["items"][0]["calls"][0]["callee"] == "alpha"
+
+        snippets = client.get(
+            "/pattern-insight",
+            params={"view": "snippets", "pattern": ["alpha", "beta"]},
+        )
+        assert snippets.status_code == 200
+        assert snippets.json()["items"][0]["snippet"]
+
+        calls = client.get("/call-insight", params={"view": "callee", "api": "alpha"})
+        assert calls.status_code == 200
+        assert calls.json()["items"][0]["callee"] == "alpha"
+
+        args = client.get("/api-insight", params={"view": "args", "api": "alpha"})
+        assert args.status_code == 200
+        assert args.json()["items"][0]["count"] == 1
     finally:
         conn.close()
 

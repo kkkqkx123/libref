@@ -137,15 +137,19 @@ def test_generic_jobs_endpoint_cannot_bypass_approval(tmp_path, monkeypatch) -> 
     conn, settings, client = _setup(tmp_path, monkeypatch)
     try:
         _, admin = _key(conn, settings, "sys", ["sys_admin"])
-        for kind in ("scrape_docs", "index_repo"):
+        for kind in ("scrape_docs", "index_repo", "noop"):
             response = client.post(
                 "/jobs", json={"kind": kind, "params": {}}, headers=admin
             )
-            assert response.status_code == 400
-            assert response.json()["error"] == "invalid_argument"
+            assert response.status_code == 422
         assert (
             client.post(
-                "/jobs", json={"kind": "mine_patterns", "params": {}}, headers=admin
+                "/jobs",
+                json={
+                    "kind": "mine_patterns",
+                    "params": {"library": "docs", "version": "1.0"},
+                },
+                headers=admin,
             ).status_code
             == 200
         )

@@ -48,7 +48,7 @@ import { ElButton, ElForm, ElFormItem, ElInput, ElRadioButton, ElRadioGroup } fr
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { Row } from '../api/types';
+import { field, type Row, type SymbolInsightRow } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
@@ -74,7 +74,7 @@ const { sync } = useQuerySync();
 applyScopeFromQuery(route.query);
 
 function forwardCalls(row: Row): void {
-  const api = row['qualified_name'];
+  const api = field(row, 'qualified_name') || field(row, 'api');
   void router.push({
     path: '/insights/calls',
     query: { view: 'callee', api: typeof api === 'string' ? api : undefined },
@@ -92,13 +92,13 @@ const loading = ref(false);
 const loaded = ref(false);
 const error = ref('');
 const requestId = ref('');
-const rows = ref<Row[]>([]);
+const rows = ref<SymbolInsightRow[]>([]);
 
 async function load(): Promise<void> {
   sync({
     view: view.value,
     api: apiName.value.trim() || undefined,
-    apis: apis.value.length > 0 ? apis.value.join(',') : undefined,
+    apis: apis.value,
     limit: scopeStore.resultLimit,
     offset: offset.value,
     ...scopeSnapshot(),
@@ -110,7 +110,7 @@ async function load(): Promise<void> {
       params: {
         view: view.value,
         api: apiName.value.trim() || undefined,
-        apis: apis.value.length > 0 ? apis.value.join(',') : undefined,
+        apis: apis.value,
         ...scopeParams(),
         limit: scopeStore.resultLimit,
         offset: offset.value,

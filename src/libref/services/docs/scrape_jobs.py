@@ -6,9 +6,9 @@ import asyncio
 from typing import Any
 
 from libref.llm import EmbedFn
-from libref.services.infra.jobs import Job, JobManager
+from libref.services.infra.jobs import SCRAPE_DOCS_KIND, Job, JobManager
 
-SCRAPE_JOB_KIND = "scrape_docs"
+SCRAPE_JOB_KIND = SCRAPE_DOCS_KIND
 """Job kind name for scrape jobs in the job table."""
 
 

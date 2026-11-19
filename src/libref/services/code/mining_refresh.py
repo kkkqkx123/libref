@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-MINE_PATTERNS_JOB_KIND = "mine_patterns"
-INDUCE_LABELS_JOB_KIND = "induce_labels"
+from libref.services.infra.jobs import INDUCE_LABELS_KIND, MINE_PATTERNS_KIND
+
+MINE_PATTERNS_JOB_KIND = MINE_PATTERNS_KIND
+INDUCE_LABELS_JOB_KIND = INDUCE_LABELS_KIND
 
 DEFAULT_MINSUP = 2
 DEFAULT_MAXLEN = 10

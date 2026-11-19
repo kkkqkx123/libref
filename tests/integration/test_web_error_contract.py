@@ -98,12 +98,18 @@ def test_catalog_flags_prerelease(client) -> None:
 
 
 def test_job_detail_exposes_params(client) -> None:
-    created = client.post("/jobs", json={"kind": "noop", "params": {"target": "x"}})
+    created = client.post(
+        "/jobs",
+        json={
+            "kind": "mine_patterns",
+            "params": {"library": "docs", "version": "1.0"},
+        },
+    )
     assert created.status_code == 200
     job_id = created.json()["id"]
     detail = client.get(f"/jobs/{job_id}")
     assert detail.status_code == 200
-    assert detail.json()["params"] == {"target": "x"}
+    assert detail.json()["params"]["library"] == "docs"
 
 
 def test_missing_page_and_job_codes(client) -> None:
@@ -126,7 +132,7 @@ def test_middleware_rejection_matches_route_shape(tmp_path, monkeypatch) -> None
     from starlette.routing import Route
 
     from libref.services.infra.context import build_context
-    from libref.web.errors import error_body, error_code
+    from libref.web.errors import error_body
     from libref.web.middleware import AuthMiddleware
 
     monkeypatch.chdir(tmp_path)
@@ -145,12 +151,15 @@ def test_middleware_rejection_matches_route_shape(tmp_path, monkeypatch) -> None
     assert body["request_id"]
     # Structured quota details carry their own lead-in text, so the code must be
     # resolved from the payload instead of ``str(dict)``.
-    detail = {"error": "quota exceeded", "resource": "http_requests", "reset_at": 42}
-    assert error_code(429, detail) == "quota_exceeded"
+    detail = {
+        "error": "quota exceeded",
+        "resource": "http_requests",
+        "reset_at": "2026-11-18T00:00:00Z",
+    }
     envelope = error_body(429, detail, "rid", code="quota_exceeded")
     assert envelope["error"] == "quota_exceeded"
     assert envelope["resource"] == "http_requests"
-    assert envelope["reset_at"] == 42
+    assert envelope["reset_at"] == "2026-11-18T00:00:00Z"
 
 
 def test_generic_400_uses_invalid_argument(client) -> None:

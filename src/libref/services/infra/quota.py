@@ -15,6 +15,7 @@ from typing import Any
 
 from libref.db.contract import MetadataSession
 from libref.db.schema import QUOTA_RUNTIME_SQL
+from libref.services.infra.timestamps import iso_utc
 
 RESOURCES = frozenset(
     {
@@ -152,7 +153,7 @@ def list_policies(
             "resource": str(row[2]),
             "limit_value": int(row[3]),
             "window_type": str(row[4]),
-            "updated_at": str(row[5]),
+            "updated_at": iso_utc(row[5]),
         }
         for row in rows
     ]

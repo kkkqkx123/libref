@@ -14,12 +14,20 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Final, Literal
 
 from libref.db.contract import MetadataSession
 from libref.services.infra.tenant import GLOBAL_TENANT
+from libref.services.infra.timestamps import iso_utc
 
 logger = logging.getLogger(__name__)
+
+SCRAPE_DOCS_KIND: Final = "scrape_docs"
+INDEX_REPO_KIND: Final = "index_repo"
+MINE_PATTERNS_KIND: Final = "mine_patterns"
+INDUCE_LABELS_KIND: Final = "induce_labels"
+JobKind = Literal["scrape_docs", "index_repo", "mine_patterns", "induce_labels"]
+DirectJobKind = Literal["mine_patterns", "induce_labels"]
 
 
 def _table_columns(conn: MetadataSession, table: str) -> set[str]:
@@ -327,7 +335,7 @@ class JobManager:
                         "id": j.id,
                         "kind": j.kind,
                         "status": j.status,
-                        "finished_at": j.finished_at,
+                        "finished_at": iso_utc(j.finished_at),
                         "error": j.error,
                     }
                     for j in jobs
@@ -347,7 +355,7 @@ class JobManager:
             # Submission parameters: a failed job can only be re-submitted if the
             # caller sees what it was originally asked to do.
             "params": job.params,
-            "finished_at": job.finished_at,
+            "finished_at": iso_utc(job.finished_at),
         }
 
     def is_cancel_requested(self, job_id: int) -> bool:

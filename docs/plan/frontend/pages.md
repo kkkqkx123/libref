@@ -42,13 +42,13 @@
   - 用量排行（usage）：API 频次榜。
   - 相关推荐（related）：给定 API 的共现 API，需先输入 API 名。
   - 参数形态（args）：给定 API 的实参形状分布。
-  - 共同相关（common）：多个 API 的共同关联，支持逗号分隔多值输入。
+  - 共同相关（common）：多个 API 的共同关联，支持多值标签输入。
 - 缺必需参数时前端即时校验，不发请求；API 名支持从调用页与模式页跳转带入。
 
 ## 调用页
 
 - 三个视图：按被调方（callee）、按调用方（caller）、按文件（file）。
-- 过滤器：是否含模糊解析（include_ambiguous）、解析种类多选（resolve_kinds 逗号分隔）、
+- 过滤器：是否含模糊解析（include_ambiguous）、解析种类多选（resolve_kinds 重复查询参数）、
   实参数量上下界（min_args/max_args）、分页（limit/offset）。
 - 每条调用展示被调名、调用文件、调用者、行范围、置信标签（EXTRACTED/INFERRED/AMBIGUOUS），
   置信标签用颜色区分，模糊项默认折叠或置灰。
@@ -56,7 +56,7 @@
 ## 符号页与导入页
 
 - 符号页四个视图：详情（detail）、所在文件（file）、子符号（children）、签名（signature），
-  支持单 API 与多 API（apis 逗号分隔）输入及分页。
+  支持单 API 与多 API（apis 重复查询参数）输入及分页。
 - 导入页两个视图：谁导入了它（importers）、该文件导入了谁（imports）。
 - 符号详情与调用页双向跳转：符号可查调用，调用可查符号定义。
 
@@ -64,7 +64,7 @@
 
 - 七个视图：模式列表（patterns）、证据（evidence）、特征树（tree）、聚类（clusters）、
   健康度（health）、标签（labels）、片段（snippets）。
-- 筛选器：模式序列（pattern 逗号分隔）、包含（containing 逗号分隔）、前缀（prefix）、
+- 筛选器：模式序列（pattern 重复查询参数）、包含（containing 重复查询参数）、前缀（prefix）、
   按文件去重（dedup）、单文件上限（per_file_limit）、库版本限定与分页。
 - 证据视图展示来源实例引用（文件与行范围），支持跳转调用页核验。
 - 健康度视图与 `/mining-health` 合并展示：覆盖率、解析分布、质量率异常时标红。

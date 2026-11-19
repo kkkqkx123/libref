@@ -28,10 +28,11 @@ from libref.services.code.repo_source import (
     list_repo_dependencies,
     lookup_index_source_cached,
 )
+from libref.services.infra.jobs import INDEX_REPO_KIND
 
 logger = logging.getLogger(__name__)
 
-INDEX_REPO_JOB_KIND = "index_repo"
+INDEX_REPO_JOB_KIND = INDEX_REPO_KIND
 
 
 def _same_source(left: str | None, right: str | None) -> bool:

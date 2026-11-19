@@ -8,8 +8,8 @@
       show-overflow-tooltip
     >
       <template #default="scope">
-        <span :class="{ 'libref-mono': isTechnical(scope.row[column]) }">
-          {{ format(scope.row[column]) }}
+        <span :class="{ 'libref-mono': isTechnical(value(scope.row, column)) }">
+          {{ format(value(scope.row, column)) }}
         </span>
       </template>
     </el-table-column>
@@ -26,7 +26,7 @@
 <script setup lang="ts">
 import { ElButton, ElTable, ElTableColumn } from 'element-plus';
 import { computed } from 'vue';
-import type { JsonValue, Row } from '../../api/types';
+import { field, type JsonValue, type Row } from '../../api/types';
 import { messages } from '../../i18n';
 import { formatCell } from '../../utils/format';
 
@@ -48,6 +48,10 @@ const columns = computed(() => {
   }
   return names;
 });
+
+function value(row: Row, key: string): JsonValue {
+  return field(row, key);
+}
 
 function isTechnical(value: JsonValue): boolean {
   return typeof value === 'number' || (typeof value === 'string' && value.includes('/'));

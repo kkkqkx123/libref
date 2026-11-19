@@ -104,6 +104,7 @@ import type {
   DocProbeRequest,
   IndexRequest,
   IndexRequestCreate,
+  IndexRequestParams,
   RepoProbeRequest,
 } from '../api/types';
 import { readString } from '../utils/query';
@@ -242,21 +243,23 @@ async function cancel(item: IndexRequest): Promise<void> {
 }
 
 function reapply(item: IndexRequest): void {
-  form.value.kind = item.kind === 'docs' ? 'docs' : 'repo';
-  form.value.library = String(item.params.library || '');
-  form.value.version = String(item.params.version || '');
-  form.value.ecosystem = String(item.params.ecosystem || '');
-  form.value.source = item.kind === 'repo' ? String(item.params.source || '') : '';
-  form.value.startUrl = item.kind === 'docs' ? String(item.params.start_url || '') : '';
-  form.value.max_pages = item.params.max_pages ? Number(item.params.max_pages) : undefined;
-  form.value.prefilter = Boolean(item.params.prefilter);
-  form.value.subdir = String(item.params.subdir || '');
-  form.value.max_files = item.params.max_files ? Number(item.params.max_files) : undefined;
-  form.value.only_files = Array.isArray(item.params.only_files) ? item.params.only_files.map(String) : [];
-  form.value.exclude_patterns = Array.isArray(item.params.exclude_patterns) ? item.params.exclude_patterns.map(String) : [];
-  form.value.update = Boolean(item.params.update);
-  form.value.fresh = Boolean(item.params.fresh);
-  if (typeof item.params.include_prerelease === 'boolean') scopeStore.includePrerelease = item.params.include_prerelease;
+  const params: IndexRequestParams = item.params;
+  const kind = params.kind || item.kind;
+  form.value.kind = kind;
+  form.value.library = params.library;
+  form.value.version = params.version;
+  form.value.ecosystem = params.ecosystem || '';
+  form.value.source = kind === 'repo' ? params.source || '' : '';
+  form.value.startUrl = kind === 'docs' ? params.start_url || '' : '';
+  form.value.max_pages = params.max_pages ?? undefined;
+  form.value.prefilter = params.prefilter;
+  form.value.subdir = params.subdir || '';
+  form.value.max_files = params.max_files ?? undefined;
+  form.value.only_files = params.only_files || [];
+  form.value.exclude_patterns = params.exclude_patterns || [];
+  form.value.update = params.update;
+  form.value.fresh = params.fresh;
+  if (typeof params.include_prerelease === 'boolean') scopeStore.includePrerelease = params.include_prerelease;
   showAdvanced.value = true;
 }
 

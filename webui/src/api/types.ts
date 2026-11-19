@@ -11,8 +11,39 @@ export type Envelope<T> = {
 };
 
 export type JsonValue = Schema<'JsonValue-Output'>;
-export type JsonRow = Schema<'InsightResponse'>['items'][number];
+export type JsonRow = Record<string, JsonValue>;
 export type Row = JsonRow;
+
+export type ApiRankRow = Schema<'ApiRankRow'>;
+export type ApiArgRow = Schema<'ApiArgRow'>;
+export type ApiInsightRow = ApiRankRow | ApiArgRow;
+export type PatternInsightRow =
+  | Schema<'PatternRow'>
+  | Schema<'EvidenceRow'>
+  | Schema<'FeatureNodeRow'>
+  | Schema<'ClusterRow'>
+  | Schema<'PatternHealthRow'>
+  | Schema<'PatternLabelRow'>
+  | Schema<'PatternSnippetRow'>;
+export type SymbolInsightRow = Schema<'SymbolRow'> | Schema<'SignatureRow'>;
+export type CallInsightRow = Schema<'CallRow'>;
+export type ImportInsightRow = Schema<'ImportEdgeRow'>;
+export type InsightRow =
+  | ApiInsightRow
+  | PatternInsightRow
+  | SymbolInsightRow
+  | CallInsightRow
+  | ImportInsightRow;
+
+export type FeedbackStatus = Schema<'FeedbackItem'>['status'];
+export type KnownErrorCode = Schema<'ErrorResponse'>['error'];
+export type ApiErrorCode = KnownErrorCode | `http_${number}`;
+
+// Dynamic table columns and legacy feedback links still need value lookup by
+// name; domain navigation uses the typed row variants instead.
+export function field(row: object, key: string): JsonValue {
+  return (row as JsonRow)[key];
+}
 
 export type SearchResponse = Schema<'SearchResponse'>;
 export type SearchItem = Schema<'SearchItem'>;
@@ -28,13 +59,17 @@ export type DependencyRow = Schema<'DependencyRow'>;
 export type ManifestDependency = Schema<'ManifestDependency'>;
 export type IndexRequest = Schema<'IndexRequestItem'>;
 export type IndexRequestCreate = Schema<'IndexRequestCreate'>;
+export type IndexRequestParams = Schema<'IndexRequestParams'>;
 export type DocProbeRequest = Schema<'DocProbeRequest'>;
 export type DocProbeResponse = Schema<'DocProbeResponse'>;
 export type RepoProbeRequest = Schema<'RepoProbeRequest'>;
 export type RepoProbeResponse = Schema<'RepoProbeResponse'>;
-export type JobCreate = Schema<'JobCreate'>;
+export type JobCreate = Schema<'MineJobCreate'> | Schema<'InduceJobCreate'>;
 export type JobSummary = Schema<'JobSummary'>;
-export type JobDetail = Schema<'JobDetail'>;
+export type JobDetail =
+  | Schema<'MineJobDetail'>
+  | Schema<'InduceJobDetail'>
+  | Schema<'IndexJobDetail'>;
 export type ReviewItem = Schema<'ReviewItem'>;
 export type FeedbackItem = Schema<'FeedbackItem'>;
 export type Principal = Schema<'PrincipalResponse'>;

@@ -59,22 +59,28 @@
     <el-dialog v-model="createOpen"  :title="messages.jobs.createTitle" width="520px">
       <el-form :model="createForm" label-width="80px">
         <el-form-item :label="messages.common.kind">
-          <el-input v-model="createForm.kind"  :placeholder="messages.jobs.kindPlaceholder" />
+          <el-select v-model="createForm.kind">
+            <el-option value="mine_patterns" :label="messages.jobs.minePatterns" />
+            <el-option value="induce_labels" :label="messages.jobs.induceLabels" />
+          </el-select>
         </el-form-item>
-        <el-form-item :label="messages.jobs.params">
-          <el-input v-model="createForm.paramsText" type="textarea" :rows="4"  :placeholder="messages.jobs.paramsPlaceholder" />
+        <el-form-item :label="messages.common.library">
+          <el-input v-model="createForm.library" />
+        </el-form-item>
+        <el-form-item :label="messages.common.version">
+          <el-input v-model="createForm.version" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="createOpen = false">{{ messages.common.cancel }}</el-button>
-        <el-button type="primary" :disabled="!createForm.kind" @click="create">{{ messages.common.submit }}</el-button>
+        <el-button type="primary" :disabled="!createForm.library || !createForm.version" @click="create">{{ messages.common.submit }}</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ElButton, ElDialog, ElDrawer, ElForm, ElFormItem, ElInput, ElInputNumber, ElTable, ElTableColumn } from 'element-plus';
+import { ElButton, ElDialog, ElDrawer, ElForm, ElFormItem, ElInput, ElInputNumber, ElOption, ElSelect, ElTable, ElTableColumn } from 'element-plus';
 import { ElMessageBox } from 'element-plus';
 import { computed, onUnmounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
@@ -106,7 +112,11 @@ const detailOpen = ref(false);
 const detailLoading = ref(false);
 const detail = ref<JobDetail | null>(null);
 const createOpen = ref(false);
-const createForm = reactive({ kind: '', paramsText: '{}' });
+const createForm = reactive({
+  kind: 'mine_patterns' as 'mine_patterns' | 'induce_labels',
+  library: '',
+  version: '',
+});
 // 429 is a quota refusal, not a failure: show the reset time plus a manual retry
 // instead of an error notification.
 const quotaReset = ref<string | null>(null);
@@ -251,11 +261,21 @@ function stopListPolling(): void {
 async function resubmit(): Promise<void> {
   const current = detail.value;
   if (!current) return;
+  if (current.kind !== 'mine_patterns' && current.kind !== 'induce_labels') {
+    notifyError(new Error(messages.value.jobs.indexJobHint), messages.value.common.paramError);
+    return;
+  }
+  const params = {
+    library: current.params.library,
+    version: current.params.version,
+    include_ambiguous: false,
+  };
+  const body: JobCreate =
+    current.kind === 'mine_patterns'
+      ? { kind: 'mine_patterns', params }
+      : { kind: 'induce_labels', params };
   try {
-    const { data } = await api('/jobs', {
-      method: 'POST',
-      body: { kind: current.kind, params: current.params || {} },
-    });
+    const { data } = await api('/jobs', { method: 'POST', body });
     notifySuccess(messages.value.jobs.submitted(data.id));
     detailOpen.value = false;
     await reload();
@@ -281,22 +301,25 @@ async function cancel(id: number): Promise<void> {
 }
 
 async function create(): Promise<void> {
-  let params: NonNullable<JobCreate['params']> = {};
-  try {
-    params = JSON.parse(createForm.paramsText || '{}') as NonNullable<JobCreate['params']>;
-  } catch {
-    notifyError(new Error(messages.value.jobs.invalidJson), messages.value.common.paramError);
+  const params = {
+    library: createForm.library.trim(),
+    version: createForm.version.trim(),
+    include_ambiguous: false,
+  };
+  if (!params.library || !params.version) {
+    notifyError(new Error(messages.value.common.paramError), messages.value.common.paramError);
     return;
   }
+  const body: JobCreate =
+    createForm.kind === 'mine_patterns'
+      ? { kind: 'mine_patterns', params }
+      : { kind: 'induce_labels', params };
   try {
-    const { data } = await api('/jobs', {
-      method: 'POST',
-      body: { kind: createForm.kind, params },
-    });
+    const { data } = await api('/jobs', { method: 'POST', body });
     notifySuccess(messages.value.jobs.submitted(data.id));
     createOpen.value = false;
-    createForm.kind = '';
-    createForm.paramsText = '{}';
+    createForm.library = '';
+    createForm.version = '';
     await reload();
   } catch (err) {
     handleWriteFailure(err, messages.value.jobs.submitFailed, () => void create());

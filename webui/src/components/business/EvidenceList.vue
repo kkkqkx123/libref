@@ -34,7 +34,7 @@
 import { ElButton } from 'element-plus';
 import { computed } from 'vue';
 import { messages } from '../../i18n';
-import type { Row } from '../../api/types';
+import { field, type Row } from '../../api/types';
 import { hasScope } from '../../stores/auth';
 import ConfidenceBadge from '../common/ConfidenceBadge.vue';
 import { formatCell } from '../../utils/format';
@@ -46,7 +46,7 @@ const canFeedback = computed(() => hasScope('feedback:write'));
 
 function pick(row: Row, keys: string[]): string {
   for (const key of keys) {
-    const value = row[key];
+    const value = field(row, key);
     if (typeof value === 'string' && value) return value;
     if (typeof value === 'number') return String(value);
   }
@@ -59,7 +59,7 @@ function confidenceOf(row: Row): string {
 
 function mainOf(row: Row): string {
   return (
-    pick(row, ['callee_name', 'callee', 'qualified_name', 'name', 'pattern']) ||
+    pick(row, ['callee', 'qualified_name', 'name', 'pattern']) ||
     formatCell(row).slice(0, 120)
   );
 }

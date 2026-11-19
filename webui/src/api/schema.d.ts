@@ -776,10 +776,33 @@ export interface components {
             reasons: string[];
             /** Model */
             model: string;
-            /** Confidence */
-            confidence: string;
+            /**
+             * Confidence
+             * @enum {string}
+             */
+            confidence: "high" | "low";
             /** Cited Ids */
             cited_ids: number[];
+        };
+        /** ApiArgInsightResponse */
+        ApiArgInsightResponse: {
+            /** Items */
+            items: components["schemas"]["ApiArgRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "args";
+        };
+        /** ApiArgRow */
+        ApiArgRow: {
+            args: components["schemas"]["JsonValue-Output"];
+            /** Count */
+            count: number;
         };
         /** ApiKeyResponse */
         ApiKeyResponse: {
@@ -808,6 +831,77 @@ export interface components {
             last_used_at: string | null;
             /** Created At */
             created_at: string | null;
+        };
+        /** ApiRankInsightResponse */
+        ApiRankInsightResponse: {
+            /** Items */
+            items: components["schemas"]["ApiRankRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @enum {string}
+             */
+            view: "usage" | "related" | "common";
+        };
+        /** ApiRankRow */
+        ApiRankRow: {
+            /** Api */
+            api: string;
+            /** Calls */
+            calls: number;
+            /** Scopes */
+            scopes: number;
+        };
+        /** CallInsightResponse */
+        CallInsightResponse: {
+            /** Items */
+            items: components["schemas"]["CallRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @enum {string}
+             */
+            view: "callee" | "caller" | "file";
+        };
+        /** CallRow */
+        CallRow: {
+            /** Callee */
+            callee: string;
+            /** Caller */
+            caller: string | null;
+            /** Caller File */
+            caller_file: string;
+            /** Line Start */
+            line_start: number;
+            /** Line End */
+            line_end: number;
+            /** Start Byte */
+            start_byte: number;
+            /** End Byte */
+            end_byte: number;
+            /** Confidence */
+            confidence: string;
+            /** Resolve Kind */
+            resolve_kind: string;
+            /** Receiver */
+            receiver: string | null;
+            /** Func */
+            func: string;
+            args: components["schemas"]["JsonValue-Output"];
+            /** Argument Count */
+            argument_count: number;
+            /** Call Order */
+            call_order: number;
+            /** Callee Entity Id */
+            callee_entity_id: number | null;
+            /** Caller Entity Id */
+            caller_entity_id: number | null;
         };
         /** ChunkLocator */
         ChunkLocator: {
@@ -855,6 +949,17 @@ export interface components {
             url?: string | null;
             /** Sort Order */
             sort_order?: number | null;
+        };
+        /** ClusterRow */
+        ClusterRow: {
+            /** Cluster Id */
+            cluster_id: number;
+            /** Members */
+            members: string[];
+            /** Size */
+            size: number;
+            /** Representative */
+            representative: string | null;
         };
         /** ConfigRefreshResponse */
         ConfigRefreshResponse: {
@@ -980,6 +1085,63 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** EvidenceCall */
+        EvidenceCall: {
+            /** Callee */
+            callee: string;
+            args: components["schemas"]["JsonValue-Output"];
+            /** Line Start */
+            line_start: number | null;
+            /** Line End */
+            line_end: number | null;
+            /** Confidence */
+            confidence: string | null;
+            /** Resolve Kind */
+            resolve_kind: string | null;
+            /** Callee Signature */
+            callee_signature?: string | null;
+            /** Callee Params */
+            callee_params?: components["schemas"]["JsonValue-Output"][] | null;
+            /** Callee Return Type */
+            callee_return_type?: string | null;
+        };
+        /** EvidenceRow */
+        EvidenceRow: {
+            /** Library */
+            library: string;
+            /** Version */
+            version: string;
+            /** Caller File */
+            caller_file: string;
+            /** Caller */
+            caller: string | null;
+            /** Calls */
+            calls: components["schemas"]["EvidenceCall"][];
+            /** Matched */
+            matched: number[];
+            /** Rendered */
+            rendered: string;
+            snippet?: components["schemas"]["JsonValue-Output"] | null;
+            /** Caller Signature */
+            caller_signature?: string | null;
+            /** Caller Params */
+            caller_params?: components["schemas"]["JsonValue-Output"][] | null;
+        };
+        /** FeatureNodeRow */
+        FeatureNodeRow: {
+            /** Path */
+            path: string;
+            /** Parent */
+            parent: string | null;
+            /** Depth */
+            depth: number;
+            /** Kind */
+            kind: string;
+            /** Calls */
+            calls: number;
+            /** Scopes */
+            scopes: number;
+        };
         /** FeedbackCreate */
         FeedbackCreate: {
             /**
@@ -1021,7 +1183,10 @@ export interface components {
              * @enum {string}
              */
             status: "open" | "acknowledged" | "resolved";
-            /** Created At */
+            /**
+             * Created At
+             * Format: date-time
+             */
             created_at: string;
             /** Resolved By */
             resolved_by: number | null;
@@ -1048,6 +1213,52 @@ export interface components {
             ok: boolean;
             /** Fingerprint */
             fingerprint: string;
+        };
+        /** ImportEdgeRow */
+        ImportEdgeRow: {
+            /** Importer File */
+            importer_file: string;
+            /** Alias */
+            alias: string;
+            /** Target */
+            target: string;
+            /** Kind */
+            kind: string;
+        };
+        /** ImportInsightResponse */
+        ImportInsightResponse: {
+            /** Items */
+            items: components["schemas"]["ImportEdgeRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @enum {string}
+             */
+            view: "importers" | "imports";
+        };
+        /** IndexJobDetail */
+        IndexJobDetail: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed";
+            /** Error */
+            error: string | null;
+            result?: components["schemas"]["JsonValue-Output"] | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "scrape_docs" | "index_repo";
+            params: components["schemas"]["IndexRequestParams"];
         };
         /** IndexRequestCreate */
         IndexRequestCreate: {
@@ -1124,10 +1335,7 @@ export interface components {
             target: string;
             /** Source */
             source: string;
-            /** Params */
-            params: {
-                [key: string]: components["schemas"]["JsonValue-Output"];
-            };
+            params: components["schemas"]["IndexRequestParams"];
             /**
              * Status
              * @enum {string}
@@ -1143,10 +1351,77 @@ export interface components {
             job_id: number | null;
             /** Error */
             error: string;
-            /** Created At */
+            /**
+             * Created At
+             * Format: date-time
+             */
             created_at: string;
-            /** Updated At */
+            /**
+             * Updated At
+             * Format: date-time
+             */
             updated_at: string;
+        };
+        /** IndexRequestParams */
+        IndexRequestParams: {
+            /** Kind */
+            kind?: ("repo" | "docs") | null;
+            /**
+             * Library
+             * @default
+             */
+            library: string;
+            /**
+             * Version
+             * @default
+             */
+            version: string;
+            /** Ecosystem */
+            ecosystem?: string | null;
+            /** Source */
+            source?: string | null;
+            /** Start Url */
+            start_url?: string | null;
+            /** Max Pages */
+            max_pages?: number | null;
+            /**
+             * Prefilter
+             * @default false
+             */
+            prefilter: boolean;
+            /** Scope */
+            scope?: {
+                [key: string]: components["schemas"]["JsonValue-Output"];
+            } | null;
+            /**
+             * Update
+             * @default false
+             */
+            update: boolean;
+            /**
+             * Fresh
+             * @default false
+             */
+            fresh: boolean;
+            /**
+             * Include Prerelease
+             * @default false
+             */
+            include_prerelease: boolean;
+            /** Subdir */
+            subdir?: string | null;
+            /** Only Files */
+            only_files?: string[] | null;
+            /** Exclude Patterns */
+            exclude_patterns?: string[] | null;
+            /** Max Files */
+            max_files?: number | null;
+            /** Resolved From */
+            resolved_from?: string | null;
+            /** Registry Confirmed */
+            registry_confirmed?: boolean | null;
+            /** Index Request Id */
+            index_request_id?: number | null;
         };
         /** IndexRequestReject */
         IndexRequestReject: {
@@ -1162,16 +1437,51 @@ export interface components {
             /** Count */
             count: number;
         };
-        /** InsightResponse */
-        InsightResponse: {
-            /** Items */
-            items: {
-                [key: string]: components["schemas"]["JsonValue-Output"];
-            }[];
-            /** Degraded */
-            degraded: boolean;
-            /** Count */
-            count: number;
+        /** InduceJobCreate */
+        InduceJobCreate: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "induce_labels";
+            params: components["schemas"]["InduceJobParams"];
+        };
+        /** InduceJobDetail */
+        InduceJobDetail: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed";
+            /** Error */
+            error: string | null;
+            result?: components["schemas"]["JsonValue-Output"] | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "induce_labels";
+            params: components["schemas"]["InduceJobParams"];
+        };
+        /** InduceJobParams */
+        InduceJobParams: {
+            /** Library */
+            library: string;
+            /** Version */
+            version: string;
+            /** Ecosystem */
+            ecosystem?: string | null;
+            /** Topn */
+            topn?: number | null;
+            /**
+             * Include Ambiguous
+             * @default false
+             */
+            include_ambiguous: boolean;
         };
         /** IssuedKey */
         IssuedKey: {
@@ -1182,36 +1492,6 @@ export interface components {
             /** Prefix */
             prefix: string;
         };
-        /** JobCreate */
-        JobCreate: {
-            /** Kind */
-            kind: string;
-            /** Params */
-            params?: {
-                [key: string]: components["schemas"]["JsonValue-Input"];
-            };
-        };
-        /** JobDetail */
-        JobDetail: {
-            /** Id */
-            id: number;
-            /** Kind */
-            kind: string;
-            /**
-             * Status
-             * @enum {string}
-             */
-            status: "pending" | "running" | "done" | "failed";
-            /** Error */
-            error: string | null;
-            result?: components["schemas"]["JsonValue-Output"] | null;
-            /** Params */
-            params?: {
-                [key: string]: components["schemas"]["JsonValue-Output"];
-            };
-            /** Finished At */
-            finished_at: string | null;
-        };
         /** JobListResponse */
         JobListResponse: {
             /** Jobs */
@@ -1221,8 +1501,11 @@ export interface components {
         JobSummary: {
             /** Id */
             id: number;
-            /** Kind */
-            kind: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "scrape_docs" | "index_repo" | "mine_patterns" | "induce_labels";
             /**
              * Status
              * @enum {string}
@@ -1258,7 +1541,7 @@ export interface components {
             /** Scopes */
             scopes?: string[];
             /** Expires At */
-            expires_at?: number | null;
+            expires_at?: string | null;
         };
         /** LibraryResponse */
         LibraryResponse: {
@@ -1318,6 +1601,68 @@ export interface components {
             counters?: {
                 [key: string]: number;
             };
+        };
+        /** MineJobCreate */
+        MineJobCreate: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "mine_patterns";
+            params: components["schemas"]["MineJobParams"];
+        };
+        /** MineJobDetail */
+        MineJobDetail: {
+            /** Id */
+            id: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "done" | "failed";
+            /** Error */
+            error: string | null;
+            result?: components["schemas"]["JsonValue-Output"] | null;
+            /** Finished At */
+            finished_at: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "mine_patterns";
+            params: components["schemas"]["MineJobParams"];
+        };
+        /** MineJobParams */
+        MineJobParams: {
+            /** Library */
+            library: string;
+            /** Version */
+            version: string;
+            /** Ecosystem */
+            ecosystem?: string | null;
+            /** Minsup */
+            minsup?: number | null;
+            /** Topn */
+            topn?: number | null;
+            /** Maxlen */
+            maxlen?: number | null;
+            /** Minlen */
+            minlen?: number | null;
+            /**
+             * Include Ambiguous
+             * @default false
+             */
+            include_ambiguous: boolean;
+            /** Cluster Threshold */
+            cluster_threshold?: number | null;
+            /** Cluster Min Size */
+            cluster_min_size?: number | null;
+            /** Resolve Kinds */
+            resolve_kinds?: string[] | null;
+            /** Min Args */
+            min_args?: number | null;
+            /** Max Args */
+            max_args?: number | null;
         };
         /** MiningHealthResponse */
         MiningHealthResponse: {
@@ -1394,6 +1739,169 @@ export interface components {
             /** Chunks */
             chunks: number;
         };
+        /** PatternClusterInsightResponse */
+        PatternClusterInsightResponse: {
+            /** Items */
+            items: components["schemas"]["ClusterRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "clusters";
+        };
+        /** PatternEvidenceInsightResponse */
+        PatternEvidenceInsightResponse: {
+            /** Items */
+            items: components["schemas"]["EvidenceRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "evidence";
+        };
+        /** PatternHealthInsightResponse */
+        PatternHealthInsightResponse: {
+            /** Items */
+            items: components["schemas"]["PatternHealthRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "health";
+        };
+        /** PatternHealthRow */
+        PatternHealthRow: {
+            /** Patterns */
+            patterns: number;
+            /** Total Support */
+            total_support: number;
+            /** Reusability */
+            reusability: number;
+            /** Diversity */
+            diversity: number;
+            /** Clusters */
+            clusters: number;
+            /** Resolve Kinds */
+            resolve_kinds: {
+                [key: string]: number;
+            };
+            /** Confidence */
+            confidence: {
+                [key: string]: number;
+            };
+            /** Unresolved Rate */
+            unresolved_rate: number;
+            /** Caller Link Rate */
+            caller_link_rate: number;
+            /** Signature Missing Rate */
+            signature_missing_rate: number;
+        };
+        /** PatternLabelInsightResponse */
+        PatternLabelInsightResponse: {
+            /** Items */
+            items: components["schemas"]["PatternLabelRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "labels";
+        };
+        /** PatternLabelRow */
+        PatternLabelRow: {
+            /** Pattern */
+            pattern: string[];
+            /** Pattern Hash */
+            pattern_hash: string;
+            /** Model */
+            model: string | null;
+            /** Prompt Version */
+            prompt_version: string | null;
+            /** Name */
+            name: string | null;
+            /** Summary */
+            summary: string | null;
+            /** Category Path */
+            category_path: string[];
+            /** Workflow */
+            workflow: string | null;
+            /** Related Apis */
+            related_apis: string[];
+        };
+        /** PatternListInsightResponse */
+        PatternListInsightResponse: {
+            /** Items */
+            items: components["schemas"]["PatternRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "patterns";
+        };
+        /** PatternRow */
+        PatternRow: {
+            /** Pattern */
+            pattern: string[];
+            /** Support */
+            support: number;
+        };
+        /** PatternSnippetInsightResponse */
+        PatternSnippetInsightResponse: {
+            /** Items */
+            items: components["schemas"]["PatternSnippetRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "snippets";
+        };
+        /** PatternSnippetRow */
+        PatternSnippetRow: {
+            /** Caller File */
+            caller_file: string | null;
+            /** Caller */
+            caller: string | null;
+            snippet: components["schemas"]["JsonValue-Output"] | null;
+            /** Rendered */
+            rendered: string | null;
+        };
+        /** PatternTreeInsightResponse */
+        PatternTreeInsightResponse: {
+            /** Items */
+            items: components["schemas"]["FeatureNodeRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "tree";
+        };
         /** PrefixGroup */
         PrefixGroup: {
             /** Prefix */
@@ -1459,7 +1967,10 @@ export interface components {
              * @enum {string}
              */
             window_type: "hour" | "day" | "month";
-            /** Updated At */
+            /**
+             * Updated At
+             * Format: date-time
+             */
             updated_at: string;
         };
         /** QuotaPolicyResponse */
@@ -1795,6 +2306,78 @@ export interface components {
             /** Suggest Error */
             suggest_error?: string | null;
         };
+        /** SignatureInsightResponse */
+        SignatureInsightResponse: {
+            /** Items */
+            items: components["schemas"]["SignatureRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "signature";
+        };
+        /** SignatureRow */
+        SignatureRow: {
+            /** Api */
+            api: string;
+            /** Kind */
+            kind: string;
+            /** Signature */
+            signature: string;
+            /** Params */
+            params?: components["schemas"]["JsonValue-Output"][] | null;
+            /** Return Type */
+            return_type?: string | null;
+            /** Short */
+            short: string;
+        };
+        /** SymbolInsightResponse */
+        SymbolInsightResponse: {
+            /** Items */
+            items: components["schemas"]["SymbolRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @enum {string}
+             */
+            view: "detail" | "file" | "children";
+        };
+        /** SymbolRow */
+        SymbolRow: {
+            /** Qualified Name */
+            qualified_name: string;
+            /** Kind */
+            kind: string;
+            /** Parent */
+            parent: string | null;
+            /** Signature */
+            signature: string;
+            /** Params */
+            params: components["schemas"]["JsonValue-Output"][];
+            /** Bases */
+            bases: components["schemas"]["JsonValue-Output"][];
+            /** Depth */
+            depth: number;
+            /** File */
+            file: string;
+            /** Line Start */
+            line_start: number;
+            /** Line End */
+            line_end: number;
+            /** Param Types */
+            param_types: components["schemas"]["JsonValue-Output"][];
+            /** Return Type */
+            return_type: string;
+            /** Has Doc */
+            has_doc: boolean;
+        };
         /** TopLink */
         TopLink: {
             /** Url */
@@ -1863,17 +2446,26 @@ export interface components {
         };
         /** QuotaErrorDetail */
         QuotaErrorDetail: {
-            /** Error */
-            error: string;
+            /**
+             * Error
+             * @enum {string}
+             */
+            error: "unauthorized" | "forbidden" | "missing_scope" | "origin_forbidden" | "not_found" | "page_not_found" | "job_not_found" | "quota_exceeded" | "review_conflict" | "invalid_limit" | "invalid_offset" | "invalid_scope" | "invalid_ecosystem" | "invalid_argument" | "chat_disabled" | "upstream_unavailable" | "unavailable" | "index_request_conflict" | "config_refresh_failed";
             /** Resource */
             resource: string;
-            /** Reset At */
-            reset_at: number | string;
+            /**
+             * Reset At
+             * Format: date-time
+             */
+            reset_at: string;
         };
         /** ErrorResponse */
         ErrorResponse: {
-            /** Error */
-            error: string;
+            /**
+             * Error
+             * @enum {string}
+             */
+            error: "unauthorized" | "forbidden" | "missing_scope" | "origin_forbidden" | "not_found" | "page_not_found" | "job_not_found" | "quota_exceeded" | "review_conflict" | "invalid_limit" | "invalid_offset" | "invalid_scope" | "invalid_ecosystem" | "invalid_argument" | "chat_disabled" | "upstream_unavailable" | "unavailable" | "index_request_conflict" | "config_refresh_failed";
             /** Detail */
             detail: string | components["schemas"]["QuotaErrorDetail"];
             /**
@@ -1890,7 +2482,7 @@ export interface components {
              * Reset At
              * @default null
              */
-            reset_at: number | string | null;
+            reset_at: string | null;
         };
         JsonValue: boolean | number | string | components["schemas"]["JsonValue"][] | {
             [key: string]: components["schemas"]["JsonValue"];
@@ -2281,7 +2873,7 @@ export interface operations {
             query: {
                 view: "usage" | "related" | "args" | "common";
                 api?: string | null;
-                apis?: string | null;
+                apis?: string[] | null;
                 library?: string | null;
                 version?: string | null;
                 ecosystem?: string | null;
@@ -2299,7 +2891,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InsightResponse"];
+                    "application/json": components["schemas"]["ApiRankInsightResponse"] | components["schemas"]["ApiArgInsightResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2326,8 +2918,8 @@ export interface operations {
         parameters: {
             query: {
                 view: "patterns" | "evidence" | "tree" | "clusters" | "health" | "labels" | "snippets";
-                pattern?: string | null;
-                containing?: string | null;
+                pattern?: string[] | null;
+                containing?: string[] | null;
                 prefix?: string | null;
                 library?: string | null;
                 version?: string | null;
@@ -2348,7 +2940,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InsightResponse"];
+                    "application/json": components["schemas"]["PatternListInsightResponse"] | components["schemas"]["PatternEvidenceInsightResponse"] | components["schemas"]["PatternTreeInsightResponse"] | components["schemas"]["PatternClusterInsightResponse"] | components["schemas"]["PatternHealthInsightResponse"] | components["schemas"]["PatternLabelInsightResponse"] | components["schemas"]["PatternSnippetInsightResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2376,7 +2968,7 @@ export interface operations {
             query: {
                 view: "detail" | "file" | "children" | "signature";
                 api?: string | null;
-                apis?: string | null;
+                apis?: string[] | null;
                 library?: string | null;
                 version?: string | null;
                 ecosystem?: string | null;
@@ -2395,7 +2987,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InsightResponse"];
+                    "application/json": components["schemas"]["SymbolInsightResponse"] | components["schemas"]["SignatureInsightResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2429,7 +3021,7 @@ export interface operations {
                 limit?: number | null;
                 offset?: number;
                 include_ambiguous?: boolean;
-                resolve_kinds?: string | null;
+                resolve_kinds?: string[] | null;
                 min_args?: number | null;
                 max_args?: number | null;
             };
@@ -2445,7 +3037,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InsightResponse"];
+                    "application/json": components["schemas"]["CallInsightResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2491,7 +3083,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InsightResponse"];
+                    "application/json": components["schemas"]["ImportInsightResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2600,7 +3192,7 @@ export interface operations {
     index_request_list_index_requests_get: {
         parameters: {
             query?: {
-                status?: string | null;
+                status?: ("pending" | "approved" | "queued" | "running" | "done" | "failed" | "rejected" | "cancelled") | null;
                 limit?: number;
             };
             header?: never;
@@ -3060,7 +3652,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["JobCreate"];
+                "application/json": components["schemas"]["MineJobCreate"] | components["schemas"]["InduceJobCreate"];
             };
         };
         responses: {
@@ -3110,7 +3702,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["JobDetail"];
+                    "application/json": components["schemas"]["MineJobDetail"] | components["schemas"]["InduceJobDetail"] | components["schemas"]["IndexJobDetail"];
                 };
             };
             /** @description Validation Error */
@@ -3421,7 +4013,7 @@ export interface operations {
         parameters: {
             query?: {
                 limit?: number;
-                status?: string | null;
+                status?: ("open" | "acknowledged" | "resolved") | null;
             };
             header?: never;
             path?: never;

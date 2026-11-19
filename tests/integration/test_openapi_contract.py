@@ -22,7 +22,7 @@ def _schema_refs(schema: dict) -> list[str]:
     if "$ref" in schema:
         return [schema["$ref"]]
     refs: list[str] = []
-    for variant in schema.get("anyOf", []):
+    for variant in schema.get("anyOf", []) + schema.get("oneOf", []):
         refs.extend(_schema_refs(variant))
     return refs
 
@@ -112,6 +112,55 @@ def test_all_routes_expose_named_object_schemas(tmp_path, monkeypatch) -> None:
         conn.close()
 
 
+def test_insight_queries_declare_arrays(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    conn = _open(tmp_path)
+    try:
+        document = _client(conn, monkeypatch, tmp_path).get("/openapi.json").json()
+        expected = {
+            "/api-insight": ("apis",),
+            "/pattern-insight": ("pattern", "containing"),
+            "/symbol-insight": ("apis",),
+            "/call-insight": ("resolve_kinds",),
+        }
+        for route, names in expected.items():
+            parameters = document["paths"][route]["get"]["parameters"]
+            for name in names:
+                param = next(p for p in parameters if p["name"] == name)
+                assert "array" in str(param["schema"]), (route, name)
+    finally:
+        conn.close()
+
+
+def test_insight_responses_name_their_rows(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    conn = _open(tmp_path)
+    try:
+        document = _client(conn, monkeypatch, tmp_path).get("/openapi.json").json()
+        components = document["components"]["schemas"]
+        routes = (
+            "/api-insight",
+            "/pattern-insight",
+            "/symbol-insight",
+            "/call-insight",
+            "/import-insight",
+        )
+        for route in routes:
+            schema = document["paths"][route]["get"]["responses"]["200"]["content"][
+                "application/json"
+            ]["schema"]
+            refs = _schema_refs(schema)
+            assert refs, route
+            for ref in refs:
+                name = ref.rsplit("/", 1)[-1]
+                response = components[name]
+                assert "view" in response["properties"], name
+                row = response["properties"]["items"]["items"]
+                assert row.get("$ref", "").startswith("#/components/schemas/"), name
+    finally:
+        conn.close()
+
+
 def test_contract_search_response_shape(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     conn = _open(tmp_path)
@@ -147,7 +196,9 @@ def test_response_contract_is_strict(tmp_path, monkeypatch) -> None:
         for name, schema in schemas.items():
             assert schema.get("additionalProperties") is not True, name
         for name, field in (
-            ("JobDetail", "status"),
+            ("MineJobDetail", "status"),
+            ("InduceJobDetail", "status"),
+            ("IndexJobDetail", "status"),
             ("JobSummary", "status"),
             ("IndexRequestItem", "status"),
             ("ReviewItem", "status"),
@@ -159,6 +210,23 @@ def test_response_contract_is_strict(tmp_path, monkeypatch) -> None:
             prop = schemas["ApiKeyRow"]["properties"][field]
             types = {variant["type"] for variant in prop.get("anyOf", [prop])}
             assert types == {"string", "null"}, field
+        assert schemas["IndexRequestItem"]["properties"]["params"]["$ref"].endswith(
+            "/IndexRequestParams"
+        )
+        assert set(schemas["AnswerResponse"]["properties"]["confidence"]["enum"]) == {
+            "high",
+            "low",
+        }
+        assert set(schemas["ErrorResponse"]["properties"]["error"]["enum"])
+        for name, field in (
+            ("ApiKeyRow", "expires_at"),
+            ("FeedbackItem", "created_at"),
+            ("IndexRequestItem", "updated_at"),
+            ("MineJobDetail", "finished_at"),
+            ("QuotaPolicy", "updated_at"),
+        ):
+            prop = schemas[name]["properties"][field]
+            assert "date-time" in str(prop), (name, field)
         for name, expected in (
             ("LibraryResponse", "libraries"),
             ("VersionResponse", "versions"),

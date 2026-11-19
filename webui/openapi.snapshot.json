@@ -811,7 +811,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 {
                   "type": "null"
@@ -891,7 +894,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InsightResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ApiRankInsightResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ApiArgInsightResponse"
+                    }
+                  ],
+                  "title": "Response Api Insight Api Insight Get"
                 }
               }
             }
@@ -949,7 +960,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 {
                   "type": "null"
@@ -965,7 +979,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 {
                   "type": "null"
@@ -1093,7 +1110,30 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InsightResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/PatternListInsightResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PatternEvidenceInsightResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PatternTreeInsightResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PatternClusterInsightResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PatternHealthInsightResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PatternLabelInsightResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/PatternSnippetInsightResponse"
+                    }
+                  ],
+                  "title": "Response Pattern Insight Pattern Insight Get"
                 }
               }
             }
@@ -1164,7 +1204,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 {
                   "type": "null"
@@ -1254,7 +1297,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InsightResponse"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SymbolInsightResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SignatureInsightResponse"
+                    }
+                  ],
+                  "title": "Response Symbol Insight Symbol Insight Get"
                 }
               }
             }
@@ -1408,7 +1459,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 },
                 {
                   "type": "null"
@@ -1456,7 +1510,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InsightResponse"
+                  "$ref": "#/components/schemas/CallInsightResponse"
                 }
               }
             }
@@ -1599,7 +1653,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InsightResponse"
+                  "$ref": "#/components/schemas/ImportInsightResponse"
                 }
               }
             }
@@ -1792,6 +1846,16 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "pending",
+                    "approved",
+                    "queued",
+                    "running",
+                    "done",
+                    "failed",
+                    "rejected",
+                    "cancelled"
+                  ],
                   "type": "string"
                 },
                 {
@@ -2319,7 +2383,22 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/JobCreate"
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/MineJobCreate"
+                  },
+                  {
+                    "$ref": "#/components/schemas/InduceJobCreate"
+                  }
+                ],
+                "discriminator": {
+                  "propertyName": "kind",
+                  "mapping": {
+                    "mine_patterns": "#/components/schemas/MineJobCreate",
+                    "induce_labels": "#/components/schemas/InduceJobCreate"
+                  }
+                },
+                "title": "Body"
               }
             }
           }
@@ -2379,7 +2458,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/JobDetail"
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/MineJobDetail"
+                    },
+                    {
+                      "$ref": "#/components/schemas/InduceJobDetail"
+                    },
+                    {
+                      "$ref": "#/components/schemas/IndexJobDetail"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "kind",
+                    "mapping": {
+                      "mine_patterns": "#/components/schemas/MineJobDetail",
+                      "induce_labels": "#/components/schemas/InduceJobDetail",
+                      "scrape_docs": "#/components/schemas/IndexJobDetail",
+                      "index_repo": "#/components/schemas/IndexJobDetail"
+                    }
+                  },
+                  "title": "Response Job Detail Jobs  Job Id  Get"
                 }
               }
             }
@@ -3018,6 +3117,11 @@
             "schema": {
               "anyOf": [
                 {
+                  "enum": [
+                    "open",
+                    "acknowledged",
+                    "resolved"
+                  ],
                   "type": "string"
                 },
                 {
@@ -3614,6 +3718,10 @@
           },
           "confidence": {
             "type": "string",
+            "enum": [
+              "high",
+              "low"
+            ],
             "title": "Confidence"
           },
           "cited_ids": {
@@ -3635,6 +3743,55 @@
           "cited_ids"
         ],
         "title": "AnswerResponse"
+      },
+      "ApiArgInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApiArgRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "const": "args",
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "ApiArgInsightResponse"
+      },
+      "ApiArgRow": {
+        "properties": {
+          "args": {
+            "$ref": "#/components/schemas/JsonValue-Output"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "args",
+          "count"
+        ],
+        "title": "ApiArgRow"
       },
       "ApiKeyResponse": {
         "properties": {
@@ -3693,7 +3850,8 @@
           "expires_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -3704,7 +3862,8 @@
           "revoked_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -3715,7 +3874,8 @@
           "last_used_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -3726,7 +3886,8 @@
           "created_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -3747,6 +3908,216 @@
           "created_at"
         ],
         "title": "ApiKeyRow"
+      },
+      "ApiRankInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ApiRankRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "usage",
+              "related",
+              "common"
+            ],
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "ApiRankInsightResponse"
+      },
+      "ApiRankRow": {
+        "properties": {
+          "api": {
+            "type": "string",
+            "title": "Api"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "scopes": {
+            "type": "integer",
+            "title": "Scopes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "api",
+          "calls",
+          "scopes"
+        ],
+        "title": "ApiRankRow"
+      },
+      "CallInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CallRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "callee",
+              "caller",
+              "file"
+            ],
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "CallInsightResponse"
+      },
+      "CallRow": {
+        "properties": {
+          "callee": {
+            "type": "string",
+            "title": "Callee"
+          },
+          "caller": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller"
+          },
+          "caller_file": {
+            "type": "string",
+            "title": "Caller File"
+          },
+          "line_start": {
+            "type": "integer",
+            "title": "Line Start"
+          },
+          "line_end": {
+            "type": "integer",
+            "title": "Line End"
+          },
+          "start_byte": {
+            "type": "integer",
+            "title": "Start Byte"
+          },
+          "end_byte": {
+            "type": "integer",
+            "title": "End Byte"
+          },
+          "confidence": {
+            "type": "string",
+            "title": "Confidence"
+          },
+          "resolve_kind": {
+            "type": "string",
+            "title": "Resolve Kind"
+          },
+          "receiver": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Receiver"
+          },
+          "func": {
+            "type": "string",
+            "title": "Func"
+          },
+          "args": {
+            "$ref": "#/components/schemas/JsonValue-Output"
+          },
+          "argument_count": {
+            "type": "integer",
+            "title": "Argument Count"
+          },
+          "call_order": {
+            "type": "integer",
+            "title": "Call Order"
+          },
+          "callee_entity_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callee Entity Id"
+          },
+          "caller_entity_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller Entity Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "callee",
+          "caller",
+          "caller_file",
+          "line_start",
+          "line_end",
+          "start_byte",
+          "end_byte",
+          "confidence",
+          "resolve_kind",
+          "receiver",
+          "func",
+          "args",
+          "argument_count",
+          "call_order",
+          "callee_entity_id",
+          "caller_entity_id"
+        ],
+        "title": "CallRow"
       },
       "ChunkLocator": {
         "properties": {
@@ -3838,6 +4209,44 @@
         },
         "type": "object",
         "title": "ChunkLocator"
+      },
+      "ClusterRow": {
+        "properties": {
+          "cluster_id": {
+            "type": "integer",
+            "title": "Cluster Id"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Members"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "representative": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Representative"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cluster_id",
+          "members",
+          "size",
+          "representative"
+        ],
+        "title": "ClusterRow"
       },
       "ConfigRefreshResponse": {
         "properties": {
@@ -4217,6 +4626,243 @@
         ],
         "title": "DocProbeResponse"
       },
+      "EvidenceCall": {
+        "properties": {
+          "callee": {
+            "type": "string",
+            "title": "Callee"
+          },
+          "args": {
+            "$ref": "#/components/schemas/JsonValue-Output"
+          },
+          "line_start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Start"
+          },
+          "line_end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line End"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "resolve_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolve Kind"
+          },
+          "callee_signature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callee Signature"
+          },
+          "callee_params": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/JsonValue-Output"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callee Params"
+          },
+          "callee_return_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Callee Return Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "callee",
+          "args",
+          "line_start",
+          "line_end",
+          "confidence",
+          "resolve_kind"
+        ],
+        "title": "EvidenceCall"
+      },
+      "EvidenceRow": {
+        "properties": {
+          "library": {
+            "type": "string",
+            "title": "Library"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "caller_file": {
+            "type": "string",
+            "title": "Caller File"
+          },
+          "caller": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller"
+          },
+          "calls": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceCall"
+            },
+            "type": "array",
+            "title": "Calls"
+          },
+          "matched": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Matched"
+          },
+          "rendered": {
+            "type": "string",
+            "title": "Rendered"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "caller_signature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller Signature"
+          },
+          "caller_params": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/JsonValue-Output"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller Params"
+          }
+        },
+        "type": "object",
+        "required": [
+          "library",
+          "version",
+          "caller_file",
+          "caller",
+          "calls",
+          "matched",
+          "rendered"
+        ],
+        "title": "EvidenceRow"
+      },
+      "FeatureNodeRow": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "depth": {
+            "type": "integer",
+            "title": "Depth"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "calls": {
+            "type": "integer",
+            "title": "Calls"
+          },
+          "scopes": {
+            "type": "integer",
+            "title": "Scopes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "parent",
+          "depth",
+          "kind",
+          "calls",
+          "scopes"
+        ],
+        "title": "FeatureNodeRow"
+      },
       "FeedbackCreate": {
         "properties": {
           "entity_type": {
@@ -4297,6 +4943,7 @@
           },
           "created_at": {
             "type": "string",
+            "format": "date-time",
             "title": "Created At"
           },
           "resolved_by": {
@@ -4313,7 +4960,8 @@
           "resolved_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -4397,6 +5045,141 @@
           "fingerprint"
         ],
         "title": "HealthResponse"
+      },
+      "ImportEdgeRow": {
+        "properties": {
+          "importer_file": {
+            "type": "string",
+            "title": "Importer File"
+          },
+          "alias": {
+            "type": "string",
+            "title": "Alias"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "importer_file",
+          "alias",
+          "target",
+          "kind"
+        ],
+        "title": "ImportEdgeRow"
+      },
+      "ImportInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImportEdgeRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "importers",
+              "imports"
+            ],
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "ImportInsightResponse"
+      },
+      "IndexJobDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "scrape_docs",
+              "index_repo"
+            ],
+            "title": "Kind"
+          },
+          "params": {
+            "$ref": "#/components/schemas/IndexRequestParams"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "error",
+          "finished_at",
+          "kind",
+          "params"
+        ],
+        "title": "IndexJobDetail"
       },
       "IndexRequestCreate": {
         "properties": {
@@ -4599,11 +5382,7 @@
             "title": "Source"
           },
           "params": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Output"
-            },
-            "type": "object",
-            "title": "Params"
+            "$ref": "#/components/schemas/IndexRequestParams"
           },
           "status": {
             "type": "string",
@@ -4655,10 +5434,12 @@
           },
           "created_at": {
             "type": "string",
+            "format": "date-time",
             "title": "Created At"
           },
           "updated_at": {
             "type": "string",
+            "format": "date-time",
             "title": "Updated At"
           }
         },
@@ -4682,6 +5463,198 @@
           "updated_at"
         ],
         "title": "IndexRequestItem"
+      },
+      "IndexRequestParams": {
+        "properties": {
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "repo",
+                  "docs"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "library": {
+            "type": "string",
+            "title": "Library",
+            "default": ""
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "default": ""
+          },
+          "ecosystem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ecosystem"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "start_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Url"
+          },
+          "max_pages": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Pages"
+          },
+          "prefilter": {
+            "type": "boolean",
+            "title": "Prefilter",
+            "default": false
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue-Output"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "update": {
+            "type": "boolean",
+            "title": "Update",
+            "default": false
+          },
+          "fresh": {
+            "type": "boolean",
+            "title": "Fresh",
+            "default": false
+          },
+          "include_prerelease": {
+            "type": "boolean",
+            "title": "Include Prerelease",
+            "default": false
+          },
+          "subdir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subdir"
+          },
+          "only_files": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Only Files"
+          },
+          "exclude_patterns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exclude Patterns"
+          },
+          "max_files": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Files"
+          },
+          "resolved_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved From"
+          },
+          "registry_confirmed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Registry Confirmed"
+          },
+          "index_request_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Request Id"
+          }
+        },
+        "type": "object",
+        "title": "IndexRequestParams"
       },
       "IndexRequestReject": {
         "properties": {
@@ -4723,88 +5696,29 @@
         ],
         "title": "IndexRequestResponse"
       },
-      "InsightResponse": {
-        "properties": {
-          "items": {
-            "items": {
-              "additionalProperties": {
-                "$ref": "#/components/schemas/JsonValue-Output"
-              },
-              "type": "object"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "degraded": {
-            "type": "boolean",
-            "title": "Degraded"
-          },
-          "count": {
-            "type": "integer",
-            "title": "Count"
-          }
-        },
-        "type": "object",
-        "required": [
-          "items",
-          "degraded",
-          "count"
-        ],
-        "title": "InsightResponse"
-      },
-      "IssuedKey": {
-        "properties": {
-          "id": {
-            "type": "integer",
-            "title": "Id"
-          },
-          "key": {
-            "type": "string",
-            "title": "Key"
-          },
-          "prefix": {
-            "type": "string",
-            "title": "Prefix"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "key",
-          "prefix"
-        ],
-        "title": "IssuedKey"
-      },
-      "JobCreate": {
+      "InduceJobCreate": {
         "properties": {
           "kind": {
             "type": "string",
-            "minLength": 1,
+            "const": "induce_labels",
             "title": "Kind"
           },
           "params": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Input"
-            },
-            "type": "object",
-            "title": "Params"
+            "$ref": "#/components/schemas/InduceJobParams"
           }
         },
         "type": "object",
         "required": [
-          "kind"
+          "kind",
+          "params"
         ],
-        "title": "JobCreate"
+        "title": "InduceJobCreate"
       },
-      "JobDetail": {
+      "InduceJobDetail": {
         "properties": {
           "id": {
             "type": "integer",
             "title": "Id"
-          },
-          "kind": {
-            "type": "string",
-            "title": "Kind"
           },
           "status": {
             "type": "string",
@@ -4837,14 +5751,51 @@
               }
             ]
           },
-          "params": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/JsonValue-Output"
-            },
-            "type": "object",
-            "title": "Params"
-          },
           "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "kind": {
+            "type": "string",
+            "const": "induce_labels",
+            "title": "Kind"
+          },
+          "params": {
+            "$ref": "#/components/schemas/InduceJobParams"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "error",
+          "finished_at",
+          "kind",
+          "params"
+        ],
+        "title": "InduceJobDetail"
+      },
+      "InduceJobParams": {
+        "properties": {
+          "library": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Library"
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Version"
+          },
+          "ecosystem": {
             "anyOf": [
               {
                 "type": "string"
@@ -4853,18 +5804,55 @@
                 "type": "null"
               }
             ],
-            "title": "Finished At"
+            "title": "Ecosystem"
+          },
+          "topn": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topn"
+          },
+          "include_ambiguous": {
+            "type": "boolean",
+            "title": "Include Ambiguous",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "library",
+          "version"
+        ],
+        "title": "InduceJobParams"
+      },
+      "IssuedKey": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "prefix": {
+            "type": "string",
+            "title": "Prefix"
           }
         },
         "type": "object",
         "required": [
           "id",
-          "kind",
-          "status",
-          "error",
-          "finished_at"
+          "key",
+          "prefix"
         ],
-        "title": "JobDetail"
+        "title": "IssuedKey"
       },
       "JobListResponse": {
         "properties": {
@@ -4890,6 +5878,12 @@
           },
           "kind": {
             "type": "string",
+            "enum": [
+              "scrape_docs",
+              "index_repo",
+              "mine_patterns",
+              "induce_labels"
+            ],
             "title": "Kind"
           },
           "status": {
@@ -4905,7 +5899,8 @@
           "finished_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -5032,7 +6027,8 @@
           "expires_at": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -5151,7 +6147,8 @@
           "resolved_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -5243,6 +6240,238 @@
           "uptime_seconds"
         ],
         "title": "MetricsResponse"
+      },
+      "MineJobCreate": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "mine_patterns",
+            "title": "Kind"
+          },
+          "params": {
+            "$ref": "#/components/schemas/MineJobParams"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "params"
+        ],
+        "title": "MineJobCreate"
+      },
+      "MineJobDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "kind": {
+            "type": "string",
+            "const": "mine_patterns",
+            "title": "Kind"
+          },
+          "params": {
+            "$ref": "#/components/schemas/MineJobParams"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "error",
+          "finished_at",
+          "kind",
+          "params"
+        ],
+        "title": "MineJobDetail"
+      },
+      "MineJobParams": {
+        "properties": {
+          "library": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Library"
+          },
+          "version": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Version"
+          },
+          "ecosystem": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ecosystem"
+          },
+          "minsup": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minsup"
+          },
+          "topn": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topn"
+          },
+          "maxlen": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxlen"
+          },
+          "minlen": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minlen"
+          },
+          "include_ambiguous": {
+            "type": "boolean",
+            "title": "Include Ambiguous",
+            "default": false
+          },
+          "cluster_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Threshold"
+          },
+          "cluster_min_size": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Min Size"
+          },
+          "resolve_kinds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolve Kinds"
+          },
+          "min_args": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Args"
+          },
+          "max_args": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Args"
+          }
+        },
+        "type": "object",
+        "required": [
+          "library",
+          "version"
+        ],
+        "title": "MineJobParams"
       },
       "MiningHealthResponse": {
         "properties": {
@@ -5427,6 +6656,467 @@
         ],
         "title": "PageRow",
         "description": "One stored page URL under a library version."
+      },
+      "PatternClusterInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ClusterRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "const": "clusters",
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "PatternClusterInsightResponse"
+      },
+      "PatternEvidenceInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "const": "evidence",
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "PatternEvidenceInsightResponse"
+      },
+      "PatternHealthInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PatternHealthRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "const": "health",
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "PatternHealthInsightResponse"
+      },
+      "PatternHealthRow": {
+        "properties": {
+          "patterns": {
+            "type": "integer",
+            "title": "Patterns"
+          },
+          "total_support": {
+            "type": "integer",
+            "title": "Total Support"
+          },
+          "reusability": {
+            "type": "number",
+            "title": "Reusability"
+          },
+          "diversity": {
+            "type": "number",
+            "title": "Diversity"
+          },
+          "clusters": {
+            "type": "integer",
+            "title": "Clusters"
+          },
+          "resolve_kinds": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Resolve Kinds"
+          },
+          "confidence": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Confidence"
+          },
+          "unresolved_rate": {
+            "type": "number",
+            "title": "Unresolved Rate"
+          },
+          "caller_link_rate": {
+            "type": "number",
+            "title": "Caller Link Rate"
+          },
+          "signature_missing_rate": {
+            "type": "number",
+            "title": "Signature Missing Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "patterns",
+          "total_support",
+          "reusability",
+          "diversity",
+          "clusters",
+          "resolve_kinds",
+          "confidence",
+          "unresolved_rate",
+          "caller_link_rate",
+          "signature_missing_rate"
+        ],
+        "title": "PatternHealthRow"
+      },
+      "PatternLabelInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PatternLabelRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "const": "labels",
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "PatternLabelInsightResponse"
+      },
+      "PatternLabelRow": {
+        "properties": {
+          "pattern": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pattern"
+          },
+          "pattern_hash": {
+            "type": "string",
+            "title": "Pattern Hash"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "prompt_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Version"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "category_path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Category Path"
+          },
+          "workflow": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflow"
+          },
+          "related_apis": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Related Apis"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pattern",
+          "pattern_hash",
+          "model",
+          "prompt_version",
+          "name",
+          "summary",
+          "category_path",
+          "workflow",
+          "related_apis"
+        ],
+        "title": "PatternLabelRow"
+      },
+      "PatternListInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PatternRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "const": "patterns",
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "PatternListInsightResponse"
+      },
+      "PatternRow": {
+        "properties": {
+          "pattern": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pattern"
+          },
+          "support": {
+            "type": "integer",
+            "title": "Support"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pattern",
+          "support"
+        ],
+        "title": "PatternRow"
+      },
+      "PatternSnippetInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PatternSnippetRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "const": "snippets",
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "PatternSnippetInsightResponse"
+      },
+      "PatternSnippetRow": {
+        "properties": {
+          "caller_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller File"
+          },
+          "caller": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caller"
+          },
+          "snippet": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JsonValue-Output"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rendered": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rendered"
+          }
+        },
+        "type": "object",
+        "required": [
+          "caller_file",
+          "caller",
+          "snippet",
+          "rendered"
+        ],
+        "title": "PatternSnippetRow"
+      },
+      "PatternTreeInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureNodeRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "const": "tree",
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "PatternTreeInsightResponse"
       },
       "PrefixGroup": {
         "properties": {
@@ -5619,6 +7309,7 @@
           },
           "updated_at": {
             "type": "string",
+            "format": "date-time",
             "title": "Updated At"
           }
         },
@@ -6327,7 +8018,8 @@
           "updated_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -6745,6 +8437,216 @@
         ],
         "title": "SearchResponse"
       },
+      "SignatureInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SignatureRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "const": "signature",
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "SignatureInsightResponse"
+      },
+      "SignatureRow": {
+        "properties": {
+          "api": {
+            "type": "string",
+            "title": "Api"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/JsonValue-Output"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          },
+          "return_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Type"
+          },
+          "short": {
+            "type": "string",
+            "title": "Short"
+          }
+        },
+        "type": "object",
+        "required": [
+          "api",
+          "kind",
+          "signature",
+          "short"
+        ],
+        "title": "SignatureRow"
+      },
+      "SymbolInsightResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SymbolRow"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "degraded": {
+            "type": "boolean",
+            "title": "Degraded"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "detail",
+              "file",
+              "children"
+            ],
+            "title": "View"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "degraded",
+          "count",
+          "view"
+        ],
+        "title": "SymbolInsightResponse"
+      },
+      "SymbolRow": {
+        "properties": {
+          "qualified_name": {
+            "type": "string",
+            "title": "Qualified Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent"
+          },
+          "signature": {
+            "type": "string",
+            "title": "Signature"
+          },
+          "params": {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
+            "type": "array",
+            "title": "Params"
+          },
+          "bases": {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
+            "type": "array",
+            "title": "Bases"
+          },
+          "depth": {
+            "type": "integer",
+            "title": "Depth"
+          },
+          "file": {
+            "type": "string",
+            "title": "File"
+          },
+          "line_start": {
+            "type": "integer",
+            "title": "Line Start"
+          },
+          "line_end": {
+            "type": "integer",
+            "title": "Line End"
+          },
+          "param_types": {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue-Output"
+            },
+            "type": "array",
+            "title": "Param Types"
+          },
+          "return_type": {
+            "type": "string",
+            "title": "Return Type"
+          },
+          "has_doc": {
+            "type": "boolean",
+            "title": "Has Doc"
+          }
+        },
+        "type": "object",
+        "required": [
+          "qualified_name",
+          "kind",
+          "parent",
+          "signature",
+          "params",
+          "bases",
+          "depth",
+          "file",
+          "line_start",
+          "line_end",
+          "param_types",
+          "return_type",
+          "has_doc"
+        ],
+        "title": "SymbolRow"
+      },
       "TopLink": {
         "properties": {
           "url": {
@@ -6885,7 +8787,8 @@
           "created_at": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "date-time"
               },
               {
                 "type": "null"
@@ -6917,6 +8820,27 @@
       "QuotaErrorDetail": {
         "properties": {
           "error": {
+            "enum": [
+              "unauthorized",
+              "forbidden",
+              "missing_scope",
+              "origin_forbidden",
+              "not_found",
+              "page_not_found",
+              "job_not_found",
+              "quota_exceeded",
+              "review_conflict",
+              "invalid_limit",
+              "invalid_offset",
+              "invalid_scope",
+              "invalid_ecosystem",
+              "invalid_argument",
+              "chat_disabled",
+              "upstream_unavailable",
+              "unavailable",
+              "index_request_conflict",
+              "config_refresh_failed"
+            ],
             "title": "Error",
             "type": "string"
           },
@@ -6925,15 +8849,9 @@
             "type": "string"
           },
           "reset_at": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "title": "Reset At"
+            "format": "date-time",
+            "title": "Reset At",
+            "type": "string"
           }
         },
         "required": [
@@ -6947,6 +8865,27 @@
       "ErrorResponse": {
         "properties": {
           "error": {
+            "enum": [
+              "unauthorized",
+              "forbidden",
+              "missing_scope",
+              "origin_forbidden",
+              "not_found",
+              "page_not_found",
+              "job_not_found",
+              "quota_exceeded",
+              "review_conflict",
+              "invalid_limit",
+              "invalid_offset",
+              "invalid_scope",
+              "invalid_ecosystem",
+              "invalid_argument",
+              "chat_disabled",
+              "upstream_unavailable",
+              "unavailable",
+              "index_request_conflict",
+              "config_refresh_failed"
+            ],
             "title": "Error",
             "type": "string"
           },
@@ -6981,9 +8920,7 @@
           "reset_at": {
             "anyOf": [
               {
-                "type": "number"
-              },
-              {
+                "format": "date-time",
                 "type": "string"
               },
               {

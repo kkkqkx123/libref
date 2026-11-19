@@ -75,7 +75,7 @@ async function submit(): Promise<void> {
         kind: form.kind,
         roles: form.roles,
         scopes: [],
-        expires_at: expiresDate.value ? expiresDate.value.getTime() / 1000 : null,
+        expires_at: expiresDate.value ? expiresDate.value.toISOString() : null,
       },
     });
     notifySuccess(messages.value.admin.keyIssued);

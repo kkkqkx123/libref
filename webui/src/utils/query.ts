@@ -31,15 +31,18 @@ export function readBool(value: RawQueryValue, fallback: boolean): boolean {
 }
 
 export function readList(value: RawQueryValue): string[] {
-  return single(value)
-    .split(',')
-    .map((item) => item.trim())
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (item || '').trim())
     .filter((item) => item.length > 0);
 }
 
-function encode(value: QueryValue | string[]): string | undefined {
+function encode(value: QueryValue | string[]): string | string[] | undefined {
   if (value === null || value === undefined) return undefined;
-  if (Array.isArray(value)) return value.length > 0 ? value.join(',') : undefined;
+  if (Array.isArray(value)) {
+    const items = value.map((item) => item.trim()).filter((item) => item.length > 0);
+    return items.length > 0 ? items : undefined;
+  }
   if (typeof value === 'boolean') return value ? '1' : '0';
   if (typeof value === 'number') return Number.isFinite(value) ? String(value) : undefined;
   const trimmed = value.trim();
@@ -52,9 +55,9 @@ export function useQuerySync() {
   const router = useRouter();
 
   function sync(snapshot: QuerySnapshot): void {
-    const next: Record<string, string> = {};
+    const next: Record<string, string | string[]> = {};
     for (const [key, value] of Object.entries(route.query)) {
-      const encoded = encode(value as QueryValue);
+      const encoded = encode(value as QueryValue | string[]);
       if (encoded !== undefined) next[key] = encoded;
     }
     for (const [key, value] of Object.entries(snapshot)) {

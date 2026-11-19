@@ -1,3 +1,5 @@
+import type { KnownErrorCode } from '../../api/types';
+
 export const zhCN = {
   common: {
     retry: '重试',
@@ -115,7 +117,9 @@ export const zhCN = {
     chat_disabled: '问答未启用，请先在配置中开启对话模型',
     upstream_unavailable: '上游数据源暂不可用',
     unavailable: '服务暂不可用，请稍后重试',
-  },
+    index_request_conflict: '入库申请状态冲突，请刷新后重试',
+    config_refresh_failed: '配置刷新失败，请查看服务日志',
+  } satisfies Record<KnownErrorCode, string>,
   app: {
     brand: 'libref',
     devMode: '开发模式',
@@ -387,15 +391,15 @@ export const zhCN = {
     resubmit: '按原参数重提',
     resubmitFailed: '重提失败',
     createTitle: '新建通用任务',
-    kindPlaceholder: '任务类型',
+    minePatterns: '挖掘模式',
+    induceLabels: '归纳标签',
+    indexJobHint: '索引任务请通过入库申请处理',
     params: '参数',
-    paramsPlaceholder: 'JSON 对象，如 {"library": "x"}',
     none: '（无）',
     loadDetailFailed: '加载详情失败',
     cancelConfirm: '确定取消该任务吗？',
     cancelled: '已取消',
     cancelFailed: '取消失败',
-    invalidJson: '参数不是合法 JSON',
     submitted: (id: number) => `任务已提交：${id}`,
     submitFailed: '提交失败',
     error: '错误',

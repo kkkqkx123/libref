@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from libref.services.infra.timestamps import iso_utc
+
 
 class ReviewService:
     """Review orchestration; entity identity uses review_status rows for locating."""
@@ -86,7 +88,7 @@ class ReviewService:
                 {
                     "entity_id": int(r[0]),
                     "status": r[1],
-                    "updated_at": r[2],
+                    "updated_at": iso_utc(r[2]),
                     "callee": r[3],
                     "caller_file": r[4],
                     "caller": r[5],

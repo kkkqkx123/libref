@@ -56,7 +56,7 @@ import { ElButton, ElCheckbox, ElForm, ElFormItem, ElInput, ElInputNumber, ElRad
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { Row } from '../api/types';
+import { field, type CallInsightRow, type Row } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
 import EvidenceList from '../components/business/EvidenceList.vue';
 import EmptyState from '../components/common/EmptyState.vue';
@@ -100,7 +100,7 @@ const loading = ref(false);
 const loaded = ref(false);
 const error = ref('');
 const requestId = ref('');
-const rows = ref<Row[]>([]);
+const rows = ref<CallInsightRow[]>([]);
 
 async function load(): Promise<void> {
   sync({
@@ -125,7 +125,7 @@ async function load(): Promise<void> {
         limit: scopeStore.resultLimit,
         offset: offset.value,
         include_ambiguous: includeAmbiguous.value,
-        resolve_kinds: resolveKinds.value.length > 0 ? resolveKinds.value.join(',') : undefined,
+        resolve_kinds: resolveKinds.value,
         min_args: minArgs.value,
         max_args: maxArgs.value,
       },
@@ -148,7 +148,7 @@ function page(direction: number): void {
 if (route.query.view || route.query.api) void load();
 
 function forwardSymbol(row: Row): void {
-  const api = row['callee_name'];
+  const api = field(row, 'callee');
   void router.push({
     path: '/insights/symbols',
     query: { view: 'detail', api: typeof api === 'string' ? api : undefined },
@@ -156,7 +156,7 @@ function forwardSymbol(row: Row): void {
 }
 
 function forwardFeedback(row: Row): void {
-  const entityId = Number(row['entity_id']);
+  const entityId = Number(field(row, 'entity_id'));
   void router.push({
     path: '/feedback',
     query: {

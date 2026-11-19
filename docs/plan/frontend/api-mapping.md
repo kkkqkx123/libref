@@ -22,10 +22,10 @@
 
 | 端点 | 视图参数 | 前端注意 |
 |---|---|---|
-| `GET /api-insight` | view 取 usage/related/args/common | related 与 args 必填 api；common 填 api 或 apis（逗号分隔）；limit 上限 500 |
-| `GET /pattern-insight` | view 取 patterns/evidence/tree/clusters/health/labels/snippets | pattern 与 containing 为逗号分隔序列；prefix 为单前缀；dedup 与 per_file_limit 只在部分视图有效 |
-| `GET /symbol-insight` | view 取 detail/file/children/signature | 支持 offset 分页；apis 多值逗号分隔 |
-| `GET /call-insight` | view 取 callee/caller/file | resolve_kinds 逗号分隔多选；min_args/max_args 为非负整数；offset 分页 |
+| `GET /api-insight` | view 取 usage/related/args/common | related 与 args 必填 api；common 填 api 或 apis（重复查询参数）；limit 上限 500 |
+| `GET /pattern-insight` | view 取 patterns/evidence/tree/clusters/health/labels/snippets | pattern 与 containing 为重复查询参数序列；prefix 为单前缀；dedup 与 per_file_limit 只在部分视图有效 |
+| `GET /symbol-insight` | view 取 detail/file/children/signature | 支持 offset 分页；apis 为重复查询参数 |
+| `GET /call-insight` | view 取 callee/caller/file | resolve_kinds 为重复查询参数多选；min_args/max_args 为非负整数；offset 分页 |
 | `GET /import-insight` | view 取 importers/imports | offset 分页 |
 
 ## 写操作：入库与任务

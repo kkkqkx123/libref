@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from libref.services.infra.timestamps import iso_utc
 from libref.text.normalize import normalize_markdown
 
 
@@ -110,7 +111,7 @@ class LibraryService:
                     "docs_url": r[5],
                     "repo_url": r[6],
                     "resolved_from": r[7],
-                    "resolved_at": r[8],
+                    "resolved_at": iso_utc(r[8]),
                     "versions": r[9],
                 }
             )
@@ -188,7 +189,7 @@ class LibraryService:
                 # Catalog consumers (webui) cannot classify pre-releases on their
                 # own without duplicating the per-registry rules, so flag it here.
                 "prerelease": is_prerelease(r[1], r[4]),
-                "created_at": r[3],
+                "created_at": iso_utc(r[3]),
                 "ecosystem": r[4],
                 "pages": r[5],
             }

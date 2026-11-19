@@ -37,7 +37,7 @@ import { ElButton, ElForm, ElFormItem, ElInput, ElRadioButton, ElRadioGroup } fr
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { Row } from '../api/types';
+import { field, type ApiInsightRow, type Row } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
 import EvidenceList from '../components/business/EvidenceList.vue';
 import EmptyState from '../components/common/EmptyState.vue';
@@ -72,7 +72,7 @@ const loading = ref(false);
 const loaded = ref(false);
 const error = ref('');
 const requestId = ref('');
-const rows = ref<Row[]>([]);
+const rows = ref<ApiInsightRow[]>([]);
 
 const needsApi = computed(() => view.value === 'related' || view.value === 'args');
 
@@ -101,7 +101,7 @@ async function load(): Promise<void> {
       params: {
         view: view.value,
         api: apiName.value.trim() || undefined,
-        apis: apis.value.length > 0 ? apis.value.join(',') : undefined,
+        apis: apis.value,
         ...scopeParams(),
         limit: scopeStore.resultLimit,
       },
@@ -119,7 +119,7 @@ async function load(): Promise<void> {
 if (route.query.view || route.query.api || route.query.apis) void load();
 
 function forwardFeedback(row: Row): void {
-  const entityId = Number(row['entity_id']);
+  const entityId = Number(field(row, 'entity_id'));
   void router.push({
     path: '/feedback',
     query: {

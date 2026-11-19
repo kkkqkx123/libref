@@ -613,6 +613,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
                         INDEX_REPO_JOB_KIND,
                         build_repo_runner,
                     )
+                    from libref.services.code.mining_refresh import (
+                        INDUCE_LABELS_JOB_KIND,
+                        MINE_PATTERNS_JOB_KIND,
+                        build_induce_runner,
+                        build_mine_runner,
+                    )
                     from libref.services.docs.scrape_jobs import (
                         SCRAPE_JOB_KIND,
                         build_scrape_runner,
@@ -638,12 +644,18 @@ def cmd_serve(args: argparse.Namespace) -> int:
                         embed=ctx.embed,
                         mgr=mgr,
                     )
+                    mine_runner = build_mine_runner(settings, worker_conn)
+                    induce_runner = build_induce_runner(settings, worker_conn)
 
                     async def dispatch(job):
                         if job.kind == SCRAPE_JOB_KIND:
                             return await scrape_runner(job)
                         if job.kind == INDEX_REPO_JOB_KIND:
                             return await repo_runner(job)
+                        if job.kind == MINE_PATTERNS_JOB_KIND:
+                            return await mine_runner(job)
+                        if job.kind == INDUCE_LABELS_JOB_KIND:
+                            return await induce_runner(job)
                         raise ValueError(f"unsupported job kind: {job.kind}")
 
                     mgr.start_worker(

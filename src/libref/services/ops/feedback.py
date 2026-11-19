@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from libref.services.infra.tenant import GLOBAL_TENANT
+from libref.services.infra.timestamps import iso_utc
 
 
 class FeedbackService:
@@ -73,9 +74,9 @@ class FeedbackService:
                 "kind": str(row[5]),
                 "body": str(row[6]),
                 "status": str(row[7]),
-                "created_at": str(row[8]),
+                "created_at": iso_utc(row[8]),
                 "resolved_by": row[9],
-                "resolved_at": row[10],
+                "resolved_at": iso_utc(row[10]),
             }
             for row in rows
         ]

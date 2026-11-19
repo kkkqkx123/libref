@@ -1,6 +1,7 @@
 // Typed fetch wrapper: paths, query strings, request bodies and responses come
 // from the checked-in OpenAPI schema. It also injects the API key, normalizes
 // FastAPI errors, and surfaces the backend request id for audit correlation.
+import type { ApiErrorCode, KnownErrorCode } from './types';
 import type { components, paths } from './schema';
 import { authStore } from '../stores/auth';
 import { messages } from '../i18n';
@@ -9,7 +10,7 @@ export class ApiError extends Error {
   status: number;
   // Stable backend code (`page_not_found`, `quota_exceeded`, ...); falls back
   // to `http_<status>` when the cause is not mapped.
-  code: string;
+  code: ApiErrorCode;
   // Raw backend detail, kept so a generic code can still name the culprit
   // (which argument, which upstream).
   detail: string;
@@ -18,7 +19,7 @@ export class ApiError extends Error {
 
   constructor(
     status: number,
-    code: string,
+    code: ApiErrorCode,
     message: string,
     detail: string,
     requestId: string,
@@ -143,17 +144,18 @@ function errorBodyOf(payload: unknown): ErrorBody | null {
 function describeFailure(
   status: number,
   payload: unknown,
-): { code: string; message: string; detail: string } {
+): { code: ApiErrorCode; message: string; detail: string } {
   const body = errorBodyOf(payload);
-  let code = '';
+  let code: ApiErrorCode = `http_${status}`;
   let detailText = '';
-  if (body) {
+  if (body?.error) {
     code = body.error;
     if (typeof body.detail === 'string') detailText = body.detail;
     else if (body.detail) detailText = body.detail.error;
   }
-  if (!code) code = `http_${status}`;
-  const localised = (messages.value.errorCodes as Record<string, string>)[code];
+  const localised = (messages.value.errorCodes as Record<KnownErrorCode, string>)[
+    code as KnownErrorCode
+  ];
   if (localised) {
     const combined =
       detailText && detailText !== localised
@@ -193,9 +195,15 @@ export async function api<P extends ApiPath, M extends ApiMethod = 'GET'>(
 ): Promise<{ data: ResponseOf<P, M>; requestId: string }> {
   const query = new URLSearchParams();
   const params = options.params as
-    | Record<string, string | number | boolean | null | undefined>
+    | Record<string, string | string[] | number | boolean | null | undefined>
     | undefined;
   for (const [key, value] of Object.entries(params || {})) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== '') query.append(key, String(item));
+      }
+      continue;
+    }
     if (value === undefined || value === null || value === '') continue;
     query.append(key, String(value));
   }

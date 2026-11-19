@@ -79,7 +79,7 @@ import { ElButton, ElForm, ElFormItem, ElInput, ElInputNumber, ElOption, ElSelec
 import { computed, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { FeedbackItem } from '../api/types';
+import type { FeedbackItem, FeedbackStatus } from '../api/types';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import LoadingPanel from '../components/common/LoadingPanel.vue';
@@ -109,7 +109,11 @@ const form = reactive({
   kind: 'general',
   body: typeof route.query.body === 'string' ? route.query.body : '',
 });
-const status = ref(readString(route.query.status));
+const STATUSES: FeedbackStatus[] = ['open', 'acknowledged', 'resolved'];
+const requestedStatus = readString(route.query.status) as FeedbackStatus;
+const status = ref<FeedbackStatus | ''>(
+  STATUSES.includes(requestedStatus) ? requestedStatus : '',
+);
 const loading = ref(false);
 const submitting = ref(false);
 // Quota refusals show the reset time plus a manual retry rather than an error.
