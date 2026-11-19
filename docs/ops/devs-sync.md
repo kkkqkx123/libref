@@ -116,6 +116,20 @@ uv run pytest -m integration -q
 uv run pytest -q          # 全量；e2e 默认跳过，requires_qdrant / requires_simvec 需现场自备服务或产物
 ```
 
+## 镜像构建
+
+devs 的 Docker 是系统包安装：`/usr/bin/docker` 与 `/usr/bin/dockerd`，daemon 由 systemd 管理，socket 为 `/var/run/docker.sock`，数据目录为 `/var/lib/docker`，`itc` 已加入 `docker` 组。镜像源写在 `/etc/docker/daemon.json`，当前使用 `https://docker.m.daocloud.io`。不再使用用户目录下的临时 Docker 工具链。
+
+构建前按上文同步源码。GHCR 基础镜像在该机拉取 blob 会卡在 GHCR CDN，可先从可联网机器导出后用 `sudo docker load -i` 载入；Docker Hub 基础镜像走镜像源直接拉取。构建命令（当前镜像无 buildx 组件，显式关闭 BuildKit）：
+
+```bash
+cd /data/kkkqkx/libref/repo
+sha=$(sed -n 's/^sha=//p' BUILD_INFO.txt)
+sudo env DOCKER_BUILDKIT=0 docker build -f Dockerfile -t libref:$sha -t libref:latest .
+```
+
+镜像为四阶段构建：Python 依赖、前端产物、simvec 原生库分别构建，运行时镜像只含 `.venv`、`libsimvec.so` 与前端 `dist`，不含 gcc、cargo、node 工具链。构建后用 `docker run --rm libref:$sha` 核对入口与导入路径。
+
 ## 反向取回
 
 日志和结果体积小，直接取回：
