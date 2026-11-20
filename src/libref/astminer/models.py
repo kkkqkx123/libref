@@ -36,6 +36,13 @@ class CodeSnippet(BaseModel):
     heading: str = ""
     ordinal: int = 0
     origin_kind: str = "markdown_fence"
+    # Host location of the block, so call evidence points back to the page
+    # or source file instead of only to a synthetic parse path.
+    origin_location: str = ""
+    origin_start_byte: int = 0
+    origin_end_byte: int = 0
+    origin_start_line: int = 0
+    origin_end_line: int = 0
 
 
 class ApiDeclRecord(BaseModel):
@@ -55,6 +62,7 @@ class ApiDeclRecord(BaseModel):
     depth: int = 0
     has_doc: bool = False
     span_kind: str = "exact_entities"
+    preproc_conditions: list[str] = Field(default_factory=list)
 
 
 class RawCall(BaseModel):
@@ -69,6 +77,8 @@ class RawCall(BaseModel):
     receiver: str | None = None
     func: str = ""
     argument_count: int = 0
+    relation_kind: str = "direct"
+    macro_generated: bool = False
 
 
 class CallInstanceRecord(BaseModel):
@@ -95,3 +105,4 @@ class CallInstanceRecord(BaseModel):
     origin_kind: str = "repo_file"
     in_target_api: bool = False
     target_status: str = "current"
+    relation_kind: str = "direct"

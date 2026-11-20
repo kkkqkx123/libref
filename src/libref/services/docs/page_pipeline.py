@@ -409,6 +409,7 @@ class PagePipeline:
                             origin_kind=origin,
                             tenant_id=self._tenant_id,
                             source_url=url,
+                            settings=self._settings,
                         )
         split_start = _time.monotonic()
         self._account_page(store, tenant_id, snapshot_bytes=0)

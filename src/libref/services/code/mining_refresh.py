@@ -58,12 +58,23 @@ def _review_map(conn, version_id: int) -> dict[int, str]:
 
 
 def _keep_call(
-    confidence: str, resolve_kind: str, status: str | None, include_ambiguous: bool
+    confidence: str,
+    resolve_kind: str,
+    status: str | None,
+    include_ambiguous: bool,
+    relation_kind: str = "direct",
+    relation_kinds: set[str] | None = None,
 ) -> bool:
     if status == "conflict":
         return False
     if status == "approved":
         return True
+    if relation_kinds and relation_kind not in relation_kinds:
+        return False
+    # Macro calls need an explicit relation filter even when ambiguous calls
+    # are allowed; their shape, not their confidence, is the reason to drop them.
+    if relation_kind == "macro" and "macro" not in (relation_kinds or set()):
+        return False
     # Stdlib/builtin rows are certain externals (INFERRED), so the mining
     # exclusion rides on the source column instead of the confidence level.
     if confidence == "AMBIGUOUS" or resolve_kind in ("stdlib", "builtin"):
@@ -80,14 +91,17 @@ def _load_kept_calls(
     min_args: int | None = None,
     max_args: int | None = None,
     source_ids: list[int] | tuple[int, ...] | None = None,
+    relation_kinds: list[str] | tuple[str, ...] | None = None,
 ):
     """Single shared scan with review, target and source-aware filters."""
     if source_ids is not None and not source_ids:
         return []
     wanted = sorted({str(k) for k in (resolve_kinds or []) if str(k).strip()})
+    wanted_relations = {str(k) for k in (relation_kinds or []) if str(k).strip()}
     sql = (
         "SELECT callee_name, caller_file, caller, confidence, id,"
-        " line_start, call_order, start_byte, resolve_kind, argument_count, sample_id"
+        " line_start, call_order, start_byte, resolve_kind, argument_count, sample_id,"
+        " COALESCE(relation_kind,'direct')"
         " FROM call_instances WHERE version_id=? AND in_target_api=1"
     )
     params: list[Any] = [version_id]
@@ -100,7 +114,12 @@ def _load_kept_calls(
     out = []
     for r in rows:
         if not _keep_call(
-            str(r[3]), str(r[8] or ""), review.get(int(r[4])), include_ambiguous
+            str(r[3]),
+            str(r[8] or ""),
+            review.get(int(r[4])),
+            include_ambiguous,
+            str(r[11] or "direct"),
+            wanted_relations,
         ):
             continue
         if wanted and str(r[8] or "") not in wanted:
@@ -160,6 +179,7 @@ def refresh_feature_tree(
     max_args: int | None = None,
     profile_id: int,
     source_ids: list[int] | tuple[int, ...] | None = None,
+    relation_kinds: list[str] | tuple[str, ...] | None = None,
 ) -> int:
     """Rebuild hierarchical feature nodes in bulk; returns the node count."""
     from libref.mining import feature_tree as _tree
@@ -173,6 +193,7 @@ def refresh_feature_tree(
         min_args=min_args,
         max_args=max_args,
         source_ids=source_ids,
+        relation_kinds=relation_kinds,
     )
     calls = [
         (str(r[0]), str(r[10]) or _scope_key(str(r[1]), r[2])) for r in rows if r[0]
@@ -229,6 +250,7 @@ def refresh_clusters(
     max_args: int | None = None,
     profile_id: int,
     source_ids: list[int] | tuple[int, ...] | None = None,
+    relation_kinds: list[str] | tuple[str, ...] | None = None,
 ) -> int:
     """Rebuild API clusters in bulk; returns the cluster count."""
     from libref.mining import build_scope_sets as _scope_sets
@@ -245,6 +267,7 @@ def refresh_clusters(
         min_args=min_args,
         max_args=max_args,
         source_ids=source_ids,
+        relation_kinds=relation_kinds,
     )
     triplets = [
         (str(r[0]), str(r[10]) or _scope_key(str(r[1]), r[2]), r[2])
@@ -301,6 +324,7 @@ def mine_patterns(
     max_args: int | None = None,
     profile: str | None = None,
     source_roles: list[str] | tuple[str, ...] | None = None,
+    relation_kinds: list[str] | tuple[str, ...] | None = None,
     tenant_id: str = "default",
 ) -> list[dict]:
     import json as _json
@@ -337,6 +361,7 @@ def mine_patterns(
         min_args=min_args,
         max_args=max_args,
         source_ids=source_ids,
+        relation_kinds=relation_kinds,
     )
     if not rows:
         _clear_derived(conn, version_id, profile_id)
@@ -355,6 +380,7 @@ def mine_patterns(
         _rk,
         _argc,
         sample_id,
+        _relation,
     ) in rows:
         key = str(sample_id) or _scope_key(str(caller_file), caller)
         groups.setdefault(key, []).append(
@@ -383,6 +409,7 @@ def mine_patterns(
             max_args=max_args,
             profile_id=profile_id,
             source_ids=source_ids,
+            relation_kinds=relation_kinds,
         )
         refresh_clusters(
             conn,
@@ -396,6 +423,7 @@ def mine_patterns(
             max_args=max_args,
             profile_id=profile_id,
             source_ids=source_ids,
+            relation_kinds=relation_kinds,
         )
         conn.commit()
         return []
@@ -448,6 +476,7 @@ def mine_patterns(
         max_args=max_args,
         profile_id=profile_id,
         source_ids=source_ids,
+        relation_kinds=relation_kinds,
     )
     refresh_clusters(
         conn,
@@ -461,6 +490,7 @@ def mine_patterns(
         max_args=max_args,
         profile_id=profile_id,
         source_ids=source_ids,
+        relation_kinds=relation_kinds,
     )
     conn.commit()
     results.sort(key=lambda r: (-r["support"], r["pattern"]))
@@ -484,6 +514,7 @@ def mine_job_params(
     max_args: int | None = None,
     profile: str | None = None,
     source_roles: list[str] | tuple[str, ...] | None = None,
+    relation_kinds: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Build mining job params, symmetric with scrape job params, ensuring replayability."""
     return {
@@ -502,6 +533,7 @@ def mine_job_params(
         "max_args": max_args,
         "profile": profile,
         "source_roles": list(source_roles) if source_roles else None,
+        "relation_kinds": list(relation_kinds) if relation_kinds else None,
     }
 
 
@@ -537,6 +569,7 @@ def build_mine_runner(settings, conn):
             max_args=p.get("max_args"),
             profile=p.get("profile"),
             source_roles=p.get("source_roles"),
+            relation_kinds=p.get("relation_kinds"),
         )
 
     return runner

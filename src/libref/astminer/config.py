@@ -22,14 +22,16 @@ class LanguageConfig:
 C_CONFIG = LanguageConfig(
     name="c",
     grammar="tree_sitter_c",
-    file_suffixes=(".c", ".h"),
+    file_suffixes=(".c",),
     config_version=1,
 )
 
+# Header suffixes are routed to C++: a C++ header parsed as C loses classes and
+# members, while the C++ grammar still covers the C constructs used in headers.
 CPP_CONFIG = LanguageConfig(
     name="cpp",
     grammar="tree_sitter_cpp",
-    file_suffixes=(".cc", ".cpp", ".cxx", ".hpp", ".hh"),
+    file_suffixes=(".cc", ".cpp", ".cxx", ".hpp", ".hh", ".h"),
     config_version=1,
 )
 
@@ -166,6 +168,7 @@ def _rules_fingerprint() -> str:
     parts: list[str] = []
     for rel in (
         "engine.py",
+        "c_shadow.py",
         "context.py",
         "rules/entities.py",
         "rules/aliases.py",

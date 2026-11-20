@@ -168,6 +168,7 @@ def _call_filter_sql(
     resolve_kinds: list[str] | tuple[str, ...] | None,
     min_args: int | None,
     max_args: int | None,
+    relation_kinds: list[str] | tuple[str, ...] | None = None,
 ) -> tuple[str, list[Any]]:
     """Shared call filter with review semantics; empty inputs keep history."""
     parts: list[str] = ["(rs.status IS NULL OR rs.status != 'conflict')"]
@@ -186,6 +187,17 @@ def _call_filter_sql(
             marks = ",".join("?" for _ in wanted)
             parts.append(f"({alias}.resolve_kind IN ({marks}))")
             params.extend(wanted)
+    relations = sorted({str(k) for k in (relation_kinds or []) if str(k).strip()})
+    if relations:
+        marks = ",".join("?" for _ in relations)
+        parts.append(f"(COALESCE({alias}.relation_kind,'direct') IN ({marks}))")
+        params.extend(relations)
+    else:
+        # Macro shape is excluded independently of the ambiguous-call switch.
+        parts.append(
+            f"(COALESCE({alias}.relation_kind,'direct') != 'macro'"
+            " OR rs.status='approved')"
+        )
     if min_args is not None:
         parts.append(f"({alias}.argument_count >= ?)")
         params.append(int(min_args))
@@ -1057,6 +1069,7 @@ class MiningReadService:
             "call_order": int(row[13] or 0),
             "callee_entity_id": row[14],
             "caller_entity_id": row[15],
+            "relation_kind": str(row[16] or "direct"),
         }
 
     def calls_by_callee(
@@ -1072,6 +1085,7 @@ class MiningReadService:
         resolve_kinds: list[str] | None = None,
         min_args: int | None = None,
         max_args: int | None = None,
+        relation_kinds: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Who calls me: deterministic caller listing for one callee."""
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
@@ -1079,12 +1093,18 @@ class MiningReadService:
             return []
         placeholders = ",".join("?" for _ in vids)
         extra, params = _call_filter_sql(
-            "call_instances", include_ambiguous, resolve_kinds, min_args, max_args
+            "call_instances",
+            include_ambiguous,
+            resolve_kinds,
+            min_args,
+            max_args,
+            relation_kinds,
         )
         rows = self._conn.execute(
             "SELECT callee_name, caller, caller_file, line_start, line_end,"
             " start_byte, end_byte, confidence, resolve_kind, receiver, func, args,"
-            " argument_count, call_order, callee_entity_id, caller_entity_id"
+            " argument_count, call_order, callee_entity_id, caller_entity_id,"
+            " COALESCE(call_instances.relation_kind,'direct')"
             " FROM call_instances LEFT JOIN review_status rs"
             " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
             f" WHERE version_id IN ({placeholders}) AND callee_name = ?{extra}"
@@ -1108,6 +1128,7 @@ class MiningReadService:
         resolve_kinds: list[str] | None = None,
         min_args: int | None = None,
         max_args: int | None = None,
+        relation_kinds: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Who I call: deterministic callee listing for one caller."""
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
@@ -1115,12 +1136,18 @@ class MiningReadService:
             return []
         placeholders = ",".join("?" for _ in vids)
         extra, params = _call_filter_sql(
-            "call_instances", include_ambiguous, resolve_kinds, min_args, max_args
+            "call_instances",
+            include_ambiguous,
+            resolve_kinds,
+            min_args,
+            max_args,
+            relation_kinds,
         )
         rows = self._conn.execute(
             "SELECT callee_name, caller, caller_file, line_start, line_end,"
             " start_byte, end_byte, confidence, resolve_kind, receiver, func, args,"
-            " argument_count, call_order, callee_entity_id, caller_entity_id"
+            " argument_count, call_order, callee_entity_id, caller_entity_id,"
+            " COALESCE(call_instances.relation_kind,'direct')"
             " FROM call_instances LEFT JOIN review_status rs"
             " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
             f" WHERE version_id IN ({placeholders}) AND caller = ?{extra}"
@@ -1144,18 +1171,25 @@ class MiningReadService:
         resolve_kinds: list[str] | None = None,
         min_args: int | None = None,
         max_args: int | None = None,
+        relation_kinds: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids or not importer_file:
             return []
         placeholders = ",".join("?" for _ in vids)
         extra, params = _call_filter_sql(
-            "call_instances", include_ambiguous, resolve_kinds, min_args, max_args
+            "call_instances",
+            include_ambiguous,
+            resolve_kinds,
+            min_args,
+            max_args,
+            relation_kinds,
         )
         rows = self._conn.execute(
             "SELECT callee_name, caller, caller_file, line_start, line_end,"
             " start_byte, end_byte, confidence, resolve_kind, receiver, func, args,"
-            " argument_count, call_order, callee_entity_id, caller_entity_id"
+            " argument_count, call_order, callee_entity_id, caller_entity_id,"
+            " COALESCE(call_instances.relation_kind,'direct')"
             " FROM call_instances LEFT JOIN review_status rs"
             " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
             f" WHERE version_id IN ({placeholders}) AND caller_file = ?{extra}"
@@ -1572,6 +1606,7 @@ class MiningReadService:
         resolve_kinds: list[str] | None = None,
         min_args: int | None = None,
         max_args: int | None = None,
+        relation_kinds: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Thin bidirectional call views with shared filters."""
         capped = limit if limit is not None else 100
@@ -1589,6 +1624,7 @@ class MiningReadService:
                 resolve_kinds=resolve_kinds,
                 min_args=min_args,
                 max_args=max_args,
+                relation_kinds=relation_kinds,
                 tenant_id=tenant_id,
             )
         if view == "caller":
@@ -1605,6 +1641,7 @@ class MiningReadService:
                 resolve_kinds=resolve_kinds,
                 min_args=min_args,
                 max_args=max_args,
+                relation_kinds=relation_kinds,
                 tenant_id=tenant_id,
             )
         if view == "file":
@@ -1621,6 +1658,7 @@ class MiningReadService:
                 resolve_kinds=resolve_kinds,
                 min_args=min_args,
                 max_args=max_args,
+                relation_kinds=relation_kinds,
                 tenant_id=tenant_id,
             )
         raise ValueError(f"unsupported call view: {view}")

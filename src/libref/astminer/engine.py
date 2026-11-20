@@ -10,8 +10,10 @@ from tree_sitter import Parser, Query, QueryCursor
 
 from libref.astminer import queries as _queries
 from libref.astminer import rules as _rules
+from libref.astminer.c_shadow import shadow_for_parse
 from libref.astminer.config import LanguageConfig, grammar_fingerprint, load_language
 from libref.astminer.context import determine_module_path
+from libref.astminer.macro_calls import find_macro_calls
 from libref.astminer.models import ApiDeclRecord, RawCall
 from libref.astminer.rules import CapturedItem, normalize_owner_text
 
@@ -42,6 +44,7 @@ class _Entity:
     has_doc: bool = False
     span_override: tuple[int, int, int, int] | None = None
     impl_anchors: list[tuple[int, int, str]] = field(default_factory=list)
+    preproc_conditions: list[str] = field(default_factory=list)
 
 
 def get_parser(cfg: LanguageConfig) -> Parser:
@@ -117,7 +120,9 @@ def extract_file(
     path: str, cfg: LanguageConfig, source: bytes
 ) -> tuple[list[ApiDeclRecord], list[ScopedAlias], list[RawCall]]:
     parser = get_parser(cfg)
-    tree = parser.parse(source)
+    # The tree is built from shadow bytes with identical spans; all text is
+    # still sliced from the original source, so evidence stays verbatim.
+    tree = parser.parse(shadow_for_parse(source, cfg.name))
     compiled = _compiled_queries(cfg)
     entity_matches = QueryCursor(compiled["entity"]).matches(tree.root_node)
     call_matches = QueryCursor(compiled["call"]).matches(tree.root_node)
@@ -143,8 +148,24 @@ def extract_file(
         if not var or not target:
             continue
         aliases.append((var, target, _var_scope(decls, var, at)))
-    calls = _build_calls(path, cfg, source, call_matches, decls)
+    calls = _build_calls(path, cfg, source, call_matches, decls, tree.root_node)
     return decls, aliases, calls
+
+
+def _preproc_conditions(dep_matches, source: bytes) -> list[tuple[int, int, str]]:
+    found: list[tuple[int, int, str]] = []
+    for node, items in _merge_matches(dep_matches, source):
+        names = list(
+            dict.fromkeys(
+                item.text
+                for item in items
+                if _queries.is_preproc_condition(item.name) and item.text
+            )
+        )
+        if names:
+            found.append((node.start_byte, node.end_byte, ",".join(names)))
+    found.sort()
+    return found
 
 
 def _comment_spans(
@@ -223,6 +244,7 @@ def _build_decls(
     _nest_structure(entities)
     _classify_all(entities)
     _fill_details(source, entities, doc_spans, line_spans)
+    _attach_preproc_conditions(entities, _preproc_conditions(dep_matches, source))
     _attach_bases_innermost(entities, dep_spans)
     _merge_partial_decls(entities)
     _normalize_ownership(entities, anchors, module, cfg.name)
@@ -376,6 +398,25 @@ def _fill_details(source, entities, doc_spans, line_spans) -> None:
         entity.has_doc = _has_doc(node, body, source, doc_spans, line_spans)
 
 
+def _attach_preproc_conditions(
+    entities: list[_Entity], conditions: list[tuple[int, int, str]]
+) -> None:
+    for start, end, text in conditions:
+        if not text:
+            continue
+        best: _Entity | None = None
+        best_size: int | None = None
+        for entity in entities:
+            node = entity.node
+            if not (start <= node.start_byte <= end):
+                continue
+            size = node.end_byte - node.start_byte
+            if best_size is None or size < best_size:
+                best, best_size = entity, size
+        if best is not None and text not in best.preproc_conditions:
+            best.preproc_conditions.append(text)
+
+
 def _emit_record(entity: _Entity, path: str) -> ApiDeclRecord:
     node = entity.node
     start, end = node.start_byte, node.end_byte
@@ -398,6 +439,7 @@ def _emit_record(entity: _Entity, path: str) -> ApiDeclRecord:
         parent=entity.parent,
         depth=entity.depth,
         has_doc=entity.has_doc,
+        preproc_conditions=list(entity.preproc_conditions),
     )
 
 
@@ -595,38 +637,113 @@ def _var_scope(decls: list[ApiDeclRecord], var: str, at: int) -> str:
     return enclosing if enclosing is not None else ""
 
 
-def _build_calls(path, cfg, source, call_matches, decls) -> list[RawCall]:
+_RELATION_PRIORITY = {
+    "macro": 7,
+    "method": 6,
+    "constructor": 6,
+    "pointer": 5,
+    "direct": 4,
+    "chained": 3,
+    "callback": 2,
+    "funcref": 1,
+}
+
+
+def _relation_kind(items: list, node, source: bytes) -> str:
+    found = [
+        kind
+        for item in items
+        if (kind := _queries.relation_for_capture(item.name)) is not None
+    ]
+    if node.type == "macro_invocation":
+        found.append("macro")
+    if not found:
+        return "direct"
+    return max(found, key=lambda kind: _RELATION_PRIORITY.get(kind, 0))
+
+
+def _dedupe_calls(calls: list[RawCall]) -> list[RawCall]:
+    """Collapse overlapping hits on the same call site from several patterns."""
+    kept: list[RawCall] = []
+    ordered = sorted(calls, key=lambda c: (c.caller_file, c.caller or "", c.start_byte))
+    for call in ordered:
+        tail = call.func or call.raw_callee.rpartition(".")[2]
+        size = call.end_byte - call.start_byte
+        merged = False
+        for index, other in enumerate(kept):
+            if other.caller_file != call.caller_file or other.caller != call.caller:
+                continue
+            other_tail = other.func or other.raw_callee.rpartition(".")[2]
+            if tail != other_tail:
+                continue
+            other_size = other.end_byte - other.start_byte
+            larger = max(size, other_size)
+            smaller = min(size, other_size)
+            if larger > smaller * 2 or smaller == 0:
+                continue
+            overlap = min(call.end_byte, other.end_byte) - max(
+                call.start_byte, other.start_byte
+            )
+            if overlap < smaller * 0.8:
+                continue
+            rank = _RELATION_PRIORITY.get(call.relation_kind, 0)
+            other_rank = _RELATION_PRIORITY.get(other.relation_kind, 0)
+            if (rank, -size) > (other_rank, -other_size):
+                kept[index] = call
+            merged = True
+            break
+        if not merged:
+            kept.append(call)
+    return kept
+
+
+def _build_calls(path, cfg, source, call_matches, decls, root=None) -> list[RawCall]:
     groups = _merge_matches(call_matches, source)
     calls: list[RawCall] = []
     for node, items in groups:
-        if node.type not in _rules.CALL_NODE_TYPES:
+        shapes = [_queries.is_call_capture(item.name) for item in items]
+        if node.type not in _rules.CALL_NODE_TYPES and not any(shapes):
             continue
         if _is_module_loader(node, source):
             continue
         raw, receiver, func = _rules.extract_call_parts(items, node, source)
         if not raw:
             continue
+        relation = _relation_kind(items, node, source)
+        if relation != "macro" and cfg.name in ("c", "cpp"):
+            macro_names = {
+                decl.qualified_name.rpartition(".")[2]
+                for decl in decls
+                if decl.kind == "macro"
+            }
+            if (func or raw).rpartition(".")[2] in macro_names:
+                relation = "macro"
         args_node = _rules.first_node(items, ".arguments")
         if args_node is None:
             args_node = node.child_by_field_name("arguments")
         if args_node is None:
             for child in node.children:
-                if child.type == "argument_list":
+                if child.type in ("argument_list", "arguments", "token_tree"):
                     args_node = child
                     break
         args = (
             _rules.summarize_arguments(args_node, source)
             if args_node is not None
+            and args_node.type in ("argument_list", "arguments")
             else []
         )
-        count = _rules.count_arguments(args_node) if args_node is not None else 0
-        caller = _caller_for(node, decls)
+        count = (
+            _rules.count_arguments(args_node)
+            if args_node is not None
+            and args_node.type in ("argument_list", "arguments")
+            else 0
+        )
         calls.append(
             RawCall(
                 raw_callee=raw,
                 args=args,
                 caller_file=path,
-                caller=caller,
+                caller=_caller_for(node, decls),
                 line_start=node.start_point[0] + 1,
                 line_end=node.end_point[0] + 1,
                 start_byte=node.start_byte,
@@ -634,9 +751,27 @@ def _build_calls(path, cfg, source, call_matches, decls) -> list[RawCall]:
                 receiver=receiver,
                 func=func,
                 argument_count=count,
+                relation_kind=relation,
             )
         )
-    return calls
+    if root is not None:
+        for macro in find_macro_calls(root, source, cfg.name):
+            calls.append(
+                RawCall(
+                    raw_callee=macro.name,
+                    args=list(macro.args),
+                    caller_file=path,
+                    caller=_caller_at(decls, macro.start_byte),
+                    line_start=macro.line_start,
+                    line_end=macro.line_end,
+                    start_byte=macro.start_byte,
+                    end_byte=macro.end_byte,
+                    func=macro.name,
+                    relation_kind="macro",
+                    macro_generated=True,
+                )
+            )
+    return _dedupe_calls(calls)
 
 
 def _is_module_loader(node, source: bytes) -> bool:
@@ -653,11 +788,17 @@ def _is_module_loader(node, source: bytes) -> bool:
 
 
 def _caller_for(node, decls: list[ApiDeclRecord]) -> str | None:
+    return _caller_at(decls, node.start_byte, node.end_byte)
+
+
+def _caller_at(
+    decls: list[ApiDeclRecord], start: int, end: int | None = None
+) -> str | None:
     best: ApiDeclRecord | None = None
     for decl in decls:
         if decl.kind not in ("function", "method", "constructor"):
             continue
-        if not (decl.start_byte <= node.start_byte and node.end_byte <= decl.end_byte):
+        if not (decl.start_byte <= start and (end is None or end <= decl.end_byte)):
             continue
         if best is None or (
             decl.start_byte >= best.start_byte and decl.end_byte <= best.end_byte

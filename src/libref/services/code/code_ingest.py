@@ -361,6 +361,7 @@ async def _index_repo_inner(
                 tenant_id=tenant_id,
                 source_url=str(source),
                 commit_sha=commit,
+                settings=settings,
             )
     batch_size = max(1, int(getattr(settings, "index_batch_files", 200) or 200))
     done, fingerprint = resume_offset(conn, version_id, CODE_KIND, files, fresh=fresh)
@@ -459,6 +460,10 @@ async def _index_repo_inner(
             origin_kind=origin_kind,
             target_names=effective_names,
             target_prefixes=target_prefixes,
+            stdlib_filter_enabled=bool(
+                getattr(settings, "stdlib_filter_enabled", True)
+            ),
+            stdlib_table_version=str(getattr(settings, "stdlib_table_version", "1")),
         )
         batch_count, batch_wanted = _upsert_calls(
             conn, library_id, version_id, resolved, commit

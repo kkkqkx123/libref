@@ -39,6 +39,13 @@ class DirSamples(BaseModel):
     files: list[str] = []
 
 
+class RoleCandidate(BaseModel):
+    file: str
+    role: str
+    sources: list[str] = []
+    evidence: list[str] = []
+
+
 class RepoProbe(BaseModel):
     source: str
     root_kind: str
@@ -62,10 +69,105 @@ class RepoProbe(BaseModel):
     top_dirs: list[DirGroup] = []
     samples: list[str] = []
     manifest_deps: list[dict] = []
+    role_candidates: list[RoleCandidate] = []
 
 
 def _normalize_source(source: str) -> str:
     return source.strip().removeprefix("git+").rstrip("/")
+
+
+_PATH_MARKERS = {
+    "test": "test",
+    "tests": "test",
+    "testing": "test",
+    "spec": "test",
+    "specs": "test",
+    "example": "example",
+    "examples": "example",
+    "sample": "example",
+    "samples": "example",
+}
+_ANNOTATION_MARKERS = (
+    ("#[test]", "test"),
+    ("#[cfg(test)]", "test"),
+    ("@Test", "test"),
+    ("@pytest.mark", "test"),
+    ("def test_", "test"),
+    ("func Test", "test"),
+    ("func Benchmark", "test"),
+    ("func Example", "example"),
+    ("TEST(", "test"),
+    ("TEST_F(", "test"),
+    ("describe(", "test"),
+    ("it(", "test"),
+    ("@example", "example"),
+    ("/// Example", "example"),
+)
+_NAME_MARKERS = (
+    ("test_", "test"),
+    ("_test.", "test"),
+    ("test.", "test"),
+    ("Test.", "test"),
+    ("Tests.", "test"),
+    ("Spec.", "test"),
+    ("example_", "example"),
+    ("_example.", "example"),
+)
+
+
+def _add_role_hit(
+    sources: list[str],
+    roles: list[str],
+    evidence: list[str],
+    source: str,
+    role: str,
+    text: str,
+) -> None:
+    if source not in sources:
+        sources.append(source)
+    if role not in roles:
+        roles.append(role)
+    if text and text not in evidence:
+        evidence.append(text[:64])
+
+
+def _role_candidates(root, files: list[str]) -> list[RoleCandidate]:
+    """Suggest test/example roles from path, syntax-level marks and names.
+
+    Only bounded file heads are read; no file is parsed and no role is applied.
+    """
+    if root is None:
+        return []
+    out: list[RoleCandidate] = []
+    for rel in files[:300]:
+        sources: list[str] = []
+        evidence: list[str] = []
+        roles: list[str] = []
+
+        normalized = rel.replace("\\", "/")
+        for part in normalized.split("/")[:-1]:
+            role = _PATH_MARKERS.get(part.lower())
+            if role:
+                _add_role_hit(sources, roles, evidence, "path", role, part)
+        try:
+            head = (root / rel).read_bytes()[:8192].decode("utf-8", "replace")
+        except OSError:
+            head = ""
+        for marker, role in _ANNOTATION_MARKERS:
+            if head and marker in head:
+                _add_role_hit(sources, roles, evidence, "annotation", role, marker)
+        base = normalized.rpartition("/")[2]
+        for marker, role in _NAME_MARKERS:
+            if marker in base:
+                _add_role_hit(sources, roles, evidence, "name", role, base)
+        if roles:
+            primary = "test" if "test" in roles else roles[0]
+            out.append(
+                RoleCandidate(
+                    file=rel, role=primary, sources=sources, evidence=evidence
+                )
+            )
+    return out
 
 
 def _cache_get(key: str, ttl_hours: float) -> RepoProbe | None:
@@ -364,6 +466,10 @@ def _assemble(
         top_dirs=top_dirs,
         samples=files[: max(0, limit)],
         manifest_deps=deps[:50],
+        role_candidates=_role_candidates(
+            root,
+            files + list(census.get("skipped_paths", [])),
+        ),
         source_note=source_note,
         sizes_known=sizes_known,
     )

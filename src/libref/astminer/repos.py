@@ -102,6 +102,7 @@ def census_of_relpaths(
     dir_files: dict[str, int] = {}
     skipped = 0
     oversized = 0
+    skipped_paths: list[str] = []
     for rel, size in items:
         suffix = PurePosixPath(rel).suffix
         if suffix not in suffixes:
@@ -112,11 +113,13 @@ def census_of_relpaths(
             continue
         if _should_skip(rel):
             skipped += 1
+            skipped_paths.append(rel)
             continue
         if size is None:
             pass
         elif size < 0:
             skipped += 1
+            skipped_paths.append(rel)
             continue
         elif size > max_file_bytes:
             oversized += 1
@@ -137,6 +140,7 @@ def census_of_relpaths(
         "dir_files": dir_files,
         "skipped": skipped,
         "oversized": oversized,
+        "skipped_paths": skipped_paths,
     }
 
 

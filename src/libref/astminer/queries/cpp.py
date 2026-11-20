@@ -1,61 +1,99 @@
-"""C++ queries for functions, classes, includes, calls and comments."""
+"""C++ queries: the C query set plus class, member and qualified-call shapes."""
 
 from __future__ import annotations
 
+from libref.astminer.queries import c as _c
+
 
 def entity_query() -> str:
-    return r"""
-(function_definition
-  declarator: (function_declarator
-    declarator: (identifier) @entity.function.name
-    parameters: (parameter_list) @entity.function.params)
-  body: (compound_statement) @entity.function.body) @entity.function
-
-(function_definition
-  declarator: (function_declarator
-    declarator: (field_identifier) @entity.function.name
-    parameters: (parameter_list) @entity.function.params)
-  body: (compound_statement) @entity.function.body) @entity.function
-
+    return (
+        _c.entity_query()
+        + r"""
 (class_specifier
   name: (type_identifier) @entity.class.name
   body: (field_declaration_list) @entity.class.body) @entity.class
 
-(struct_specifier
-  name: (type_identifier) @entity.struct.name
-  body: (field_declaration_list) @entity.struct.body) @entity.struct
+(function_definition
+  declarator: (function_declarator
+    declarator: (field_identifier) @entity.method.name
+    parameters: (parameter_list) @entity.method.params)
+  body: (compound_statement) @entity.method.body) @entity.method
+
+(declaration
+  declarator: (function_declarator
+    declarator: (field_identifier) @entity.method.name
+    parameters: (parameter_list) @entity.method.params)) @entity.method
+
+(field_declaration
+  type: (_) @entity.method.return_type
+  declarator: (function_declarator
+    declarator: (field_identifier) @entity.method.name
+    parameters: (parameter_list) @entity.method.params)) @entity.method
+
+(function_definition
+  type: (_) @entity.method.return_type
+  declarator: (function_declarator
+    declarator: (qualified_identifier
+      scope: (_) @entity.method.receiver
+      name: (identifier) @entity.method.name)
+    parameters: (parameter_list) @entity.method.params)
+  body: (compound_statement) @entity.method.body) @entity.method
+
+(declaration
+  declarator: (function_declarator
+    declarator: (identifier) @entity.constructor.name
+    parameters: (parameter_list) @entity.constructor.params)) @entity.constructor
+
+(declaration
+  declarator: (function_declarator
+    declarator: (destructor_name) @entity.constructor.name
+    parameters: (parameter_list) @entity.constructor.params)) @entity.constructor
+
+(function_definition
+  type: (_) @entity.constructor.return_type
+  declarator: (function_declarator
+    declarator: (identifier) @entity.constructor.name
+    parameters: (parameter_list) @entity.constructor.params)
+  body: (compound_statement) @entity.constructor.body) @entity.constructor
+
+(function_definition
+  declarator: (function_declarator
+    declarator: (destructor_name) @entity.constructor.name
+    parameters: (parameter_list) @entity.constructor.params)
+  body: (compound_statement) @entity.constructor.body) @entity.constructor
+
+(namespace_definition
+  name: (namespace_identifier) @entity.module.name
+  body: (declaration_list) @entity.module.body) @entity.module
 """
+    )
 
 
 def call_query() -> str:
-    return r"""
+    return (
+        _c.call_query()
+        + r"""
 (call_expression
-  function: (identifier) @call.function.name
-  arguments: (argument_list) @call.function.arguments) @call.function
-
-(call_expression
-  function: (field_expression
-    field: (field_identifier) @call.method.function)
+  function: (qualified_identifier
+    scope: (_) @call.method.object
+    name: (identifier) @call.method.function)
   arguments: (argument_list) @call.method.arguments) @call.method
 
 (call_expression
-  function: (qualified_identifier
-    name: (identifier) @call.function.name)
-  arguments: (argument_list) @call.function.arguments) @call.function
+  function: (field_expression
+    argument: (_) @call.method.object
+    field: (field_identifier) @call.method.function)
+  arguments: (argument_list) @call.method.arguments) @call.method
+
+(new_expression
+  type: (type_identifier) @call.constructor.name) @call.constructor
 """
+    )
 
 
 def dependency_query() -> str:
-    return r"""
-(preproc_include
-  path: (system_lib_string) @dependency.import.path) @dependency.import
-
-(preproc_include
-  path: (string_literal) @dependency.import.path) @dependency.import
-"""
+    return _c.dependency_query()
 
 
 def comment_query() -> str:
-    return r"""
-(comment) @comment.doc
-"""
+    return _c.comment_query()

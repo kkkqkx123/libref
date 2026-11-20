@@ -161,6 +161,7 @@ class CallInsightQuery(BaseModel):
     offset: int = Field(default=0, ge=0)
     include_ambiguous: bool = False
     resolve_kinds: list[str] | None = None
+    relation_kinds: list[str] | None = None
     min_args: int | None = Field(default=None, ge=0)
     max_args: int | None = Field(default=None, ge=0)
 

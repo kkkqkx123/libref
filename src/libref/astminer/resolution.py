@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import sys
-
+from libref.astminer import stdlib as _stdlib
 from libref.astminer.models import (
     ApiDeclRecord,
     CallInstanceRecord,
@@ -36,84 +35,6 @@ def _strip_glued_new(
     if remainder in alias_map or remainder in index or _is_stdlib_target(remainder):
         return f"{remainder}.{tail}" if tail else remainder
     return raw
-
-
-try:
-    _PYTHON_STDLIB = set(sys.stdlib_module_names)
-except AttributeError:  # pragma: no cover - fallback for older interpreters
-    _PYTHON_STDLIB = {
-        "os",
-        "sys",
-        "json",
-        "re",
-        "pathlib",
-        "typing",
-        "collections",
-        "itertools",
-        "functools",
-        "math",
-        "datetime",
-        "logging",
-        "unittest",
-        "argparse",
-        "io",
-        "shutil",
-        "glob",
-        "pickle",
-        "copy",
-        "enum",
-        "dataclasses",
-        "abc",
-        "inspect",
-        "importlib",
-        "hashlib",
-        "sqlite3",
-        "asyncio",
-        "threading",
-        "subprocess",
-        "urllib",
-        "http",
-    }
-
-_JAVA_STDLIB_PREFIXES = ("java.", "javax.", "jdk.", "sun.", "com.sun.")
-_RUST_STDLIB_PREFIXES = ("std.", "core.", "alloc.")
-_CSHARP_STDLIB_PREFIXES = ("System.",)
-_KOTLIN_STDLIB_PREFIXES = ("kotlin.", "kotlinx.")
-_GROOVY_STDLIB_PREFIXES = ("groovy.", "org.codehaus.groovy.")
-_NODE_BUILTINS = frozenset(
-    {
-        "fs",
-        "path",
-        "os",
-        "util",
-        "events",
-        "stream",
-        "http",
-        "https",
-        "url",
-        "querystring",
-        "assert",
-        "buffer",
-        "child_process",
-        "cluster",
-        "crypto",
-        "dgram",
-        "dns",
-        "http2",
-        "module",
-        "net",
-        "process",
-        "readline",
-        "string_decoder",
-        "timers",
-        "tls",
-        "tty",
-        "v8",
-        "vm",
-        "worker_threads",
-        "zlib",
-    }
-)
 
 
 def _language_for_file(path: str | None) -> str | None:
@@ -160,9 +81,12 @@ def resolve_calls(
     origin_kind: str = "repo_file",
     target_names: set[str] | frozenset[str] | None = None,
     target_prefixes: tuple[str, ...] | list[str] | None = None,
+    stdlib_filter_enabled: bool = True,
+    stdlib_table_version: str = _stdlib.STDLIB_TABLE_VERSION,
 ) -> list[CallInstanceRecord]:
     by_file: dict[str, set[str]] = {}
     parent_by_qual: dict[str, str | None] = {}
+    argcounts_by_qual: dict[str, set[int]] = {}
     params_by_qual: dict[str, list[str]] = {}
     param_types_by_qual: dict[str, dict[str, str]] = {}
     bases_by_qual: dict[str, list[str]] = {}
@@ -173,6 +97,7 @@ def resolve_calls(
         by_file.setdefault(decl.file, set()).add(decl.qualified_name)
         parent_by_qual.setdefault(decl.qualified_name, decl.parent)
         params = list(decl.params or [])
+        argcounts_by_qual.setdefault(decl.qualified_name, set()).add(len(params))
         params_by_qual.setdefault(decl.qualified_name, params)
         types = dict(param_types_by_qual.setdefault(decl.qualified_name, {}))
         for idx, name in enumerate(params):
@@ -267,6 +192,14 @@ def resolve_calls(
             suffix_index=suffix_index,
             bases_by_qual=bases_by_qual,
             return_by_qual=return_by_qual,
+            argcounts_by_qual=argcounts_by_qual,
+            receiver=call.receiver,
+            argument_count=call.argument_count,
+            relation_kind=call.relation_kind,
+            macro_generated=call.macro_generated,
+            target_names=target_names,
+            stdlib_filter_enabled=stdlib_filter_enabled,
+            stdlib_table_version=stdlib_table_version,
         )
         scope = (
             f"{call.caller_file}::{call.caller}" if call.caller else call.caller_file
@@ -310,6 +243,7 @@ def resolve_calls(
                 source_role=source_role,
                 origin_kind=origin_kind,
                 in_target_api=in_target,
+                relation_kind=call.relation_kind,
             )
         )
     return out
@@ -329,9 +263,71 @@ def resolve_one(
     suffix_index: dict[str, list[str]] | None = None,
     bases_by_qual: dict[str, list[str]] | None = None,
     return_by_qual: dict[str, str] | None = None,
+    argcounts_by_qual: dict[str, set[int]] | None = None,
+    receiver: str | None = None,
+    argument_count: int | None = None,
+    relation_kind: str = "direct",
+    macro_generated: bool = False,
+    target_names: set[str] | frozenset[str] | None = None,
+    stdlib_filter_enabled: bool = True,
+    stdlib_table_version: str = _stdlib.STDLIB_TABLE_VERSION,
+) -> tuple[str, Confidence, str]:
+    """Resolve one call, then apply stdlib and macro-shape classification."""
+    result = _resolve_one_core(
+        raw,
+        caller,
+        declared,
+        same_file,
+        alias_map,
+        parent_by_qual,
+        language=language,
+        params_by_qual=params_by_qual,
+        param_types_by_qual=param_types_by_qual,
+        suffix_index=suffix_index,
+        bases_by_qual=bases_by_qual,
+        return_by_qual=return_by_qual,
+        argcounts_by_qual=argcounts_by_qual,
+        receiver=receiver,
+        argument_count=argument_count,
+        target_names=target_names,
+    )
+    resolved, confidence, kind = result
+    # A target API with a stdlib-looking name always wins over classification.
+    protected = resolved in declared or resolved in (target_names or ())
+    if (
+        not protected
+        and stdlib_filter_enabled
+        and kind != "stdlib"
+        and _stdlib.is_stdlib(resolved or raw, language, stdlib_table_version)
+    ):
+        return resolved, "INFERRED", "stdlib"
+    if (macro_generated or relation_kind == "macro") and confidence == "EXTRACTED":
+        confidence = "INFERRED"
+    return resolved, confidence, kind
+
+
+def _resolve_one_core(
+    raw: str,
+    caller: str | None,
+    declared: set[str],
+    same_file: set[str],
+    alias_map: dict[str, str],
+    parent_by_qual: dict[str, str | None] | None = None,
+    *,
+    language: str | None = None,
+    params_by_qual: dict[str, list[str]] | None = None,
+    param_types_by_qual: dict[str, dict[str, str]] | None = None,
+    suffix_index: dict[str, list[str]] | None = None,
+    bases_by_qual: dict[str, list[str]] | None = None,
+    return_by_qual: dict[str, str] | None = None,
+    argcounts_by_qual: dict[str, set[int]] | None = None,
+    receiver: str | None = None,
+    argument_count: int | None = None,
+    target_names: set[str] | frozenset[str] | None = None,
 ) -> tuple[str, Confidence, str]:
     if not raw:
         return raw, "AMBIGUOUS", "unresolved"
+    raw = raw.replace("::", ".").replace("->", ".")
     index = suffix_index if suffix_index is not None else _build_suffix_index(declared)
     raw = _strip_glued_new(raw, alias_map, index)
     head, _, _rest = raw.partition(".")
@@ -355,11 +351,14 @@ def resolve_one(
         suffixed = index.get(resolved, [])
         if len(suffixed) == 1 and suffixed[0] in same_file:
             return suffixed[0], "EXTRACTED", "alias-suffix"
-        if _is_stdlib_target(resolved):
-            # Stdlib targets are named exactly once; the uncertainty the
-            # AMBIGUOUS level is meant to flag is candidate competition, which
-            # does not apply here. Mining still drops them via the source
-            # column unless a reviewer approves them.
+        if (
+            _is_stdlib_target(resolved, language)
+            and resolved not in declared
+            and resolved not in (target_names or ())
+        ):
+            # Stdlib targets are named exactly once; mining drops them via
+            # the source column unless a reviewer approves them. A target
+            # API with the same name is resolved as a normal declared call.
             return resolved, "INFERRED", "stdlib"
         rewritten = _rewrite_factory_chain(
             resolved, declared, index, same_file, return_by_qual or {}
@@ -416,6 +415,22 @@ def resolve_one(
         if typed is not None:
             return typed[0], typed[1], "receiver-type"
     candidates = list(index.get(raw, []))
+    if not candidates:
+        return raw, "AMBIGUOUS", "unresolved"
+    candidates = _filter_candidates(
+        candidates,
+        receiver,
+        argument_count,
+        argcounts_by_qual
+        or (
+            {q: {len(params_by_qual.get(q, []))} for q in candidates}
+            if params_by_qual
+            else None
+        ),
+        alias_map,
+        parent_by_qual,
+        raw,
+    )
     if not candidates:
         return raw, "AMBIGUOUS", "unresolved"
     same_hits = [q for q in candidates if q in same_file]
@@ -791,25 +806,41 @@ def _resolve_via_receiver_type(
     return None
 
 
-def _is_stdlib_target(resolved: str) -> bool:
-    if not resolved:
-        return False
-    if resolved.startswith("node:"):
-        return True
-    head = resolved.partition(".")[0]
-    if not head:
-        return False
-    if head in _PYTHON_STDLIB:
-        return True
-    if head in _NODE_BUILTINS:
-        return True
-    for prefix in _JAVA_STDLIB_PREFIXES:
-        if resolved.startswith(prefix):
-            return True
-    for prefix in _RUST_STDLIB_PREFIXES + _CSHARP_STDLIB_PREFIXES:
-        if resolved.startswith(prefix):
-            return True
-    for prefix in _KOTLIN_STDLIB_PREFIXES + _GROOVY_STDLIB_PREFIXES:
-        if resolved.startswith(prefix):
-            return True
-    return False
+def _is_stdlib_target(resolved: str, language: str | None = None) -> bool:
+    return _stdlib.is_stdlib(resolved, language or "python")
+
+
+def _filter_candidates(
+    candidates: list[str],
+    receiver: str | None,
+    argument_count: int | None,
+    argcounts: dict[str, set[int]] | None,
+    alias_map: dict[str, str],
+    parent_by_qual: dict[str, str | None] | None,
+    raw: str,
+) -> list[str]:
+    """Disambiguate overloads by arity and reject receiver-bound hijacking."""
+    if argument_count is not None and argcounts:
+        matched = [
+            qual
+            for qual in candidates
+            if argument_count in argcounts.get(qual, {argument_count})
+        ]
+        if matched:
+            candidates = matched
+    if not receiver:
+        return candidates
+    head = receiver.replace("->", ".").replace("::", ".").partition(".")[0]
+    head = head.strip("*& ")
+    if head in _SELF_HEADS:
+        return candidates
+    suffix = "." + raw.partition(".")[2]
+    owner = alias_map.get(head, head)
+    owner = _normalize_type_name(owner) or head
+    return [
+        qual
+        for qual in candidates
+        if qual == owner + suffix
+        or qual.startswith(owner + ".")
+        or (parent_by_qual or {}).get(qual) == owner
+    ]

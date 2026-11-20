@@ -805,6 +805,7 @@ def build_web_app(
         offset: int = 0,
         include_ambiguous: bool = False,
         resolve_kinds: Annotated[list[str] | None, Query()] = None,
+        relation_kinds: Annotated[list[str] | None, Query()] = None,
         min_args: int | None = None,
         max_args: int | None = None,
         principal=Depends(_guard),
@@ -819,6 +820,7 @@ def build_web_app(
             offset=offset,
             include_ambiguous=include_ambiguous,
             resolve_kinds=resolve_kinds,
+            relation_kinds=relation_kinds,
             min_args=min_args,
             max_args=max_args,
         )
@@ -838,6 +840,7 @@ def build_web_app(
                         offset=params.offset,
                         include_ambiguous=params.include_ambiguous,
                         resolve_kinds=params.resolve_kinds,
+                        relation_kinds=params.relation_kinds,
                         min_args=params.min_args,
                         max_args=params.max_args,
                         tenant_id=_tenant_of(principal),

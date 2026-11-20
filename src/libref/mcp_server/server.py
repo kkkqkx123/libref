@@ -802,6 +802,7 @@ def build_mcp_server(
         offset: int = 0,
         include_ambiguous: bool = False,
         resolve_kinds: list[str] | None = None,
+        relation_kinds: list[str] | None = None,
         min_args: int | None = None,
         max_args: int | None = None,
     ) -> dict[str, Any]:
@@ -827,6 +828,7 @@ def build_mcp_server(
                         offset=offset,
                         include_ambiguous=include_ambiguous,
                         resolve_kinds=resolve_kinds,
+                        relation_kinds=relation_kinds,
                         min_args=min_args,
                         max_args=max_args,
                         tenant_id=_tenant(_principal()),

@@ -75,6 +75,7 @@ def encode_records(
                 "depth": decl.depth,
                 "has_doc": bool(decl.has_doc),
                 "span_kind": decl.span_kind,
+                "preproc_conditions": list(decl.preproc_conditions),
             }
         )
     for alias, full, scope in aliases:
@@ -93,6 +94,8 @@ def encode_records(
                 "receiver": call.receiver,
                 "func": call.func,
                 "argument_count": call.argument_count,
+                "relation_kind": call.relation_kind,
+                "macro_generated": bool(call.macro_generated),
             }
         )
     return records
@@ -130,6 +133,7 @@ def decode_records(
                     has_doc=bool(item.get("has_doc", False)),
                     span_kind=str(item.get("span_kind", "exact_entities"))
                     or "exact_entities",
+                    preproc_conditions=list(item.get("preproc_conditions", [])),
                 )
             )
         elif kind == "alias":
@@ -157,6 +161,8 @@ def decode_records(
                     end_byte=int(item.get("end_byte", 0)),
                     receiver=item.get("receiver"),
                     func=str(item.get("func", "") or item["raw"].rpartition(".")[2]),
+                    relation_kind=str(item.get("relation_kind", "direct") or "direct"),
+                    macro_generated=bool(item.get("macro_generated", False)),
                     argument_count=int(
                         item.get("argument_count", len(item.get("args", [])))
                     ),

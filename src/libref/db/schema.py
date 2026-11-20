@@ -732,3 +732,10 @@ CREATE INDEX IF NOT EXISTS idx_quota_events_subject
 
 # ── Quota tables alone for runtime ensure without touching other groups ──
 QUOTA_RUNTIME_SQL = QUOTA_TABLES_SQL
+
+# ── Call relation shape: independent from resolution provenance ──
+CALL_RELATION_SQL = """
+ALTER TABLE call_instances ADD COLUMN relation_kind TEXT NOT NULL DEFAULT 'direct';
+CREATE INDEX IF NOT EXISTS idx_call_instances_relation
+  ON call_instances(version_id, relation_kind);
+"""

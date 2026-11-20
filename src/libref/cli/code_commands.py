@@ -454,6 +454,11 @@ def cmd_call_insight(args: argparse.Namespace) -> int:
                 offset=int(getattr(args, "offset", 0) or 0),
                 include_ambiguous=bool(getattr(args, "include_ambiguous", False)),
                 resolve_kinds=kinds,
+                relation_kinds=(
+                    args.relation_kinds.split(",")
+                    if getattr(args, "relation_kinds", None)
+                    else None
+                ),
                 min_args=getattr(args, "min_args", None),
                 max_args=getattr(args, "max_args", None),
             )

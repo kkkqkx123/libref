@@ -179,7 +179,7 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 
 ### probe-repo
 
-只返回目录结构，不解析。`source` 必填，`--subdir/--max-files/--sample-limit` 可选，`--only-file` 可重复（单文件限定，先过滤再做预算判断，未命中路径在返回体中回显），`--exclude-pattern` 可重复（排除匹配路径），`--tree-depth` 展开目录树深度（缺省 1，返回目录与递归文件数，最多 100 条），`--samples-per-dir` 每目录采样上限（缺省关闭，打开后按目录分组采样，总量受采样数约束）。基路径分步走：先看根，再用 `--subdir` 下钻。本地路径只在本命令可用；REST 的 `/repo-probe` 与 MCP 的 `repo_probe` 只接受远端地址，避免把服务端文件系统暴露给只持 `read` 的调用方。
+只返回目录结构，不解析文件；仅读取有限文件头给出 `role_candidates`（test/example 候选及路径、注解、命名命中来源），候选不自动改变语料角色。`source` 必填，`--subdir/--max-files/--sample-limit` 可选，`--only-file` 可重复（单文件限定，先过滤再做预算判断，未命中路径在返回体中回显），`--exclude-pattern` 可重复（排除匹配路径），`--tree-depth` 展开目录树深度（缺省 1，返回目录与递归文件数，最多 100 条），`--samples-per-dir` 每目录采样上限（缺省关闭，打开后按目录分组采样，总量受采样数约束）。基路径分步走：先看根，再用 `--subdir` 下钻。本地路径只在本命令可用；REST 的 `/repo-probe` 与 MCP 的 `repo_probe` 只接受远端地址，避免把服务端文件系统暴露给只持 `read` 的调用方。
 
 ### link-stats
 
@@ -205,7 +205,7 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 
 ### call-insight
 
-`view` 三选一：`callee/caller/file`，均要求 `--api`。`--include-ambiguous` 计入待定调用，`--resolve-kinds` 为逗号分隔的调用种类，`--min-args/--max-args` 为实参数量区间。`--limit/--offset` 可选。
+`view` 三选一：`callee/caller/file`，均要求 `--api`。`--include-ambiguous` 计入待定调用，`--resolve-kinds` 为逗号分隔的解析来源，`--relation-kinds` 为逗号分隔的调用形态（显式指定可放行宏形态），`--min-args/--max-args` 为实参数量区间。`--limit/--offset` 可选。
 
 ### import-insight
 

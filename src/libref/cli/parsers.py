@@ -682,6 +682,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_call.add_argument("--offset", type=int, default=0)
     p_call.add_argument("--include-ambiguous", action="store_true")
     p_call.add_argument("--resolve-kinds", default=None)
+    p_call.add_argument("--relation-kinds", default=None)
     p_call.add_argument("--min-args", type=int, default=None)
     p_call.add_argument("--max-args", type=int, default=None)
     p_call.set_defaults(func=cmd_call_insight)

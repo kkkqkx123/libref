@@ -77,6 +77,8 @@ MCP 出口面向模型，共二十七个工具。实现在 `src/libref/mcp_serve
 
 ### repo_probe
 
+返回的 `role_candidates` 只建议 test/example 角色并区分路径、注解、命名命中，不自动改变语料角色。
+
 探查仓库目录结构，不解析。`source` 非空必填（远端地址；本地路径只在命令行可用，工具入口按参数错误拒绝），`subdir` 可选，`max_files` 取 1 到 100000，`sample_limit` 取 1 到 100，`only_files` 为非空字符串数组（单文件限定，先过滤再做预算判断），`exclude_patterns` 为非空字符串数组（排除匹配路径，与索引同口径），`tree_depth` 取 1 到 10（目录树展开深度，缺省 1），`samples_per_dir` 取 1 到 50（每目录采样上限，缺省关闭，总量受采样数约束）。返回体回显生效的限定与未命中的限定路径，附目录树（目录与递归文件数，最多 100 条）与按目录分组的采样。
 
 ### repo_dependencies
@@ -105,7 +107,7 @@ MCP 出口面向模型，共二十七个工具。实现在 `src/libref/mcp_serve
 
 ### call_insight
 
-调用视角：`callee/caller/file` 均要求 `api`。`include_ambiguous` 计入待定调用，`resolve_kinds` 为调用种类数组，`min_args/max_args` 为实参数量区间。`offset` 默认为 0。
+调用视角：`callee/caller/file` 均要求 `api`。`include_ambiguous` 计入待定调用，`resolve_kinds` 为解析来源数组，`relation_kinds` 为调用形态数组（显式指定可放行宏形态），`min_args/max_args` 为实参数量区间。`offset` 默认为 0。
 
 ### import_insight
 

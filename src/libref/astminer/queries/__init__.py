@@ -80,11 +80,15 @@ SIGNATURE_ROLES = frozenset(
 CALL_CATEGORIES = frozenset(
     {
         "async",
+        "callback",
+        "chained",
         "constructor",
         "function",
         "hof",
         "macro",
         "method",
+        "pointer",
+        "funcref",
         "reference",
         "super",
     }
@@ -116,6 +120,7 @@ DEPENDENCY_CATEGORIES = frozenset(
         "extend",
         "implement",
         "import",
+        "macro",
         "module",
         "require",
         "use",
@@ -133,6 +138,9 @@ DEPENDENCY_ROLES = frozenset(
         "exports",
         "from",
         "future",
+        "if",
+        "ifdef",
+        "ifndef",
         "import",
         "items",
         "list",
@@ -194,6 +202,44 @@ def is_impl_root(name: str) -> bool:
 
 def is_file_scoped_capture(name: str) -> bool:
     return name == "entity.package.file_scoped"
+
+
+def is_preproc_condition(name: str) -> bool:
+    parts = capture_parts(name)
+    return (
+        len(parts) == 4
+        and parts[:2] == ("dependency", "macro")
+        and parts[2] in ("if", "ifdef", "ifndef")
+        and parts[3] == "name"
+    )
+
+
+_RELATION_BY_CATEGORY = {
+    "macro": "macro",
+    "method": "method",
+    "chained": "chained",
+    "pointer": "pointer",
+    "funcref": "funcref",
+    "callback": "callback",
+    "constructor": "constructor",
+    "reference": "funcref",
+    "async": "direct",
+    "function": "direct",
+    "hof": "direct",
+    "super": "method",
+}
+
+
+def relation_for_capture(name: str) -> str | None:
+    parts = capture_parts(name)
+    if len(parts) < 2 or parts[0] != "call":
+        return None
+    return _RELATION_BY_CATEGORY.get(parts[1])
+
+
+def is_call_capture(name: str) -> bool:
+    parts = capture_parts(name)
+    return bool(parts) and parts[0] == "call"
 
 
 def is_base_name_capture(name: str) -> bool:

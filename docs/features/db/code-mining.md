@@ -62,6 +62,7 @@
 | origin_kind | TEXT NOT NULL DEFAULT 'repo_file' | 来源形态（版本 26 列） |
 | in_target_api | INTEGER NOT NULL DEFAULT 0 | 是否命中目标 API（版本 26 列） |
 | target_status | TEXT NOT NULL DEFAULT 'current' | 目标版本兼容状态（版本 26 列） |
+| relation_kind | TEXT NOT NULL DEFAULT 'direct' | 调用形态，与解析来源独立（版本 27 列） |
 
 索引清单如下：
 
@@ -75,6 +76,7 @@
 | idx_call_instances_scope_key | (version_id, scope) |
 | idx_call_instances_caller | caller_entity_id |
 | idx_call_instances_resolve | (version_id, resolve_kind) |
+| idx_call_instances_relation | (version_id, relation_kind) |
 
 ### code_sources
 
@@ -225,7 +227,8 @@ DELETE FROM pages WHERE id=?;   -- 逐页，先收文档标识
 ## 读取
 
 频次按被调名分组计数并去重计数作用域，冲突审核的行排除，
-歧义行仅在放行开关或已批准时计入：
+歧义行仅在放行开关或已批准时计入；标准库、内建与宏形态调用默认排除，
+读模型可按 `relation_kinds` 显式筛选调用形态：
 
 ```sql
 SELECT callee_name, count(*),

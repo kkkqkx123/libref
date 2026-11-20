@@ -143,6 +143,7 @@ CREATE TABLE IF NOT EXISTS call_instances(
   end_byte INTEGER NOT NULL DEFAULT 0,
   scope TEXT,
   resolve_kind TEXT NOT NULL DEFAULT '',
+  relation_kind TEXT NOT NULL DEFAULT 'direct',
   caller_entity_id BIGINT REFERENCES api_entities(id) ON DELETE SET NULL,
   source_id BIGINT,
   sample_id TEXT NOT NULL DEFAULT '',
@@ -161,6 +162,7 @@ CREATE INDEX IF NOT EXISTS idx_call_instances_scope ON call_instances(version_id
 CREATE INDEX IF NOT EXISTS idx_call_instances_scope_key ON call_instances(version_id, scope);
 CREATE INDEX IF NOT EXISTS idx_call_instances_caller ON call_instances(caller_entity_id);
 CREATE INDEX IF NOT EXISTS idx_call_instances_resolve ON call_instances(version_id, resolve_kind);
+CREATE INDEX IF NOT EXISTS idx_call_instances_relation ON call_instances(version_id, relation_kind);
 
 CREATE TABLE IF NOT EXISTS code_sources(
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

@@ -97,7 +97,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### GET /call-insight
 
-`view` 三选一：`callee/caller/file`，均要求 `api`。`include_ambiguous` 计入待定调用，`resolve_kinds` 为逗号分隔的调用种类，`min_args/max_args` 为实参数量区间。`offset` 默认 0。
+`view` 三选一：`callee/caller/file`，均要求 `api`。`include_ambiguous` 计入待定调用，`resolve_kinds` 为逗号分隔的解析来源，`relation_kinds` 为逗号分隔的调用形态（显式指定可放行宏形态），`min_args/max_args` 为实参数量区间。`offset` 默认 0。
 
 ### GET /import-insight
 
@@ -190,6 +190,8 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 请求体 `start_url` 必填，`scope` 为范围字典，`sample_limit` 取 1 到 100，`fetch_sample_limit` 取 0 到 100（0 表示禁用），`max_pages` 设预算上限（超限只标记不抛错），`prefilter` 先做存活探测。返回探查结构，超预算时带标记并给出实际规模，开启跟随链接时带膨胀提示。
 
 ### POST /repo-probe
+
+探查结果中的 `role_candidates` 只给出 test/example 候选及命中来源（路径、注解、命名），不改变语料角色。
 
 请求体 `source` 必填（远端地址或本地路径），`subdir` 可选，`max_files` 可选，`sample_limit` 取 1 到 100，`only_files` 为单文件限定数组（先过滤再做预算判断），`exclude_patterns` 为排除正则数组（与索引同口径），`tree_depth` 取 1 到 10 缺省 1，`samples_per_dir` 取 1 到 50（每目录采样上限，缺省关闭，总量受采样数约束）。返回目录结构、目录树（目录与递归文件数，最多 100 条）与按目录分组的采样，未命中的限定路径在返回体中回显。
 

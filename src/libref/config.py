@@ -65,6 +65,10 @@ class LibrefSettings(BaseSettings):
     index_batch_files: int = Field(default=200, ge=1)
     usage_mining_enabled: bool = True
     doc_code_mining_enabled: bool = True
+    # Standard-library references are classified during extraction; disabling
+    # the filter leaves them as ordinary inferred calls for review.
+    stdlib_filter_enabled: bool = True
+    stdlib_table_version: str = "1"
     probe_sample_limit: int = Field(default=20, ge=1)
     probe_cache_ttl_hours: float = Field(default=1.0, ge=0)
     # Probe sampling: how many discovered pages get a bounded head fetch for
@@ -424,6 +428,8 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "index_batch_files",
             "usage_mining_enabled",
             "doc_code_mining_enabled",
+            "stdlib_filter_enabled",
+            "stdlib_table_version",
             "probe_sample_limit",
             "probe_cache_ttl_hours",
             "probe_fetch_sample_limit",

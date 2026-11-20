@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from libref.db.schema import (
     AST_CHUNK_RELATION_SQL,
+    CALL_RELATION_SQL,
     CALL_RESOLVE_SQL,
     CALL_SCOPE_SQL,
     DISCOVERY_CACHE_SQL,
@@ -72,6 +73,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(24, "quota-tables", QUOTA_TABLES_SQL),
     Migration(25, "index-requests", INDEX_REQUESTS_SQL),
     Migration(26, "usage-corpus-mining-profiles", USAGE_CORPUS_SQL),
+    Migration(27, "call-relation-kind", CALL_RELATION_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

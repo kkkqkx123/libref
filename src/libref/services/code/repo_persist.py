@@ -197,6 +197,7 @@ def _upsert_calls(
                 getattr(call, "origin_kind", "repo_file") or "repo_file",
                 1 if getattr(call, "in_target_api", True) else 0,
                 getattr(call, "target_status", "current") or "current",
+                getattr(call, "relation_kind", "direct") or "direct",
             )
         )
         needs_review = call.confidence == "AMBIGUOUS" or (
@@ -211,9 +212,9 @@ def _upsert_calls(
             " library_id, version_id, caller, receiver, func, argument_count,"
             " call_order, start_byte, end_byte, commit_sha, scope,"
             " resolve_kind, caller_entity_id, source_id, sample_id, source_role,"
-            " origin_kind, in_target_api, target_status)"
+            " origin_kind, in_target_api, target_status, relation_kind)"
             " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            " ?, ?, ?, ?, ?, ?)"
+            " ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(call_uid) DO UPDATE SET callee_entity_id=excluded.callee_entity_id,"
             " callee_name=excluded.callee_name, args=excluded.args,"
             " confidence=excluded.confidence, library_id=excluded.library_id,"
@@ -225,7 +226,8 @@ def _upsert_calls(
             " resolve_kind=excluded.resolve_kind, caller_entity_id=excluded.caller_entity_id,"
             " source_id=excluded.source_id, sample_id=excluded.sample_id,"
             " source_role=excluded.source_role, origin_kind=excluded.origin_kind,"
-            " in_target_api=excluded.in_target_api, target_status=excluded.target_status",
+            " in_target_api=excluded.in_target_api, target_status=excluded.target_status,"
+            " relation_kind=excluded.relation_kind",
             batch,
         )
     if review_uids:

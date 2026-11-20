@@ -97,3 +97,121 @@ def test_doc_and_rust_fence_extraction(conn):
     assert len(doc_blocks) == 1
     assert doc_blocks[0].language == "rust"
     assert doc_blocks[0].origin_kind == "rustdoc_doctest"
+
+
+def test_stdlib_calls_excluded_from_mining_by_default(conn):
+    from libref.astminer.models import CodeSnippet
+    from libref.services.registry.libraries import LibraryService
+
+    library_id, version_id = LibraryService(conn).ensure_library_version("demo", "0.1")
+    for name in ("rte_eth_rx_burst", "rte_eth_tx_burst"):
+        conn.execute(
+            "INSERT INTO api_entities(entity_uid, library_id, version_id,"
+            " qualified_name, kind) VALUES(?, ?, ?, ?, 'function')",
+            (f"uid:{name}", library_id, version_id, name),
+        )
+    snippets = [
+        CodeSnippet(
+            sample_id=f"c-{index}",
+            language="c",
+            code=(
+                "void use(void) {\n"
+                '  printf("x");\n'
+                "  malloc(8);\n"
+                "  rte_eth_rx_burst(0, 0, 0, 32);\n"
+                "  rte_eth_tx_burst(0, 0, 0, 32);\n"
+                "}\n"
+            ),
+        )
+        for index in range(2)
+    ]
+    ingest_snippets(
+        conn,
+        "demo",
+        "0.1",
+        snippets,
+        source_key="reference:stdlib",
+        source_role="reference_project",
+        target_filter={"prefixes": ["rte_"]},
+    )
+    rows = conn.execute(
+        "SELECT callee_name, resolve_kind FROM call_instances"
+        " WHERE source_role='reference_project'"
+    ).fetchall()
+    by_name = {name: kind for name, kind in rows}
+    assert by_name["printf"] == "stdlib"
+    assert by_name["malloc"] == "stdlib"
+    patterns = [r["pattern"] for r in mine_patterns(conn, "demo", "0.1", minsup=2)]
+    assert patterns
+    assert all(all(name.startswith("rte_") for name in pattern) for pattern in patterns)
+
+
+def test_macro_calls_need_explicit_relation_filter(conn):
+    from libref.astminer.models import CodeSnippet
+
+    code = (
+        "#define rte_wrap(x) rte_eth_rx_burst(x, 0)\n"
+        "void use(void) {\n"
+        "  rte_init();\n"
+        "  rte_tx_burst(0, 0, 0, 32);\n"
+        "  rte_wrap(1);\n"
+        "}\n"
+    )
+    snippet = CodeSnippet(sample_id="macro.c", language="c", code=code)
+    ingest_snippets(
+        conn,
+        "demo",
+        "0.1",
+        [snippet],
+        source_key="reference:macro",
+        source_role="reference_project",
+        target_filter={"prefixes": ["rte_"]},
+    )
+    rows = conn.execute(
+        "SELECT callee_name, relation_kind, confidence FROM call_instances"
+        " WHERE source_role='reference_project'"
+    ).fetchall()
+    macro = {name: (kind, conf) for name, kind, conf in rows if kind == "macro"}
+    assert "rte_eth_rx_burst" in macro
+    assert all(conf != "EXTRACTED" for _kind, conf in macro.values())
+    default = mine_patterns(conn, "demo", "0.1", minsup=1, include_ambiguous=True)
+    assert all("rte_wrap" not in pattern for pattern in [r["pattern"] for r in default])
+    included = mine_patterns(
+        conn,
+        "demo",
+        "0.1",
+        minsup=1,
+        include_ambiguous=True,
+        relation_kinds=["direct", "macro"],
+    )
+    assert any("rte_wrap" in r["pattern"] for r in included)
+
+
+def test_snippet_evidence_points_back_to_host(conn):
+    from libref.astminer.models import CodeSnippet
+
+    snippet = CodeSnippet(
+        sample_id="page-1",
+        language="python",
+        code="demo.run()\n",
+        origin_location="https://example.org/docs#quickstart",
+        origin_start_line=12,
+        origin_end_line=12,
+        origin_start_byte=200,
+        origin_end_byte=210,
+    )
+    ingest_snippets(
+        conn,
+        "demo",
+        "0.1",
+        [snippet],
+        source_key="docs:page-1",
+    )
+    row = conn.execute(
+        "SELECT caller_file, line_start, start_byte FROM call_instances"
+        " WHERE caller_file LIKE 'https://example.org/docs%' LIMIT 1"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "https://example.org/docs#quickstart"
+    assert row[1] == 12
+    assert row[2] == 200

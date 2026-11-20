@@ -62,6 +62,21 @@ def _synthetic_path(source_key: str, sample_id: str, suffix: str) -> str:
     return f"usage/{safe}{suffix}"
 
 
+def _relocate_snippet_calls(resolved, snippet: CodeSnippet):
+    """Move snippet call evidence from the synthetic path to its host source."""
+    if not snippet.origin_location:
+        return resolved
+    for call in resolved:
+        call.caller_file = snippet.origin_location
+        if snippet.origin_start_line:
+            call.line_start = snippet.origin_start_line + call.line_start - 1
+            call.line_end = snippet.origin_start_line + call.line_end - 1
+        if snippet.origin_start_byte:
+            call.start_byte = snippet.origin_start_byte + call.start_byte
+            call.end_byte = snippet.origin_start_byte + call.end_byte
+    return resolved
+
+
 def ingest_snippets(
     conn,
     library: str,
@@ -76,6 +91,7 @@ def ingest_snippets(
     target_filter: dict | None = None,
     source_url: str = "",
     commit_sha: str = "",
+    settings=None,
 ) -> dict[str, int]:
     """Parse snippets with target API facts and persist source-aware call instances."""
     from libref.astminer import engine as ast_engine
@@ -129,7 +145,12 @@ def ingest_snippets(
             origin_kind=snippet.origin_kind or origin_kind,
             target_names=explicit_names or target_names,
             target_prefixes=prefixes,
+            stdlib_filter_enabled=bool(
+                getattr(settings, "stdlib_filter_enabled", True)
+            ),
+            stdlib_table_version=str(getattr(settings, "stdlib_table_version", "1")),
         )
+        resolved = _relocate_snippet_calls(resolved, snippet)
         count, ids = _upsert_calls(conn, library_id, version_id, resolved, commit_sha)
         calls += count
         wanted.update(ids)

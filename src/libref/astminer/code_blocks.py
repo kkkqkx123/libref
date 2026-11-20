@@ -53,6 +53,44 @@ def canonical_language(tag: str) -> str:
     return ""
 
 
+def _byte_starts(lines: list[str]) -> list[int]:
+    starts: list[int] = []
+    offset = 0
+    for line in lines:
+        starts.append(offset)
+        offset += len(line.encode("utf-8")) + 1
+    return starts
+
+
+def _body_origin(
+    body: list[str],
+    first_line: int,
+    starts: list[int],
+    origin_lines: list[tuple[int, int]] | None,
+) -> tuple[int, int, int, int]:
+    """Map the stripped block body back to host line and byte positions."""
+    leading = 0
+    while leading < len(body) and not body[leading].strip():
+        leading += 1
+    index = first_line + leading
+    text_line = body[min(leading, len(body) - 1)]
+    column = len(text_line) - len(text_line.lstrip())
+    line_no, byte_at = (
+        origin_lines[index]
+        if origin_lines is not None and index < len(origin_lines)
+        else (index + 1, starts[index] if index < len(starts) else 0)
+    )
+    start_byte = byte_at + column
+    last = max(index, first_line + len(body) - 1)
+    end_line, end_at = (
+        origin_lines[last]
+        if origin_lines is not None and last < len(origin_lines)
+        else (last + 1, starts[last] if last < len(starts) else start_byte)
+    )
+    end_byte = end_at + len(body[-1].encode("utf-8")) if body else start_byte
+    return line_no, end_line, start_byte, end_byte
+
+
 def fenced_blocks(
     text: str,
     *,
@@ -60,9 +98,12 @@ def fenced_blocks(
     url: str = "",
     heading: str = "",
     origin_kind: str = "markdown_fence",
+    origin_location: str = "",
+    origin_lines: list[tuple[int, int]] | None = None,
 ) -> list[CodeSnippet]:
     """Extract balanced fenced blocks with a configured language tag."""
     lines = str(text or "").splitlines()
+    starts = _byte_starts(lines)
     out: list[CodeSnippet] = []
     ordinal = 0
     index = 0
@@ -85,6 +126,7 @@ def fenced_blocks(
             continue
         language = canonical_language(tag)
         body: list[str] = []
+        body_start = index + 1
         index += 1
         while index < len(lines) and not _is_close(lines[index], close_char, close_len):
             body.append(lines[index])
@@ -96,6 +138,9 @@ def fenced_blocks(
         code = "\n".join(body).strip()
         if not code:
             continue
+        start_line, end_line, start_byte, end_byte = _body_origin(
+            body, body_start, starts, origin_lines
+        )
         out.append(
             CodeSnippet(
                 sample_id=f"{sample_prefix}#{ordinal}",
@@ -105,6 +150,11 @@ def fenced_blocks(
                 heading=heading,
                 ordinal=ordinal,
                 origin_kind=origin_kind,
+                origin_location=origin_location or url,
+                origin_start_byte=start_byte,
+                origin_end_byte=end_byte,
+                origin_start_line=start_line,
+                origin_end_line=end_line,
             )
         )
     return out
@@ -114,16 +164,21 @@ def rust_doc_blocks(text: bytes | str, *, path: str) -> list[CodeSnippet]:
     """Extract fenced Rust examples embedded in doc comments."""
     raw = text.decode("utf-8", "replace") if isinstance(text, bytes) else text
     stripped: list[str] = []
-    for line in raw.splitlines():
+    origin_lines: list[tuple[int, int]] = []
+    offset = 0
+    for line_no, line in enumerate(raw.splitlines(), start=1):
         match = _RUST_DOC_RE.match(line)
-        if match is not None:
-            stripped.append(match.group(2))
-        else:
-            stripped.append("")
+        content = match.group(2) if match is not None else ""
+        prefix = match.start(2) if match is not None else 0
+        stripped.append(content)
+        origin_lines.append((line_no, offset + len(line[:prefix].encode("utf-8"))))
+        offset += len(line.encode("utf-8")) + 1
     return fenced_blocks(
         "\n".join(stripped),
         sample_prefix=f"rustdoc:{path}",
         origin_kind="rustdoc_doctest",
+        origin_location=path,
+        origin_lines=origin_lines,
     )
 
 
