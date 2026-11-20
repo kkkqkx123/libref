@@ -49,13 +49,19 @@ def build_pattern_block(labels: list[dict[str, Any]], limit: int) -> str:
         workflow = str(label.get("workflow") or "")
         if workflow:
             body = f"{body} Workflow: {workflow}" if body else workflow
+        macro_policy = str(label.get("macro_policy") or "exclude")
         attrs = {
             "kind": "pattern-hint",
             "name": str(label.get("name") or ""),
             "pattern": ", ".join(str(p) for p in pattern),
             "profile": str(label.get("profile") or ""),
             "profile_fingerprint": str(label.get("profile_fingerprint") or ""),
+            "macro_policy": macro_policy,
         }
+        if macro_policy in ("review_only", "approved_only"):
+            attrs["macro_note"] = (
+                "macro calls are macro-body visible calls, not expanded call sites"
+            )
         source_roles = label.get("source_roles") or []
         if source_roles:
             attrs["source_roles"] = ", ".join(str(role) for role in source_roles)

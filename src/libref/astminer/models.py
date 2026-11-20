@@ -68,6 +68,8 @@ class ApiDeclRecord(BaseModel):
     has_doc: bool = False
     span_kind: str = "exact_entities"
     preproc_conditions: list[str] = Field(default_factory=list)
+    macro_body_signature: str = ""
+    macro_body_hash: str = ""
 
 
 class RawCall(BaseModel):
@@ -84,6 +86,13 @@ class RawCall(BaseModel):
     argument_count: int = 0
     relation_kind: str = "direct"
     macro_generated: bool = False
+    macro_host: str = ""
+    macro_host_file: str = ""
+    macro_definition_line: int = 0
+    macro_nesting: int = 0
+    macro_conditions: list[str] = Field(default_factory=list)
+    macro_body_kind: str = ""
+    macro_body_signature: str = ""
 
 
 class CallInstanceRecord(BaseModel):
@@ -111,3 +120,11 @@ class CallInstanceRecord(BaseModel):
     in_target_api: bool = False
     target_status: str = TARGET_STATUS_RESOLVED
     relation_kind: str = "direct"
+    macro_generated: bool = False
+    macro_host: str = ""
+    macro_host_file: str = ""
+    macro_definition_line: int = 0
+    macro_nesting: int = 0
+    macro_conditions: list[str] = Field(default_factory=list)
+    macro_body_kind: str = ""
+    macro_body_signature: str = ""

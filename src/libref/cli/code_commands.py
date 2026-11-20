@@ -213,6 +213,7 @@ def cmd_mine(args: argparse.Namespace) -> int:
                     max_args=getattr(args, "max_args", None),
                     profile=getattr(args, "profile", None),
                     source_roles=getattr(args, "source_role", None),
+                    macro_policy=getattr(args, "macro_policy", None),
                 ),
             )
 
@@ -243,6 +244,7 @@ def cmd_mine(args: argparse.Namespace) -> int:
             max_args=getattr(args, "max_args", None),
             profile=getattr(args, "profile", None),
             source_roles=getattr(args, "source_role", None),
+            macro_policy=getattr(args, "macro_policy", None),
         )
     finally:
         conn.close()
@@ -301,6 +303,7 @@ def cmd_induce_labels(args: argparse.Namespace) -> int:
                     ecosystem=getattr(args, "ecosystem", None),
                     topn=args.topn,
                     profile=getattr(args, "profile", None),
+                    macro_policy=getattr(args, "macro_policy", None),
                 ),
             )
 
@@ -323,6 +326,7 @@ def cmd_induce_labels(args: argparse.Namespace) -> int:
                 ecosystem=getattr(args, "ecosystem", None),
                 topn=args.topn,
                 profile=getattr(args, "profile", None),
+                macro_policy=getattr(args, "macro_policy", None),
             )
         )
     finally:

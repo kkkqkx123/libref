@@ -32,13 +32,16 @@ def _persist_entities(
             "INSERT INTO api_entities(entity_uid, library_id, version_id, tenant_id,"
             " qualified_name, kind, parent, signature, params, bases,"
             " start_byte, end_byte, depth, file, line_start, line_end,"
-            " param_types, return_type, has_doc) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " param_types, return_type, has_doc, macro_body_hash, macro_body_signature)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(entity_uid) DO UPDATE SET parent=excluded.parent,"
             " signature=excluded.signature, params=excluded.params, bases=excluded.bases,"
             " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
             " depth=excluded.depth, file=excluded.file, line_start=excluded.line_start,"
             " line_end=excluded.line_end, param_types=excluded.param_types,"
-            " return_type=excluded.return_type, has_doc=excluded.has_doc",
+            " return_type=excluded.return_type, has_doc=excluded.has_doc,"
+            " macro_body_hash=excluded.macro_body_hash,"
+            " macro_body_signature=excluded.macro_body_signature",
             [
                 (
                     entity_uid(version_id, qualified_name, kind),
@@ -60,6 +63,8 @@ def _persist_entities(
                     _decl_json.dumps(list(decl.param_types), ensure_ascii=False),
                     decl.return_type,
                     1 if decl.has_doc else 0,
+                    decl.macro_body_hash,
+                    decl.macro_body_signature,
                 )
                 for (qualified_name, kind), decl in pending.items()
             ],
@@ -69,13 +74,16 @@ def _persist_entities(
             "INSERT INTO api_entities(entity_uid, library_id, version_id,"
             " qualified_name, kind, parent, signature, params, bases,"
             " start_byte, end_byte, depth, file, line_start, line_end,"
-            " param_types, return_type, has_doc) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " param_types, return_type, has_doc, macro_body_hash, macro_body_signature)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(entity_uid) DO UPDATE SET parent=excluded.parent,"
             " signature=excluded.signature, params=excluded.params, bases=excluded.bases,"
             " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
             " depth=excluded.depth, file=excluded.file, line_start=excluded.line_start,"
             " line_end=excluded.line_end, param_types=excluded.param_types,"
-            " return_type=excluded.return_type, has_doc=excluded.has_doc",
+            " return_type=excluded.return_type, has_doc=excluded.has_doc,"
+            " macro_body_hash=excluded.macro_body_hash,"
+            " macro_body_signature=excluded.macro_body_signature",
             [
                 (
                     entity_uid(version_id, qualified_name, kind),
@@ -96,6 +104,8 @@ def _persist_entities(
                     _decl_json.dumps(list(decl.param_types), ensure_ascii=False),
                     decl.return_type,
                     1 if decl.has_doc else 0,
+                    decl.macro_body_hash,
+                    decl.macro_body_signature,
                 )
                 for (qualified_name, kind), decl in pending.items()
             ],
@@ -198,6 +208,14 @@ def _upsert_calls(
                 1 if getattr(call, "in_target_api", True) else 0,
                 getattr(call, "target_status", "current") or "current",
                 getattr(call, "relation_kind", "direct") or "direct",
+                1 if getattr(call, "macro_generated", False) else 0,
+                getattr(call, "macro_host", "") or "",
+                getattr(call, "macro_host_file", "") or "",
+                int(getattr(call, "macro_definition_line", 0) or 0),
+                int(getattr(call, "macro_nesting", 0) or 0),
+                _uid_json.dumps(list(getattr(call, "macro_conditions", []) or [])),
+                getattr(call, "macro_body_kind", "") or "",
+                getattr(call, "macro_body_signature", "") or "",
             )
         )
         needs_review = call.confidence == "AMBIGUOUS" or (
@@ -212,9 +230,11 @@ def _upsert_calls(
             " library_id, version_id, caller, receiver, func, argument_count,"
             " call_order, start_byte, end_byte, commit_sha, scope,"
             " resolve_kind, caller_entity_id, source_id, sample_id, source_role,"
-            " origin_kind, in_target_api, target_status, relation_kind)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-            " ?, ?, ?, ?, ?, ?, ?)"
+            " origin_kind, in_target_api, target_status, relation_kind,"
+            " macro_generated, macro_host, macro_host_file, macro_definition_line,"
+            " macro_nesting, macro_conditions, macro_body_kind, macro_body_signature)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+            " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(call_uid) DO UPDATE SET callee_entity_id=excluded.callee_entity_id,"
             " callee_name=excluded.callee_name, args=excluded.args,"
             " confidence=excluded.confidence, library_id=excluded.library_id,"
@@ -227,7 +247,14 @@ def _upsert_calls(
             " source_id=excluded.source_id, sample_id=excluded.sample_id,"
             " source_role=excluded.source_role, origin_kind=excluded.origin_kind,"
             " in_target_api=excluded.in_target_api, target_status=excluded.target_status,"
-            " relation_kind=excluded.relation_kind",
+            " relation_kind=excluded.relation_kind,"
+            " macro_generated=excluded.macro_generated, macro_host=excluded.macro_host,"
+            " macro_host_file=excluded.macro_host_file,"
+            " macro_definition_line=excluded.macro_definition_line,"
+            " macro_nesting=excluded.macro_nesting,"
+            " macro_conditions=excluded.macro_conditions,"
+            " macro_body_kind=excluded.macro_body_kind,"
+            " macro_body_signature=excluded.macro_body_signature",
             batch,
         )
     if review_uids:

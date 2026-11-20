@@ -76,6 +76,8 @@ def encode_records(
                 "has_doc": bool(decl.has_doc),
                 "span_kind": decl.span_kind,
                 "preproc_conditions": list(decl.preproc_conditions),
+                "macro_body_signature": decl.macro_body_signature,
+                "macro_body_hash": decl.macro_body_hash,
             }
         )
     for alias, full, scope in aliases:
@@ -96,6 +98,13 @@ def encode_records(
                 "argument_count": call.argument_count,
                 "relation_kind": call.relation_kind,
                 "macro_generated": bool(call.macro_generated),
+                "macro_host": call.macro_host,
+                "macro_host_file": call.macro_host_file,
+                "macro_definition_line": call.macro_definition_line,
+                "macro_nesting": call.macro_nesting,
+                "macro_conditions": list(call.macro_conditions),
+                "macro_body_kind": call.macro_body_kind,
+                "macro_body_signature": call.macro_body_signature,
             }
         )
     return records
@@ -134,6 +143,8 @@ def decode_records(
                     span_kind=str(item.get("span_kind", "exact_entities"))
                     or "exact_entities",
                     preproc_conditions=list(item.get("preproc_conditions", [])),
+                    macro_body_signature=str(item.get("macro_body_signature", "")),
+                    macro_body_hash=str(item.get("macro_body_hash", "")),
                 )
             )
         elif kind == "alias":
@@ -163,6 +174,13 @@ def decode_records(
                     func=str(item.get("func", "") or item["raw"].rpartition(".")[2]),
                     relation_kind=str(item.get("relation_kind", "direct") or "direct"),
                     macro_generated=bool(item.get("macro_generated", False)),
+                    macro_host=str(item.get("macro_host", "")),
+                    macro_host_file=str(item.get("macro_host_file", "")),
+                    macro_definition_line=int(item.get("macro_definition_line", 0)),
+                    macro_nesting=int(item.get("macro_nesting", 0)),
+                    macro_conditions=list(item.get("macro_conditions", [])),
+                    macro_body_kind=str(item.get("macro_body_kind", "")),
+                    macro_body_signature=str(item.get("macro_body_signature", "")),
                     argument_count=int(
                         item.get("argument_count", len(item.get("args", [])))
                     ),

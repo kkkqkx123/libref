@@ -71,8 +71,15 @@ def _keep_call(
     relation_kinds: set[str] | None = None,
     target_status: str = TARGET_STATUS_RESOLVED,
     include_unconfirmed: bool = False,
+    macro_policy: str = "exclude",
 ) -> bool:
     if status == "conflict":
+        return False
+    if relation_kind == "macro":
+        if macro_policy == "review_only":
+            return True
+        if macro_policy == "approved_only":
+            return status == "approved"
         return False
     if (
         target_status == TARGET_STATUS_UNCONFIRMED
@@ -85,10 +92,6 @@ def _keep_call(
     if status == "approved":
         return True
     if relation_kinds and relation_kind not in relation_kinds:
-        return False
-    # Macro calls need an explicit relation filter even when ambiguous calls
-    # are allowed; their shape, not their confidence, is the reason to drop them.
-    if relation_kind == "macro" and "macro" not in (relation_kinds or set()):
         return False
     # Stdlib/builtin rows are certain externals (INFERRED), so the mining
     # exclusion rides on the source column instead of the confidence level.
@@ -108,12 +111,15 @@ def _load_kept_calls(
     max_args: int | None = None,
     source_ids: list[int] | tuple[int, ...] | None = None,
     relation_kinds: list[str] | tuple[str, ...] | None = None,
+    macro_policy: str = "exclude",
 ):
     """Single shared scan with review, target and source-aware filters."""
     if source_ids is not None and not source_ids:
         return []
     wanted = sorted({str(k) for k in (resolve_kinds or []) if str(k).strip()})
     wanted_relations = {str(k) for k in (relation_kinds or []) if str(k).strip()}
+    if macro_policy in ("review_only", "approved_only") and relation_kinds is not None:
+        wanted_relations.add("macro")
     sql = (
         "SELECT callee_name, caller_file, caller, confidence, id,"
         " line_start, call_order, start_byte, resolve_kind, argument_count, sample_id,"
@@ -127,8 +133,20 @@ def _load_kept_calls(
         params.extend(int(v) for v in source_ids)
     rows = conn.execute(sql, params).fetchall()
     review = _review_map(conn, version_id)
+    macro_names: set[str] = set()
+    if macro_policy == "exclude":
+        macro_names = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT qualified_name FROM api_entities"
+                " WHERE version_id=? AND kind='macro'",
+                (version_id,),
+            ).fetchall()
+        }
     out = []
     for r in rows:
+        if macro_policy == "exclude" and str(r[0]) in macro_names:
+            continue
         if not _keep_call(
             str(r[3]),
             str(r[8] or ""),
@@ -138,6 +156,7 @@ def _load_kept_calls(
             wanted_relations,
             str(r[12] or TARGET_STATUS_RESOLVED),
             include_unconfirmed,
+            macro_policy,
         ):
             continue
         if wanted and str(r[8] or "") not in wanted:
@@ -199,6 +218,7 @@ def refresh_feature_tree(
     profile_id: int,
     source_ids: list[int] | tuple[int, ...] | None = None,
     relation_kinds: list[str] | tuple[str, ...] | None = None,
+    macro_policy: str = "exclude",
 ) -> int:
     """Rebuild hierarchical feature nodes in bulk; returns the node count."""
     from libref.mining import feature_tree as _tree
@@ -214,6 +234,7 @@ def refresh_feature_tree(
         max_args=max_args,
         source_ids=source_ids,
         relation_kinds=relation_kinds,
+        macro_policy=macro_policy,
     )
     calls = [
         (str(r[0]), str(r[10]) or _scope_key(str(r[1]), r[2])) for r in rows if r[0]
@@ -272,6 +293,7 @@ def refresh_clusters(
     profile_id: int,
     source_ids: list[int] | tuple[int, ...] | None = None,
     relation_kinds: list[str] | tuple[str, ...] | None = None,
+    macro_policy: str = "exclude",
 ) -> int:
     """Rebuild API clusters in bulk; returns the cluster count."""
     from libref.mining import build_scope_sets as _scope_sets
@@ -290,6 +312,7 @@ def refresh_clusters(
         max_args=max_args,
         source_ids=source_ids,
         relation_kinds=relation_kinds,
+        macro_policy=macro_policy,
     )
     triplets = [
         (str(r[0]), str(r[10]) or _scope_key(str(r[1]), r[2]), r[2])
@@ -348,6 +371,7 @@ def mine_patterns(
     profile: str | None = None,
     source_roles: list[str] | tuple[str, ...] | None = None,
     relation_kinds: list[str] | tuple[str, ...] | None = None,
+    macro_policy: str | None = None,
     tenant_id: str = "default",
 ) -> list[dict]:
     import json as _json
@@ -376,6 +400,11 @@ def mine_patterns(
     )
     profile_id = int(resolved_profile["id"])
     source_ids = list(resolved_profile.get("source_ids") or [])
+    policy = str(macro_policy or resolved_profile.get("macro_policy") or "exclude")
+    if policy == "exclude" and "macro" in (relation_kinds or ()):
+        policy = "review_only"
+    if resolved_profile.get("fingerprint_changed"):
+        _clear_derived(conn, version_id, profile_id)
     rows = _load_kept_calls(
         conn,
         version_id,
@@ -386,6 +415,7 @@ def mine_patterns(
         max_args=max_args,
         source_ids=source_ids,
         relation_kinds=relation_kinds,
+        macro_policy=policy,
     )
     if not rows:
         _clear_derived(conn, version_id, profile_id)
@@ -436,6 +466,7 @@ def mine_patterns(
             profile_id=profile_id,
             source_ids=source_ids,
             relation_kinds=relation_kinds,
+            macro_policy=policy,
         )
         refresh_clusters(
             conn,
@@ -451,6 +482,7 @@ def mine_patterns(
             profile_id=profile_id,
             source_ids=source_ids,
             relation_kinds=relation_kinds,
+            macro_policy=policy,
         )
         conn.commit()
         return []
@@ -505,6 +537,7 @@ def mine_patterns(
         profile_id=profile_id,
         source_ids=source_ids,
         relation_kinds=relation_kinds,
+        macro_policy=policy,
     )
     refresh_clusters(
         conn,
@@ -520,6 +553,7 @@ def mine_patterns(
         profile_id=profile_id,
         source_ids=source_ids,
         relation_kinds=relation_kinds,
+        macro_policy=policy,
     )
     conn.commit()
     results.sort(key=lambda r: (-r["support"], r["pattern"]))
@@ -545,6 +579,7 @@ def mine_job_params(
     profile: str | None = None,
     source_roles: list[str] | tuple[str, ...] | None = None,
     relation_kinds: list[str] | tuple[str, ...] | None = None,
+    macro_policy: str | None = None,
 ) -> dict[str, Any]:
     """Build mining job params, symmetric with scrape job params, ensuring replayability."""
     return {
@@ -565,6 +600,7 @@ def mine_job_params(
         "profile": profile,
         "source_roles": list(source_roles) if source_roles else None,
         "relation_kinds": list(relation_kinds) if relation_kinds else None,
+        "macro_policy": macro_policy,
     }
 
 
@@ -602,6 +638,7 @@ def build_mine_runner(settings, conn):
             profile=p.get("profile"),
             source_roles=p.get("source_roles"),
             relation_kinds=p.get("relation_kinds"),
+            macro_policy=p.get("macro_policy"),
         )
 
     return runner
@@ -626,6 +663,7 @@ def induce_job_params(
     include_ambiguous: bool = False,
     include_unconfirmed: bool = False,
     profile: str | None = None,
+    macro_policy: str | None = None,
 ) -> dict[str, Any]:
     """Build induction job params with replayable scope."""
     return {
@@ -636,6 +674,7 @@ def induce_job_params(
         "include_ambiguous": include_ambiguous,
         "include_unconfirmed": include_unconfirmed,
         "profile": profile,
+        "macro_policy": macro_policy,
     }
 
 
@@ -650,6 +689,7 @@ async def induce_labels(
     include_ambiguous: bool = False,
     include_unconfirmed: bool = False,
     profile: str | None = None,
+    macro_policy: str | None = None,
     chat=None,
 ) -> dict[str, Any]:
     """Induce names for top patterns with a chat function; disabled without a key."""
@@ -697,13 +737,21 @@ async def induce_labels(
     )
     profile_id = int(resolved_profile["id"])
     profile_sources = list(resolved_profile.get("source_ids") or [])
+    policy = str(macro_policy or resolved_profile.get("macro_policy") or "exclude")
     source_hint = profile_source_context(conn, profile_sources)["hint"]
+    source_hint += f"; macro policy {policy}"
+    if policy in ("review_only", "approved_only"):
+        source_hint += (
+            "; macro calls are visible in macro bodies, not expanded call sites"
+        )
     want_topn = (
         int(topn)
         if topn is not None
         else int(setting_or_default(settings, "induction_topn"))
     )
-    prompt_version = str(setting_or_default(settings, "induction_prompt_version"))
+    prompt_version = (
+        str(setting_or_default(settings, "induction_prompt_version")) + ":" + policy
+    )
     model = str(setting_or_default(settings, "chat_model"))
     batch_size = max(1, int(setting_or_default(settings, "induction_batch")))
     reader = MiningReadService(conn, settings)
@@ -758,6 +806,13 @@ async def induce_labels(
                     )
                 )
             )
+            if policy == "exclude":
+                shape_filter += " AND COALESCE(relation_kind,'direct') != 'macro'"
+            elif policy == "approved_only":
+                shape_filter += (
+                    " AND (COALESCE(relation_kind,'direct') != 'macro'"
+                    " OR rs.status='approved')"
+                )
             in_v = ",".join("?" for _ in scope_ids)
             in_a = ",".join("?" for _ in wanted_apis)
             shape_params: list[Any] = [*scope_ids, *wanted_apis]
@@ -900,6 +955,7 @@ def build_induce_runner(settings, conn):
             include_ambiguous=bool(p.get("include_ambiguous", False)),
             include_unconfirmed=bool(p.get("include_unconfirmed", False)),
             profile=p.get("profile"),
+            macro_policy=p.get("macro_policy"),
         )
 
     return runner

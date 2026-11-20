@@ -21,7 +21,7 @@ def _profile_context(
     name = profile or "usage"
     placeholders = ",".join("?" for _ in version_ids)
     rows = conn.execute(
-        f"SELECT id, name, source_ids, fingerprint FROM mining_profiles"
+        f"SELECT id, name, source_ids, fingerprint, params FROM mining_profiles"
         f" WHERE version_id IN ({placeholders}) AND name=?",
         (*version_ids, name),
     ).fetchall()
@@ -40,12 +40,24 @@ def _profile_context(
             members = [int(v) for v in values] if isinstance(values, list) else []
         sources.update(members)
         context = profile_source_context(conn, members)
+        try:
+            raw_params = json.loads(str(row[4])) if row[4] else {}
+        except ValueError:
+            raw_params = {}
+        policy = str((raw_params or {}).get("macro_policy") or "exclude")
+        hint = context["hint"]
+        if policy in ("review_only", "approved_only"):
+            hint += (
+                f"; macro policy {policy}; macro calls are visible in macro bodies,"
+                " not expanded call sites"
+            )
         details[int(row[0])] = {
             "name": str(row[1]),
             "fingerprint": str(row[3] or ""),
             "source_ids": members,
             "source_roles": context["roles"],
-            "source_hint": context["hint"],
+            "source_hint": hint,
+            "macro_policy": policy,
         }
     return ids, sources, details
 
@@ -193,8 +205,15 @@ def _render_evidence(
             "confidence": str(call.get("confidence") or ""),
             "resolve": str(call.get("resolve_kind") or ""),
             "target": str(call.get("target_status") or ""),
+            "relation": str(call.get("relation_kind") or "direct"),
             "hit": "true" if idx in set(matched) else "false",
         }
+        if call.get("relation_kind") == "macro":
+            attrs["macro_body"] = "true"
+            attrs["macro_host"] = str(call.get("macro_host") or "")
+            attrs["macro_location"] = str(call.get("definition_location") or "")
+            if call.get("definition_url"):
+                attrs["definition_url"] = str(call.get("definition_url") or "")
         sig = str(call.get("callee_signature") or "").strip()
         if sig:
             attrs["signature"] = sig
@@ -213,7 +232,12 @@ def _render_evidence(
         "profile_fingerprint": str(group.get("profile_fingerprint") or ""),
         "canonical_url": str(group.get("canonical_url") or ""),
         "source_hint": str(group.get("source_hint") or ""),
+        "macro_policy": str(group.get("macro_policy") or "exclude"),
     }
+    if any(call.get("relation_kind") == "macro" for call in calls):
+        head["macro_note"] = (
+            "macro-body visible call at its definition point, not a preprocessed call site"
+        )
     return unit_tag(head, inner)
 
 
@@ -270,6 +294,7 @@ def _call_filter_sql(
     min_args: int | None,
     max_args: int | None,
     relation_kinds: list[str] | tuple[str, ...] | None = None,
+    macro_policy: str = "exclude",
 ) -> tuple[str, list[Any]]:
     """Shared call filter with review semantics; empty inputs keep history."""
     parts: list[str] = ["(rs.status IS NULL OR rs.status != 'conflict')"]
@@ -296,16 +321,22 @@ def _call_filter_sql(
             parts.append(f"({alias}.resolve_kind IN ({marks}))")
             params.extend(wanted)
     relations = sorted({str(k) for k in (relation_kinds or []) if str(k).strip()})
+    if macro_policy == "exclude" and "macro" in relations:
+        macro_policy = "review_only"
     if relations:
         marks = ",".join("?" for _ in relations)
         parts.append(f"(COALESCE({alias}.relation_kind,'direct') IN ({marks}))")
         params.extend(relations)
-    else:
-        # Macro shape is excluded independently of the ambiguous-call switch.
+    elif macro_policy == "review_only":
+        pass
+    elif macro_policy == "approved_only":
         parts.append(
             f"(COALESCE({alias}.relation_kind,'direct') != 'macro'"
             " OR rs.status='approved')"
         )
+    else:
+        # Macro shape is excluded independently of the ambiguous-call switch.
+        parts.append(f"COALESCE({alias}.relation_kind,'direct') != 'macro'")
     if min_args is not None:
         parts.append(f"({alias}.argument_count >= ?)")
         params.append(int(min_args))
@@ -619,6 +650,30 @@ class MiningReadService:
         _pids, sources, _profiles = _profile_context(self._conn, vids, profile)
         if not sources:
             return []
+        macro_policy = next(iter(_profiles.values()), {}).get("macro_policy", "exclude")
+        if macro_policy == "exclude":
+            macro_filter = " AND COALESCE(ci.relation_kind,'direct') != 'macro'"
+        elif macro_policy == "approved_only":
+            macro_filter = (
+                " AND (COALESCE(ci.relation_kind,'direct') != 'macro'"
+                " OR rs.status='approved')"
+            )
+        else:
+            macro_filter = ""
+        macro_names: set[str] = set()
+        if macro_policy == "exclude":
+            try:
+                macro_names = {
+                    str(row[0])
+                    for row in self._conn.execute(
+                        "SELECT qualified_name FROM api_entities WHERE version_id IN ("
+                        + ",".join("?" for _ in vids)
+                        + ") AND kind='macro'",
+                        tuple(vids),
+                    ).fetchall()
+                }
+            except Exception:  # noqa: BLE001 -- read models may run on partial schemas
+                macro_names = set()
         source_marks = ",".join("?" for _ in sources)
         source_params = list(sources)
         base_filter = "(rs.status IS NULL OR rs.status != 'conflict')"
@@ -639,6 +694,7 @@ class MiningReadService:
                 " AND COALESCE(ci.target_status,'resolved_target')"
                 " NOT IN ('prefix_candidate', 'version_unconfirmed')"
             )
+        conf += macro_filter
         # Scopes missing any member can never contain the pattern as a subsequence,
         # so only those scopes are loaded in the second phase.
         members = sorted(set(pattern))
@@ -665,7 +721,8 @@ class MiningReadService:
             " ci.callee_name, ci.args, ci.line_start, ci.line_end, ci.confidence,"
             " ci.call_order, ci.start_byte, ci.id, ci.resolve_kind,"
             " ci.source_id, ci.sample_id, ci.source_role, ci.origin_kind,"
-            " ci.target_status"
+            " ci.target_status, ci.relation_kind, ci.macro_host,"
+            " ci.macro_host_file, ci.macro_definition_line, ci.macro_conditions"
             " FROM call_instances ci LEFT JOIN review_status rs "
             "ON rs.entity_type='call_instance' AND rs.entity_id=ci.id"
             " JOIN versions v ON v.id = ci.version_id"
@@ -699,11 +756,18 @@ class MiningReadService:
             source_role,
             origin_kind,
             target_status,
+            relation_kind,
+            macro_host,
+            macro_host_file,
+            macro_definition_line,
+            macro_conditions,
         ) in rows:
+            if macro_policy == "exclude" and str(callee) in macro_names:
+                continue
             key = (vid, path, caller or "")
+            label = labels.get(int(source_id or 0), {})
             slot = groups.get(key)
             if slot is None:
-                label = labels.get(int(source_id or 0), {})
                 profile_id = next(iter(_profiles), 0)
                 slot = {
                     "library": lib,
@@ -723,6 +787,7 @@ class MiningReadService:
                     "source_hint": str(
                         _profiles.get(profile_id, {}).get("source_hint") or ""
                     ),
+                    "macro_policy": macro_policy,
                     "declared_target_version": str(
                         label.get("declared_target_version") or ""
                     ),
@@ -746,6 +811,26 @@ class MiningReadService:
                     "confidence": cf,
                     "resolve_kind": rk,
                     "target_status": str(target_status or ""),
+                    "relation_kind": str(relation_kind or "direct"),
+                    "macro_body": str(relation_kind or "") == "macro",
+                    "macro_host": str(macro_host or ""),
+                    "definition_location": (
+                        f"{macro_host_file or path}:{macro_definition_line}"
+                        if macro_host_file or macro_definition_line
+                        else ""
+                    ),
+                    "definition_url": (
+                        _canonical_url(
+                            str(label.get("source_url") or ""),
+                            str(label.get("commit_sha") or ""),
+                            str(macro_host_file or path),
+                            int(macro_definition_line or 0),
+                            int(macro_definition_line or 0),
+                        )
+                        if str(relation_kind or "") == "macro"
+                        else ""
+                    ),
+                    "macro_conditions": _parse_json_list(macro_conditions),
                 }
             )
         self._attach_signatures(list(groups.values()), vids)
@@ -870,10 +955,71 @@ class MiningReadService:
             total = sum(relations.values())
             macro = relations.get("macro", 0)
             health["relations"] = relations
+            macro_entities = {
+                str(row[0])
+                for row in self._conn.execute(
+                    "SELECT qualified_name FROM api_entities WHERE version_id IN ("
+                    + ",".join("?" for _ in vids)
+                    + ") AND kind='macro'",
+                    tuple(vids),
+                ).fetchall()
+            }
+            macro_rows = self._conn.execute(
+                "SELECT callee_name, confidence, COALESCE(target_status,''),"
+                " COALESCE(resolve_kind,''), count(*) FROM call_instances"
+                " WHERE version_id IN ("
+                + ",".join("?" for _ in vids)
+                + f") AND source_id IN ({marks}) AND relation_kind='macro'"
+                " GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC, 1",
+                (*vids, *sorted(sources)),
+            ).fetchall()
+            macro_calls = sum(int(row[4]) for row in macro_rows)
+            resolved_macro_calls = sum(
+                int(row[4]) for row in macro_rows if str(row[0]) in macro_entities
+            )
+            covered = {str(row[0]) for row in macro_rows} & macro_entities
+            confidence: dict[str, int] = {}
+            unresolved: list[dict[str, Any]] = []
+            for name, conf, status, kind, count in macro_rows:
+                name = str(name)
+                confidence[str(conf)] = confidence.get(str(conf), 0) + int(count)
+                if (
+                    name not in macro_entities
+                    or status in (TARGET_STATUS_PREFIX,)
+                    or kind == "unresolved"
+                ):
+                    unresolved.append(
+                        {
+                            "api": name,
+                            "calls": int(count),
+                            "target_status": str(status),
+                            "resolve_kind": str(kind),
+                        }
+                    )
+            target_calls = sum(health.get("target_status", {}).values())
             health["macro_coverage"] = {
                 "macro": macro,
                 "total": total,
                 "ratio": round(macro / total, 4) if total else 0.0,
+                "macro_calls": macro_calls,
+                "target_calls": target_calls,
+                "target_macro_ratio": (
+                    round(macro_calls / target_calls, 4) if target_calls else 0.0
+                ),
+                "target_macro_definitions": len(macro_entities),
+                "covered_macro_definitions": len(covered),
+                "definition_coverage": (
+                    round(len(covered) / len(macro_entities), 4)
+                    if macro_entities
+                    else 0.0
+                ),
+                "resolved_macro_calls": resolved_macro_calls,
+                "macro_resolution_ratio": (
+                    round(resolved_macro_calls / macro_calls, 4) if macro_calls else 0.0
+                ),
+                "confidence": confidence,
+                "unresolved_macro_calls": sum(item["calls"] for item in unresolved),
+                "unresolved": unresolved,
             }
         return health
 
@@ -1500,6 +1646,9 @@ class MiningReadService:
                     ),
                     "source_hint": str(
                         profiles.get(int(pid), {}).get("source_hint") or ""
+                    ),
+                    "macro_policy": str(
+                        profiles.get(int(pid), {}).get("macro_policy") or "exclude"
                     ),
                 }
             )

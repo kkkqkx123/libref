@@ -739,3 +739,19 @@ ALTER TABLE call_instances ADD COLUMN relation_kind TEXT NOT NULL DEFAULT 'direc
 CREATE INDEX IF NOT EXISTS idx_call_instances_relation
   ON call_instances(version_id, relation_kind);
 """
+
+# ── Macro body evidence: definition attribution plus target macro identity ──
+MACRO_EVIDENCE_SQL = """
+ALTER TABLE call_instances ADD COLUMN macro_generated INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE call_instances ADD COLUMN macro_host TEXT NOT NULL DEFAULT '';
+ALTER TABLE call_instances ADD COLUMN macro_host_file TEXT NOT NULL DEFAULT '';
+ALTER TABLE call_instances ADD COLUMN macro_definition_line INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE call_instances ADD COLUMN macro_nesting INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE call_instances ADD COLUMN macro_conditions JSON NOT NULL DEFAULT '[]';
+ALTER TABLE call_instances ADD COLUMN macro_body_kind TEXT NOT NULL DEFAULT '';
+ALTER TABLE call_instances ADD COLUMN macro_body_signature TEXT NOT NULL DEFAULT '';
+ALTER TABLE api_entities ADD COLUMN macro_body_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE api_entities ADD COLUMN macro_body_signature TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_call_instances_macro_host
+  ON call_instances(version_id, macro_host);
+"""

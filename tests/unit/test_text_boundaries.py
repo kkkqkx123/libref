@@ -131,11 +131,15 @@ def test_pattern_evidence_marks_gaps_and_hits(monkeypatch, tmp_path):
         " call_order INTEGER, start_byte INTEGER, scope TEXT, resolve_kind TEXT,"
         " source_id INTEGER, sample_id TEXT DEFAULT '', source_role TEXT DEFAULT '',"
         " origin_kind TEXT DEFAULT '', in_target_api INTEGER DEFAULT 0,"
-        " target_status TEXT DEFAULT 'resolved_target')"
+        " target_status TEXT DEFAULT 'resolved_target',"
+        " relation_kind TEXT DEFAULT 'direct', macro_host TEXT DEFAULT '',"
+        " macro_host_file TEXT DEFAULT '', macro_definition_line INTEGER DEFAULT 0,"
+        " macro_conditions TEXT DEFAULT '[]')"
     )
     conn.execute(
         "CREATE TABLE mining_profiles(id INTEGER PRIMARY KEY, version_id INTEGER,"
-        " name TEXT, source_ids TEXT, fingerprint TEXT DEFAULT '')"
+        " name TEXT, source_ids TEXT, fingerprint TEXT DEFAULT '',"
+        " params TEXT DEFAULT '{}')"
     )
     conn.execute(
         "INSERT INTO mining_profiles(id, version_id, name, source_ids, fingerprint)"

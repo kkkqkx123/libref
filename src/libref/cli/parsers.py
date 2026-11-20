@@ -575,6 +575,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_mine.add_argument("--max-args", type=int, default=None)
     p_mine.add_argument("--profile", default=None)
     p_mine.add_argument(
+        "--macro-policy",
+        choices=["exclude", "review_only", "approved_only"],
+        default=None,
+        help="Macro call policy; named review profiles default to review_only",
+    )
+    p_mine.add_argument(
         "--source-role",
         action="append",
         default=None,
@@ -602,6 +608,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_induce.add_argument("--ecosystem", default=None)
     p_induce.add_argument("--topn", type=int, default=None)
     p_induce.add_argument("--profile", default=None)
+    p_induce.add_argument(
+        "--macro-policy",
+        choices=["exclude", "review_only", "approved_only"],
+        default=None,
+    )
     p_induce.add_argument(
         "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
     )

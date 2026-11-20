@@ -267,6 +267,14 @@ def resolve_calls(
                 in_target_api=in_target,
                 target_status=target_status,
                 relation_kind=call.relation_kind,
+                macro_generated=call.macro_generated,
+                macro_host=call.macro_host,
+                macro_host_file=call.macro_host_file,
+                macro_definition_line=call.macro_definition_line,
+                macro_nesting=call.macro_nesting,
+                macro_conditions=list(call.macro_conditions),
+                macro_body_kind=call.macro_body_kind,
+                macro_body_signature=call.macro_body_signature,
             )
         )
     return out

@@ -13,7 +13,11 @@ from libref.astminer import rules as _rules
 from libref.astminer.c_shadow import shadow_for_parse
 from libref.astminer.config import LanguageConfig, grammar_fingerprint, load_language
 from libref.astminer.context import determine_module_path
-from libref.astminer.macro_calls import find_macro_calls
+from libref.astminer.macro_calls import (
+    find_macro_calls,
+    macro_body_hash,
+    macro_body_signature,
+)
 from libref.astminer.models import ApiDeclRecord, RawCall
 from libref.astminer.rules import CapturedItem, normalize_owner_text
 
@@ -74,6 +78,14 @@ def _compiled_queries(cfg: LanguageConfig) -> dict[str, Query]:
 
 def node_text(node, source: bytes) -> str:
     return _rules.slice_text(node, source)
+
+
+def _walk(node):
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        yield current
+        stack.extend(reversed(current.children))
 
 
 def _largest_valid(captures: dict[str, list]) -> tuple[str, Any] | None:
@@ -139,6 +151,7 @@ def extract_file(
         module,
         doc_nodes=doc_nodes,
         line_nodes=line_nodes,
+        root=tree.root_node,
     )
     alias_module = module
     if module is not None and path.replace("\\", "/").endswith("__init__.py"):
@@ -235,6 +248,7 @@ def _build_decls(
     module=None,
     doc_nodes=None,
     line_nodes=None,
+    root=None,
 ) -> list[ApiDeclRecord]:
     doc_spans = list(doc_nodes or [])
     line_spans = list(line_nodes or [])
@@ -248,7 +262,18 @@ def _build_decls(
     _attach_bases_innermost(entities, dep_spans)
     _merge_partial_decls(entities)
     _normalize_ownership(entities, anchors, module, cfg.name)
-    return [_emit_record(entity, path) for entity in entities]
+    records = [_emit_record(entity, path, source) for entity in entities]
+    if root is not None and cfg.name in ("c", "cpp"):
+        records.extend(
+            _attribute_declarations(
+                root,
+                source,
+                path,
+                dep_matches,
+                {item.qualified_name for item in records},
+            )
+        )
+    return records
 
 
 def _collect_entities(entity_matches, source: bytes) -> list[_Entity]:
@@ -417,7 +442,7 @@ def _attach_preproc_conditions(
             best.preproc_conditions.append(text)
 
 
-def _emit_record(entity: _Entity, path: str) -> ApiDeclRecord:
+def _emit_record(entity: _Entity, path: str, source: bytes) -> ApiDeclRecord:
     node = entity.node
     start, end = node.start_byte, node.end_byte
     line_start, line_end = node.start_point[0] + 1, node.end_point[0] + 1
@@ -440,7 +465,65 @@ def _emit_record(entity: _Entity, path: str) -> ApiDeclRecord:
         depth=entity.depth,
         has_doc=entity.has_doc,
         preproc_conditions=list(entity.preproc_conditions),
+        macro_body_signature=(
+            macro_body_signature(node_text(node, source))
+            if entity.kind == "macro"
+            else ""
+        ),
+        macro_body_hash=(
+            macro_body_hash(node_text(node, source)) if entity.kind == "macro" else ""
+        ),
     )
+
+
+def _attribute_declarations(
+    root,
+    source: bytes,
+    path: str,
+    dep_matches,
+    existing: set[str],
+) -> list[ApiDeclRecord]:
+    """Recover prototypes whose GNU attributes leave a function declarator in an ERROR node."""
+    records: list[ApiDeclRecord] = []
+    conditions = _preproc_conditions(dep_matches, source)
+    for node in _walk(root):
+        if node.type != "ERROR":
+            continue
+        declaration = node.parent
+        while declaration is not None and declaration.type != "declaration":
+            declaration = declaration.parent
+        if declaration is None:
+            continue
+        text = " ".join(node_text(declaration, source).split())
+        if not text.endswith(";"):
+            continue
+        for candidate in _walk(node):
+            if candidate.type != "function_declarator":
+                continue
+            name_node = candidate.child_by_field_name("declarator")
+            params_node = candidate.child_by_field_name("parameters")
+            if name_node is None or name_node.type != "identifier":
+                continue
+            name = node_text(name_node, source).strip()
+            if not name or name in existing:
+                continue
+            entity = _Entity(
+                node=declaration,
+                kind="function",
+                name=name,
+                short=name,
+                items=[],
+                signature=text[:-1].strip(),
+                params=(
+                    _rules.params_from_params_node(params_node, source)
+                    if params_node is not None
+                    else []
+                ),
+            )
+            _attach_preproc_conditions([entity], conditions)
+            records.append(_emit_record(entity, path, source))
+            existing.add(name)
+    return records
 
 
 def _attach_bases_innermost(
@@ -755,7 +838,7 @@ def _build_calls(path, cfg, source, call_matches, decls, root=None) -> list[RawC
             )
         )
     if root is not None:
-        for macro in find_macro_calls(root, source, cfg.name):
+        for macro in find_macro_calls(root, source, cfg.name, path, get_parser(cfg)):
             calls.append(
                 RawCall(
                     raw_callee=macro.name,
@@ -769,6 +852,13 @@ def _build_calls(path, cfg, source, call_matches, decls, root=None) -> list[RawC
                     func=macro.name,
                     relation_kind="macro",
                     macro_generated=True,
+                    macro_host=macro.host_macro,
+                    macro_host_file=macro.host_file or path,
+                    macro_definition_line=macro.macro_definition_line,
+                    macro_nesting=macro.macro_nesting,
+                    macro_conditions=list(macro.macro_conditions),
+                    macro_body_kind=macro.macro_body_kind,
+                    macro_body_signature=macro.macro_body_signature,
                 )
             )
     return _dedupe_calls(calls)

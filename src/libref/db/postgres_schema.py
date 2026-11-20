@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS api_entities(
   param_types JSONB NOT NULL DEFAULT '[]',
   return_type TEXT NOT NULL DEFAULT '',
   has_doc INTEGER NOT NULL DEFAULT 0,
+  macro_body_hash TEXT NOT NULL DEFAULT '',
+  macro_body_signature TEXT NOT NULL DEFAULT '',
   tenant_id TEXT NOT NULL DEFAULT 'default',
   UNIQUE(version_id, qualified_name, kind)
 );
@@ -151,6 +153,14 @@ CREATE TABLE IF NOT EXISTS call_instances(
   origin_kind TEXT NOT NULL DEFAULT 'repo_file',
   in_target_api INTEGER NOT NULL DEFAULT 0,
   target_status TEXT NOT NULL DEFAULT 'current',
+  macro_generated INTEGER NOT NULL DEFAULT 0,
+  macro_host TEXT NOT NULL DEFAULT '',
+  macro_host_file TEXT NOT NULL DEFAULT '',
+  macro_definition_line INTEGER NOT NULL DEFAULT 0,
+  macro_nesting INTEGER NOT NULL DEFAULT 0,
+  macro_conditions JSONB NOT NULL DEFAULT '[]',
+  macro_body_kind TEXT NOT NULL DEFAULT '',
+  macro_body_signature TEXT NOT NULL DEFAULT '',
   tenant_id TEXT NOT NULL DEFAULT 'default'
 );
 
@@ -163,6 +173,7 @@ CREATE INDEX IF NOT EXISTS idx_call_instances_scope_key ON call_instances(versio
 CREATE INDEX IF NOT EXISTS idx_call_instances_caller ON call_instances(caller_entity_id);
 CREATE INDEX IF NOT EXISTS idx_call_instances_resolve ON call_instances(version_id, resolve_kind);
 CREATE INDEX IF NOT EXISTS idx_call_instances_relation ON call_instances(version_id, relation_kind);
+CREATE INDEX IF NOT EXISTS idx_call_instances_macro_host ON call_instances(version_id, macro_host);
 
 CREATE TABLE IF NOT EXISTS code_sources(
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

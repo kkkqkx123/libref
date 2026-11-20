@@ -28,6 +28,7 @@ pytestmark = pytest.mark.skipif(
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 LOCK = HERE / "fixtures" / "usage_mining" / "repos.lock.json"
+PROFILE_NAMES = ("dpdk-official-examples", "dpdk-on-mtl")
 
 _REPORTS = (
     "00-manifest.txt",
@@ -42,12 +43,15 @@ _REPORTS = (
     "09-resolution-coverage-diff.txt",
     "10-evidence-dpdk-official-examples.txt",
     "11-evidence-dpdk-on-mtl.txt",
+    "12-macro-evidence-dpdk-on-mtl.txt",
     "20-health-dpdk-official-examples.txt",
     "21-health-dpdk-on-mtl.txt",
     "30-labels-dpdk-official-examples.txt",
     "31-labels-dpdk-on-mtl.txt",
     "40-health-comparison.txt",
+    "41-macro-metrics.txt",
     "50-quality-gates.txt",
+    "60-macro-fingerprint.txt",
     "SUMMARY.txt",
 )
 
@@ -185,6 +189,43 @@ def test_real_repo_usage_mining_outputs(tmp_path, conn, monkeypatch) -> None:
     assert comparison["dpdk-official-examples"]["macro_coverage"]["total"] > 0
     assert comparison["dpdk-on-mtl"]["macro_coverage"]["total"] > 0
 
+    metrics = _read(out_dir, "41-macro-metrics.txt")
+    for profile in PROFILE_NAMES:
+        item = metrics[profile]
+        assert item["macro_calls"] > 0
+        assert item["target_macro_definitions"] > 0
+        assert item["definition_coverage"] > 0
+        assert item["macro_resolution_ratio"] > 0
+        assert isinstance(item["unresolved"], list)
+        assert "EXTRACTED" not in item["confidence"]
+
+    macro_evidence = _read(out_dir, "12-macro-evidence-dpdk-on-mtl.txt")
+    assert macro_evidence
+    macro_calls = [
+        call
+        for group in macro_evidence
+        for call in group["calls"]
+        if call["relation_kind"] == "macro"
+    ]
+    assert macro_calls
+    assert all(
+        call["macro_body"]
+        and call["macro_host"]
+        and call["definition_url"].startswith("https://")
+        and "#L" in call["definition_url"]
+        for call in macro_calls
+    )
+    assert all("macro_body" in group["rendered"] for group in macro_evidence)
+
+    fingerprint_report = _read(out_dir, "60-macro-fingerprint.txt")
+    assert fingerprint_report["target_macro_definitions"] > 0
+    policies = {
+        item["name"]: item["macro_policy"] for item in fingerprint_report["profiles"]
+    }
+    assert policies["dpdk-on-mtl"] == "review_only"
+    assert policies["usage"] == "exclude"
+    assert all(item["fingerprint"] for item in fingerprint_report["profiles"])
+
     labels = _read(out_dir, "31-labels-dpdk-on-mtl.txt")
     assert labels["labels"]
     assert all(item["profile"] == "dpdk-on-mtl" for item in labels["labels"])
@@ -193,6 +234,12 @@ def test_real_repo_usage_mining_outputs(tmp_path, conn, monkeypatch) -> None:
     assert "v23.12" in labels["source_hint"]
     assert "f20b60a982e2c38e61108c4123ee7cb5a385da16" in labels["source_hint"]
     assert 'source_hint="' in labels["answer_block"]
+    assert 'macro_policy="review_only"' in labels["answer_block"]
+    assert "macro-body visible call" in labels["answer_block"]
+    assert any(
+        set(label["pattern"]) & set(fingerprint_report["macro_names"])
+        for label in labels["labels"]
+    )
 
     gates = _read(out_dir, "50-quality-gates.txt")
     assert all(gates["checks"].values()), gates["gates"]
@@ -205,7 +252,8 @@ def test_real_repo_usage_mining_outputs(tmp_path, conn, monkeypatch) -> None:
     assert set(gates["thresholds"]) == {
         "unresolved_rate",
         "prefix_candidate_rate",
-        "minimum_macro_ratio",
+        "macro_target_call_ratio",
+        "macro_definition_coverage",
     }
 
     summary_text = _read(out_dir, "SUMMARY.txt")

@@ -29,6 +29,24 @@ ORIGIN_KINDS = frozenset(
     }
 )
 DEFAULT_PROFILE = "usage"
+MACRO_POLICY_EXCLUDE = "exclude"
+MACRO_POLICY_REVIEW_ONLY = "review_only"
+MACRO_POLICY_APPROVED_ONLY = "approved_only"
+MACRO_POLICIES = frozenset(
+    {MACRO_POLICY_EXCLUDE, MACRO_POLICY_REVIEW_ONLY, MACRO_POLICY_APPROVED_ONLY}
+)
+
+
+def normalize_macro_policy(policy: Any = None, name: str | None = None) -> str:
+    """Resolve the macro policy attached to one mining profile."""
+    if policy is None:
+        if name in (None, DEFAULT_PROFILE, "implementation", "all"):
+            return MACRO_POLICY_EXCLUDE
+        return MACRO_POLICY_REVIEW_ONLY
+    value = str(policy).strip()
+    if value not in MACRO_POLICIES:
+        raise ValueError(f"unsupported macro policy: {value}")
+    return value
 
 
 def _normalize_version(value: Any) -> str:
@@ -280,10 +298,37 @@ def _source_identities(conn, source_ids: list[int]) -> list[str]:
     return sorted(identities)
 
 
+def _macro_fact_identities(conn, source_ids: list[int]) -> list[str]:
+    """Target macro definition identities that make a profile result reproducible."""
+    ids = sorted({int(value) for value in source_ids})
+    if not ids:
+        return []
+    marks = ",".join("?" for _ in ids)
+    versions = sorted(
+        {
+            int(row[0])
+            for row in conn.execute(
+                f"SELECT DISTINCT version_id FROM code_sources WHERE id IN ({marks})",
+                ids,
+            ).fetchall()
+        }
+    )
+    if not versions:
+        return []
+    marks = ",".join("?" for _ in versions)
+    rows = conn.execute(
+        "SELECT qualified_name, macro_body_hash, macro_body_signature FROM api_entities"
+        f" WHERE version_id IN ({marks}) AND kind='macro' ORDER BY qualified_name",
+        versions,
+    ).fetchall()
+    return [_dump((str(row[0]), str(row[1] or ""), str(row[2] or ""))) for row in rows]
+
+
 def _fingerprint(conn, source_ids: list[int], support_mode: str, params: Any) -> str:
     blob = _dump(
         {
             "sources": _source_identities(conn, source_ids),
+            "macros": _macro_fact_identities(conn, source_ids),
             "support": support_mode,
             "params": params or {},
         }
@@ -365,6 +410,7 @@ def resolve_profile(
     source_ids: list[int] | None = None,
     source_roles: list[str] | tuple[str, ...] | None = None,
     support_mode: str = "sample",
+    macro_policy: Any = None,
     tenant_id: str = "default",
 ) -> dict[str, Any]:
     """Resolve a mining profile without rewriting the default usage profile."""
@@ -375,7 +421,10 @@ def resolve_profile(
         unknown = [role for role in wanted_roles if role not in SOURCE_ROLES]
         if unknown:
             raise ValueError(f"unsupported source role: {unknown[0]}")
-    params: dict[str, Any] = {"source_roles": wanted_roles} if wanted_roles else {}
+    policy = normalize_macro_policy(macro_policy, name)
+    params: dict[str, Any] = {"macro_policy": policy}
+    if wanted_roles:
+        params["source_roles"] = wanted_roles
 
     if source_ids is not None:
         ids = sorted({int(v) for v in source_ids})
@@ -398,7 +447,7 @@ def resolve_profile(
             name=str(name),
             source_ids=ids,
             support_mode=support_mode,
-            params={},
+            params=params,
             tenant_id=tenant_id,
         )
         return {
@@ -406,6 +455,8 @@ def resolve_profile(
             "name": str(name),
             "source_ids": ids,
             "support_mode": support_mode,
+            "macro_policy": policy,
+            "fingerprint": profile_fingerprint(conn, ids, support_mode, params),
         }
     else:
         ids = _usage_source_ids(conn, version_id, tenant_id)
@@ -424,20 +475,36 @@ def resolve_profile(
             ids = sorted({int(r[0]) for r in rows})
 
     profile_name = name or DEFAULT_PROFILE
+    changed = False
+    fingerprint = ""
     if name is not None and name not in (DEFAULT_PROFILE, "implementation", "all"):
         row = conn.execute(
-            "SELECT id, source_ids, support_mode FROM mining_profiles"
-            " WHERE version_id=? AND name=?",
+            "SELECT id, source_ids, support_mode, params, fingerprint"
+            " FROM mining_profiles WHERE version_id=? AND name=?",
             (int(version_id), str(name)),
         ).fetchone()
         if row is not None:
+            stored_params = _load(row[3], {})
+            if macro_policy is None and isinstance(stored_params, dict):
+                policy = normalize_macro_policy(stored_params.get("macro_policy"), name)
+                params["macro_policy"] = policy
             stored_ids = sorted(int(v) for v in _load(row[1], []) if str(v).strip())
             if not overrides or (stored_ids == ids and str(row[2]) == support_mode):
+                fingerprint = profile_fingerprint(conn, stored_ids, str(row[2]), params)
+                changed = fingerprint != str(row[4] or "")
+                if changed:
+                    conn.execute(
+                        "UPDATE mining_profiles SET params=?, fingerprint=? WHERE id=?",
+                        (_dump(params), fingerprint, int(row[0])),
+                    )
                 return {
                     "id": int(row[0]),
                     "name": str(name),
                     "source_ids": stored_ids,
                     "support_mode": str(row[2]),
+                    "macro_policy": policy,
+                    "fingerprint": fingerprint,
+                    "fingerprint_changed": changed,
                 }
             suffix = _fingerprint(conn, ids, support_mode, params)[:12]
             profile_name = f"{name}:{suffix}"
@@ -454,9 +521,40 @@ def resolve_profile(
         params=params,
         tenant_id=tenant_id,
     )
+    fingerprint = profile_fingerprint(conn, ids, support_mode, params)
     return {
         "id": pid,
         "name": profile_name,
         "source_ids": ids,
         "support_mode": support_mode,
+        "macro_policy": policy,
+        "fingerprint": fingerprint,
+        "fingerprint_changed": changed,
+    }
+
+
+def macro_body_diff(
+    conn, source_version_id: int, target_version_id: int
+) -> dict[str, Any]:
+    """Compare recorded macro body identities between two library versions."""
+
+    def load(version_id: int) -> dict[str, str]:
+        rows = conn.execute(
+            "SELECT qualified_name, macro_body_hash FROM api_entities"
+            " WHERE version_id=? AND kind='macro' ORDER BY qualified_name",
+            (int(version_id),),
+        ).fetchall()
+        return {str(row[0]): str(row[1] or "") for row in rows}
+
+    source = load(source_version_id)
+    target = load(target_version_id)
+    changed = sorted(
+        name for name in source.keys() & target.keys() if source[name] != target[name]
+    )
+    return {
+        "source_macros": len(source),
+        "target_macros": len(target),
+        "changed": changed,
+        "added": sorted(target.keys() - source.keys()),
+        "removed": sorted(source.keys() - target.keys()),
     }

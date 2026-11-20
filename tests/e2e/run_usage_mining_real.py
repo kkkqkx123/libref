@@ -37,7 +37,8 @@ MAX_REPORT_PATTERNS = 50
 REVIEW_THRESHOLDS = {
     "unresolved_rate": 0.75,
     "prefix_candidate_rate": 0.60,
-    "minimum_macro_ratio": 0.02,
+    "macro_target_call_ratio": 0.02,
+    "macro_definition_coverage": 0.01,
 }
 
 
@@ -86,20 +87,22 @@ async def _label_chat(messages: list[dict[str, Any]]) -> str:
 
 def _source_rows(conn, version_id: int) -> list[dict[str, Any]]:
     rows = conn.execute(
-        "SELECT id, source_key, source_role, origin_kind, source_url, commit_sha,"
-        " selection, target_filter FROM code_sources WHERE version_id=? ORDER BY id",
+        "SELECT id, version_id, source_key, source_role, origin_kind, source_url,"
+        " commit_sha, selection, target_filter FROM code_sources"
+        " WHERE version_id=? ORDER BY id",
         (version_id,),
     ).fetchall()
     return [
         {
             "source_id": int(row[0]),
-            "source_key": str(row[1]),
-            "source_role": str(row[2]),
-            "origin_kind": str(row[3]),
-            "source_url": str(row[4] or ""),
-            "commit_sha": str(row[5] or ""),
-            "selection": json.loads(str(row[6])) if row[6] else {},
-            "target_filter": json.loads(str(row[7])) if row[7] else {},
+            "version_id": int(row[1]),
+            "source_key": str(row[2]),
+            "source_role": str(row[3]),
+            "origin_kind": str(row[4]),
+            "source_url": str(row[5] or ""),
+            "commit_sha": str(row[6] or ""),
+            "selection": json.loads(str(row[7])) if row[7] else {},
+            "target_filter": json.loads(str(row[8])) if row[8] else {},
         }
         for row in rows
     ]
@@ -228,9 +231,9 @@ def _index_version(
 def _call_facts(conn, version_id: int) -> list[dict[str, Any]]:
     rows = conn.execute(
         "SELECT source_id, source_role, in_target_api, target_status, resolve_kind,"
-        " confidence, count(*) FROM call_instances WHERE version_id=?"
-        " GROUP BY source_id, source_role, in_target_api, target_status,"
-        " resolve_kind, confidence ORDER BY source_id, target_status",
+        " confidence, COALESCE(relation_kind,'direct'), count(*) FROM call_instances"
+        " WHERE version_id=? GROUP BY source_id, source_role, in_target_api,"
+        " target_status, resolve_kind, confidence, 7 ORDER BY source_id, target_status",
         (version_id,),
     ).fetchall()
     return [
@@ -241,7 +244,8 @@ def _call_facts(conn, version_id: int) -> list[dict[str, Any]]:
             "target_status": str(row[3]),
             "resolve_kind": str(row[4]),
             "confidence": str(row[5]),
-            "calls": int(row[6]),
+            "relation_kind": str(row[6]),
+            "calls": int(row[7]),
         }
         for row in rows
     ]
@@ -274,13 +278,25 @@ def _profile_facts(facts: list[dict[str, Any]], source_ids: set[int]) -> dict[st
         "unconfirmed_calls": statuses.get(TARGET_STATUS_UNCONFIRMED, 0),
         "resolved_calls": statuses.get(TARGET_STATUS_RESOLVED, 0),
         "prefix_calls": statuses.get(TARGET_STATUS_PREFIX, 0),
+        "macro_calls": sum(
+            int(row["calls"]) for row in allowed if row["relation_kind"] == "macro"
+        ),
+        "macro_confidence": sorted(
+            {row["confidence"] for row in allowed if row["relation_kind"] == "macro"}
+        ),
     }
 
 
 def _version_report(
-    source_rows: list[dict[str, Any]], version: str
+    conn,
+    source_rows: list[dict[str, Any]],
+    version: str,
+    target_version_id: int,
 ) -> list[dict[str, Any]]:
-    from libref.services.code.usage_sources import source_target_status
+    from libref.services.code.usage_sources import (
+        macro_body_diff,
+        source_target_status,
+    )
 
     out = []
     for source in source_rows:
@@ -292,6 +308,14 @@ def _version_report(
             version,
             version_required=bool(filt.get("version_required")),
         )
+        diff = macro_body_diff(conn, source["version_id"], target_version_id)
+        changed = bool(diff["changed"] or diff["added"] or diff["removed"])
+        if status:
+            macro_status = "version_unconfirmed"
+        elif changed:
+            macro_status = "macro_body_changed"
+        else:
+            macro_status = "macro_body_confirmed"
         out.append(
             {
                 "source_key": source["source_key"],
@@ -300,6 +324,8 @@ def _version_report(
                 "declared_library_version": declared,
                 "target_status": status or "version_confirmed",
                 "evidence": str(filt.get("version_evidence") or ""),
+                "macro_body_status": macro_status,
+                "macro_body_diff": diff,
             }
         )
     return out
@@ -372,6 +398,39 @@ def _macro_calls(conn, version_id: int) -> int:
             (version_id,),
         ).fetchone()[0]
     )
+
+
+def _macro_pattern_names(conn, version_id: int) -> set[str]:
+    return {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT qualified_name FROM api_entities WHERE version_id=? AND kind='macro'",
+            (version_id,),
+        ).fetchall()
+    }
+
+
+def _macro_body_call_names(conn, version_id: int, source_ids: list[int]) -> set[str]:
+    if not source_ids:
+        return set()
+    marks = ",".join("?" for _ in source_ids)
+    return {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT DISTINCT callee_name FROM call_instances"
+            f" WHERE version_id=? AND source_id IN ({marks})"
+            " AND relation_kind='macro'",
+            (version_id, *source_ids),
+        ).fetchall()
+    }
+
+
+def _macro_evidence(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        group
+        for group in groups
+        if any(call.get("relation_kind") == "macro" for call in group.get("calls", []))
+    ]
 
 
 def _resolution_diff(
@@ -542,6 +601,8 @@ def _quality_gates(
     resolution: dict[str, Any],
     version_report: list[dict[str, Any]],
     census: dict[str, Any],
+    macro_pattern_names: set[str],
+    macro_evidence_by_profile: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
     from libref.services.code.usage_sources import profile_fingerprint
 
@@ -770,6 +831,151 @@ def _quality_gates(
             "profile confidence distributions differ and macro coverage is reported",
         )
     )
+    policy_by_profile = {
+        str(item["name"]): str((item.get("params") or {}).get("macro_policy") or "")
+        for item in profiles
+    }
+    gates.append(
+        _gate(
+            "macro_policy_scoped",
+            all(policy_by_profile.get(name) == "review_only" for name in PROFILES)
+            and policy_by_profile.get("usage") == "exclude"
+            and policy_by_profile.get("implementation") == "exclude",
+            policy_by_profile,
+            "named review profiles allow macro evidence; default profiles exclude it",
+        )
+    )
+    gates.append(
+        _gate(
+            "named_profiles_mine_macro_calls",
+            all(facts_by_profile[name]["macro_calls"] > 0 for name in PROFILES)
+            and all(patterns[name] & macro_pattern_names for name in PROFILES),
+            {
+                name: {
+                    "macro_calls": facts_by_profile[name]["macro_calls"],
+                    "macro_patterns": sorted(patterns[name] & macro_pattern_names),
+                }
+                for name in PROFILES
+            },
+            "each named profile carries macro calls into mined patterns",
+        )
+    )
+    gates.append(
+        _gate(
+            "default_usage_excludes_macro_calls",
+            not (patterns["usage"] & macro_pattern_names),
+            {
+                "macro_calls": usage_facts["macro_calls"],
+                "macro_patterns": sorted(patterns["usage"] & macro_pattern_names),
+            },
+            "default usage mines no macro patterns from unapproved macro calls",
+        )
+    )
+    gates.append(
+        _gate(
+            "macro_calls_stay_inferred",
+            all(
+                "EXTRACTED" not in facts_by_profile[name]["macro_confidence"]
+                for name in PROFILES
+            ),
+            {name: facts_by_profile[name]["macro_confidence"] for name in PROFILES},
+            "macro-body calls never carry EXTRACTED confidence",
+        )
+    )
+    required_metrics = {
+        "macro_calls",
+        "target_calls",
+        "target_macro_ratio",
+        "target_macro_definitions",
+        "covered_macro_definitions",
+        "definition_coverage",
+        "resolved_macro_calls",
+        "macro_resolution_ratio",
+        "confidence",
+        "unresolved",
+    }
+    gates.append(
+        _gate(
+            "macro_metrics_reviewable",
+            all(
+                required_metrics <= set(item["macro_coverage"])
+                and item["macro_coverage"]["target_macro_definitions"] > 0
+                for item in health.values()
+            ),
+            {
+                name: {
+                    key: item["macro_coverage"].get(key)
+                    for key in sorted(required_metrics)
+                }
+                for name, item in health.items()
+            },
+            "health reports target-relative ratios, definition coverage and unresolved names",
+        )
+    )
+    gates.append(
+        _gate(
+            "macro_evidence_located",
+            bool(macro_evidence_by_profile.get("dpdk-on-mtl"))
+            and all(
+                call.get("macro_body") is True
+                and call.get("macro_host")
+                and call.get("definition_url")
+                and "macro_body" in group.get("rendered", "")
+                for group in macro_evidence_by_profile["dpdk-on-mtl"]
+                for call in group.get("calls", [])
+                if call.get("relation_kind") == "macro"
+            ),
+            {
+                name: [
+                    {
+                        "macro_host": call.get("macro_host"),
+                        "definition_url": call.get("definition_url"),
+                    }
+                    for group in groups
+                    for call in group.get("calls", [])
+                    if call.get("relation_kind") == "macro"
+                ]
+                for name, groups in macro_evidence_by_profile.items()
+            },
+            "macro evidence names the host macro and links to its definition",
+        )
+    )
+    gates.append(
+        _gate(
+            "macro_body_fingerprints_recorded",
+            bool(macro_pattern_names)
+            and all(
+                item["params"].get("macro_policy") and item["fingerprint"]
+                for item in profiles
+            ),
+            {
+                "macro_definitions": len(macro_pattern_names),
+                "policies": policy_by_profile,
+            },
+            "macro bodies and policies participate in stored profile identities",
+        )
+    )
+    gates.append(
+        _gate(
+            "version_macro_body_report",
+            all("macro_body_diff" in item for item in version_report)
+            and any(
+                item["target_status"] != "version_unconfirmed"
+                or item["macro_body_status"] == "version_unconfirmed"
+                for item in version_report
+            ),
+            [
+                {
+                    "source_key": item["source_key"],
+                    "target_status": item["target_status"],
+                    "macro_body_status": item["macro_body_status"],
+                    "changed_macros": len(item["macro_body_diff"]["changed"]),
+                }
+                for item in version_report
+            ],
+            "version report lists macro body differences and keeps version uncertainty",
+        )
+    )
     gates.append(
         _gate(
             "scenario_patterns_differ",
@@ -823,14 +1029,36 @@ def _quality_gates(
                 )
             )
     for name, item in health.items():
-        ratio = float(item.get("macro_coverage", {}).get("ratio", 0.0))
+        coverage = item.get("macro_coverage", {})
+        target_ratio = float(coverage.get("target_macro_ratio", 0.0))
+        definition_coverage = float(coverage.get("definition_coverage", 0.0))
         reviews.append(
             _review(
-                f"{name}.macro_coverage",
-                ratio,
-                REVIEW_THRESHOLDS["minimum_macro_ratio"],
+                f"{name}.macro_target_ratio",
+                {
+                    "ratio": target_ratio,
+                    "missing": [item["api"] for item in coverage.get("unresolved", [])][
+                        :12
+                    ],
+                },
+                REVIEW_THRESHOLDS["macro_target_call_ratio"],
                 "pass"
-                if ratio >= REVIEW_THRESHOLDS["minimum_macro_ratio"]
+                if target_ratio >= REVIEW_THRESHOLDS["macro_target_call_ratio"]
+                else "needs_review",
+            )
+        )
+        reviews.append(
+            _review(
+                f"{name}.macro_definition_coverage",
+                {
+                    "coverage": definition_coverage,
+                    "missing": [item["api"] for item in coverage.get("unresolved", [])][
+                        :12
+                    ],
+                },
+                REVIEW_THRESHOLDS["macro_definition_coverage"],
+                "pass"
+                if definition_coverage >= REVIEW_THRESHOLDS["macro_definition_coverage"]
                 else "needs_review",
             )
         )
@@ -944,7 +1172,17 @@ def render(
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)
+    macro_names = _macro_pattern_names(conn, version_id)
     sources = _source_rows(conn, version_id)
+    macro_body_names = _macro_body_call_names(
+        conn,
+        version_id,
+        [
+            source["source_id"]
+            for source in sources
+            if source["source_role"] == "reference_project"
+        ],
+    )
     profiles = _profile_rows(conn, version_id)
     _write(
         out_dir,
@@ -993,21 +1231,27 @@ def render(
             }
         ),
     )
-    version_report = _version_report(sources, version)
+    version_report = _version_report(conn, sources, version, version_id)
     _write(out_dir, "08-version-compatibility.txt", _dump(version_report))
     _write(out_dir, "09-resolution-coverage-diff.txt", _dump(resolution))
 
     reader = MiningReadService(conn, settings)
     evidence: dict[str, list[dict[str, Any]]] = {}
+    macro_evidence_by_profile: dict[str, list[dict[str, Any]]] = {}
     health: dict[str, dict[str, Any]] = {}
     labels_report: dict[str, Any] = {}
     for idx, name in enumerate(PROFILES, start=10):
         role = PROFILES[name]
+        prefer_macro = name == "dpdk-on-mtl" and bool(macro_body_names)
         evidence_pattern = next(
             (
                 item["pattern"]
                 for item in pattern_rows[name]
                 if any(part.startswith("rte_") for part in item.get("pattern", []))
+                and (
+                    not prefer_macro
+                    or any(part in macro_body_names for part in item.get("pattern", []))
+                )
             ),
             pattern_rows[name][0]["pattern"] if pattern_rows[name] else [],
         )
@@ -1022,6 +1266,13 @@ def render(
             profile=name,
         )
         _write(out_dir, f"{idx:02d}-evidence-{name}.txt", _dump(evidence[name]))
+        macro_evidence_by_profile[name] = _macro_evidence(evidence[name])
+        if name == "dpdk-on-mtl":
+            _write(
+                out_dir,
+                "12-macro-evidence-dpdk-on-mtl.txt",
+                _dump(macro_evidence_by_profile[name]),
+            )
         health[name] = reader.mining_health(library, version, profile=name)
         _write(out_dir, f"{idx + 10:02d}-health-{name}.txt", _dump(health[name]))
         labels = reader.list_labels(library, version, limit=5, profile=name)
@@ -1054,6 +1305,30 @@ def render(
         for name, item in health.items()
     }
     _write(out_dir, "40-health-comparison.txt", _dump(comparison))
+    _write(
+        out_dir,
+        "41-macro-metrics.txt",
+        _dump({name: item["macro_coverage"] for name, item in health.items()}),
+    )
+    _write(
+        out_dir,
+        "60-macro-fingerprint.txt",
+        _dump(
+            {
+                "target_macro_definitions": len(macro_names),
+                "macro_names": sorted(macro_names),
+                "profiles": [
+                    {
+                        "name": item["name"],
+                        "macro_policy": (item.get("params") or {}).get("macro_policy"),
+                        "fingerprint": item["fingerprint"],
+                    }
+                    for item in profiles
+                ],
+                "version_report": version_report,
+            }
+        ),
+    )
 
     corpus_census = _corpus_census(manifest, lock)
     gates = _quality_gates(
@@ -1070,6 +1345,8 @@ def render(
         resolution=resolution,
         version_report=version_report,
         census=corpus_census,
+        macro_pattern_names=macro_names,
+        macro_evidence_by_profile=macro_evidence_by_profile,
     )
     _write(out_dir, "50-quality-gates.txt", _dump(gates))
 
@@ -1105,6 +1382,9 @@ def render(
             "uncovered_dirs": corpus_census["uncovered_dirs"],
         },
         "health_comparison": comparison,
+        "macro_metrics": {
+            name: item["macro_coverage"] for name, item in health.items()
+        },
         "version_compatibility": version_report,
         "resolution_coverage": {
             "metric_delta": resolution["metric_delta"],

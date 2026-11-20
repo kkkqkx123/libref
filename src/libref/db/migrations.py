@@ -18,6 +18,7 @@ from libref.db.schema import (
     IMPORT_EDGES_SQL,
     INDEX_REQUESTS_SQL,
     INITIAL_SCHEMA_SQL,
+    MACRO_EVIDENCE_SQL,
     MINING_PROVENANCE_INDEX_SQL,
     MINING_REVIEW_SCHEMA_SQL,
     MULTI_TENANT_SQL,
@@ -74,6 +75,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(25, "index-requests", INDEX_REQUESTS_SQL),
     Migration(26, "usage-corpus-mining-profiles", USAGE_CORPUS_SQL),
     Migration(27, "call-relation-kind", CALL_RELATION_SQL),
+    Migration(28, "macro-body-evidence", MACRO_EVIDENCE_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """
