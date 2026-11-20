@@ -20,6 +20,9 @@ pytestmark = pytest.mark.skipif(
 )
 
 MANIFEST = Path(__file__).resolve().parent / "fixtures" / "manifest.json"
+SAMPLING = (
+    Path(__file__).resolve().parent.parent / "fixtures" / "parsing" / "sampling.json"
+)
 PERSISTENT_REPOS = Path(__file__).resolve().parent / "repos"
 
 
@@ -85,3 +88,28 @@ def test_e2e_repo_index_invariants(tmp_path, conn):
     report = tmp_path / "e2e-parsing-report.txt"
     report.write_text("\n".join(report_lines) + "\n", encoding="utf-8")
     assert report_lines
+
+
+def test_e2e_python_sampling_index_invariants(tmp_path, conn):
+    """Local Python sampling: no network, but same index invariants as hosted repos."""
+    from libref.services.code.code_ingest import index_repo
+
+    sampling = json.loads(SAMPLING.read_text(encoding="utf-8"))
+    root = Path(__file__).resolve().parent.parent.parent / sampling["root"]
+    if not root.is_dir():
+        pytest.skip(f"local Python sample unavailable: {sampling['root']}")
+    counts = index_repo(
+        conn,
+        "e2e-python",
+        "sample",
+        str(root),
+        repos_dir=PERSISTENT_REPOS,
+        only_files=sampling["sample"],
+    )
+    assert counts["files"] == len(sampling["sample"])
+    assert counts["entities"] > 0
+    assert counts["calls"] > 0
+    dist = _confidence_dist(conn, "e2e-python", "sample")
+    assert sum(dist.values()) > 0
+    report = tmp_path / "e2e-python-report.txt"
+    report.write_text(f"counts={counts} dist={dist}\n", encoding="utf-8")

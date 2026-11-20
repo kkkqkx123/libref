@@ -16,6 +16,7 @@ import json
 import sys
 import tempfile
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -106,7 +107,13 @@ def export_site(conn, library: str, version: str, site: str) -> list[str]:
         "SELECT id, url FROM pages WHERE version_id=? ORDER BY url",
         (version_id,),
     ).fetchall()
-    summary = [f"site={site} pages={len(pages)} snapshots={len(snapshots)}"]
+    generated_at = datetime.now(UTC).isoformat(timespec="seconds")
+    summary = [
+        (
+            f"site={site} pages={len(pages)} snapshots={len(snapshots)}"
+            f" generated_at={generated_at}"
+        )
+    ]
     for url, snap in sorted(snapshots.items()):
         summary.append(
             f"snapshot {url} raw_bytes={snap['raw_bytes']} "

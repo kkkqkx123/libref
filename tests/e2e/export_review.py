@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 MANIFEST = Path(__file__).resolve().parent / "fixtures" / "manifest.json"
@@ -65,7 +66,10 @@ def export_repo(
     by_file_decls: dict[str, list] = {}
     for decl in all_decls:
         by_file_decls.setdefault(decl.file, []).append(decl)
-    summary: list[str] = [f"repo={repo} commit={commit} files={len(sources)}"]
+    generated_at = datetime.now(UTC).isoformat(timespec="seconds")
+    summary: list[str] = [
+        f"repo={repo} commit={commit} files={len(sources)} generated_at={generated_at}"
+    ]
     for rel in sorted(sources):
         data = sources[rel]
         lines = [f"# File: {rel}", ""]

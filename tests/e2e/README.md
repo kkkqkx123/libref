@@ -32,6 +32,12 @@
 uv run python tests/e2e/probe-discovery/fetch_probe_discovery.py --skip-network
 ```
 
+## MCP 工具核查
+
+`render_mcp_outputs.py` 用确定性种子库调用全部 MCP 工具，把结构化返回落到 `outputs/mcp/`，一个工具一份文本。默认离线，联网探查需显式开启；判读说明见 `fixtures/mcp/README.md`。
+
+解析与抓取审查输出的首行记录生成时间，仓库标签与提交标识沿用清单和索引记录。
+
 ## 检索问答基准
 
 `bench/` 是检索问答基准目录：用生产抓取服务与生产仓库管理真实获取第三方文档站与官方仓库

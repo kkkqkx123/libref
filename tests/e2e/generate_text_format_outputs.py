@@ -12,6 +12,7 @@ import argparse
 import json
 import sqlite3
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -216,6 +217,7 @@ def main() -> int:
             stored = libraries.list_libraries()[0]["description"]
 
             summary = [
+                f"generated_at={datetime.now(UTC).isoformat(timespec='seconds')}",
                 f"snippet_cases={len(snippet_cases)}",  # type: ignore[arg-type]
                 f"truncate_cases={len(truncate_cases)}",  # type: ignore[arg-type]
                 f"page_chunks={page['chunks']}",

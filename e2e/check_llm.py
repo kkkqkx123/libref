@@ -9,11 +9,10 @@ from __future__ import annotations
 import asyncio
 import math
 
-from libref.store.chat import build_chat_fn
-from libref.store.embeddings import build_embed_fn
-from libref.store.rerank import build_rerank_fn
-
 from libref.config import LibrefSettings
+from libref.llm.chat import build_chat_fn
+from libref.llm.embeddings import build_embed_fn
+from libref.llm.rerank import build_rerank_fn
 
 
 def _check_vectors(vecs: list[list[float]], dim: int) -> None:
@@ -39,9 +38,9 @@ async def _main() -> int:
         print("SKIP: no embedding api key in .env")
         return 0
     # Rerank and chat are off by default; enable them in memory only for this check, never touching .env.
-    settings.rerank_enabled = True
-    settings.chat_enabled = True
-    settings.chat_timeout = 120.0
+    settings = settings.model_copy(
+        update={"rerank_enabled": True, "chat_enabled": True, "chat_timeout": 120.0}
+    )
 
     embed = build_embed_fn(settings)
     assert embed is not None, "embed builder returned None despite key present"

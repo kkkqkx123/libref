@@ -1,11 +1,11 @@
 # MCP 工具面整理
 
-> 依据：`src/libref/mcp_server/server.py`（当前 19 工具实现）。
+> 依据：`src/libref/mcp_server/server.py`（当前 27 工具实现）。
 > 定位：MCP 出口是只做参数校验与服务调用的参数薄层，业务逻辑全部在 `services/` 层；向量索引仅 `store/vec_store` 可达。三出口（MCP/CLI/Web）共用同一组统一入口，保证行为一致。
 
 ## 1. 工具总览
 
-当前共 19 个工具，按使用场景分为 6 组：
+当前共 27 个工具，按使用场景分为 6 组：
 
 | 组 | 工具 | 职责一句话 |
 |---|---|---|
@@ -20,6 +20,7 @@
 | 探查 | `doc_probe` | 探查文档站结构，不存储，先探查再抓取 |
 | 探查 | `repo_probe` | 探查仓库目录结构，不解析，先探查再索引 |
 | 探查 | `repo_dependencies` | 查询某版本清单声明的依赖 |
+| 探查 | `link_stats` | 文档链接引用统计：版本汇总与单页明细 |
 | 源码洞察 | `api_insight` | 接口视角：频次榜、同现接口、参数形态、多接口公共调用 |
 | 源码洞察 | `pattern_insight` | 序列与结构视角：模式列表、模式证据、特征树、分组、健康、标签、片段 |
 | 源码洞察 | `symbol_insight` | 符号视角：详情、所属文件、子节点、签名 |
@@ -28,6 +29,13 @@
 | 源码洞察 | `mining_health` | 复用度与多样性健康信号 |
 | 治理 | `review` | 审核状态机：列待定、批准、标冲突、重开 |
 | 治理 | `job_show` | 任务查看：无编号列最近任务，给定编号返详情 |
+| 治理 | `submit_feedback` | 提交开发者反馈，只记录不改审核状态 |
+| 治理 | `request_repo_index` | 按坐标或远端地址申请仓库索引 |
+| 治理 | `request_docs_index` | 按坐标或起始地址申请文档抓取 |
+| 治理 | `index_request_status` | 读取单个索引申请 |
+| 治理 | `wait_index_request` | 有界轮询单个索引申请 |
+| 治理 | `list_index_requests` | 查看自己的申请或待审队列 |
+| 治理 | `review_index_request` | 列表、通过或驳回待审申请 |
 
 除审核的状态迁移外，其余均为只读。地址解析虽写注册表缓存，但对外语义为只读查询。
 
@@ -58,9 +66,11 @@
 
 ## 6. 审核运维
 
-审核对应同一审核状态机的四个动作：列表按置信优先级返回待定项，其余三个动作对单实体做流转。仅待定可转终态，仅冲突可重开，非法流转返回失败原因。审核是出口唯一的写入面。
+审核对应同一审核状态机的四个动作：列表按置信优先级返回待定项，其余三个动作对单实体做流转。仅待定可转终态，仅冲突可重开，非法流转返回失败原因。反馈只追加记录，不改变审核状态。
 
-任务查看用任务编号是否给定区分列表与详情，未知编号返回未找到原因。地址解析用目标区分文档地址与仓库地址，失败沿用分类错误 envelope，便于区分参数错误、可重试错误与无地址。
+任务查看用任务编号是否给定区分列表与详情，未知编号返回未找到原因。地址解析用目标区分文档地址与仓库地址，失败沿用分类错误 envelope，便于区分参数错误、可重试错误与无地址。链接统计按给定地址返回单页统计，不给地址时返回版本汇总与排名。
+
+索引申请把抓取与索引提交拆成申请、审批、等待与读取四步：申请返回编号并携带下一步工具，审批按 scope 与租户隔离，等待有界轮询并在超时时返回当前状态，状态与列表工具按申请归属过滤。
 
 ## 7. 典型工作流
 
@@ -71,4 +81,4 @@
 
 ## 8. 与服务层的对应
 
-出口到服务为一一对应，不存在出口直连存储：分支逻辑只在服务层实现一次，三出口直接调用统一入口。检索对应 `SearchService.search_with_mode`，阅读对应 `PageService.read_doc`，目录对应 `LibraryService.catalog`，发现对应 `DiscoveryService`，探查对应 `probe_docs_async/probe_repo`，源码洞察对应 `MiningReadService` 各视角，审核对应 `ReviewService.apply`，任务对应 `JobManager.show`，解析对应 `resolver.resolve`。CLI 的 `probe-docs/probe-repo` 与 Web 的 `/doc-probe`、`/repo-probe` 为同一探查语义的换皮。新增过滤或排序语义时改服务层，出口只做参数透传。
+出口到服务为一一对应，不存在出口直连存储：分支逻辑只在服务层实现一次，三出口直接调用统一入口。检索对应 `SearchService.search_with_mode`，阅读对应 `PageService.read_doc`，目录对应 `LibraryService.catalog`，发现对应 `DiscoveryService`，探查对应 `probe_docs_async/probe_repo`，依赖与链接统计对应 `list_repo_dependencies` 与链接服务，源码洞察对应 `MiningReadService` 各视角，审核对应 `ReviewService.apply`，反馈对应 `FeedbackService.submit`，任务与申请对应 `JobManager.show` 和 `IndexRequestService`，解析对应 `resolver.resolve`。CLI 的 `probe-docs/probe-repo` 与 Web 的 `/doc-probe`、`/repo-probe` 为同一探查语义的换皮。新增过滤或排序语义时改服务层，出口只做参数透传。
