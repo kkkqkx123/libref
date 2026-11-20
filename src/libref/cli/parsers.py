@@ -1017,6 +1017,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_submit.add_argument("--only-file", action="append", default=None)
     p_submit.add_argument("--exclude-pattern", action="append", default=None)
     p_submit.add_argument("--max-files", type=int, default=None)
+    p_submit.add_argument(
+        "--source-role",
+        choices=[
+            "official_example",
+            "doc_snippet",
+            "readme",
+            "test",
+            "reference_project",
+            "implementation",
+        ],
+        default=None,
+    )
+    p_submit.add_argument("--target-prefix", action="append", default=None)
+    p_submit.add_argument("--target-name", action="append", default=None)
     for flag in (
         "prefilter",
         "update",

@@ -186,6 +186,44 @@ def test_quota_rejection_carries_resource_and_reset(tmp_path, monkeypatch) -> No
         conn.close()
 
 
+def test_repo_request_keeps_corpus_role_and_target_filter(
+    tmp_path, monkeypatch
+) -> None:
+    conn, settings, client = _setup(tmp_path, monkeypatch)
+    try:
+        _, requester = _key(conn, settings, "requester", ["external"])
+        base = {
+            "kind": "repo",
+            "library": "demo",
+            "version": "1.0",
+            "source": "https://github.com/example/demo.git",
+        }
+        first = client.post(
+            "/index-requests",
+            json={
+                **base,
+                "source_role": "official_example",
+                "target_filter": {"prefixes": ["rte_"]},
+            },
+            headers=requester,
+        )
+        assert first.status_code == 200, first.text
+        item = first.json()
+        assert item["params"]["source_role"] == "official_example"
+        assert item["params"]["target_filter"] == {"prefixes": ["rte_"]}
+
+        second = client.post(
+            "/index-requests",
+            json={**base, "source_role": "test"},
+            headers=requester,
+        )
+        assert second.status_code == 200, second.text
+        assert second.json()["id"] != item["id"]
+        assert second.json()["dedupe_key"] != item["dedupe_key"]
+    finally:
+        conn.close()
+
+
 def test_service_listing_uses_tenant_and_owner_rules(tmp_path, monkeypatch) -> None:
     conn, settings, _ = _setup(tmp_path, monkeypatch)
     try:

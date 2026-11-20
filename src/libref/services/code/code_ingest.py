@@ -203,7 +203,7 @@ async def _index_repo_inner(
             resolved_from = cached_origin
     if resolved_from is None:
         resolved_from = "explicit"
-    from libref.services.code.usage_sources import register_source
+    from libref.services.code.usage_sources import register_source, update_source_commit
 
     catalog = LibraryService(conn)
     library_id, version_id = catalog.ensure_library_version(
@@ -216,9 +216,17 @@ async def _index_repo_inner(
         tenant_id=tenant_id,
     )
     import hashlib as _hashlib
+    import json as _json
 
+    target_text = _json.dumps(
+        target_filter or {}, sort_keys=True, separators=(",", ":")
+    )
     source_fingerprint = _hashlib.sha1(
-        f"{source}\0{subdir or ''}\0{','.join(only_files or [])}".encode()
+        (
+            f"{source}\0{subdir or ''}\0{','.join(only_files or [])}"
+            f"\0{','.join(exclude_patterns or [])}\0{target_text}"
+            f"\0{origin_kind}"
+        ).encode()
     ).hexdigest()[:12]
     source_id = register_source(
         conn,
@@ -299,6 +307,7 @@ async def _index_repo_inner(
                 f"version already indexed from different source: {old_url}"
             )
     root, commit = manager.ensure(conn, repo_name, source, update=update)
+    update_source_commit(conn, source_id, commit)
     if settings is not None and bool(getattr(settings, "quota_enabled", False)):
         from libref.services.infra.quota import add_usage as _add_repo_usage
         from libref.services.ops.retention import dir_size_bytes as _dir_size
@@ -396,10 +405,7 @@ async def _index_repo_inner(
     counts.update(counts_source)
     counts["evicted"] = ast_cache.sweep_repo(conn, repo_name, live)
     conn.commit()
-    existing_entities = conn.execute(
-        "SELECT count(*) FROM api_entities WHERE version_id=?", (version_id,)
-    ).fetchone()[0]
-    persist_definitions = source_role == "implementation" or not existing_entities
+    persist_definitions = source_role == "implementation"
     if persist_definitions:
         n_entities, swept_entities = _persist_entities(
             conn, library_id, version_id, all_decls
@@ -421,8 +427,6 @@ async def _index_repo_inner(
             (version_id,),
         ).fetchall()
     }
-    if not target_names:
-        target_names = {d.qualified_name for d in all_decls}
     filt = target_filter or {}
     explicit_names = {str(v) for v in filt.get("names", []) if str(v).strip()}
     target_prefixes = tuple(str(v) for v in filt.get("prefixes", []) if str(v).strip())

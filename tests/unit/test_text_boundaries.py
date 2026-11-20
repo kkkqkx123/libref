@@ -129,15 +129,16 @@ def test_pattern_evidence_marks_gaps_and_hits(monkeypatch, tmp_path):
         " callee_name TEXT, args TEXT, caller_file TEXT, caller TEXT,"
         " confidence TEXT, line_start INTEGER, line_end INTEGER,"
         " call_order INTEGER, start_byte INTEGER, scope TEXT, resolve_kind TEXT,"
-        " source_id INTEGER, sample_id TEXT DEFAULT '', in_target_api INTEGER DEFAULT 0)"
+        " source_id INTEGER, sample_id TEXT DEFAULT '', source_role TEXT DEFAULT '',"
+        " origin_kind TEXT DEFAULT '', in_target_api INTEGER DEFAULT 0)"
     )
     conn.execute(
         "CREATE TABLE mining_profiles(id INTEGER PRIMARY KEY, version_id INTEGER,"
-        " name TEXT, source_ids TEXT)"
+        " name TEXT, source_ids TEXT, fingerprint TEXT DEFAULT '')"
     )
     conn.execute(
-        "INSERT INTO mining_profiles(id, version_id, name, source_ids)"
-        " VALUES(1, 1, 'usage', '[7]')"
+        "INSERT INTO mining_profiles(id, version_id, name, source_ids, fingerprint)"
+        " VALUES(1, 1, 'usage', '[7]', 'fp')"
     )
     conn.execute(
         "CREATE TABLE review_status(entity_type TEXT, entity_id INTEGER, status TEXT)"

@@ -286,14 +286,6 @@ def _sweep_calls(
     return swept
 
 
-def _persist_calls(
-    conn, library_id: int, version_id: int, resolved, commit_sha: str = ""
-) -> tuple[int, int]:
-    """Upsert plus version-level sweep; batched ingest calls _upsert_calls per batch instead."""
-    count, wanted = _upsert_calls(conn, library_id, version_id, resolved, commit_sha)
-    return count, _sweep_calls(conn, version_id, wanted)
-
-
 def _import_kind(importer_file: str, alias: str, target: str) -> str:
     """Import edge shape by file language plus alias and target relation."""
     from pathlib import Path as _Path

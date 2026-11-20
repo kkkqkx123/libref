@@ -209,16 +209,18 @@ def resolve_calls(
         names = frozenset(target_names or ())
         prefix_hit = bool(prefixes) and resolved.startswith(prefixes)
         name_hit = bool(names) and resolved in names
-        in_target = (
-            True
-            if source_role == "implementation" or not (names or prefixes)
-            else (name_hit or prefix_hit)
-        )
-        sample = (
+        if source_role == "implementation":
+            in_target = True
+        elif names or prefixes:
+            in_target = name_hit or prefix_hit
+        else:
+            in_target = False
+        base_sample = (
             f"{call.caller_file}::{call.caller}"
             if call.caller
-            else str(call.caller_file or sample_prefix or "sample")
+            else str(call.caller_file or "sample")
         )
+        sample = f"{sample_prefix}:{base_sample}" if sample_prefix else base_sample
         out.append(
             CallInstanceRecord(
                 callee=resolved,

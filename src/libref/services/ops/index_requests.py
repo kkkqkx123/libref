@@ -35,6 +35,33 @@ _TRANSITIONS: dict[str, frozenset[str]] = {
 }
 
 
+def _usage_role(value: Any) -> str:
+    """Normalize a requested corpus role before it enters a replayable job."""
+    from libref.services.code.usage_sources import SOURCE_ROLES
+
+    role = "implementation" if value in (None, "") else str(value)
+    if role not in SOURCE_ROLES:
+        raise IndexRequestError(f"unsupported source role: {role}")
+    return role
+
+
+def _target_filter(value: Any) -> dict[str, list[str]]:
+    """Keep only the target name and prefix rules understood by the indexer."""
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, dict):
+        raise IndexRequestError("target_filter must be an object")
+    out: dict[str, list[str]] = {}
+    for key in ("names", "prefixes"):
+        raw = value.get(key) or []
+        if not isinstance(raw, (list, tuple)):
+            raise IndexRequestError(f"target_filter.{key} must be an array")
+        items = [str(item).strip() for item in raw if str(item).strip()]
+        if items:
+            out[key] = items
+    return out
+
+
 class IndexRequestItem(BaseModel):
     """One request row as exposed through HTTP, MCP, and CLI."""
 
@@ -327,6 +354,8 @@ class IndexRequestService:
                 "only_files": payload.get("only_files"),
                 "exclude_patterns": payload.get("exclude_patterns"),
                 "max_files": payload.get("max_files"),
+                "source_role": _usage_role(payload.get("source_role")),
+                "target_filter": _target_filter(payload.get("target_filter")),
             }
             target = f"repo|{ecosystem}|{library}|{version}|{address}"
             return {"kind": kind, "source": address, "target": target, "params": params}

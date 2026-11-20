@@ -53,6 +53,8 @@ def build_pattern_block(labels: list[dict[str, Any]], limit: int) -> str:
             "kind": "pattern-hint",
             "name": str(label.get("name") or ""),
             "pattern": ", ".join(str(p) for p in pattern),
+            "profile": str(label.get("profile") or ""),
+            "profile_fingerprint": str(label.get("profile_fingerprint") or ""),
         }
         units.append(unit_tag(attrs, truncate_material(body, limit)))
     return (

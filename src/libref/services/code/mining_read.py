@@ -11,21 +11,26 @@ from libref.text.snippet import call_tag, gap_tag, unit_tag
 
 def _profile_context(
     conn, version_ids: list[int], profile: str | None = None
-) -> tuple[list[int], set[int]]:
-    """Resolve profile identities and their source ids for read paths."""
+) -> tuple[list[int], set[int], dict[int, dict[str, str]]]:
+    """Resolve profile identities, sources, and audit metadata for read paths."""
     if not version_ids:
-        return [], set()
+        return [], set(), {}
     name = profile or "usage"
     placeholders = ",".join("?" for _ in version_ids)
     rows = conn.execute(
-        f"SELECT id, source_ids FROM mining_profiles WHERE version_id IN ({placeholders})"
-        " AND name=?",
+        f"SELECT id, name, source_ids, fingerprint FROM mining_profiles"
+        f" WHERE version_id IN ({placeholders}) AND name=?",
         (*version_ids, name),
     ).fetchall()
     ids = [int(r[0]) for r in rows]
     sources: set[int] = set()
+    details: dict[int, dict[str, str]] = {}
     for row in rows:
-        raw = row[1]
+        details[int(row[0])] = {
+            "name": str(row[1]),
+            "fingerprint": str(row[3] or ""),
+        }
+        raw = row[2]
         if not raw:
             continue
         try:
@@ -34,7 +39,38 @@ def _profile_context(
             values = []
         if isinstance(values, list):
             sources.update(int(v) for v in values)
-    return ids, sources
+    return ids, sources, details
+
+
+def _source_labels(conn, source_ids: set[int]) -> dict[int, dict[str, Any]]:
+    """Render source role and identity for evidence without exposing secrets."""
+    if not source_ids:
+        return {}
+    if hasattr(conn, "table_columns") and not conn.table_columns("code_sources"):
+        return {}
+    marks = ",".join("?" for _ in source_ids)
+    try:
+        rows = conn.execute(
+            "SELECT id, source_key, source_role, origin_kind, source_url, selection"
+            f" FROM code_sources WHERE id IN ({marks})",
+            tuple(sorted(source_ids)),
+        ).fetchall()
+    except Exception:  # noqa: BLE001 -- source metadata is advisory for evidence
+        return {}
+    out: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        try:
+            selection = json.loads(str(row[5])) if row[5] else {}
+        except ValueError:
+            selection = {}
+        out[int(row[0])] = {
+            "source_key": str(row[1]),
+            "source_role": str(row[2]),
+            "origin_kind": str(row[3]),
+            "source_url": str(row[4] or ""),
+            "heading": str((selection or {}).get("heading") or ""),
+        }
+    return out
 
 
 def _scope_of(table: str) -> str:
@@ -112,6 +148,11 @@ def _render_evidence(
         "caller": str(group.get("caller") or ""),
         "library": str(group.get("library") or ""),
         "version": str(group.get("version") or ""),
+        "source": str(group.get("source_role") or ""),
+        "source_key": str(group.get("source_key") or ""),
+        "sample": str(group.get("sample_id") or ""),
+        "profile": str(group.get("profile") or ""),
+        "profile_fingerprint": str(group.get("profile_fingerprint") or ""),
     }
     return unit_tag(head, inner)
 
@@ -364,7 +405,7 @@ class MiningReadService:
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
-        pids, _sources = _profile_context(self._conn, vids, profile)
+        pids, _sources, _profiles = _profile_context(self._conn, vids, profile)
         if not pids:
             return []
         placeholders = ",".join("?" for _ in pids)
@@ -507,7 +548,7 @@ class MiningReadService:
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
-        _pids, sources = _profile_context(self._conn, vids, profile)
+        _pids, sources, _profiles = _profile_context(self._conn, vids, profile)
         if not sources:
             return []
         source_marks = ",".join("?" for _ in sources)
@@ -542,10 +583,12 @@ class MiningReadService:
             return []
         wanted_scopes = [r[0] for r in scope_rows]
         scope_marks = ",".join("?" for _ in wanted_scopes)
+        labels = _source_labels(self._conn, set(source_params))
         rows = self._conn.execute(
             "SELECT ci.version_id, l.name, v.version, ci.caller_file, ci.caller,"
             " ci.callee_name, ci.args, ci.line_start, ci.line_end, ci.confidence,"
-            " ci.call_order, ci.start_byte, ci.id, ci.resolve_kind"
+            " ci.call_order, ci.start_byte, ci.id, ci.resolve_kind,"
+            " ci.source_id, ci.sample_id, ci.source_role, ci.origin_kind"
             " FROM call_instances ci LEFT JOIN review_status rs "
             "ON rs.entity_type='call_instance' AND rs.entity_id=ci.id"
             " JOIN versions v ON v.id = ci.version_id"
@@ -574,15 +617,31 @@ class MiningReadService:
             _s,
             _i,
             rk,
+            source_id,
+            sample_id,
+            source_role,
+            origin_kind,
         ) in rows:
             key = (vid, path, caller or "")
             slot = groups.get(key)
             if slot is None:
+                label = labels.get(int(source_id or 0), {})
+                profile_id = next(iter(_profiles), 0)
                 slot = {
                     "library": lib,
                     "version": ver,
                     "caller_file": path,
                     "caller": caller,
+                    "sample_id": str(sample_id or ""),
+                    "source_role": str(source_role or ""),
+                    "origin_kind": str(origin_kind or ""),
+                    "source_key": str(label.get("source_key") or ""),
+                    "source_url": str(label.get("source_url") or ""),
+                    "heading": str(label.get("heading") or ""),
+                    "profile": str(_profiles.get(profile_id, {}).get("name") or ""),
+                    "profile_fingerprint": str(
+                        _profiles.get(profile_id, {}).get("fingerprint") or ""
+                    ),
                     "calls": [],
                 }
                 groups[key] = slot
@@ -646,6 +705,7 @@ class MiningReadService:
     ) -> dict[str, Any]:
         from libref.mining.idiom import reuse_diversity
 
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         patterns = self.list_patterns(
             library=library,
             version=version,
@@ -672,6 +732,25 @@ class MiningReadService:
         health.update(
             self.quality_rates(library, version, ecosystem, tenant_id=tenant_id)
         )
+        _pids, sources, _profiles = _profile_context(self._conn, vids, profile)
+        if sources:
+            marks = ",".join("?" for _ in sources)
+            rows = self._conn.execute(
+                "SELECT COALESCE(relation_kind,'direct'), count(*)"
+                " FROM call_instances WHERE version_id IN ("
+                + ",".join("?" for _ in vids)
+                + f") AND source_id IN ({marks}) GROUP BY 1",
+                (*vids, *sorted(sources)),
+            ).fetchall()
+            relations = {str(kind): int(count) for kind, count in rows}
+            total = sum(relations.values())
+            macro = relations.get("macro", 0)
+            health["relations"] = relations
+            health["macro_coverage"] = {
+                "macro": macro,
+                "total": total,
+                "ratio": round(macro / total, 4) if total else 0.0,
+            }
         return health
 
     def resolve_distribution(
@@ -1212,26 +1291,29 @@ class MiningReadService:
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
-        pids, _sources = _profile_context(self._conn, vids, profile)
+        pids, _sources, profiles = _profile_context(self._conn, vids, profile)
         if not pids:
             return []
         placeholders = ",".join("?" for _ in pids)
-        table = self._conn.execute(
-            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='pattern_labels'"
-        ).fetchone()
-        if not table or not table[0]:
+        if hasattr(self._conn, "table_columns") and not self._conn.table_columns(
+            "pattern_labels"
+        ):
             return []
-        rows = self._conn.execute(
-            "SELECT pattern, pattern_hash, model, prompt_version, name,"
-            " summary, category_path, workflow, related_apis, updated_at"
-            " FROM pattern_labels"
-            f" WHERE profile_id IN ({placeholders})"
-            " ORDER BY updated_at DESC, pattern_hash, model, prompt_version",
-            tuple(pids),
-        ).fetchall()
+        try:
+            rows = self._conn.execute(
+                "SELECT profile_id, pattern, pattern_hash, model, prompt_version, name,"
+                " summary, category_path, workflow, related_apis, updated_at"
+                " FROM pattern_labels"
+                f" WHERE profile_id IN ({placeholders})"
+                " ORDER BY updated_at DESC, pattern_hash, model, prompt_version",
+                tuple(pids),
+            ).fetchall()
+        except Exception:  # noqa: BLE001 -- labels are an optional derived table
+            return []
         out = []
         seen: set[str] = set()
         for (
+            pid,
             raw,
             phash,
             model,
@@ -1271,6 +1353,10 @@ class MiningReadService:
                     "category_path": cat_path,
                     "workflow": workflow,
                     "related_apis": rel,
+                    "profile": str(profiles.get(int(pid), {}).get("name") or ""),
+                    "profile_fingerprint": str(
+                        profiles.get(int(pid), {}).get("fingerprint") or ""
+                    ),
                 }
             )
             if len(out) >= limit:
@@ -1290,7 +1376,7 @@ class MiningReadService:
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
-        pids, _sources = _profile_context(self._conn, vids, profile)
+        pids, _sources, _profiles = _profile_context(self._conn, vids, profile)
         if not pids:
             return []
         placeholders = ",".join("?" for _ in pids)
@@ -1337,7 +1423,7 @@ class MiningReadService:
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
-        pids, _sources = _profile_context(self._conn, vids, profile)
+        pids, _sources, _profiles = _profile_context(self._conn, vids, profile)
         if not pids:
             return []
         placeholders = ",".join("?" for _ in pids)

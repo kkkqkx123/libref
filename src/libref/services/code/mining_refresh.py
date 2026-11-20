@@ -576,10 +576,13 @@ def build_mine_runner(settings, conn):
 
 
 def _label_table_ready(conn) -> bool:
-    row = conn.execute(
-        "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='pattern_labels'"
-    ).fetchone()
-    return bool(row and row[0])
+    if hasattr(conn, "table_columns"):
+        return bool(conn.table_columns("pattern_labels"))
+    try:
+        conn.execute("SELECT 1 FROM pattern_labels LIMIT 1").fetchone()
+    except Exception:  # noqa: BLE001 -- optional derived table on either backend
+        return False
+    return True
 
 
 def induce_job_params(

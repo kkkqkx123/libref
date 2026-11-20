@@ -85,6 +85,11 @@ def _payload(args: argparse.Namespace) -> dict[str, Any]:
         "only_files": args.only_file,
         "exclude_patterns": args.exclude_pattern,
         "max_files": args.max_files,
+        "source_role": getattr(args, "source_role", None),
+        "target_filter": {
+            "prefixes": list(getattr(args, "target_prefix", None) or []),
+            "names": list(getattr(args, "target_name", None) or []),
+        },
     }
     payload.update(
         {

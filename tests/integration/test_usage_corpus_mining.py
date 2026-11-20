@@ -115,7 +115,7 @@ def test_stdlib_calls_excluded_from_mining_by_default(conn):
             sample_id=f"c-{index}",
             language="c",
             code=(
-                "void use(void) {\n"
+                f"void use_{index}(void) {{\n"
                 '  printf("x");\n'
                 "  malloc(8);\n"
                 "  rte_eth_rx_burst(0, 0, 0, 32);\n"
@@ -215,3 +215,164 @@ def test_snippet_evidence_points_back_to_host(conn):
     assert row[0] == "https://example.org/docs#quickstart"
     assert row[1] == 12
     assert row[2] == 200
+
+
+def test_usage_source_never_defines_target_api(conn, tmp_path):
+    repo = copy_mini_repo(tmp_path)
+    index_repo(
+        conn,
+        "demo",
+        "0.1",
+        str(repo),
+        repos_dir=tmp_path / "repos-reference",
+        source_role="reference_project",
+    )
+    assert (
+        conn.execute(
+            "SELECT count(*) FROM api_entities WHERE version_id="
+            " (SELECT id FROM versions WHERE version='0.1' LIMIT 1)"
+        ).fetchone()[0]
+        == 0
+    )
+    index_repo(
+        conn,
+        "demo",
+        "0.1",
+        str(repo),
+        repos_dir=tmp_path / "repos-implementation",
+    )
+    assert (
+        conn.execute(
+            "SELECT count(*) FROM api_entities WHERE version_id="
+            " (SELECT id FROM versions WHERE version='0.1' LIMIT 1)"
+        ).fetchone()[0]
+        > 0
+    )
+
+
+def test_unconstrained_snippet_is_not_target_usage(conn):
+    snippet = CodeSnippet(sample_id="plain", language="python", code="demo.run()\n")
+    ingest_snippets(conn, "demo", "0.1", [snippet], source_key="docs:plain")
+    rows = conn.execute(
+        "SELECT in_target_api FROM call_instances WHERE source_role='doc_snippet'"
+    ).fetchall()
+    assert rows
+    assert all(int(row[0]) == 0 for row in rows)
+
+
+def test_doc_pages_keep_independent_sources(conn):
+    def _snippet(marker):
+        return CodeSnippet(
+            sample_id=f"page-{marker}",
+            language="python",
+            code=f"demo.run({marker})\n",
+        )
+
+    first = ingest_snippets(
+        conn,
+        "demo",
+        "0.1",
+        [_snippet(1)],
+        source_key="doc:1:page-a",
+        target_filter={"names": ["demo.run"]},
+        source_url="https://example.org/a",
+        selection={"url": "https://example.org/a", "heading": "A"},
+    )
+    second = ingest_snippets(
+        conn,
+        "demo",
+        "0.1",
+        [_snippet(2)],
+        source_key="doc:1:page-b",
+        target_filter={"names": ["demo.run"]},
+        source_url="https://example.org/b",
+        selection={"url": "https://example.org/b", "heading": "B"},
+    )
+    rows = conn.execute(
+        "SELECT source_id FROM call_instances WHERE source_id IN (?,?)",
+        (first["source_id"], second["source_id"]),
+    ).fetchall()
+    assert len(rows) == 2
+    assert (
+        conn.execute(
+            "SELECT source_url FROM code_sources WHERE id=?", (second["source_id"],)
+        ).fetchone()[0]
+        == "https://example.org/b"
+    )
+
+
+def test_source_role_override_does_not_rewrite_default_profile(conn):
+    from libref.services.code.usage_sources import register_source, resolve_profile
+    from libref.services.registry.libraries import LibraryService
+
+    _library_id, version_id = LibraryService(conn).ensure_library_version("demo", "0.2")
+    official = register_source(
+        conn,
+        version_id=version_id,
+        source_key="official",
+        source_role="official_example",
+    )
+    tests = register_source(
+        conn,
+        version_id=version_id,
+        source_key="tests",
+        source_role="test",
+    )
+    default = resolve_profile(conn, version_id=version_id)
+    assert default["source_ids"] == sorted([official, tests])
+    subset = resolve_profile(conn, version_id=version_id, source_roles=["test"])
+    assert subset["source_ids"] == [tests]
+    assert subset["name"] != "usage"
+    assert resolve_profile(conn, version_id=version_id)["source_ids"] == sorted(
+        [official, tests]
+    )
+
+
+def test_profile_fingerprint_tracks_source_commit(conn):
+    from libref.services.code.usage_sources import (
+        ensure_profile,
+        register_source,
+        update_source_commit,
+    )
+    from libref.services.registry.libraries import LibraryService
+
+    _library_id, version_id = LibraryService(conn).ensure_library_version("demo", "0.3")
+    source = register_source(
+        conn,
+        version_id=version_id,
+        source_key="reference:mtl",
+        source_role="reference_project",
+        source_url="https://github.com/example/mtl.git",
+    )
+    first = ensure_profile(
+        conn, version_id=version_id, name="usage", source_ids=[source]
+    )
+    before = conn.execute(
+        "SELECT fingerprint FROM mining_profiles WHERE id=?", (first,)
+    ).fetchone()[0]
+    update_source_commit(conn, source, "abc123")
+    ensure_profile(conn, version_id=version_id, name="usage", source_ids=[source])
+    after = conn.execute(
+        "SELECT fingerprint FROM mining_profiles WHERE id=?", (first,)
+    ).fetchone()[0]
+    assert before != after
+
+
+def test_sample_id_carries_source_namespace():
+    from libref.astminer import resolution as ast_resolution
+    from libref.astminer.models import RawCall
+
+    call = RawCall(
+        raw_callee="run",
+        caller_file="main.py",
+        caller="main",
+        line_start=1,
+        line_end=1,
+    )
+    first = ast_resolution.resolve_calls(
+        [], {}, [call], "repo-a", sample_prefix="repo-a"
+    )
+    second = ast_resolution.resolve_calls(
+        [], {}, [call], "repo-b", sample_prefix="repo-b"
+    )
+    assert first[0].sample_id != second[0].sample_id

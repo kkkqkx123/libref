@@ -263,9 +263,11 @@ class PagePipeline:
         kind = classify_content(result.content_type, url)
         clean_start = _time.monotonic()
         detail = FetchDetail()
+        page_title = ""
         if kind == "html":
             scraped = self.scrape_cached(raw_body, url)
             markdown = scraped.markdown
+            page_title = scraped.title
             detail = FetchDetail(
                 links=[]
                 if scraped.nofollow
@@ -396,7 +398,12 @@ class PagePipeline:
                         )
                         origin = "html_code_block"
                     else:
-                        blocks = fenced_blocks(markdown, sample_prefix=prefix, url=url)
+                        blocks = fenced_blocks(
+                            markdown,
+                            sample_prefix=prefix,
+                            url=url,
+                            heading=page_title,
+                        )
                         origin = "markdown_fence"
                     if blocks:
                         ingest_snippets(
@@ -404,11 +411,16 @@ class PagePipeline:
                             str(meta[0]),
                             str(meta[1]),
                             blocks,
-                            source_key=f"doc:{version_id}",
+                            source_key=prefix,
                             source_role="doc_snippet",
                             origin_kind=origin,
                             tenant_id=self._tenant_id,
                             source_url=url,
+                            selection={
+                                "url": url,
+                                "heading": page_title,
+                                "kind": kind,
+                            },
                             settings=self._settings,
                         )
         split_start = _time.monotonic()

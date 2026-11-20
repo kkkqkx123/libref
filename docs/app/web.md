@@ -89,7 +89,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### GET /pattern-insight
 
-`view` 七选一：`patterns/evidence/tree/clusters/health/labels/snippets`。`evidence` 要求非空 `pattern`（逗号分隔序列）。`containing` 为逗号分隔的必含接口集合，`prefix` 为点分前缀，`per_file_limit` 限每文件证据数，`dedup` 三态（真/假/缺省跟随配置），`profile` 选择挖掘档案，缺省为 `usage`。
+`view` 七选一：`patterns/evidence/tree/clusters/health/labels/snippets`。带来源过滤的挖掘写入带指纹的独立档案，不改写默认 `usage`。`evidence` 要求非空 `pattern`（逗号分隔序列）。`containing` 为逗号分隔的必含接口集合，`prefix` 为点分前缀，`per_file_limit` 限每文件证据数，`dedup` 三态（真/假/缺省跟随配置），`profile` 选择挖掘档案，缺省为 `usage`。
 
 ### GET /symbol-insight
 

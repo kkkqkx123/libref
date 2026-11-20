@@ -102,8 +102,8 @@
 | --cluster-min-size | 否 | 取配置 | 聚类最小规模；未显式指定时取 `cluster_min_size` 配置值 |
 | --resolve-kinds | 否 | 无 | 逗号分隔的调用种类过滤 |
 | --min-args/--max-args | 否 | 无 | 实参数量区间过滤 |
-| --profile | 否 | usage | 挖掘档案名称；`implementation` 表示库内部实现口径 |
-| --source-role | 否 | 无 | 只选这些语料角色，可重复 |
+| --profile | 否 | usage | 挖掘档案名称；`implementation` 表示库内部实现口径。配合来源过滤时可显式创建同名档案 |
+| --source-role | 否 | 无 | 只选这些语料角色，可重复；未给 `--profile` 时写入带指纹的独立档案，不改写默认 usage |
 | --async | 否 | 关 | 经任务队列执行 |
 
 ### induce-labels
@@ -221,7 +221,7 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 
 ## 索引申请
 
-`request submit --kind repo|docs` 按坐标或 HTTP(S) 地址提交申请；`request list`、`request show <id>` 查看申请，`request approve <id>`、`request reject <id> --reason ...`、`request cancel <id>` 执行审批与撤回，`request wait <id> --timeout 300` 有界等待终态。本地直连同样走 `IndexRequestService`，不绕过审批；远端通过 Bearer 调用 `/index-requests`。撤回只适用于作业运行前，已运行的作业返回冲突。终态退出码与远程 ingest 一致：仅 `done` 返回 0。
+`request submit --kind repo|docs` 支持 `--source-role`、`--target-prefix`、`--target-name` 声明仓库语料角色与目标 API 约束。按坐标或 HTTP(S) 地址提交申请；`request list`、`request show <id>` 查看申请，`request approve <id>`、`request reject <id> --reason ...`、`request cancel <id>` 执行审批与撤回，`request wait <id> --timeout 300` 有界等待终态。本地直连同样走 `IndexRequestService`，不绕过审批；远端通过 Bearer 调用 `/index-requests`。撤回只适用于作业运行前，已运行的作业返回冲突。终态退出码与远程 ingest 一致：仅 `done` 返回 0。
 
 ## 运维
 

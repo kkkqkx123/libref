@@ -6,13 +6,12 @@ import json
 import re
 from collections.abc import Iterable
 
-from libref.astminer.code_blocks import suffix_for_language
+from libref.astminer.code_blocks import dedupe_snippets, suffix_for_language
 from libref.astminer.config import config_for_suffix
 from libref.astminer.models import ApiDeclRecord, CodeSnippet
 from libref.services.code.repo_persist import _sweep_calls, _upsert_calls
 from libref.services.code.usage_sources import register_source
 
-_KIND_SUFFIXES = ("function", "method", "class", "interface", "enum", "constructor")
 _SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
@@ -91,6 +90,9 @@ def ingest_snippets(
     target_filter: dict | None = None,
     source_url: str = "",
     commit_sha: str = "",
+    selection: dict | None = None,
+    limits: dict | None = None,
+    weight: float = 1.0,
     settings=None,
 ) -> dict[str, int]:
     """Parse snippets with target API facts and persist source-aware call instances."""
@@ -111,6 +113,9 @@ def ingest_snippets(
         source_url=source_url,
         commit_sha=commit_sha,
         target_filter=target_filter or {},
+        selection=selection,
+        limits=limits,
+        weight=weight,
         tenant_id=tenant_id,
     )
     target_decls = _target_decls(conn, version_id)
@@ -121,7 +126,7 @@ def ingest_snippets(
     wanted: set[str] = set()
     calls = 0
     parsed = 0
-    for snippet in snippets:
+    for snippet in dedupe_snippets(snippets):
         suffix = suffix_for_language(snippet.language)
         cfg = config_for_suffix(suffix)
         if cfg is None:
@@ -140,7 +145,7 @@ def ingest_snippets(
             commit_sha,
             language=cfg.name,
             source_id=source_id,
-            sample_prefix=snippet.sample_id,
+            sample_prefix="",
             source_role=source_role,
             origin_kind=snippet.origin_kind or origin_kind,
             target_names=explicit_names or target_names,
@@ -157,18 +162,3 @@ def ingest_snippets(
     swept = _sweep_calls(conn, version_id, wanted, source_id=source_id)
     conn.commit()
     return {"parsed": parsed, "calls": calls, "swept": swept, "source_id": source_id}
-
-
-def library_source_names(conn, version_id: int) -> set[str]:
-    """Qualified names of the target library surface for one version."""
-    return {
-        str(r[0])
-        for r in conn.execute(
-            "SELECT qualified_name FROM api_entities WHERE version_id=?", (version_id,)
-        ).fetchall()
-    }
-
-
-def entity_kind_suffixes() -> tuple[str, ...]:
-    """Callable entity kinds used when matching resolved calls to definitions."""
-    return _KIND_SUFFIXES

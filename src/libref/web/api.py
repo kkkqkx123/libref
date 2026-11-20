@@ -229,6 +229,8 @@ class IndexRequestCreate(BaseModel):
     only_files: list[str] | None = None
     exclude_patterns: list[str] | None = None
     max_files: int | None = Field(default=None, ge=1)
+    source_role: str | None = None
+    target_filter: dict[str, JsonValue] | None = None
 
 
 class IndexRequestReject(BaseModel):

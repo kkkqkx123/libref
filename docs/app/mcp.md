@@ -99,7 +99,7 @@ MCP 出口面向模型，共二十七个工具。实现在 `src/libref/mcp_serve
 
 ### pattern_insight
 
-序列与结构视角：`patterns` 模式列表，`evidence` 模式证据，`tree` 特征树，`clusters` 分组，`health` 健康，`labels` 标签，`snippets` 片段。`evidence` 要求非空 `pattern` 数组。`containing` 为必含接口数组，`prefix` 为点分前缀。`per_file_limit` 取 1 到 20。`dedup` 三态：真开关注入去重，假关闭，不给跟随配置。`profile` 选择挖掘档案，缺省为 `usage`。
+序列与结构视角：`patterns` 模式列表，`evidence` 模式证据，`tree` 特征树，`clusters` 分组，`health` 健康，`labels` 标签，`snippets` 片段。带来源过滤的挖掘写入带指纹的独立档案，不改写默认 `usage`。`evidence` 要求非空 `pattern` 数组。`containing` 为必含接口数组，`prefix` 为点分前缀。`per_file_limit` 取 1 到 20。`dedup` 三态：真开关注入去重，假关闭，不给跟随配置。`profile` 选择挖掘档案，缺省为 `usage`。
 
 ### symbol_insight
 
