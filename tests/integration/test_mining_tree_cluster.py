@@ -55,33 +55,54 @@ def test_scope_sets_share_scope_key_with_ingest(monkeypatch, tmp_path):
 def test_mine_persists_tree_and_clusters(conn, tmp_path, monkeypatch):
     dst = copy_mini_repo(tmp_path)
     index_repo(conn, "demo", "0.1", str(dst), repos_dir=tmp_path / "repos")
-    mine_patterns(conn, "demo", "0.1", minsup=2)
+    mine_patterns(conn, "demo", "0.1", minsup=2, profile="implementation")
     svc = MiningReadService(conn)
-    tree = {n["path"]: n for n in svc.feature_tree("demo", "0.1")}
+    tree = {
+        n["path"]: n for n in svc.feature_tree("demo", "0.1", profile="implementation")
+    }
     assert tree["numpy"]["calls"] == 8
     assert tree["numpy"]["scopes"] == 4
     assert tree["numpy.array"]["calls"] == 4
-    clusters = svc.api_clusters("demo", "0.1")
+    clusters = svc.api_clusters("demo", "0.1", profile="implementation")
     assert clusters
     assert any(
         "numpy.array" in g["members"] and "numpy.zeros" in g["members"]
         for g in clusters
     )
     raw = svc.pattern_evidence(
-        ["numpy.array", "numpy.zeros"], "demo", "0.1", dedup=False, per_file_limit=10
+        ["numpy.array", "numpy.zeros"],
+        "demo",
+        "0.1",
+        dedup=False,
+        per_file_limit=10,
+        profile="implementation",
     )
     assert len(raw) >= 2
-    diversified = svc.pattern_evidence(["numpy.array", "numpy.zeros"], "demo", "0.1")
+    diversified = svc.pattern_evidence(
+        ["numpy.array", "numpy.zeros"],
+        "demo",
+        "0.1",
+        profile="implementation",
+    )
     assert len(diversified) >= 1
 
 
 def test_mine_clears_derived_when_calls_gone(conn, monkeypatch, tmp_path):
     library_id, version_id = LibraryService(conn).ensure_library_version("demo", "t")
+    from libref.services.code.usage_sources import register_source
+
+    source_id = register_source(
+        conn,
+        version_id=version_id,
+        source_key="seeded:implementation",
+        source_role="implementation",
+    )
     conn.execute(
         "INSERT INTO call_instances(call_uid, callee_name, args, repo,"
         " caller_file, line_start, line_end, confidence,"
-        " library_id, version_id, caller, call_order, start_byte)"
-        " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        " library_id, version_id, caller, call_order, start_byte,"
+        " source_id, sample_id, source_role, in_target_api)"
+        " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             "uid-1",
             "a.b",
@@ -96,14 +117,21 @@ def test_mine_clears_derived_when_calls_gone(conn, monkeypatch, tmp_path):
             "g",
             1,
             10,
+            source_id,
+            "g",
+            "implementation",
+            1,
         ),
     )
     conn.commit()
-    mine_patterns(conn, "demo", "t", minsup=1, minlen=1)
+    mine_patterns(conn, "demo", "t", minsup=1, minlen=1, profile="implementation")
     assert conn.execute("SELECT count(*) FROM feature_nodes").fetchone()[0] >= 1
     conn.execute("DELETE FROM call_instances WHERE version_id=?", (version_id,))
     conn.commit()
-    assert mine_patterns(conn, "demo", "t", minsup=1, minlen=1) == []
+    assert (
+        mine_patterns(conn, "demo", "t", minsup=1, minlen=1, profile="implementation")
+        == []
+    )
     assert conn.execute("SELECT count(*) FROM feature_nodes").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM api_clusters").fetchone()[0] == 0
     assert conn.execute("SELECT count(*) FROM seq_patterns").fetchone()[0] == 0

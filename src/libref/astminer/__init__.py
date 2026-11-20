@@ -9,6 +9,8 @@ from libref.astminer.cache import (
     sweep_repo,
 )
 from libref.astminer.config import (
+    C_CONFIG,
+    CPP_CONFIG,
     CSHARP_CONFIG,
     GO_CONFIG,
     JAVA_CONFIG,
@@ -35,7 +37,9 @@ from libref.astminer.resolution import resolve_calls
 from libref.astminer.source_chunk import SourceChunk, SourceSplit, build_source_chunks
 
 __all__ = [
+    "CPP_CONFIG",
     "CSHARP_CONFIG",
+    "C_CONFIG",
     "GO_CONFIG",
     "JAVASCRIPT_CONFIG",
     "JAVA_CONFIG",

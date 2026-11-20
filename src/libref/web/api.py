@@ -137,6 +137,7 @@ class PatternInsightQuery(BaseModel):
     limit: int | None = Field(default=None, ge=1, le=500)
     per_file_limit: int | None = Field(default=None, ge=1, le=20)
     dedup: bool | None = None
+    profile: str | None = None
 
 
 class SymbolInsightQuery(BaseModel):
@@ -327,6 +328,7 @@ class MineJobParams(ContractModel):
     resolve_kinds: list[str] | None = None
     min_args: int | None = Field(default=None, ge=0)
     max_args: int | None = Field(default=None, ge=0)
+    profile: str | None = None
 
 
 class InduceJobParams(ContractModel):
@@ -335,6 +337,7 @@ class InduceJobParams(ContractModel):
     ecosystem: str | None = None
     topn: int | None = Field(default=None, ge=1)
     include_ambiguous: bool = False
+    profile: str | None = None
 
 
 class MineJobCreate(ContractModel):
@@ -561,6 +564,8 @@ class IndexRequestParams(ContractModel):
     only_files: list[str] | None = None
     exclude_patterns: list[str] | None = None
     max_files: int | None = None
+    source_role: str | None = None
+    target_filter: dict[str, JsonValue] | None = None
     resolved_from: str | None = None
     registry_confirmed: bool | None = None
     index_request_id: int | None = None

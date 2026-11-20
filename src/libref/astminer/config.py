@@ -19,6 +19,20 @@ class LanguageConfig:
     language_fn: str = "language"
 
 
+C_CONFIG = LanguageConfig(
+    name="c",
+    grammar="tree_sitter_c",
+    file_suffixes=(".c", ".h"),
+    config_version=1,
+)
+
+CPP_CONFIG = LanguageConfig(
+    name="cpp",
+    grammar="tree_sitter_cpp",
+    file_suffixes=(".cc", ".cpp", ".cxx", ".hpp", ".hh"),
+    config_version=1,
+)
+
 PYTHON_CONFIG = LanguageConfig(
     name="python",
     grammar="tree_sitter_python",
@@ -84,6 +98,8 @@ TYPESCRIPT_CONFIG = LanguageConfig(
 )
 
 LANGUAGE_CONFIGS: dict[str, LanguageConfig] = {
+    "c": C_CONFIG,
+    "cpp": CPP_CONFIG,
     "python": PYTHON_CONFIG,
     "java": JAVA_CONFIG,
     "javascript": JAVASCRIPT_CONFIG,

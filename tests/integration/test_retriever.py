@@ -49,15 +49,18 @@ def _seed(conn) -> dict[str, int]:
             raw_content=body,
         )
         ids[key] = r.inserted_ids[0]
+    from libref.services.code.usage_sources import ensure_profile
+
+    pid = ensure_profile(conn, version_id=1, name="usage", source_ids=[])
     conn.execute(
-        "INSERT INTO seq_patterns(library_id, version_id, pattern, support, is_closed)"
-        " VALUES(1, 1, ?, 9, 1)",
-        (json.dumps(["numpy.array", "numpy.zeros"]),),
+        "INSERT INTO seq_patterns(library_id, version_id, profile_id, pattern,"
+        " support, is_closed) VALUES(1, 1, ?, ?, 9, 1)",
+        (pid, json.dumps(["numpy.array", "numpy.zeros"])),
     )
     conn.execute(
-        "INSERT INTO seq_patterns(library_id, version_id, pattern, support, is_closed)"
-        " VALUES(1, 1, ?, 1, 1)",
-        (json.dumps(["unrelated"]),),
+        "INSERT INTO seq_patterns(library_id, version_id, profile_id, pattern,"
+        " support, is_closed) VALUES(1, 1, ?, ?, 1, 1)",
+        (pid, json.dumps(["unrelated"])),
     )
     conn.commit()
     return ids
@@ -207,10 +210,13 @@ def test_precise_attribution_ignores_substring(conn, tmp_path, monkeypatch) -> N
         ],
         raw_content="quetzalgate my_numpy.arrayish helper",
     )
+    from libref.services.code.usage_sources import ensure_profile
+
+    pid = ensure_profile(conn, version_id=1, name="usage", source_ids=[])
     conn.execute(
-        "INSERT INTO seq_patterns(library_id, version_id, pattern, support, is_closed)"
-        " VALUES(1, 1, ?, 9, 1)",
-        (json.dumps(["numpy.array"]),),
+        "INSERT INTO seq_patterns(library_id, version_id, profile_id, pattern,"
+        " support, is_closed) VALUES(1, 1, ?, ?, 9, 1)",
+        (pid, json.dumps(["numpy.array"])),
     )
     conn.commit()
     monkeypatch.chdir(tmp_path)

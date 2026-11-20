@@ -15,7 +15,7 @@ pytestmark = pytest.mark.integration
 def _seed_demo(conn, tmp_path):
     dst = copy_mini_repo(tmp_path)
     index_repo(conn, "demo", "0.1", str(dst), repos_dir=tmp_path / "repos")
-    mine_patterns(conn, "demo", "0.1", minsup=2)
+    mine_patterns(conn, "demo", "0.1", minsup=2, profile="implementation")
     return MiningReadService(conn)
 
 
@@ -28,10 +28,15 @@ def test_evidence_snippet_and_per_file_dedup(conn, tmp_path, monkeypatch):
         limit=10,
         per_file_limit=10,
         dedup=False,
+        profile="implementation",
     )
     assert len(raw) >= 2
     groups = svc.pattern_evidence(
-        ["numpy.array", "numpy.zeros"], "demo", "0.1", limit=10
+        ["numpy.array", "numpy.zeros"],
+        "demo",
+        "0.1",
+        limit=10,
+        profile="implementation",
     )
     assert len(groups) >= 1
     assert len(groups) <= len(raw)
@@ -46,6 +51,7 @@ def test_evidence_snippet_and_per_file_dedup(conn, tmp_path, monkeypatch):
         limit=10,
         per_file_limit=1,
         dedup=True,
+        profile="implementation",
     )
     files = [g["caller_file"] for g in limited]
     assert len(files) == len(set(files))
@@ -60,14 +66,17 @@ def test_intersection_prescreen_matches_precise(conn, tmp_path, monkeypatch):
     )
     assert any(r["api"] == "print" for r in relaxed)
     patterns = svc.list_patterns(
-        "demo", "0.1", containing=["numpy.array", "numpy.zeros"]
+        "demo",
+        "0.1",
+        containing=["numpy.array", "numpy.zeros"],
+        profile="implementation",
     )
     assert any("numpy.zeros" in p["pattern"] for p in patterns)
 
 
 def test_health_and_labels_roundtrip(conn, tmp_path, monkeypatch):
     svc = _seed_demo(conn, tmp_path)
-    health = svc.mining_health("demo", "0.1")
+    health = svc.mining_health("demo", "0.1", profile="implementation")
     assert health["patterns"] >= 1
     assert health["total_support"] >= health["patterns"]
 
@@ -84,13 +93,21 @@ def test_health_and_labels_roundtrip(conn, tmp_path, monkeypatch):
     from libref.config import load_settings
 
     settings = load_settings(overrides={"induction_enabled": True, "induction_topn": 5})
-    out = asyncio.run(induce_labels(conn, settings, "demo", "0.1", chat=fake_chat))
+    out = asyncio.run(
+        induce_labels(
+            conn, settings, "demo", "0.1", profile="implementation", chat=fake_chat
+        )
+    )
     assert out["labeled"] >= 1
     assert out["failed"] == 0
-    labels = svc.list_labels("demo", "0.1")
+    labels = svc.list_labels("demo", "0.1", profile="implementation")
     assert labels
     assert labels[0]["name"] == "array init"
-    again = asyncio.run(induce_labels(conn, settings, "demo", "0.1", chat=fake_chat))
+    again = asyncio.run(
+        induce_labels(
+            conn, settings, "demo", "0.1", profile="implementation", chat=fake_chat
+        )
+    )
     assert again["skipped"] >= 1
     assert again["labeled"] == 0
 
@@ -110,11 +127,21 @@ def test_eval_closure_tasks_resolve_and_execute(conn, tmp_path, monkeypatch):
                 task["apis"], "demo", "0.1", include_ambiguous=True
             )
             assert related
-            patterns = svc.list_patterns("demo", "0.1", containing=task["apis"])
+            patterns = svc.list_patterns(
+                "demo", "0.1", containing=task["apis"], profile="implementation"
+            )
         else:
-            patterns = svc.list_patterns("demo", "0.1", containing=task["apis"])
+            patterns = svc.list_patterns(
+                "demo", "0.1", containing=task["apis"], profile="implementation"
+            )
         assert patterns
-        evidence = svc.pattern_evidence(patterns[0]["pattern"], "demo", "0.1", limit=3)
+        evidence = svc.pattern_evidence(
+            patterns[0]["pattern"],
+            "demo",
+            "0.1",
+            limit=3,
+            profile="implementation",
+        )
         assert evidence
         snippet = evidence[0]["snippet"]
         assert not snippet["invalid"]

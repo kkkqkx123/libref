@@ -40,6 +40,7 @@ libref/
 │   │   ├── robots.py           # [P1] robots 合规检查（SQLite 缓存 7 天 TTL，照搬 crawl4ai）
 │   │   ├── fetcher.py          # [P1] httpx 抓取 + etag/last_modified 增量 + per-host 退避
 │   │   ├── extract.py          # [P1] selectolax 正文净化（Pruning）→ markdownify
+│   │   ├── code_blocks.py      # HTML 代码围栏抽取，供用法语料使用
 │   │   ├── browser.py          # [P1][可选 extra] Playwright 降级抓取（JS 渲染站点）
 │   │   ├── http.py             # 共享异步客户端装配（代理、超时、重试）
 │   │   ├── scope.py            # 范围策略：起始地址加显式选项决定取舍，探查与抓取共用
@@ -59,6 +60,7 @@ libref/
 │   │   ├── engine.py           # [P2] 通用遍历：类/函数/导入/调用实例（行范围+实参+置信）
 │   │   ├── resolution.py       # [P2] 两遍走：声明/导入 facts → 跨文件别名解析
 │   │   ├── cache.py            # [P2] 文件 hash + grammar fingerprint 增量缓存
+│   │   ├── code_blocks.py      # Markdown 与 Rust 文档代码围栏抽取
 │   │   └── repos.py            # [P2] dulwich 克隆/更新开源仓库、文件遍历
 │   │
 │   ├── mining/                 # ── 统计与序列挖掘（借鉴 EpiCoder 统计 + PrefixSpan-py）──
@@ -114,6 +116,8 @@ libref/
 │   │   │   └── answer_materials.py # 引用块与消息组装
 │   │   ├── code/               # 源码分支：仓库摄取 + 用法挖掘读写
 │   │   │   ├── code_ingest.py  # 克隆/抽取/实体落块
+│   │   │   ├── usage_sources.py # 语料源与挖掘档案
+│   │   │   ├── usage_ingest.py  # 文档与参考片段调用摄取
 │   │   │   ├── probe.py        # 只读仓库探查：目录普查后即止，不解析不落库
 │   │   │   ├── probe_remote.py # 远端探查：复用槽/托管接口/无 blob 树/浅克隆逐级降级
 │   │   │   ├── repo_source.py  # 仓库来源解析：显式地址优先，按名解析复用

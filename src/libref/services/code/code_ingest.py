@@ -97,6 +97,9 @@ async def index_repo_async(
     max_files: int | None = None,
     heartbeat=None,
     tenant_id: str = "default",
+    source_role: str = "implementation",
+    origin_kind: str = "repo_file",
+    target_filter: dict | None = None,
 ) -> dict[str, int]:
     """Lock one version across doc and code writers, then run the ingest."""
     from libref.services.infra.version_lock import version_lock
@@ -128,6 +131,10 @@ async def index_repo_async(
             exclude_patterns=exclude_patterns,
             max_files=max_files,
             heartbeat=heartbeat,
+            tenant_id=tenant_id,
+            source_role=source_role,
+            origin_kind=origin_kind,
+            target_filter=target_filter,
         )
 
 
@@ -153,6 +160,9 @@ async def _index_repo_inner(
     max_files: int | None = None,
     heartbeat=None,
     tenant_id: str = "default",
+    source_role: str = "implementation",
+    origin_kind: str = "repo_file",
+    target_filter: dict | None = None,
 ) -> dict[str, int]:
     from libref.astminer import cache as ast_cache
     from libref.astminer import config as ast_config
@@ -193,6 +203,8 @@ async def _index_repo_inner(
             resolved_from = cached_origin
     if resolved_from is None:
         resolved_from = "explicit"
+    from libref.services.code.usage_sources import register_source
+
     catalog = LibraryService(conn)
     library_id, version_id = catalog.ensure_library_version(
         library,
@@ -203,6 +215,28 @@ async def _index_repo_inner(
         registry_confirmed=registry_confirmed,
         tenant_id=tenant_id,
     )
+    import hashlib as _hashlib
+
+    source_fingerprint = _hashlib.sha1(
+        f"{source}\0{subdir or ''}\0{','.join(only_files or [])}".encode()
+    ).hexdigest()[:12]
+    source_id = register_source(
+        conn,
+        version_id=version_id,
+        source_key=f"{source_role}:{source_fingerprint}",
+        source_role=source_role,
+        origin_kind=origin_kind,
+        source_url=str(source),
+        selection={
+            "subdir": subdir,
+            "only_files": only_files or [],
+            "exclude_patterns": exclude_patterns or [],
+        },
+        target_filter=target_filter or {},
+        tenant_id=tenant_id,
+    )
+    counts_source = {"source_id": source_id}
+    conn.commit()
     if repos_quota_mb is not None:
         from libref.services.ops.retention import check_quota
 
@@ -247,7 +281,12 @@ async def _index_repo_inner(
 
     _beat()
     manager = RepoManager(settings_dir)
-    repo_name = f"{ecosystem}/{library}/{version}"
+    base_repo_name = f"{ecosystem}/{library}/{version}"
+    repo_name = (
+        base_repo_name
+        if source_role == "implementation"
+        else f"{base_repo_name}/usage/{source_role}/{source_id}"
+    )
     existing = conn.execute(
         "SELECT url, local_path FROM repos WHERE name=?", (repo_name,)
     ).fetchone()
@@ -296,6 +335,33 @@ async def _index_repo_inner(
         raise BudgetExceeded(
             f"source budget exceeded: {len(files)} files over budget {max_files}"
         )
+    if settings is not None and bool(getattr(settings, "usage_mining_enabled", True)):
+        from libref.astminer.code_blocks import rust_doc_blocks
+        from libref.services.code.usage_ingest import ingest_snippets
+
+        rust_snippets: list = []
+        for rel in files:
+            if not rel.endswith(".rs"):
+                continue
+            try:
+                raw = (root / rel).read_bytes()
+            except OSError:
+                continue
+            rust_snippets.extend(rust_doc_blocks(raw, path=rel))
+        if rust_snippets:
+            ingest_snippets(
+                conn,
+                library,
+                version,
+                rust_snippets,
+                source_key=f"rustdoc:{version_id}",
+                source_role="doc_snippet",
+                origin_kind="rustdoc_doctest",
+                ecosystem=ecosystem,
+                tenant_id=tenant_id,
+                source_url=str(source),
+                commit_sha=commit,
+            )
     batch_size = max(1, int(getattr(settings, "index_batch_files", 200) or 200))
     done, fingerprint = resume_offset(conn, version_id, CODE_KIND, files, fresh=fresh)
     counts = {"resumed_skipped": done, "batches": 0, "vector_failed": 0}
@@ -326,18 +392,40 @@ async def _index_repo_inner(
         files,
     )
     counts.update(collect_counts)
+    counts.update(counts_source)
     counts["evicted"] = ast_cache.sweep_repo(conn, repo_name, live)
     conn.commit()
-    n_entities, swept_entities = _persist_entities(
-        conn, library_id, version_id, all_decls
-    )
+    existing_entities = conn.execute(
+        "SELECT count(*) FROM api_entities WHERE version_id=?", (version_id,)
+    ).fetchone()[0]
+    persist_definitions = source_role == "implementation" or not existing_entities
+    if persist_definitions:
+        n_entities, swept_entities = _persist_entities(
+            conn, library_id, version_id, all_decls
+        )
+        counts["import_edges"] = _persist_import_edges(
+            conn, library_id, version_id, file_aliases
+        )
+    else:
+        n_entities, swept_entities = 0, 0
+        counts["import_edges"] = 0
     counts["entities"] = n_entities
     counts["swept_entities"] = swept_entities
-    counts["import_edges"] = _persist_import_edges(
-        conn, library_id, version_id, file_aliases
-    )
     conn.commit()
     remaining = files[done:]
+    target_names = {
+        str(r[0])
+        for r in conn.execute(
+            "SELECT qualified_name FROM api_entities WHERE version_id=?",
+            (version_id,),
+        ).fetchall()
+    }
+    if not target_names:
+        target_names = {d.qualified_name for d in all_decls}
+    filt = target_filter or {}
+    explicit_names = {str(v) for v in filt.get("names", []) if str(v).strip()}
+    target_prefixes = tuple(str(v) for v in filt.get("prefixes", []) if str(v).strip())
+    effective_names = explicit_names or target_names
     wanted_calls: set[str] = set()
     if done > 0:
         # Resume skips the done files, so their call identities must seed the
@@ -360,7 +448,17 @@ async def _index_repo_inner(
         batch_aliases = {rel: file_aliases.get(rel, []) for rel in batch_files}
         batch_raw = _load_raw_batch(conn, repo_name, root, batch_files)
         resolved = ast_resolution.resolve_calls(
-            all_decls, batch_aliases, batch_raw, repo_name, commit
+            all_decls,
+            batch_aliases,
+            batch_raw,
+            repo_name,
+            commit,
+            source_id=source_id,
+            sample_prefix=repo_name,
+            source_role=source_role,
+            origin_kind=origin_kind,
+            target_names=effective_names,
+            target_prefixes=target_prefixes,
         )
         batch_count, batch_wanted = _upsert_calls(
             conn, library_id, version_id, resolved, commit
@@ -411,7 +509,7 @@ async def _index_repo_inner(
             batch_size=batch_size,
         )
         _beat()
-    swept_calls = _sweep_calls(conn, version_id, wanted_calls)
+    swept_calls = _sweep_calls(conn, version_id, wanted_calls, source_id=source_id)
     counts["calls"] = n_calls
     counts["swept_calls"] = swept_calls
     conn.commit()
@@ -466,6 +564,9 @@ def index_repo(
     max_files: int | None = None,
     heartbeat=None,
     tenant_id: str = "default",
+    source_role: str = "implementation",
+    origin_kind: str = "repo_file",
+    target_filter: dict | None = None,
 ) -> dict[str, int]:
     return asyncio.run(
         index_repo_async(
@@ -489,6 +590,9 @@ def index_repo(
             max_files=max_files,
             heartbeat=heartbeat,
             tenant_id=tenant_id,
+            source_role=source_role,
+            origin_kind=origin_kind,
+            target_filter=target_filter,
         )
     )
 
@@ -511,6 +615,9 @@ def index_repo_by_name(
     max_files: int | None = None,
     heartbeat=None,
     tenant_id: str = "default",
+    source_role: str = "implementation",
+    origin_kind: str = "repo_file",
+    target_filter: dict | None = None,
 ) -> dict[str, int]:
     return asyncio.run(
         index_repo_by_name_async(
@@ -530,6 +637,9 @@ def index_repo_by_name(
             max_files=max_files,
             heartbeat=heartbeat,
             tenant_id=tenant_id,
+            source_role=source_role,
+            origin_kind=origin_kind,
+            target_filter=target_filter,
         )
     )
 
@@ -552,6 +662,9 @@ async def index_repo_by_name_async(
     max_files: int | None = None,
     heartbeat=None,
     tenant_id: str = "default",
+    source_role: str = "implementation",
+    origin_kind: str = "repo_file",
+    target_filter: dict | None = None,
 ) -> dict[str, int]:
     from libref.services.registry.resolver import resolve_repo
 
@@ -593,6 +706,9 @@ async def index_repo_by_name_async(
             max_files=max_files,
             heartbeat=heartbeat,
             tenant_id=tenant_id,
+            source_role=source_role,
+            origin_kind=origin_kind,
+            target_filter=target_filter,
         )
     async with _client(settings) as client:
         resolution = await resolve_repo(
@@ -631,8 +747,13 @@ async def index_repo_by_name_async(
         fresh=fresh,
         subdir=subdir,
         only_files=only_files,
+        exclude_patterns=exclude_patterns,
         max_files=max_files,
         heartbeat=heartbeat,
+        tenant_id=tenant_id,
+        source_role=source_role,
+        origin_kind=origin_kind,
+        target_filter=target_filter,
     )
 
 
@@ -689,6 +810,9 @@ def build_repo_runner(
             exclude_patterns=p.get("exclude_patterns"),
             max_files=p.get("max_files"),
             heartbeat=heartbeat,
+            source_role=p.get("source_role", "implementation"),
+            origin_kind=p.get("origin_kind", "repo_file"),
+            target_filter=p.get("target_filter"),
         )
 
     return runner

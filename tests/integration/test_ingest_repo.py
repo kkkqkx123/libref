@@ -42,7 +42,7 @@ def test_ingest_repo_end_to_end(conn, tmp_path, monkeypatch):
         " AND status='pending'"
     ).fetchone()[0]
     assert pending >= 1
-    results = mine_patterns(conn, "demo", "0.1", minsup=2)
+    results = mine_patterns(conn, "demo", "0.1", minsup=2, profile="implementation")
     assert ["numpy.array", "numpy.zeros"] in [r["pattern"] for r in results]
     stored = conn.execute(
         "SELECT pattern, support, is_closed FROM seq_patterns"

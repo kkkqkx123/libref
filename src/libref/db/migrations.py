@@ -30,6 +30,7 @@ from libref.db.schema import (
     REPO_DEPS_SQL,
     REPOS_ASTCACHE_SQL,
     SYMBOL_DETAIL_SQL,
+    USAGE_CORPUS_SQL,
     VEC_VERSION_META_SQL,
     VECTOR_META_SQL,
     VERSION_SITE_EVIDENCE_SQL,
@@ -70,6 +71,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(23, "multi-tenant", MULTI_TENANT_SQL),
     Migration(24, "quota-tables", QUOTA_TABLES_SQL),
     Migration(25, "index-requests", INDEX_REQUESTS_SQL),
+    Migration(26, "usage-corpus-mining-profiles", USAGE_CORPUS_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

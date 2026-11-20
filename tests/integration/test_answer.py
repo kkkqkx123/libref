@@ -150,11 +150,18 @@ def _seed_entity_docs(conn) -> None:
     )
     import json as _json
 
+    from libref.services.code.usage_sources import ensure_profile
+
+    pid = ensure_profile(conn, version_id=1, name="usage", source_ids=[])
     conn.execute(
-        "INSERT INTO pattern_labels(library_id, version_id, pattern_hash, pattern,"
-        " model, prompt_version, name, summary, workflow, related_apis)"
-        " VALUES(1, 1, 'h', ?, 't', 'v1', 'make', 'make arrays', 'do', ?)",
-        (_json.dumps(["numpy.array", "numpy.zeros"]), _json.dumps(["numpy.array"])),
+        "INSERT INTO pattern_labels(library_id, version_id, profile_id, pattern_hash,"
+        " pattern, model, prompt_version, name, summary, workflow, related_apis)"
+        " VALUES(1, 1, ?, 'h', ?, 't', 'v1', 'make', 'make arrays', 'do', ?)",
+        (
+            pid,
+            _json.dumps(["numpy.array", "numpy.zeros"]),
+            _json.dumps(["numpy.array"]),
+        ),
     )
     conn.commit()
 

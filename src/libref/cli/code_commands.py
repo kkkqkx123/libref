@@ -35,6 +35,11 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
     settings = _load_settings(args, _registry_overrides(args))
     conn = _connect(settings)
     repos_dir = settings.repos_dir
+    target_filter = {
+        "prefixes": list(getattr(args, "target_prefix", None) or []),
+        "names": list(getattr(args, "target_name", None) or []),
+    }
+    source_role = getattr(args, "source_role", "implementation")
     vec_store, embed = _build_vector(settings)
     try:
         if args.source is not None:
@@ -111,6 +116,8 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                     )
                     or None,
                     "max_files": getattr(args, "max_files", None),
+                    "source_role": source_role,
+                    "target_filter": target_filter,
                 },
             )
 
@@ -147,6 +154,8 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                 exclude_patterns=list(getattr(args, "exclude_pattern", None) or [])
                 or None,
                 max_files=getattr(args, "max_files", None),
+                source_role=source_role,
+                target_filter=target_filter,
             )
         except ValueError as exc:
             print(f"invalid: {exc}", file=sys.stderr)
@@ -202,6 +211,8 @@ def cmd_mine(args: argparse.Namespace) -> int:
                     resolve_kinds=kinds,
                     min_args=getattr(args, "min_args", None),
                     max_args=getattr(args, "max_args", None),
+                    profile=getattr(args, "profile", None),
+                    source_roles=getattr(args, "source_role", None),
                 ),
             )
 
@@ -230,6 +241,8 @@ def cmd_mine(args: argparse.Namespace) -> int:
             resolve_kinds=kinds,
             min_args=getattr(args, "min_args", None),
             max_args=getattr(args, "max_args", None),
+            profile=getattr(args, "profile", None),
+            source_roles=getattr(args, "source_role", None),
         )
     finally:
         conn.close()
@@ -287,6 +300,7 @@ def cmd_induce_labels(args: argparse.Namespace) -> int:
                     args.version,
                     ecosystem=getattr(args, "ecosystem", None),
                     topn=args.topn,
+                    profile=getattr(args, "profile", None),
                 ),
             )
 
@@ -308,6 +322,7 @@ def cmd_induce_labels(args: argparse.Namespace) -> int:
                 args.version,
                 ecosystem=getattr(args, "ecosystem", None),
                 topn=args.topn,
+                profile=getattr(args, "profile", None),
             )
         )
     finally:
@@ -377,6 +392,7 @@ def cmd_pattern_insight(args: argparse.Namespace) -> int:
                 limit=args.limit,
                 per_file_limit=getattr(args, "per_file_limit", None),
                 dedup=dedup_value,
+                profile=getattr(args, "profile", None),
             )
         except ValueError as exc:
             print(f"invalid: {exc}", file=sys.stderr)

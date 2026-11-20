@@ -201,10 +201,41 @@ def seed_review_db(
     index_symbol_repo(conn, tmp_path, "mcp_symbol_repo")
     catalog = LibraryService(conn)
     demo_id, demo_version_id = catalog.ensure_library_version("demo", "0.1")
-    mine_patterns(conn, "demo", "0.1", minsup=1, minlen=1)
-    refresh_feature_tree(conn, demo_id, demo_version_id)
-    refresh_clusters(conn, demo_id, demo_version_id)
-    asyncio.run(induce_labels(conn, settings, "demo", "0.1", chat=_label_chat))
+    mine_patterns(
+        conn,
+        "demo",
+        "0.1",
+        minsup=1,
+        minlen=1,
+        profile="implementation",
+    )
+    from libref.services.code.usage_sources import resolve_profile
+
+    profile = resolve_profile(conn, version_id=demo_version_id, name="implementation")
+    refresh_feature_tree(
+        conn,
+        demo_id,
+        demo_version_id,
+        profile_id=int(profile["id"]),
+        source_ids=profile["source_ids"],
+    )
+    refresh_clusters(
+        conn,
+        demo_id,
+        demo_version_id,
+        profile_id=int(profile["id"]),
+        source_ids=profile["source_ids"],
+    )
+    asyncio.run(
+        induce_labels(
+            conn,
+            settings,
+            "demo",
+            "0.1",
+            profile="implementation",
+            chat=_label_chat,
+        )
+    )
     conn.executemany(
         "INSERT OR IGNORE INTO repo_dependencies"
         " (library_id, version_id, ecosystem, name, req, source_file)"

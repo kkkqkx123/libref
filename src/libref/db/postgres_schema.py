@@ -144,6 +144,12 @@ CREATE TABLE IF NOT EXISTS call_instances(
   scope TEXT,
   resolve_kind TEXT NOT NULL DEFAULT '',
   caller_entity_id BIGINT REFERENCES api_entities(id) ON DELETE SET NULL,
+  source_id BIGINT,
+  sample_id TEXT NOT NULL DEFAULT '',
+  source_role TEXT NOT NULL DEFAULT 'implementation',
+  origin_kind TEXT NOT NULL DEFAULT 'repo_file',
+  in_target_api INTEGER NOT NULL DEFAULT 0,
+  target_status TEXT NOT NULL DEFAULT 'current',
   tenant_id TEXT NOT NULL DEFAULT 'default'
 );
 
@@ -156,18 +162,50 @@ CREATE INDEX IF NOT EXISTS idx_call_instances_scope_key ON call_instances(versio
 CREATE INDEX IF NOT EXISTS idx_call_instances_caller ON call_instances(caller_entity_id);
 CREATE INDEX IF NOT EXISTS idx_call_instances_resolve ON call_instances(version_id, resolve_kind);
 
+CREATE TABLE IF NOT EXISTS code_sources(
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  source_key TEXT NOT NULL,
+  source_role TEXT NOT NULL,
+  origin_kind TEXT NOT NULL,
+  source_url TEXT NOT NULL DEFAULT '',
+  commit_sha TEXT NOT NULL DEFAULT '',
+  selection JSONB NOT NULL DEFAULT '{}',
+  target_filter JSONB NOT NULL DEFAULT '{}',
+  weight DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+  limits JSONB NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(version_id, source_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_code_sources_version ON code_sources(version_id, enabled);
+
+CREATE TABLE IF NOT EXISTS mining_profiles(
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  source_ids JSONB NOT NULL DEFAULT '[]',
+  support_mode TEXT NOT NULL DEFAULT 'sample',
+  params JSONB NOT NULL DEFAULT '{}',
+  fingerprint TEXT NOT NULL DEFAULT '',
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(version_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS seq_patterns(
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   library_id BIGINT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
   version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id BIGINT NOT NULL,
   pattern JSONB NOT NULL,
   support INTEGER NOT NULL,
   is_closed INTEGER NOT NULL DEFAULT 0,
   tenant_id TEXT NOT NULL DEFAULT 'default',
-  UNIQUE(version_id, pattern)
+  UNIQUE(profile_id, pattern)
 );
 
-CREATE INDEX IF NOT EXISTS idx_seq_patterns_support ON seq_patterns(version_id, support DESC);
+CREATE INDEX IF NOT EXISTS idx_seq_patterns_support ON seq_patterns(version_id, profile_id, support DESC);
 
 CREATE TABLE IF NOT EXISTS review_status(
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -220,6 +258,7 @@ CREATE TABLE IF NOT EXISTS feature_nodes(
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   library_id BIGINT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
   version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id BIGINT NOT NULL,
   path TEXT NOT NULL,
   parent TEXT NOT NULL DEFAULT '',
   depth INTEGER NOT NULL,
@@ -227,30 +266,32 @@ CREATE TABLE IF NOT EXISTS feature_nodes(
   calls INTEGER NOT NULL,
   scopes INTEGER NOT NULL,
   tenant_id TEXT NOT NULL DEFAULT 'default',
-  UNIQUE(version_id, path)
+  UNIQUE(profile_id, path)
 );
 
-CREATE INDEX IF NOT EXISTS idx_feature_nodes_parent ON feature_nodes(version_id, parent);
-CREATE INDEX IF NOT EXISTS idx_feature_nodes_calls ON feature_nodes(version_id, calls DESC);
+CREATE INDEX IF NOT EXISTS idx_feature_nodes_parent ON feature_nodes(version_id, profile_id, parent);
+CREATE INDEX IF NOT EXISTS idx_feature_nodes_calls ON feature_nodes(version_id, profile_id, calls DESC);
 
 CREATE TABLE IF NOT EXISTS api_clusters(
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   library_id BIGINT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
   version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id BIGINT NOT NULL,
   cluster_id INTEGER NOT NULL,
   member TEXT NOT NULL,
   size INTEGER NOT NULL,
   representative TEXT NOT NULL,
   tenant_id TEXT NOT NULL DEFAULT 'default',
-  UNIQUE(version_id, member)
+  UNIQUE(profile_id, member)
 );
 
-CREATE INDEX IF NOT EXISTS idx_api_clusters_version ON api_clusters(version_id, cluster_id);
+CREATE INDEX IF NOT EXISTS idx_api_clusters_version ON api_clusters(version_id, profile_id, cluster_id);
 
 CREATE TABLE IF NOT EXISTS pattern_labels(
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   library_id BIGINT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
   version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id BIGINT NOT NULL,
   pattern_hash TEXT NOT NULL,
   pattern JSONB NOT NULL,
   model TEXT NOT NULL,
@@ -262,10 +303,10 @@ CREATE TABLE IF NOT EXISTS pattern_labels(
   related_apis JSONB NOT NULL DEFAULT '[]',
   updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
   tenant_id TEXT NOT NULL DEFAULT 'default',
-  UNIQUE(version_id, pattern_hash, model, prompt_version)
+  UNIQUE(profile_id, pattern_hash, model, prompt_version)
 );
 
-CREATE INDEX IF NOT EXISTS idx_pattern_labels_version ON pattern_labels(version_id);
+CREATE INDEX IF NOT EXISTS idx_pattern_labels_version ON pattern_labels(version_id, profile_id);
 
 CREATE TABLE IF NOT EXISTS discovery_cache(
   ecosystem TEXT NOT NULL,

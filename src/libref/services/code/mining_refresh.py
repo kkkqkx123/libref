@@ -30,13 +30,25 @@ def _cluster_defaults(
     return float(resolved_threshold), int(resolved_size)
 
 
-def _clear_derived(conn, version_id: int) -> None:
-    """Clear all derived mining outputs within a version, keeping the tables consistent when the call or sequence list is empty."""
-    conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
-    conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
-    conn.execute("DELETE FROM api_clusters WHERE version_id=?", (version_id,))
+def _clear_derived(conn, version_id: int, profile_id: int) -> None:
+    """Clear derived outputs for one mining profile."""
+    conn.execute(
+        "DELETE FROM seq_patterns WHERE version_id=? AND profile_id=?",
+        (version_id, profile_id),
+    )
+    conn.execute(
+        "DELETE FROM feature_nodes WHERE version_id=? AND profile_id=?",
+        (version_id, profile_id),
+    )
+    conn.execute(
+        "DELETE FROM api_clusters WHERE version_id=? AND profile_id=?",
+        (version_id, profile_id),
+    )
     if _label_table_ready(conn):
-        conn.execute("DELETE FROM pattern_labels WHERE version_id=?", (version_id,))
+        conn.execute(
+            "DELETE FROM pattern_labels WHERE version_id=? AND profile_id=?",
+            (version_id, profile_id),
+        )
 
 
 def _review_map(conn, version_id: int) -> dict[int, str]:
@@ -67,15 +79,23 @@ def _load_kept_calls(
     resolve_kinds: list[str] | tuple[str, ...] | None = None,
     min_args: int | None = None,
     max_args: int | None = None,
+    source_ids: list[int] | tuple[int, ...] | None = None,
 ):
-    """Single shared scan with review plus optional mining filters."""
+    """Single shared scan with review, target and source-aware filters."""
+    if source_ids is not None and not source_ids:
+        return []
     wanted = sorted({str(k) for k in (resolve_kinds or []) if str(k).strip()})
-    rows = conn.execute(
+    sql = (
         "SELECT callee_name, caller_file, caller, confidence, id,"
-        " line_start, call_order, start_byte, resolve_kind, argument_count"
-        " FROM call_instances WHERE version_id=?",
-        (version_id,),
-    ).fetchall()
+        " line_start, call_order, start_byte, resolve_kind, argument_count, sample_id"
+        " FROM call_instances WHERE version_id=? AND in_target_api=1"
+    )
+    params: list[Any] = [version_id]
+    if source_ids is not None:
+        marks = ",".join("?" for _ in source_ids)
+        sql += f" AND source_id IN ({marks})"
+        params.extend(int(v) for v in source_ids)
+    rows = conn.execute(sql, params).fetchall()
     review = _review_map(conn, version_id)
     out = []
     for r in rows:
@@ -97,20 +117,22 @@ def _load_kept_calls(
     return out
 
 
-def _delete_not_in(conn, table: str, version_id: int, column: str, wanted: list) -> int:
-    """Set-difference cleanup; returns the removed row count.
-
-    The live set is read in one pass and the dead ids are deleted in bounded
-    batches. An empty wanted set clears the version.
-    """
+def _delete_not_in(
+    conn, table: str, version_id: int, profile_id: int, column: str, wanted: list
+) -> int:
+    """Set-difference cleanup within one profile."""
     if not wanted:
-        cur = conn.execute(f"DELETE FROM {table} WHERE version_id=?", (version_id,))
+        cur = conn.execute(
+            f"DELETE FROM {table} WHERE version_id=? AND profile_id=?",
+            (version_id, profile_id),
+        )
         return int(cur.rowcount or 0)
     keep = set(wanted)
     existing = [
         r[0]
         for r in conn.execute(
-            f"SELECT {column} FROM {table} WHERE version_id=?", (version_id,)
+            f"SELECT {column} FROM {table} WHERE version_id=? AND profile_id=?",
+            (version_id, profile_id),
         ).fetchall()
     ]
     dead = [v for v in existing if v not in keep]
@@ -119,8 +141,9 @@ def _delete_not_in(conn, table: str, version_id: int, column: str, wanted: list)
         batch = dead[start : start + 500]
         placeholders = ",".join("?" for _ in batch)
         cur = conn.execute(
-            f"DELETE FROM {table} WHERE version_id=? AND {column} IN ({placeholders})",
-            (version_id, *batch),
+            f"DELETE FROM {table} WHERE version_id=? AND profile_id=?"
+            f" AND {column} IN ({placeholders})",
+            (version_id, profile_id, *batch),
         )
         removed += int(cur.rowcount or 0)
     return removed
@@ -135,6 +158,8 @@ def refresh_feature_tree(
     resolve_kinds: list[str] | tuple[str, ...] | None = None,
     min_args: int | None = None,
     max_args: int | None = None,
+    profile_id: int,
+    source_ids: list[int] | tuple[int, ...] | None = None,
 ) -> int:
     """Rebuild hierarchical feature nodes in bulk; returns the node count."""
     from libref.mining import feature_tree as _tree
@@ -147,10 +172,16 @@ def refresh_feature_tree(
         resolve_kinds=resolve_kinds,
         min_args=min_args,
         max_args=max_args,
+        source_ids=source_ids,
     )
-    calls = [(str(r[0]), _scope_key(str(r[1]), r[2])) for r in rows if r[0]]
+    calls = [
+        (str(r[0]), str(r[10]) or _scope_key(str(r[1]), r[2])) for r in rows if r[0]
+    ]
     if not calls:
-        conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
+        conn.execute(
+            "DELETE FROM feature_nodes WHERE version_id=? AND profile_id=?",
+            (version_id, profile_id),
+        )
         return 0
     entity_rows = conn.execute(
         "SELECT qualified_name, kind, parent FROM api_entities WHERE version_id=?",
@@ -161,15 +192,16 @@ def refresh_feature_tree(
     nodes = _tree.build_feature_tree(calls, kinds, parents)
     wanted = [n["path"] for n in nodes]
     conn.executemany(
-        "INSERT INTO feature_nodes(library_id, version_id, path, parent, depth, kind, calls, scopes)"
-        " VALUES(?, ?, ?, ?, ?, ?, ?, ?)"
-        " ON CONFLICT(version_id, path) DO UPDATE SET parent=excluded.parent,"
+        "INSERT INTO feature_nodes(library_id, version_id, profile_id, path, parent,"
+        " depth, kind, calls, scopes) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        " ON CONFLICT(profile_id, path) DO UPDATE SET parent=excluded.parent,"
         " depth=excluded.depth, kind=excluded.kind,"
         " calls=excluded.calls, scopes=excluded.scopes",
         [
             (
                 library_id,
                 version_id,
+                profile_id,
                 node["path"],
                 node["parent"],
                 int(node["depth"]),
@@ -180,7 +212,7 @@ def refresh_feature_tree(
             for node in nodes
         ],
     )
-    _delete_not_in(conn, "feature_nodes", version_id, "path", wanted)
+    _delete_not_in(conn, "feature_nodes", version_id, profile_id, "path", wanted)
     return len(nodes)
 
 
@@ -195,9 +227,12 @@ def refresh_clusters(
     resolve_kinds: list[str] | tuple[str, ...] | None = None,
     min_args: int | None = None,
     max_args: int | None = None,
+    profile_id: int,
+    source_ids: list[int] | tuple[int, ...] | None = None,
 ) -> int:
     """Rebuild API clusters in bulk; returns the cluster count."""
     from libref.mining import build_scope_sets as _scope_sets
+    from libref.mining import scope_key as _scope_key
     from libref.mining.cluster import cluster_apis as _cluster_fn
 
     threshold, min_size = _cluster_defaults(threshold, min_size)
@@ -209,23 +244,32 @@ def refresh_clusters(
         resolve_kinds=resolve_kinds,
         min_args=min_args,
         max_args=max_args,
+        source_ids=source_ids,
     )
-    triplets = [(str(r[0]), str(r[1]), r[2]) for r in rows if r[0]]
+    triplets = [
+        (str(r[0]), str(r[10]) or _scope_key(str(r[1]), r[2]), r[2])
+        for r in rows
+        if r[0]
+    ]
     sets = _scope_sets(triplets)
     groups = _cluster_fn(sets, threshold=threshold, min_size=min_size)
     wanted = sorted({m for g in groups for m in g["members"]})
     if not wanted:
-        conn.execute("DELETE FROM api_clusters WHERE version_id=?", (version_id,))
+        conn.execute(
+            "DELETE FROM api_clusters WHERE version_id=? AND profile_id=?",
+            (version_id, profile_id),
+        )
         return 0
     conn.executemany(
-        "INSERT INTO api_clusters(library_id, version_id, cluster_id, member, size, representative)"
-        " VALUES(?, ?, ?, ?, ?, ?)"
-        " ON CONFLICT(version_id, member) DO UPDATE SET cluster_id=excluded.cluster_id,"
+        "INSERT INTO api_clusters(library_id, version_id, profile_id, cluster_id,"
+        " member, size, representative) VALUES(?, ?, ?, ?, ?, ?, ?)"
+        " ON CONFLICT(profile_id, member) DO UPDATE SET cluster_id=excluded.cluster_id,"
         " size=excluded.size, representative=excluded.representative",
         [
             (
                 library_id,
                 version_id,
+                profile_id,
                 int(group["cluster_id"]),
                 member,
                 int(group["size"]),
@@ -235,7 +279,7 @@ def refresh_clusters(
             for member in group["members"]
         ],
     )
-    _delete_not_in(conn, "api_clusters", version_id, "member", wanted)
+    _delete_not_in(conn, "api_clusters", version_id, profile_id, "member", wanted)
     return len(groups)
 
 
@@ -255,6 +299,9 @@ def mine_patterns(
     resolve_kinds: list[str] | tuple[str, ...] | None = None,
     min_args: int | None = None,
     max_args: int | None = None,
+    profile: str | None = None,
+    source_roles: list[str] | tuple[str, ...] | None = None,
+    tenant_id: str = "default",
 ) -> list[dict]:
     import json as _json
 
@@ -271,6 +318,17 @@ def mine_patterns(
         )
     else:
         library_id, version_id = catalog.ensure_library_version(library, version)
+    from libref.services.code.usage_sources import resolve_profile
+
+    resolved_profile = resolve_profile(
+        conn,
+        version_id=version_id,
+        name=profile,
+        source_roles=source_roles,
+        tenant_id=tenant_id,
+    )
+    profile_id = int(resolved_profile["id"])
+    source_ids = list(resolved_profile.get("source_ids") or [])
     rows = _load_kept_calls(
         conn,
         version_id,
@@ -278,9 +336,10 @@ def mine_patterns(
         resolve_kinds=resolve_kinds,
         min_args=min_args,
         max_args=max_args,
+        source_ids=source_ids,
     )
     if not rows:
-        _clear_derived(conn, version_id)
+        _clear_derived(conn, version_id, profile_id)
         conn.commit()
         return []
     groups: dict[str, list[tuple[int, int, int, int, str]]] = {}
@@ -295,10 +354,9 @@ def mine_patterns(
         start,
         _rk,
         _argc,
+        sample_id,
     ) in rows:
-        if caller is None or not str(caller).strip():
-            continue
-        key = _scope_key(str(caller_file), caller)
+        key = str(sample_id) or _scope_key(str(caller_file), caller)
         groups.setdefault(key, []).append(
             (int(line_start), int(start), int(order), int(row_id), str(callee))
         )
@@ -312,8 +370,9 @@ def mine_patterns(
             seq = seq[:1000]
         cleaned.append(seq)
     str_seqs = cleaned
-    if not str_seqs:
-        _clear_derived(conn, version_id)
+
+    def _empty() -> list[dict]:
+        _clear_derived(conn, version_id, profile_id)
         refresh_feature_tree(
             conn,
             library_id,
@@ -322,6 +381,8 @@ def mine_patterns(
             resolve_kinds=resolve_kinds,
             min_args=min_args,
             max_args=max_args,
+            profile_id=profile_id,
+            source_ids=source_ids,
         )
         refresh_clusters(
             conn,
@@ -333,38 +394,21 @@ def mine_patterns(
             resolve_kinds=resolve_kinds,
             min_args=min_args,
             max_args=max_args,
+            profile_id=profile_id,
+            source_ids=source_ids,
         )
         conn.commit()
         return []
+
+    if not str_seqs:
+        return _empty()
     if topn is not None:
         ranked = _freq.exact_counts([n for seq in str_seqs for n in seq])
         allowed = _freq.top_exact_names(ranked, topn)
         str_seqs = [[n for n in seq if n in allowed] for seq in str_seqs]
         str_seqs = [seq for seq in str_seqs if seq]
         if not str_seqs:
-            _clear_derived(conn, version_id)
-            refresh_feature_tree(
-                conn,
-                library_id,
-                version_id,
-                include_ambiguous=include_ambiguous,
-                resolve_kinds=resolve_kinds,
-                min_args=min_args,
-                max_args=max_args,
-            )
-            refresh_clusters(
-                conn,
-                library_id,
-                version_id,
-                include_ambiguous=include_ambiguous,
-                threshold=cluster_threshold,
-                min_size=cluster_min_size,
-                resolve_kinds=resolve_kinds,
-                min_args=min_args,
-                max_args=max_args,
-            )
-            conn.commit()
-            return []
+            return _empty()
     table = _norm.build_table([n for seq in str_seqs for n in seq])
     reverse = _norm.reverse_table(table)
     db = _norm.encode_sequences(str_seqs, table)
@@ -379,19 +423,21 @@ def mine_patterns(
         names = _norm.decode_pattern(list(pattern), reverse)
         payload = _json.dumps(names, ensure_ascii=False)
         wanted.append(payload)
-        batch.append((library_id, version_id, payload, int(support)))
+        batch.append((library_id, version_id, profile_id, payload, int(support)))
         results.append({"pattern": names, "support": int(support), "is_closed": 1})
     if batch:
         conn.executemany(
-            "INSERT INTO seq_patterns(library_id, version_id, pattern, support, is_closed)"
-            " VALUES(?, ?, ?, ?, 1)"
-            " ON CONFLICT(version_id, pattern) DO UPDATE SET support=excluded.support,"
+            "INSERT INTO seq_patterns(library_id, version_id, profile_id, pattern,"
+            " support, is_closed) VALUES(?, ?, ?, ?, ?, 1)"
+            " ON CONFLICT(profile_id, pattern) DO UPDATE SET support=excluded.support,"
             " is_closed=1",
             batch,
         )
-    _delete_not_in(conn, "seq_patterns", version_id, "pattern", wanted)
+    _delete_not_in(conn, "seq_patterns", version_id, profile_id, "pattern", wanted)
     if _label_table_ready(conn):
-        _delete_not_in(conn, "pattern_labels", version_id, "pattern", wanted)
+        _delete_not_in(
+            conn, "pattern_labels", version_id, profile_id, "pattern", wanted
+        )
     refresh_feature_tree(
         conn,
         library_id,
@@ -400,6 +446,8 @@ def mine_patterns(
         resolve_kinds=resolve_kinds,
         min_args=min_args,
         max_args=max_args,
+        profile_id=profile_id,
+        source_ids=source_ids,
     )
     refresh_clusters(
         conn,
@@ -411,6 +459,8 @@ def mine_patterns(
         resolve_kinds=resolve_kinds,
         min_args=min_args,
         max_args=max_args,
+        profile_id=profile_id,
+        source_ids=source_ids,
     )
     conn.commit()
     results.sort(key=lambda r: (-r["support"], r["pattern"]))
@@ -432,6 +482,8 @@ def mine_job_params(
     resolve_kinds: list[str] | tuple[str, ...] | None = None,
     min_args: int | None = None,
     max_args: int | None = None,
+    profile: str | None = None,
+    source_roles: list[str] | tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
     """Build mining job params, symmetric with scrape job params, ensuring replayability."""
     return {
@@ -448,6 +500,8 @@ def mine_job_params(
         "resolve_kinds": list(resolve_kinds) if resolve_kinds else None,
         "min_args": min_args,
         "max_args": max_args,
+        "profile": profile,
+        "source_roles": list(source_roles) if source_roles else None,
     }
 
 
@@ -481,6 +535,8 @@ def build_mine_runner(settings, conn):
             resolve_kinds=p.get("resolve_kinds"),
             min_args=p.get("min_args"),
             max_args=p.get("max_args"),
+            profile=p.get("profile"),
+            source_roles=p.get("source_roles"),
         )
 
     return runner
@@ -500,6 +556,7 @@ def induce_job_params(
     ecosystem: str | None = None,
     topn: int | None = None,
     include_ambiguous: bool = False,
+    profile: str | None = None,
 ) -> dict[str, Any]:
     """Build induction job params with replayable scope."""
     return {
@@ -508,6 +565,7 @@ def induce_job_params(
         "ecosystem": ecosystem,
         "topn": topn,
         "include_ambiguous": include_ambiguous,
+        "profile": profile,
     }
 
 
@@ -520,6 +578,7 @@ async def induce_labels(
     ecosystem: str | None = None,
     topn: int | None = None,
     include_ambiguous: bool = False,
+    profile: str | None = None,
     chat=None,
 ) -> dict[str, Any]:
     """Induce names for top patterns with a chat function; disabled without a key."""
@@ -557,6 +616,13 @@ async def induce_labels(
         )
     else:
         library_id, version_id = catalog.ensure_library_version(library, version)
+    from libref.services.code.usage_sources import resolve_profile
+
+    resolved_profile = resolve_profile(
+        conn, version_id=version_id, name=profile, tenant_id="default"
+    )
+    profile_id = int(resolved_profile["id"])
+    profile_sources = list(resolved_profile.get("source_ids") or [])
     want_topn = (
         int(topn)
         if topn is not None
@@ -567,7 +633,7 @@ async def induce_labels(
     batch_size = max(1, int(setting_or_default(settings, "induction_batch")))
     reader = MiningReadService(conn, settings)
     patterns = reader.list_patterns(
-        library, version, ecosystem, limit=max(1, want_topn)
+        library, version, ecosystem, limit=max(1, want_topn), profile=profile
     )
     try:
         sig_table = reader.signatures_for(
@@ -614,15 +680,21 @@ async def induce_labels(
             )
             in_v = ",".join("?" for _ in scope_ids)
             in_a = ",".join("?" for _ in wanted_apis)
+            shape_params: list[Any] = [*scope_ids, *wanted_apis]
+            source_filter = ""
+            if profile_sources:
+                marks = ",".join("?" for _ in profile_sources)
+                source_filter = f" AND source_id IN ({marks})"
+                shape_params.extend(profile_sources)
             try:
                 shape_rows = conn.execute(
                     "SELECT callee_name, args, count(*) FROM call_instances"
                     " LEFT JOIN review_status rs ON rs.entity_type='call_instance'"
                     " AND rs.entity_id=call_instances.id"
                     f" WHERE version_id IN ({in_v}) AND callee_name IN ({in_a})"
-                    f" AND {shape_filter}"
+                    f" AND in_target_api=1 {source_filter} AND {shape_filter}"
                     " GROUP BY callee_name, args ORDER BY callee_name, 3 DESC",
-                    (*scope_ids, *wanted_apis),
+                    shape_params,
                 ).fetchall()
             except Exception:  # noqa: BLE001 -- shapes are advisory for prompts
                 shape_rows = []
@@ -644,8 +716,9 @@ async def induce_labels(
             continue
         phash = pattern_hash(names)
         exists = conn.execute(
-            "SELECT count(*) FROM pattern_labels WHERE version_id=? AND pattern_hash=? AND model=? AND prompt_version=?",
-            (version_id, phash, model, prompt_version),
+            "SELECT count(*) FROM pattern_labels WHERE version_id=? AND profile_id=?"
+            " AND pattern_hash=? AND model=? AND prompt_version=?",
+            (version_id, profile_id, phash, model, prompt_version),
         ).fetchone()
         if exists and int(exists[0]) > 0:
             skipped += 1
@@ -700,16 +773,17 @@ async def induce_labels(
             failed += 1
             continue
         conn.execute(
-            "INSERT INTO pattern_labels(library_id, version_id, pattern_hash, pattern, model,"
-            " prompt_version, name, summary, category_path, workflow, related_apis)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            " ON CONFLICT(version_id, pattern_hash, model, prompt_version) DO UPDATE SET"
+            "INSERT INTO pattern_labels(library_id, version_id, profile_id, pattern_hash,"
+            " pattern, model, prompt_version, name, summary, category_path, workflow,"
+            " related_apis) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(profile_id, pattern_hash, model, prompt_version) DO UPDATE SET"
             " pattern=excluded.pattern, name=excluded.name, summary=excluded.summary,"
             " category_path=excluded.category_path, workflow=excluded.workflow,"
             " related_apis=excluded.related_apis, updated_at=datetime('now')",
             (
                 library_id,
                 version_id,
+                profile_id,
                 phash,
                 _json.dumps(names, ensure_ascii=False),
                 model,
@@ -743,6 +817,7 @@ def build_induce_runner(settings, conn):
             ecosystem=p.get("ecosystem"),
             topn=p.get("topn"),
             include_ambiguous=bool(p.get("include_ambiguous", False)),
+            profile=p.get("profile"),
         )
 
     return runner

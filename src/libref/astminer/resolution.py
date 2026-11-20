@@ -153,6 +153,13 @@ def resolve_calls(
     repo: str,
     commit_sha: str = "",
     language: str | None = None,
+    *,
+    source_id: int | None = None,
+    sample_prefix: str = "",
+    source_role: str = "implementation",
+    origin_kind: str = "repo_file",
+    target_names: set[str] | frozenset[str] | None = None,
+    target_prefixes: tuple[str, ...] | list[str] | None = None,
 ) -> list[CallInstanceRecord]:
     by_file: dict[str, set[str]] = {}
     parent_by_qual: dict[str, str | None] = {}
@@ -265,6 +272,20 @@ def resolve_calls(
             f"{call.caller_file}::{call.caller}" if call.caller else call.caller_file
         )
         order_counter[scope] = order_counter.get(scope, 0) + 1
+        prefixes = tuple(target_prefixes or ())
+        names = frozenset(target_names or ())
+        prefix_hit = bool(prefixes) and resolved.startswith(prefixes)
+        name_hit = bool(names) and resolved in names
+        in_target = (
+            True
+            if source_role == "implementation" or not (names or prefixes)
+            else (name_hit or prefix_hit)
+        )
+        sample = (
+            f"{call.caller_file}::{call.caller}"
+            if call.caller
+            else str(call.caller_file or sample_prefix or "sample")
+        )
         out.append(
             CallInstanceRecord(
                 callee=resolved,
@@ -284,6 +305,11 @@ def resolve_calls(
                 resolve_kind=resolve_kind,
                 repo=repo,
                 commit_sha=commit_sha,
+                source_id=source_id,
+                sample_id=sample,
+                source_role=source_role,
+                origin_kind=origin_kind,
+                in_target_api=in_target,
             )
         )
     return out

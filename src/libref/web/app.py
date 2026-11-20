@@ -697,6 +697,7 @@ def build_web_app(
         limit: int | None = None,
         per_file_limit: int | None = None,
         dedup: bool | None = None,
+        profile: str | None = None,
         principal=Depends(_guard),
     ) -> dict[str, Any]:
         params = PatternInsightQuery(
@@ -710,6 +711,7 @@ def build_web_app(
             limit=limit,
             per_file_limit=per_file_limit,
             dedup=dedup,
+            profile=profile,
         )
         _need(principal, "read")
         rc, should_close, est, bundle = _req_bundle(request, principal)
@@ -728,6 +730,7 @@ def build_web_app(
                         limit=params.limit,
                         per_file_limit=params.per_file_limit,
                         dedup=params.dedup,
+                        profile=params.profile,
                         tenant_id=_tenant_of(principal),
                     ),
                 )

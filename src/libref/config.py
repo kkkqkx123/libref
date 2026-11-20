@@ -63,6 +63,8 @@ class LibrefSettings(BaseSettings):
     ingest_clean_cache_cap: int = Field(default=512, ge=1)
     ingest_batch_pages: int = Field(default=200, ge=1)
     index_batch_files: int = Field(default=200, ge=1)
+    usage_mining_enabled: bool = True
+    doc_code_mining_enabled: bool = True
     probe_sample_limit: int = Field(default=20, ge=1)
     probe_cache_ttl_hours: float = Field(default=1.0, ge=0)
     # Probe sampling: how many discovered pages get a bounded head fetch for
@@ -420,6 +422,8 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "ingest_clean_cache_cap",
             "ingest_batch_pages",
             "index_batch_files",
+            "usage_mining_enabled",
+            "doc_code_mining_enabled",
             "probe_sample_limit",
             "probe_cache_ttl_hours",
             "probe_fetch_sample_limit",

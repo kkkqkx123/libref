@@ -107,15 +107,39 @@ def test_insight_rows_with_data(tmp_path, monkeypatch) -> None:
     conn = _open(tmp_path)
     try:
         _seed(conn)
+        from libref.services.code.usage_sources import ensure_profile, register_source
+
+        source_id = register_source(
+            conn,
+            version_id=1,
+            source_key="fixture:usage",
+            source_role="doc_snippet",
+        )
+        ensure_profile(conn, version_id=1, name="usage", source_ids=[source_id])
         for uid, callee, line in (
             ("uid-a", "alpha", 1),
             ("uid-b", "beta", 2),
         ):
             conn.execute(
                 "INSERT INTO call_instances(call_uid, callee_name, args, repo,"
-                " caller_file, line_start, line_end, confidence, library_id, version_id)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (uid, callee, "[]", "repo", "src/a.py", line, line, "EXTRACTED", 1, 1),
+                " caller_file, line_start, line_end, confidence, library_id, version_id,"
+                " source_id, sample_id, in_target_api)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    uid,
+                    callee,
+                    "[]",
+                    "repo",
+                    "src/a.py",
+                    line,
+                    line,
+                    "EXTRACTED",
+                    1,
+                    1,
+                    source_id,
+                    "src/a.py::f",
+                    1,
+                ),
             )
         conn.commit()
         client = _client(conn, monkeypatch, tmp_path)

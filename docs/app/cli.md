@@ -80,6 +80,9 @@
 | --exclude-pattern | 否 | 无 | 可重复，排除匹配该正则的路径 |
 | --max-files | 否 | 无 | 文件数上限 |
 | --fresh | 否 | 关 | 丢弃断点游标 |
+| --source-role | 否 | implementation | 语料角色：implementation、official_example、doc_snippet、readme、test、reference_project |
+| --target-prefix | 否 | 无 | 目标 API 限定名前缀，可重复，如 `--target-prefix rte_` |
+| --target-name | 否 | 无 | 目标 API 限定名，可重复 |
 
 成功打印计数。相关配置：仓库目录与配额、抓取并发与超时、嵌入与向量后端。
 
@@ -99,11 +102,13 @@
 | --cluster-min-size | 否 | 取配置 | 聚类最小规模；未显式指定时取 `cluster_min_size` 配置值 |
 | --resolve-kinds | 否 | 无 | 逗号分隔的调用种类过滤 |
 | --min-args/--max-args | 否 | 无 | 实参数量区间过滤 |
+| --profile | 否 | usage | 挖掘档案名称；`implementation` 表示库内部实现口径 |
+| --source-role | 否 | 无 | 只选这些语料角色，可重复 |
 | --async | 否 | 关 | 经任务队列执行 |
 
 ### induce-labels
 
-调用对话能力为模式生成标签并输出 JSON。`library/version` 必填，`--ecosystem` 可选，`--topn` 缺省取配置，支持 `--async`。对话未配置时失败。
+调用对话能力为模式生成标签并输出 JSON。`library/version` 必填，`--ecosystem` 可选，`--topn` 缺省取配置，`--profile` 缺省为 `usage`，支持 `--async`。对话未配置时失败。
 
 ## 检索问答
 
@@ -192,7 +197,7 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 
 ### pattern-insight
 
-`view` 七选一：`patterns/evidence/tree/clusters/health/labels/snippets`。`evidence` 要求 `--pattern` 非空（逗号分隔序列）。`--containing` 为逗号分隔的必含接口集合，`--prefix` 按点分前缀过滤，`--per-file-limit` 限每文件证据数。`--dedup/--no-dedup` 互斥，分别强制开关注入去重，都不给表示跟随配置。范围过滤与 `--limit` 可选。
+`view` 七选一：`patterns/evidence/tree/clusters/health/labels/snippets`。`evidence` 要求 `--pattern` 非空（逗号分隔序列）。`--containing` 为逗号分隔的必含接口集合，`--prefix` 按点分前缀过滤，`--per-file-limit` 限每文件证据数。`--dedup/--no-dedup` 互斥，分别强制开关注入去重，都不给表示跟随配置。`--profile` 选择挖掘档案，缺省为 `usage`。范围过滤与 `--limit` 可选。
 
 ### symbol-insight
 

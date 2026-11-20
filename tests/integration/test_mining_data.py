@@ -19,12 +19,21 @@ def _seed_calls(conn, library="demo", version="t", rows=()):
     library_id, version_id = LibraryService(conn).ensure_library_version(
         library, version
     )
+    from libref.services.code.usage_sources import register_source
+
+    source_id = register_source(
+        conn,
+        version_id=version_id,
+        source_key="seeded:implementation",
+        source_role="implementation",
+    )
     for i, (callee, path, caller, line, order, start, conf, args) in enumerate(rows):
         conn.execute(
             "INSERT INTO call_instances(call_uid, callee_name, args, repo,"
             " caller_file, line_start, line_end, confidence,"
-            " library_id, version_id, caller, call_order, start_byte)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " library_id, version_id, caller, call_order, start_byte,"
+            " source_id, sample_id, source_role, in_target_api)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 f"uid-{i}",
                 callee,
@@ -39,6 +48,10 @@ def _seed_calls(conn, library="demo", version="t", rows=()):
                 caller,
                 order,
                 start,
+                source_id,
+                f"{path}::{caller}" if caller else path,
+                "implementation",
+                1,
             ),
         )
     conn.commit()
@@ -55,7 +68,7 @@ def test_sequence_order_uses_byte_offset_not_just_line(conn, monkeypatch, tmp_pa
             ("first", "b.py", "g", 10, 1, 100, "INFERRED", []),
         ],
     )
-    results = mine_patterns(conn, "demo", "t", minsup=2)
+    results = mine_patterns(conn, "demo", "t", minsup=2, profile="implementation")
     assert [r["pattern"] for r in results] == [["first", "second"]]
 
 
@@ -69,8 +82,15 @@ def test_ambiguous_excluded_by_default(conn, monkeypatch, tmp_path):
             ("mystery", "b.py", "g", 2, 2, 20, "AMBIGUOUS", []),
         ],
     )
-    assert mine_patterns(conn, "demo", "t", minsup=2) == []
-    results = mine_patterns(conn, "demo", "t", minsup=2, include_ambiguous=True)
+    assert mine_patterns(conn, "demo", "t", minsup=2, profile="implementation") == []
+    results = mine_patterns(
+        conn,
+        "demo",
+        "t",
+        minsup=2,
+        include_ambiguous=True,
+        profile="implementation",
+    )
     assert ["real.a", "mystery"] in [r["pattern"] for r in results]
 
 
@@ -84,10 +104,10 @@ def test_stale_patterns_swept(conn, monkeypatch, tmp_path):
             ("a.two", "b.py", "g", 2, 2, 20, "INFERRED", []),
         ],
     )
-    assert mine_patterns(conn, "demo", "t", minsup=2) != []
+    assert mine_patterns(conn, "demo", "t", minsup=2, profile="implementation") != []
     conn.execute("DELETE FROM call_instances WHERE callee_name='a.two'")
     conn.commit()
-    assert mine_patterns(conn, "demo", "t", minsup=2) == []
+    assert mine_patterns(conn, "demo", "t", minsup=2, profile="implementation") == []
     assert conn.execute("SELECT count(*) FROM seq_patterns").fetchone()[0] == 0
 
 
@@ -98,15 +118,20 @@ def test_topn_keeps_exact_frequent_names(conn, monkeypatch, tmp_path):
         rows.append(("aa.bb.cc.ee", f, "f", 2, 2, 20, "INFERRED", []))
     rows.append(("rare.z", "a.py", "f", 3, 3, 30, "INFERRED", []))
     _seed_calls(conn, rows=rows)
-    results = mine_patterns(conn, "demo", "t", minsup=2, topn=2)
+    results = mine_patterns(
+        conn, "demo", "t", minsup=2, topn=2, profile="implementation"
+    )
     assert [["aa.bb.cc.dd", "aa.bb.cc.ee"]] == [r["pattern"] for r in results]
-    assert mine_patterns(conn, "demo", "t", minsup=2, topn=1) == []
+    assert (
+        mine_patterns(conn, "demo", "t", minsup=2, topn=1, profile="implementation")
+        == []
+    )
 
 
 def test_retrieval_queries_over_mined_data(conn, tmp_path, monkeypatch):
     dst = copy_mini_repo(tmp_path)
     index_repo(conn, "demo", "0.1", str(dst), repos_dir=tmp_path / "repos")
-    mine_patterns(conn, "demo", "0.1", minsup=2)
+    mine_patterns(conn, "demo", "0.1", minsup=2, profile="implementation")
     svc = MiningReadService(conn)
 
     usage = {u["api"]: u for u in svc.api_usage_counts("demo", "0.1")}
@@ -119,14 +144,26 @@ def test_retrieval_queries_over_mined_data(conn, tmp_path, monkeypatch):
     shapes = svc.arg_shapes("numpy.zeros", "demo", "0.1")
     assert shapes and shapes[0]["count"] >= 1
 
-    patterns = svc.list_patterns("demo", "0.1", containing=["numpy.array"])
+    patterns = svc.list_patterns(
+        "demo", "0.1", containing=["numpy.array"], profile="implementation"
+    )
     assert ["numpy.array", "numpy.zeros"] in [p["pattern"] for p in patterns]
 
     raw = svc.pattern_evidence(
-        ["numpy.array", "numpy.zeros"], "demo", "0.1", dedup=False, per_file_limit=10
+        ["numpy.array", "numpy.zeros"],
+        "demo",
+        "0.1",
+        dedup=False,
+        per_file_limit=10,
+        profile="implementation",
     )
     assert len(raw) >= 2
-    diversified = svc.pattern_evidence(["numpy.array", "numpy.zeros"], "demo", "0.1")
+    diversified = svc.pattern_evidence(
+        ["numpy.array", "numpy.zeros"],
+        "demo",
+        "0.1",
+        profile="implementation",
+    )
     assert len(diversified) >= 1
     assert len(diversified) <= len(raw)
     evidence = diversified
@@ -150,13 +187,17 @@ def test_minlen_filters_short_patterns(conn, monkeypatch, tmp_path):
             ("p.b", "c.py", "h", 2, 2, 20, "INFERRED", []),
         ],
     )
-    short = mine_patterns(conn, "demo", "t", minsup=2, minlen=2)
+    short = mine_patterns(
+        conn, "demo", "t", minsup=2, minlen=2, profile="implementation"
+    )
     assert any(len(r["pattern"]) == 2 for r in short)
-    long_only = mine_patterns(conn, "demo", "t", minsup=2, minlen=3)
+    long_only = mine_patterns(
+        conn, "demo", "t", minsup=2, minlen=3, profile="implementation"
+    )
     assert long_only and all(len(r["pattern"]) >= 3 for r in long_only)
 
 
-def test_file_scope_calls_excluded_from_sequences(conn, monkeypatch, tmp_path):
+def test_file_scope_calls_form_sequences(conn, monkeypatch, tmp_path):
     _seed_calls(
         conn,
         library="demo",
@@ -168,7 +209,8 @@ def test_file_scope_calls_excluded_from_sequences(conn, monkeypatch, tmp_path):
             ("s.b", "b.py", None, 2, 2, 20, "INFERRED", []),
         ],
     )
-    assert mine_patterns(conn, "demo", "noscope", minsup=2) == []
+    results = mine_patterns(conn, "demo", "noscope", minsup=2, profile="implementation")
+    assert ["s.a", "s.b"] in [r["pattern"] for r in results]
 
 
 def test_import_edges_queryable(conn, tmp_path):
@@ -184,9 +226,9 @@ def test_import_edges_queryable(conn, tmp_path):
 
 def test_evidence_carries_signatures(conn, tmp_path):
     index_symbol_repo(conn, tmp_path)
-    mine_patterns(conn, "demo", "0.1", minsup=1, minlen=1)
+    mine_patterns(conn, "demo", "0.1", minsup=1, minlen=1, profile="implementation")
     svc = MiningReadService(conn)
-    patterns = svc.list_patterns("demo", "0.1", limit=10)
+    patterns = svc.list_patterns("demo", "0.1", limit=10, profile="implementation")
     assert patterns
     target = None
     for entry in patterns:
@@ -195,7 +237,9 @@ def test_evidence_carries_signatures(conn, tmp_path):
             target = names
             break
     assert target is not None
-    groups = svc.pattern_evidence(target, "demo", "0.1", limit=5)
+    groups = svc.pattern_evidence(
+        target, "demo", "0.1", limit=5, profile="implementation"
+    )
     assert groups
     assert any(
         str(c.get("callee_signature") or "").strip()

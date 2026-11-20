@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import re
 
+from libref.astminer.queries import c as _c
+from libref.astminer.queries import cpp as _cpp
 from libref.astminer.queries import csharp as _csharp
 from libref.astminer.queries import go as _go
 from libref.astminer.queries import groovy as _groovy
@@ -292,6 +294,8 @@ def validate_captures(language: str) -> None:
 
 
 _MODULES = {
+    "c": _c,
+    "cpp": _cpp,
     "python": _python,
     "java": _java,
     "csharp": _csharp,

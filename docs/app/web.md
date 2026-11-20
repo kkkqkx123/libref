@@ -89,7 +89,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### GET /pattern-insight
 
-`view` 七选一：`patterns/evidence/tree/clusters/health/labels/snippets`。`evidence` 要求非空 `pattern`（逗号分隔序列）。`containing` 为逗号分隔的必含接口集合，`prefix` 为点分前缀，`per_file_limit` 限每文件证据数，`dedup` 三态（真/假/缺省跟随配置）。
+`view` 七选一：`patterns/evidence/tree/clusters/health/labels/snippets`。`evidence` 要求非空 `pattern`（逗号分隔序列）。`containing` 为逗号分隔的必含接口集合，`prefix` 为点分前缀，`per_file_limit` 限每文件证据数，`dedup` 三态（真/假/缺省跟随配置），`profile` 选择挖掘档案，缺省为 `usage`。
 
 ### GET /symbol-insight
 
@@ -201,7 +201,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### 索引申请
 
-`/index-requests` 提供申请、列表、详情、撤回、审批与驳回；待审队列为 `GET /index-requests/pending`。返回请求编号和状态，审批时才提交 `scrape_docs` 或 `index_repo` 作业，作业编号写入请求参数。审批会按当前设置重新校验目标地址；审批页展示完整规范化参数。撤回仅适用于作业运行前，已运行的作业返回冲突。详情包含关联作业、错误与驳回原因；终态只读，重新申请生成新行。持有 `ingest:write` 的申请方直接入队；无该 scope 的审批者不能审批自己的申请。通用 `/jobs` 不接受索引类作业，配额拒绝返回 `resource` 与 `reset_at`。
+`/index-requests` 提供申请、列表、详情、撤回、审批与驳回；待审队列为 `GET /index-requests/pending`。返回请求编号和状态，审批时才提交 `scrape_docs` 或 `index_repo` 作业，作业编号写入请求参数。仓库申请可带 `source_role` 与 `target_filter`，分别声明语料角色和目标 API 前缀或限定名。审批会按当前设置重新校验目标地址；审批页展示完整规范化参数。撤回仅适用于作业运行前，已运行的作业返回冲突。详情包含关联作业、错误与驳回原因；终态只读，重新申请生成新行。持有 `ingest:write` 的申请方直接入队；无该 scope 的审批者不能审批自己的申请。通用 `/jobs` 不接受索引类作业，配额拒绝返回 `resource` 与 `reset_at`。
 
 ## 可配置项
 
@@ -209,6 +209,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 * 服务暴露：`web_host/web_port` 为组合 `serve` 的唯一监听，`mcp_path` 为 `/mcp` 挂载路径。HTTP 与 `/mcp` 共用顶层鉴权中间件，健康检查与静态资源除外；`allowed_origins` 按来源精确匹配，非浏览器请求可不带 Origin。
 * 检索问答：同 MCP 的向量、嵌入、精排、融合、片段、窗口、问答与发现注册表各键，详尽预设强制开窗口。
+* 用法语料：`usage_mining_enabled/doc_code_mining_enabled` 控制源码文档注释与文档代码块是否进入 usage 档案。
 * 洞察：`evidence_per_file_limit/evidence_dedup` 证据默认，`cluster_threshold/cluster_min_size` 分组默认。
 * 写入：抓取并发与超时、范围、分块、嵌入与向量后端各键，`snapshot_*` 快照与 `repos_dir/repos_quota_mb` 配额。
 * 日志：`log_level/log_file/log_format`。

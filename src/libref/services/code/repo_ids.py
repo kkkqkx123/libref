@@ -60,6 +60,9 @@ def call_uid(
     end_byte: int,
     callee: str,
     args: list[str],
+    *,
+    source_id: int | None = None,
+    sample_id: str = "",
 ) -> str:
     import hashlib
 
@@ -67,6 +70,8 @@ def call_uid(
     blob = "\0".join(
         [
             repo,
+            str(source_id or 0),
+            sample_id,
             caller_file,
             caller or "",
             str(start_byte),

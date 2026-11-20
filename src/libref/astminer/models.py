@@ -28,6 +28,16 @@ ResolveKind = Literal[
 ]
 
 
+class CodeSnippet(BaseModel):
+    sample_id: str
+    language: str
+    code: str
+    url: str = ""
+    heading: str = ""
+    ordinal: int = 0
+    origin_kind: str = "markdown_fence"
+
+
 class ApiDeclRecord(BaseModel):
     qualified_name: str
     kind: str = Field(min_length=1)
@@ -79,3 +89,9 @@ class CallInstanceRecord(BaseModel):
     resolve_kind: str = ""
     repo: str = ""
     commit_sha: str = ""
+    source_id: int | None = None
+    sample_id: str = ""
+    source_role: str = "implementation"
+    origin_kind: str = "repo_file"
+    in_target_api: bool = False
+    target_status: str = "current"

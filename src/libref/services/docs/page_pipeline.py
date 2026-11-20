@@ -371,6 +371,45 @@ class PagePipeline:
                 stage_ms,
                 detail,
             )
+        if bool(getattr(self._settings, "usage_mining_enabled", True)) and bool(
+            getattr(self._settings, "doc_code_mining_enabled", True)
+        ):
+            conn = getattr(store, "_conn", None)
+            if conn is not None:
+                from libref.astminer.code_blocks import fenced_blocks
+                from libref.crawler.code_blocks import html_code_blocks
+                from libref.services.code.usage_ingest import ingest_snippets
+
+                meta = conn.execute(
+                    "SELECT l.name, v.version FROM versions v"
+                    " JOIN libraries l ON l.id=v.library_id WHERE v.id=?",
+                    (version_id,),
+                ).fetchone()
+                if meta is not None:
+                    prefix = f"doc:{version_id}:{url}"
+                    if kind == "html":
+                        blocks = html_code_blocks(
+                            scraped.cleaned_html,
+                            sample_prefix=prefix,
+                            url=url,
+                            heading=scraped.title,
+                        )
+                        origin = "html_code_block"
+                    else:
+                        blocks = fenced_blocks(markdown, sample_prefix=prefix, url=url)
+                        origin = "markdown_fence"
+                    if blocks:
+                        ingest_snippets(
+                            conn,
+                            str(meta[0]),
+                            str(meta[1]),
+                            blocks,
+                            source_key=f"doc:{version_id}",
+                            source_role="doc_snippet",
+                            origin_kind=origin,
+                            tenant_id=self._tenant_id,
+                            source_url=url,
+                        )
         split_start = _time.monotonic()
         self._account_page(store, tenant_id, snapshot_bytes=0)
         dual = split_markdown_dual(markdown, url, budgets=self._budgets)

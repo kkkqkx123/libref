@@ -341,6 +341,20 @@ def _cross_lingual_miss(query: str, fts_ids: list[int], vec_ids: list[int]) -> b
     return bool(CJK_RUN_RE.search(query or ""))
 
 
+def _profile_id_by_version(
+    conn: sqlite3.Connection, version_ids: list[int]
+) -> dict[int, int]:
+    if not version_ids:
+        return {}
+    marks = ",".join("?" for _ in version_ids)
+    rows = conn.execute(
+        "SELECT version_id, id FROM mining_profiles"
+        f" WHERE version_id IN ({marks}) AND name='usage'",
+        version_ids,
+    ).fetchall()
+    return {int(r[0]): int(r[1]) for r in rows}
+
+
 def _pattern_supports(
     conn: sqlite3.Connection,
     version_ids: list[int],
@@ -348,11 +362,14 @@ def _pattern_supports(
 ) -> dict[int, list[tuple[list[str], int]]]:
     if not version_ids:
         return {}
-    marks = ",".join("?" for _ in version_ids)
+    profiles = _profile_id_by_version(conn, version_ids)
+    if not profiles:
+        return {}
+    marks = ",".join("?" for _ in profiles.values())
     rows = conn.execute(
         "SELECT version_id, pattern, support FROM seq_patterns "
-        f"WHERE version_id IN ({marks})",
-        version_ids,
+        f"WHERE profile_id IN ({marks})",
+        tuple(profiles.values()),
     ).fetchall()
     out: dict[int, list[tuple[list[str], int]]] = {}
     for vid, raw, support in rows:
@@ -374,11 +391,14 @@ def _cluster_sets(
 ) -> dict[int, list[set[str]]]:
     if not version_ids:
         return {}
-    marks = ",".join("?" for _ in version_ids)
+    profiles = _profile_id_by_version(conn, version_ids)
+    if not profiles:
+        return {}
+    marks = ",".join("?" for _ in profiles.values())
     rows = conn.execute(
         "SELECT version_id, cluster_id, member FROM api_clusters "
-        f"WHERE version_id IN ({marks})",
-        version_ids,
+        f"WHERE profile_id IN ({marks})",
+        tuple(profiles.values()),
     ).fetchall()
     grouped: dict[tuple[int, int], set[str]] = {}
     for vid, cid, member in rows:

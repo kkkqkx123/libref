@@ -702,6 +702,7 @@ def build_mcp_server(
         limit: int | None = None,
         per_file_limit: int | None = None,
         dedup: bool | None = None,
+        profile: str | None = None,
     ) -> dict[str, Any]:
         """Sequence and structure insight: patterns, evidence, feature tree, clusters."""
         if view not in (
@@ -737,6 +738,7 @@ def build_mcp_server(
                         limit=limit,
                         per_file_limit=per_file_limit,
                         dedup=dedup,
+                        profile=profile,
                         tenant_id=_tenant(_principal()),
                     )
                 )
@@ -1089,6 +1091,8 @@ def build_mcp_server(
         only_files: list[str] | None = None,
         exclude_patterns: list[str] | None = None,
         max_files: int | None = None,
+        source_role: str | None = None,
+        target_filter: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Request repository indexing by package coordinates or an HTTP(S) Git URL."""
         principal = _principal()
@@ -1110,6 +1114,8 @@ def build_mcp_server(
             "only_files": only_files,
             "exclude_patterns": exclude_patterns,
             "max_files": max_files,
+            "source_role": source_role,
+            "target_filter": target_filter,
         }
         rc, bundle, should_close = _make_bundle()
         try:

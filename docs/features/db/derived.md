@@ -1,6 +1,6 @@
 # 派生库表：序列模式、特征树、聚类与语义标签
 
-四表均为按版本重建的派生数据，真源是调用实例，
+四表均为按挖掘档案重建的派生数据，真源是调用实例；档案绑定版本、语料源集合与参数。同一版本可并存多个档案，
 审核冲突的行不进入构建。标签另依赖模型输出，
 缺表时读取返回空，不抛错。
 
@@ -16,9 +16,10 @@
 | pattern | JSON NOT NULL | 限定名序列 |
 | support | INTEGER NOT NULL | 支持度 |
 | is_closed | INTEGER NOT NULL DEFAULT 0 | 闭合标记，写入恒为 1 |
-| UNIQUE(version_id, pattern) | 唯一键 | 同版本模式唯一 |
+| profile_id | INTEGER NOT NULL | 所属挖掘档案 |
+| UNIQUE(profile_id, pattern) | 唯一键 | 同档案模式唯一 |
 
-另有 `idx_seq_patterns_support(version_id, support DESC)`。
+另有 `idx_seq_patterns_support(version_id, profile_id, support DESC)`。
 
 ### feature_nodes
 
@@ -33,7 +34,8 @@
 | kind | TEXT NOT NULL DEFAULT 'package' | 类型 |
 | calls | INTEGER NOT NULL | 调用数 |
 | scopes | INTEGER NOT NULL | 作用域数 |
-| UNIQUE(version_id, path) | 唯一键 | 同版本路径唯一 |
+| profile_id | INTEGER NOT NULL | 所属挖掘档案 |
+| UNIQUE(profile_id, path) | 唯一键 | 同档案路径唯一 |
 
 另有 `idx_feature_nodes_parent(version_id, parent)`、
 `idx_feature_nodes_calls(version_id, calls DESC)`。
@@ -49,7 +51,8 @@
 | member | TEXT NOT NULL | 成员限定名 |
 | size | INTEGER NOT NULL | 簇大小 |
 | representative | TEXT NOT NULL | 代表成员 |
-| UNIQUE(version_id, member) | 唯一键 | 同版本成员唯一 |
+| profile_id | INTEGER NOT NULL | 所属挖掘档案 |
+| UNIQUE(profile_id, member) | 唯一键 | 同档案成员唯一 |
 
 另有 `idx_api_clusters_version(version_id, cluster_id)`。
 
@@ -63,6 +66,7 @@
 | pattern_hash | TEXT NOT NULL | 模式哈希 |
 | pattern | JSON NOT NULL | 模式原文 |
 | model | TEXT NOT NULL | 模型 |
+| profile_id | INTEGER NOT NULL | 所属挖掘档案 |
 | prompt_version | TEXT NOT NULL DEFAULT 'v1' | 提示版本 |
 | name | TEXT NOT NULL | 名称 |
 | summary | TEXT NOT NULL DEFAULT '' | 摘要 |
@@ -77,7 +81,7 @@
 ## 写入
 
 挖掘输入经共享单次扫描加审核过滤后在内存分组，
-任一上游为空时统一清空派生表，保证空版本无残留。
+任一上游为空时清空当前档案的派生表，保证空档案无残留。
 三表批量幂等写入后按集合差清理：
 
 ```sql

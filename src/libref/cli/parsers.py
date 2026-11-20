@@ -513,6 +513,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_repo.add_argument("--max-files", type=int, default=None)
     p_repo.add_argument(
+        "--source-role",
+        choices=[
+            "official_example",
+            "doc_snippet",
+            "readme",
+            "test",
+            "reference_project",
+            "implementation",
+        ],
+        default="implementation",
+    )
+    p_repo.add_argument("--target-prefix", action="append", default=None)
+    p_repo.add_argument("--target-name", action="append", default=None)
+    p_repo.add_argument(
         "--fresh",
         action="store_true",
         help="Discard the resume cursor and run the full file list",
@@ -559,6 +573,13 @@ def build_parser() -> argparse.ArgumentParser:
     p_mine.add_argument("--resolve-kinds", default=None)
     p_mine.add_argument("--min-args", type=int, default=None)
     p_mine.add_argument("--max-args", type=int, default=None)
+    p_mine.add_argument("--profile", default=None)
+    p_mine.add_argument(
+        "--source-role",
+        action="append",
+        default=None,
+        help="Restrict mining to these source roles",
+    )
     p_mine.add_argument(
         "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
     )
@@ -580,6 +601,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_induce.add_argument("version")
     p_induce.add_argument("--ecosystem", default=None)
     p_induce.add_argument("--topn", type=int, default=None)
+    p_induce.add_argument("--profile", default=None)
     p_induce.add_argument(
         "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
     )
@@ -628,6 +650,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_pattern.add_argument("--ecosystem", default=None)
     p_pattern.add_argument("--limit", type=int, default=None)
     p_pattern.add_argument("--per-file-limit", type=int, default=None)
+    p_pattern.add_argument("--profile", default=None)
     p_pattern.add_argument("--dedup", action="store_true", help="Enable evidence dedup")
     p_pattern.add_argument(
         "--no-dedup", action="store_true", help="Disable evidence dedup"

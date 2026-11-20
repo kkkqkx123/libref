@@ -335,6 +335,117 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_index_requests_active_dedupe
   WHERE status IN ('pending','approved','queued','running');
 """
 
+# ── Usage corpora and mining profiles: source-aware API usage mining ──
+USAGE_CORPUS_SQL = """
+CREATE TABLE IF NOT EXISTS code_sources(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  source_key TEXT NOT NULL,
+  source_role TEXT NOT NULL,
+  origin_kind TEXT NOT NULL,
+  source_url TEXT NOT NULL DEFAULT '',
+  commit_sha TEXT NOT NULL DEFAULT '',
+  selection JSON NOT NULL DEFAULT '{}',
+  target_filter JSON NOT NULL DEFAULT '{}',
+  weight REAL NOT NULL DEFAULT 1.0,
+  limits JSON NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(version_id, source_key)
+);
+CREATE INDEX IF NOT EXISTS idx_code_sources_version ON code_sources(version_id, enabled);
+
+CREATE TABLE IF NOT EXISTS mining_profiles(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  source_ids JSON NOT NULL DEFAULT '[]',
+  support_mode TEXT NOT NULL DEFAULT 'sample',
+  params JSON NOT NULL DEFAULT '{}',
+  fingerprint TEXT NOT NULL DEFAULT '',
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(version_id, name)
+);
+
+ALTER TABLE call_instances ADD COLUMN source_id INTEGER;
+ALTER TABLE call_instances ADD COLUMN sample_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE call_instances ADD COLUMN source_role TEXT NOT NULL DEFAULT 'implementation';
+ALTER TABLE call_instances ADD COLUMN origin_kind TEXT NOT NULL DEFAULT 'repo_file';
+ALTER TABLE call_instances ADD COLUMN in_target_api INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE call_instances ADD COLUMN target_status TEXT NOT NULL DEFAULT 'current';
+CREATE INDEX IF NOT EXISTS idx_call_instances_source ON call_instances(version_id, source_id);
+CREATE INDEX IF NOT EXISTS idx_call_instances_sample ON call_instances(version_id, sample_id);
+CREATE INDEX IF NOT EXISTS idx_call_instances_role ON call_instances(version_id, source_role);
+
+DROP TABLE IF EXISTS seq_patterns;
+CREATE TABLE seq_patterns(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id INTEGER NOT NULL,
+  pattern JSON NOT NULL,
+  support INTEGER NOT NULL,
+  is_closed INTEGER NOT NULL DEFAULT 0,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, pattern)
+);
+CREATE INDEX idx_seq_patterns_support ON seq_patterns(version_id, profile_id, support DESC);
+
+DROP TABLE IF EXISTS feature_nodes;
+CREATE TABLE feature_nodes(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id INTEGER NOT NULL,
+  path TEXT NOT NULL,
+  parent TEXT NOT NULL DEFAULT '',
+  depth INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'package',
+  calls INTEGER NOT NULL,
+  scopes INTEGER NOT NULL,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, path)
+);
+CREATE INDEX idx_feature_nodes_parent ON feature_nodes(version_id, profile_id, parent);
+CREATE INDEX idx_feature_nodes_calls ON feature_nodes(version_id, profile_id, calls DESC);
+
+DROP TABLE IF EXISTS api_clusters;
+CREATE TABLE api_clusters(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id INTEGER NOT NULL,
+  cluster_id INTEGER NOT NULL,
+  member TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  representative TEXT NOT NULL,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, member)
+);
+CREATE INDEX idx_api_clusters_version ON api_clusters(version_id, profile_id, cluster_id);
+
+DROP TABLE IF EXISTS pattern_labels;
+CREATE TABLE pattern_labels(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id INTEGER NOT NULL,
+  pattern_hash TEXT NOT NULL,
+  pattern JSON NOT NULL,
+  model TEXT NOT NULL,
+  prompt_version TEXT NOT NULL DEFAULT 'v1',
+  name TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  category_path JSON NOT NULL DEFAULT '[]',
+  workflow TEXT NOT NULL DEFAULT '',
+  related_apis JSON NOT NULL DEFAULT '[]',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, pattern_hash, model, prompt_version)
+);
+CREATE INDEX idx_pattern_labels_version ON pattern_labels(version_id, profile_id);
+"""
+
 # ── Query support: url lookups, review state scan, job recovery, embeddable filter ──
 QUERY_SUPPORT_SQL = """
 CREATE INDEX IF NOT EXISTS idx_pages_url ON pages(url);

@@ -11,6 +11,7 @@ from libref.crawler.browser import (
     is_playwright_available,
     render_html,
 )
+from libref.crawler.code_blocks import html_code_blocks
 from libref.crawler.extract import (
     ScrapeResult,
     convert_links_to_citations,
@@ -66,6 +67,7 @@ __all__ = [
     "ensure_robots_cache",
     "extract_to_markdown",
     "fetch_snapshot",
+    "html_code_blocks",
     "is_data_table",
     "is_playwright_available",
     "looks_like_js_rendered",

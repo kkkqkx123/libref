@@ -9,6 +9,34 @@ from libref.services.registry.libraries import mining_version_ids
 from libref.text.snippet import call_tag, gap_tag, unit_tag
 
 
+def _profile_context(
+    conn, version_ids: list[int], profile: str | None = None
+) -> tuple[list[int], set[int]]:
+    """Resolve profile identities and their source ids for read paths."""
+    if not version_ids:
+        return [], set()
+    name = profile or "usage"
+    placeholders = ",".join("?" for _ in version_ids)
+    rows = conn.execute(
+        f"SELECT id, source_ids FROM mining_profiles WHERE version_id IN ({placeholders})"
+        " AND name=?",
+        (*version_ids, name),
+    ).fetchall()
+    ids = [int(r[0]) for r in rows]
+    sources: set[int] = set()
+    for row in rows:
+        raw = row[1]
+        if not raw:
+            continue
+        try:
+            values = json.loads(str(raw))
+        except ValueError:
+            values = []
+        if isinstance(values, list):
+            sources.update(int(v) for v in values)
+    return ids, sources
+
+
 def _scope_of(table: str) -> str:
     """Grouping identity of one call scope, preferring the persisted key."""
     if table:
@@ -317,22 +345,26 @@ class MiningReadService:
         tenant_id: str | None = None,
         containing: list[str] | None = None,
         limit: int = 50,
+        profile: str | None = None,
     ) -> list[dict[str, Any]]:
         from libref.mining.scoring import pattern_contains_all
 
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
-        placeholders = ",".join("?" for _ in vids)
+        pids, _sources = _profile_context(self._conn, vids, profile)
+        if not pids:
+            return []
+        placeholders = ",".join("?" for _ in pids)
         # Without a membership filter the database returns the top rows directly;
         # with one the cursor stops as soon as enough matches are collected.
         tail = "" if containing else " LIMIT ?"
-        params: list[Any] = list(vids)
+        params: list[Any] = list(pids)
         if not containing:
             params.append(max(1, int(limit)))
         cursor = self._conn.execute(
             "SELECT pattern, support FROM seq_patterns"
-            f" WHERE version_id IN ({placeholders})"
+            f" WHERE profile_id IN ({placeholders})"
             f" ORDER BY support DESC, pattern{tail}",
             params,
         )
@@ -455,6 +487,7 @@ class MiningReadService:
         per_file_limit: int | None = None,
         dedup: bool | None = None,
         with_snippet: bool = True,
+        profile: str | None = None,
     ) -> list[dict[str, Any]]:
         if not pattern:
             return []
@@ -462,6 +495,11 @@ class MiningReadService:
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
+        _pids, sources = _profile_context(self._conn, vids, profile)
+        if not sources:
+            return []
+        source_marks = ",".join("?" for _ in sources)
+        source_params = list(sources)
         base_filter = "(rs.status IS NULL OR rs.status != 'conflict')"
         if include_ambiguous:
             conf = f"AND {base_filter}"
@@ -481,11 +519,12 @@ class MiningReadService:
             " FROM call_instances ci LEFT JOIN review_status rs "
             "ON rs.entity_type='call_instance' AND rs.entity_id=ci.id"
             f" WHERE ci.version_id IN ({placeholders})"
-            f" AND ci.callee_name IN ({marks_w}) {conf}"
+            f" AND ci.callee_name IN ({marks_w}) AND ci.in_target_api=1"
+            f" AND ci.source_id IN ({source_marks}) {conf}"
             f" GROUP BY {_scope_of('ci')}"
             f" HAVING COUNT(DISTINCT ci.callee_name) = {len(members)}"
             " ORDER BY 1 LIMIT 1000",
-            (*vids, *members),
+            (*vids, *members, *source_params),
         ).fetchall()
         if not scope_rows:
             return []
@@ -500,10 +539,11 @@ class MiningReadService:
             " JOIN versions v ON v.id = ci.version_id"
             " JOIN libraries l ON l.id = v.library_id"
             f" WHERE ci.version_id IN ({placeholders}) {conf}"
+            f" AND ci.in_target_api=1 AND ci.source_id IN ({source_marks})"
             f" AND {_scope_of('ci')} IN ({scope_marks})"
             " ORDER BY ci.version_id, ci.caller_file, ci.line_start,"
             " ci.start_byte, ci.call_order, ci.id",
-            (*vids, *wanted_scopes),
+            (*vids, *source_params, *wanted_scopes),
         ).fetchall()
         groups: dict[tuple, dict[str, Any]] = {}
         order: list[tuple] = []
@@ -590,6 +630,7 @@ class MiningReadService:
         version: str | None = None,
         ecosystem: str | None = None,
         tenant_id: str | None = None,
+        profile: str | None = None,
     ) -> dict[str, Any]:
         from libref.mining.idiom import reuse_diversity
 
@@ -599,6 +640,7 @@ class MiningReadService:
             ecosystem=ecosystem,
             limit=100000,
             tenant_id=tenant_id,
+            profile=profile,
         )
         clusters = self.api_clusters(
             library=library,
@@ -606,6 +648,7 @@ class MiningReadService:
             ecosystem=ecosystem,
             limit=100000,
             tenant_id=tenant_id,
+            profile=profile,
         )
         health = reuse_diversity(patterns, clusters)
         health["resolve_kinds"] = self.resolve_distribution(
@@ -1130,11 +1173,15 @@ class MiningReadService:
         tenant_id: str | None = None,
         containing: list[str] | None = None,
         limit: int = 50,
+        profile: str | None = None,
     ) -> list[dict[str, Any]]:
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
-        placeholders = ",".join("?" for _ in vids)
+        pids, _sources = _profile_context(self._conn, vids, profile)
+        if not pids:
+            return []
+        placeholders = ",".join("?" for _ in pids)
         table = self._conn.execute(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='pattern_labels'"
         ).fetchone()
@@ -1144,9 +1191,9 @@ class MiningReadService:
             "SELECT pattern, pattern_hash, model, prompt_version, name,"
             " summary, category_path, workflow, related_apis, updated_at"
             " FROM pattern_labels"
-            f" WHERE version_id IN ({placeholders})"
+            f" WHERE profile_id IN ({placeholders})"
             " ORDER BY updated_at DESC, pattern_hash, model, prompt_version",
-            tuple(vids),
+            tuple(pids),
         ).fetchall()
         out = []
         seen: set[str] = set()
@@ -1204,12 +1251,16 @@ class MiningReadService:
         tenant_id: str | None = None,
         prefix: str | None = None,
         limit: int = 100,
+        profile: str | None = None,
     ) -> list[dict[str, Any]]:
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
-        placeholders = ",".join("?" for _ in vids)
-        params: list[Any] = list(vids)
+        pids, _sources = _profile_context(self._conn, vids, profile)
+        if not pids:
+            return []
+        placeholders = ",".join("?" for _ in pids)
+        params: list[Any] = list(pids)
         filt = ""
         if prefix:
             filt = " AND (path = ? OR path LIKE ? ESCAPE '\\')"
@@ -1223,7 +1274,7 @@ class MiningReadService:
         params.append(limit)
         rows = self._conn.execute(
             "SELECT path, parent, depth, kind, calls, scopes FROM feature_nodes"
-            f" WHERE version_id IN ({placeholders}){filt}"
+            f" WHERE profile_id IN ({placeholders}){filt}"
             " ORDER BY calls DESC, path LIMIT ?",
             params,
         ).fetchall()
@@ -1247,16 +1298,20 @@ class MiningReadService:
         tenant_id: str | None = None,
         containing: list[str] | None = None,
         limit: int = 50,
+        profile: str | None = None,
     ) -> list[dict[str, Any]]:
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
-        placeholders = ",".join("?" for _ in vids)
+        pids, _sources = _profile_context(self._conn, vids, profile)
+        if not pids:
+            return []
+        placeholders = ",".join("?" for _ in pids)
         rows = self._conn.execute(
             "SELECT cluster_id, member, size, representative FROM api_clusters"
-            f" WHERE version_id IN ({placeholders})"
+            f" WHERE profile_id IN ({placeholders})"
             " ORDER BY cluster_id, member",
-            tuple(vids),
+            tuple(pids),
         ).fetchall()
         grouped: dict[int, dict[str, Any]] = {}
         order: list[int] = []
@@ -1348,6 +1403,7 @@ class MiningReadService:
         limit: int | None = None,
         per_file_limit: int | None = None,
         dedup: bool | None = None,
+        profile: str | None = None,
     ) -> list[dict[str, Any]]:
         """Unified pattern view: patterns, evidence, feature tree, clusters."""
         if view == "health":
@@ -1357,6 +1413,7 @@ class MiningReadService:
                     version=version,
                     ecosystem=ecosystem,
                     tenant_id=tenant_id,
+                    profile=profile,
                 )
             ]
         if view == "labels":
@@ -1367,6 +1424,7 @@ class MiningReadService:
                 containing=containing,
                 limit=limit if limit is not None else 50,
                 tenant_id=tenant_id,
+                profile=profile,
             )
         if view == "snippets":
             if not pattern:
@@ -1381,6 +1439,7 @@ class MiningReadService:
                 dedup=dedup,
                 with_snippet=True,
                 tenant_id=tenant_id,
+                profile=profile,
             )
             return [
                 {
@@ -1399,6 +1458,7 @@ class MiningReadService:
                 containing=containing,
                 limit=limit if limit is not None else 50,
                 tenant_id=tenant_id,
+                profile=profile,
             )
         if view == "evidence":
             if not pattern:
@@ -1413,6 +1473,7 @@ class MiningReadService:
                 dedup=dedup,
                 with_snippet=True,
                 tenant_id=tenant_id,
+                profile=profile,
             )
         if view == "tree":
             return self.feature_tree(
@@ -1422,6 +1483,7 @@ class MiningReadService:
                 prefix=prefix,
                 limit=limit if limit is not None else 100,
                 tenant_id=tenant_id,
+                profile=profile,
             )
         if view == "clusters":
             return self.api_clusters(
@@ -1431,6 +1493,7 @@ class MiningReadService:
                 containing=containing,
                 limit=limit if limit is not None else 50,
                 tenant_id=tenant_id,
+                profile=profile,
             )
         raise ValueError(f"unsupported pattern view: {view}")
 

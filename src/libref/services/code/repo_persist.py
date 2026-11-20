@@ -152,6 +152,8 @@ def _upsert_calls(
             call.end_byte,
             call.callee,
             list(call.args),
+            source_id=getattr(call, "source_id", None),
+            sample_id=getattr(call, "sample_id", "") or "",
         )
         wanted.add(uid)
         ent_id = None
@@ -189,6 +191,12 @@ def _upsert_calls(
                 _scope_key(str(call.caller_file), call.caller),
                 call.resolve_kind,
                 caller_ent_id,
+                getattr(call, "source_id", None),
+                getattr(call, "sample_id", "") or "",
+                getattr(call, "source_role", "implementation") or "implementation",
+                getattr(call, "origin_kind", "repo_file") or "repo_file",
+                1 if getattr(call, "in_target_api", True) else 0,
+                getattr(call, "target_status", "current") or "current",
             )
         )
         needs_review = call.confidence == "AMBIGUOUS" or (
@@ -202,8 +210,10 @@ def _upsert_calls(
             " repo, caller_file, line_start, line_end, confidence,"
             " library_id, version_id, caller, receiver, func, argument_count,"
             " call_order, start_byte, end_byte, commit_sha, scope,"
-            " resolve_kind, caller_entity_id)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " resolve_kind, caller_entity_id, source_id, sample_id, source_role,"
+            " origin_kind, in_target_api, target_status)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
+            " ?, ?, ?, ?, ?, ?)"
             " ON CONFLICT(call_uid) DO UPDATE SET callee_entity_id=excluded.callee_entity_id,"
             " callee_name=excluded.callee_name, args=excluded.args,"
             " confidence=excluded.confidence, library_id=excluded.library_id,"
@@ -212,7 +222,10 @@ def _upsert_calls(
             " argument_count=excluded.argument_count, call_order=excluded.call_order,"
             " start_byte=excluded.start_byte, end_byte=excluded.end_byte,"
             " commit_sha=excluded.commit_sha, scope=excluded.scope,"
-            " resolve_kind=excluded.resolve_kind, caller_entity_id=excluded.caller_entity_id",
+            " resolve_kind=excluded.resolve_kind, caller_entity_id=excluded.caller_entity_id,"
+            " source_id=excluded.source_id, sample_id=excluded.sample_id,"
+            " source_role=excluded.source_role, origin_kind=excluded.origin_kind,"
+            " in_target_api=excluded.in_target_api, target_status=excluded.target_status",
             batch,
         )
     if review_uids:
@@ -237,15 +250,17 @@ def _upsert_calls(
     return len(resolved), set(wanted)
 
 
-def _sweep_calls(conn, version_id: int, wanted: set[str]) -> int:
-    """Delete call instances outside the surviving identity set; version-level sweep runs once."""
+def _sweep_calls(
+    conn, version_id: int, wanted: set[str], *, source_id: int | None = None
+) -> int:
+    """Delete calls outside the surviving set, scoped to one source when given."""
     keep = set(wanted)
-    existing = [
-        (int(r[0]), str(r[1]))
-        for r in conn.execute(
-            "SELECT id, call_uid FROM call_instances WHERE version_id=?", (version_id,)
-        ).fetchall()
-    ]
+    sql = "SELECT id, call_uid FROM call_instances WHERE version_id=?"
+    params: list[Any] = [version_id]
+    if source_id is not None:
+        sql += " AND source_id=?"
+        params.append(int(source_id))
+    existing = [(int(r[0]), str(r[1])) for r in conn.execute(sql, params).fetchall()]
     dead_rows = [(i, u) for i, u in existing if u not in keep]
     swept = 0
     for start in range(0, len(dead_rows), 500):
@@ -256,11 +271,15 @@ def _sweep_calls(conn, version_id: int, wanted: set[str]) -> int:
             f" AND entity_id IN ({placeholders})",
             [i for i, _ in swept_chunk],
         )
-        cur = conn.execute(
+        delete_sql = (
             "DELETE FROM call_instances WHERE version_id=?"
-            f" AND call_uid IN ({placeholders})",
-            (version_id, *[u for _, u in swept_chunk]),
+            f" AND call_uid IN ({placeholders})"
         )
+        delete_params: list[Any] = [version_id, *[u for _, u in swept_chunk]]
+        if source_id is not None:
+            delete_sql += " AND source_id=?"
+            delete_params.append(int(source_id))
+        cur = conn.execute(delete_sql, delete_params)
         swept += int(cur.rowcount or 0)
     return swept
 

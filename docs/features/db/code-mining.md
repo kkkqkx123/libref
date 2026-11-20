@@ -56,6 +56,12 @@
 | scope | TEXT | 作用域键，文件加调用者（版本 12 列，已回填） |
 | resolve_kind | TEXT NOT NULL DEFAULT \'\' | 解析来源（版本 18 列） |
 | caller_entity_id | INTEGER REFERENCES api_entities(id) ON DELETE SET NULL | 调用者实体引用（版本 18 列） |
+| source_id | INTEGER | 语料源引用（版本 26 列） |
+| sample_id | TEXT NOT NULL DEFAULT '' | 样本身份（版本 26 列） |
+| source_role | TEXT NOT NULL DEFAULT 'implementation' | 语料角色（版本 26 列） |
+| origin_kind | TEXT NOT NULL DEFAULT 'repo_file' | 来源形态（版本 26 列） |
+| in_target_api | INTEGER NOT NULL DEFAULT 0 | 是否命中目标 API（版本 26 列） |
+| target_status | TEXT NOT NULL DEFAULT 'current' | 目标版本兼容状态（版本 26 列） |
 
 索引清单如下：
 
@@ -69,6 +75,31 @@
 | idx_call_instances_scope_key | (version_id, scope) |
 | idx_call_instances_caller | caller_entity_id |
 | idx_call_instances_resolve | (version_id, resolve_kind) |
+
+### code_sources
+
+| 列 | 说明 |
+|---|---|
+| id | 行号 |
+| version_id | 目标库版本 |
+| source_key | 来源身份，按版本唯一 |
+| source_role | 语料角色，取 official_example、doc_snippet、readme、test、reference_project、implementation |
+| origin_kind | 形态，取 repo_file、html_code_block、markdown_fence、rustdoc_doctest、manual_snippet |
+| source_url / commit_sha | 来源地址与提交 |
+| selection / target_filter / limits | 选择规则、目标 API 规则、采样上限，JSON 文本 |
+| weight / enabled | 权重与启用状态 |
+
+### mining_profiles
+
+| 列 | 说明 |
+|---|---|
+| id | 行号 |
+| version_id | 目标库版本 |
+| name | 档案名，缺省 usage |
+| source_ids | 参与语料源，JSON 数组 |
+| support_mode / params / fingerprint | 支持度口径、参数与指纹 |
+
+`seq_patterns`、`feature_nodes`、`api_clusters`、`pattern_labels` 的唯一键改为档案加内容键，索引也带档案维度。
 
 ### import_edges
 

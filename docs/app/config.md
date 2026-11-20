@@ -40,6 +40,8 @@
 | ingest_clean_cache_cap | 整数（≥1） | 512 | LIBREF_INGEST_CLEAN_CACHE_CAP | 入库清洗缓存上限 |
 | ingest_batch_pages | 整数（≥1） | 200 | LIBREF_INGEST_BATCH_PAGES | 入库批处理页数 |
 | index_batch_files | 整数（≥1） | 200 | LIBREF_INDEX_BATCH_FILES | 建库批处理文件数 |
+| usage_mining_enabled | 布尔 | 开 | LIBREF_USAGE_MINING_ENABLED | 是否从源码文档注释与文档代码块抽取用法语料 |
+| doc_code_mining_enabled | 布尔 | 开 | LIBREF_DOC_CODE_MINING_ENABLED | 文档抓取时是否抽取语言标注代码块 |
 | probe_sample_limit | 整数（≥1） | 20 | LIBREF_PROBE_SAMPLE_LIMIT | 探查采样上限 |
 | probe_cache_ttl_hours | 浮点（≥0） | 1.0 | LIBREF_PROBE_CACHE_TTL_HOURS | 探查缓存有效期，小时 |
 | probe_fetch_sample_limit | 整数（≥0） | 5 | LIBREF_PROBE_FETCH_SAMPLE_LIMIT | 探查拉取标题与类型的页数，0 表示禁用 |

@@ -97,7 +97,7 @@ MCP 出口面向模型，共二十七个工具。实现在 `src/libref/mcp_serve
 
 ### pattern_insight
 
-序列与结构视角：`patterns` 模式列表，`evidence` 模式证据，`tree` 特征树，`clusters` 分组，`health` 健康，`labels` 标签，`snippets` 片段。`evidence` 要求非空 `pattern` 数组。`containing` 为必含接口数组，`prefix` 为点分前缀。`per_file_limit` 取 1 到 20。`dedup` 三态：真开关注入去重，假关闭，不给跟随配置。
+序列与结构视角：`patterns` 模式列表，`evidence` 模式证据，`tree` 特征树，`clusters` 分组，`health` 健康，`labels` 标签，`snippets` 片段。`evidence` 要求非空 `pattern` 数组。`containing` 为必含接口数组，`prefix` 为点分前缀。`per_file_limit` 取 1 到 20。`dedup` 三态：真开关注入去重，假关闭，不给跟随配置。`profile` 选择挖掘档案，缺省为 `usage`。
 
 ### symbol_insight
 
@@ -131,7 +131,7 @@ MCP 出口面向模型，共二十七个工具。实现在 `src/libref/mcp_serve
 
 ## 索引申请闭环
 
-`request_repo_index` 与 `request_docs_index` 按坐标或 HTTP(S) 地址提交申请，返回请求编号；本地路径只允许本机 CLI 直连。`index_request_status` 与 `wait_index_request` 按编号读取状态，后者有界轮询并在超时时返回当前状态而非抛错；`list_index_requests` 查看自己的申请，`review_index_request` 列表、通过或驳回待审队列。工具输出携带下一步工具名及终态后的读取工具建议。
+`request_repo_index` 与 `request_docs_index` 按坐标或 HTTP(S) 地址提交申请，返回请求编号；本地路径只允许本机 CLI 直连。仓库申请可带 `source_role` 与 `target_filter`，分别声明语料角色和目标 API 前缀或限定名。`index_request_status` 与 `wait_index_request` 按编号读取状态，后者有界轮询并在超时时返回当前状态而非抛错；`list_index_requests` 查看自己的申请，`review_index_request` 列表、通过或驳回待审队列。工具输出携带下一步工具名及终态后的读取工具建议。
 
 申请与审批需 `index:request` / `index:approve`，状态与等待工具需 `read`。持有 `ingest:write` 的申请方直接入队；无该 scope 的审批者不能审批自己的申请。
 
@@ -143,5 +143,6 @@ MCP 出口面向模型，共二十七个工具。实现在 `src/libref/mcp_serve
 * 传输与鉴权：`serve-mcp` 只走标准输入输出；组合 `serve` 的 `/mcp` 与 Web 共用 `web_host/web_port`，挂载路径取 `mcp_path`。`[auth]` 的 `auth_mode/dev_principal/allowed_hosts/allowed_origins` 决定 dev 与 enforced 行为，`bootstrap_admin_key/client_api_key` 只走环境；enforced 下只认 API Key。
 * 检索问答：`vector_backend/simvec_dir/simvec_lib/qdrant_url/vector_collection/qdrant_timeout` 决定向量是否可用；`embedding_model/embedding_dim/embedding_api_base` 决定向量语义（密钥 `embedding_api_key` 只走环境）。`rerank_model/rerank_enabled/rerank_candidate_limit/rerank_top_n/rerank_truncate` 决定精排是否启用与窗口。`rrf_k/rrf_w_fts/rrf_w_vec`、`freq_alpha/cluster_alpha`、`candidate_multiplier/assemble_multiplier/assemble_min`、`retrieval_max_versions`、`fts_w_content/fts_w_title/fts_w_url/fts_w_path`、`cluster_threshold/cluster_min_size` 决定融合与加权。`snippet_radius/snippet_cap`（前者须小于后者）、`window_preview_cap`、`retriever_window_radius/retriever_expand_window` 决定片段与窗口默认，详尽预设强制开窗口。`material_limit/answer_total_budget` 决定问答材料预算，`chat_model/chat_enabled/chat_api_base/chat_timeout/chat_enable_thinking` 决定生成（密钥 `chat_api_key` 只走环境）。
 * 发现解析：`discovery_enabled/discovery_topn/discovery_cache_ttl_days/discovery_offline`，`registry_*` 解析缓存、离线、私有、镜像、地址覆盖与有效期，令牌 `discovery_github_token` 只走环境。
+* 用法语料：`usage_mining_enabled/doc_code_mining_enabled` 控制源码文档注释与文档代码块是否进入 usage 档案。
 * 洞察：`evidence_per_file_limit/evidence_dedup` 证据默认，`induction_enabled/induction_topn/induction_batch/induction_prompt_version` 标签归纳，`cluster_threshold/cluster_min_size` 分组默认。
 * 日志：`log_level/log_file/log_format`。
