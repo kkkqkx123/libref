@@ -376,3 +376,153 @@ def test_sample_id_carries_source_namespace():
         [], {}, [call], "repo-b", sample_prefix="repo-b"
     )
     assert first[0].sample_id != second[0].sample_id
+
+
+def test_prefix_candidates_stay_out_of_default_usage(conn):
+    from libref.astminer.models import CodeSnippet
+
+    snippets = [
+        CodeSnippet(sample_id=f"example-{index}.c", language="c", code=code)
+        for index, code in enumerate(
+            (
+                "void use_a(void) { rte_alpha(); rte_beta(); }\n",
+                "void use_b(void) { rte_alpha(); rte_beta(); }\n",
+            )
+        )
+    ]
+    ingest_snippets(
+        conn,
+        "demo",
+        "0.1",
+        snippets,
+        source_key="examples:prefix",
+        source_role="official_example",
+        target_filter={"prefixes": ["rte_"], "require_resolved_targets": True},
+    )
+    rows = conn.execute(
+        "SELECT callee_name, target_status FROM call_instances"
+        " WHERE source_role='official_example'"
+    ).fetchall()
+    assert rows
+    assert all(status == "prefix_candidate" for _name, status in rows)
+    assert mine_patterns(conn, "demo", "0.1", minsup=2) == []
+    included = mine_patterns(conn, "demo", "0.1", minsup=2, include_ambiguous=True)
+    assert ["rte_alpha", "rte_beta"] in [item["pattern"] for item in included]
+
+
+def test_unconfirmed_reference_version_excluded_unless_reviewed(conn):
+    from libref.astminer.models import CodeSnippet
+
+    snippets = [
+        CodeSnippet(sample_id=f"ref-{index}.c", language="c", code=code)
+        for index, code in enumerate(
+            (
+                "void use_a(void) { rte_alpha(); rte_beta(); }\n",
+                "void use_b(void) { rte_alpha(); rte_beta(); }\n",
+            )
+        )
+    ]
+    ingest_snippets(
+        conn,
+        "demo",
+        "0.1",
+        snippets,
+        source_key="reference:mismatch",
+        source_role="reference_project",
+        target_filter={
+            "prefixes": ["rte_"],
+            "declared_library_version": "0.2",
+            "version_required": True,
+        },
+    )
+    rows = conn.execute(
+        "SELECT callee_name, target_status FROM call_instances"
+        " WHERE source_role='reference_project' AND in_target_api=1"
+    ).fetchall()
+    assert rows
+    assert all(status == "version_unconfirmed" for _name, status in rows)
+    assert mine_patterns(conn, "demo", "0.1", minsup=2, include_ambiguous=True) == []
+    reviewed = mine_patterns(
+        conn,
+        "demo",
+        "0.1",
+        minsup=2,
+        include_ambiguous=True,
+        include_unconfirmed=True,
+    )
+    assert ["rte_alpha", "rte_beta"] in [item["pattern"] for item in reviewed]
+
+
+def test_profile_fingerprint_tracks_selection_rules(conn):
+    from libref.services.code.usage_sources import (
+        ensure_profile,
+        profile_fingerprint,
+        register_source,
+    )
+    from libref.services.registry.libraries import LibraryService
+
+    _library_id, version_id = LibraryService(conn).ensure_library_version("demo", "0.1")
+    source = register_source(
+        conn,
+        version_id=version_id,
+        source_key="examples:ruled",
+        source_role="official_example",
+        selection={"only_files": ["examples/a.c"]},
+    )
+    ensure_profile(
+        conn,
+        version_id=version_id,
+        name="ruled",
+        source_ids=[source],
+        params={"source_roles": ["official_example"]},
+    )
+    before = profile_fingerprint(
+        conn, [source], params={"source_roles": ["official_example"]}
+    )
+    register_source(
+        conn,
+        version_id=version_id,
+        source_key="examples:ruled",
+        source_role="official_example",
+        selection={"only_files": ["examples/b.c"]},
+    )
+    after = profile_fingerprint(
+        conn, [source], params={"source_roles": ["official_example"]}
+    )
+    assert before != after
+    assert (
+        profile_fingerprint(conn, [source], params={"source_roles": ["test"]}) != before
+    )
+
+
+def test_usage_source_resolves_against_persisted_target_declarations(conn, tmp_path):
+    from libref.astminer.models import CodeSnippet
+
+    repo = copy_mini_repo(tmp_path)
+    index_repo(conn, "demo", "0.1", str(repo), repos_dir=tmp_path / "repos")
+    ingest_snippets(
+        conn,
+        "demo",
+        "0.1",
+        [
+            CodeSnippet(
+                sample_id="external-example.py",
+                language="python",
+                code="d.helper()\n",
+            )
+        ],
+        source_key="examples:external",
+        source_role="official_example",
+        target_filter={
+            "prefixes": ["d."],
+            "require_resolved_targets": True,
+        },
+    )
+    row = conn.execute(
+        "SELECT callee_name, resolve_kind, target_status FROM call_instances"
+        " WHERE source_role='official_example' LIMIT 1"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "d.helper"
+    assert row[1] != "unresolved"
+    assert row[2] == "resolved_target"

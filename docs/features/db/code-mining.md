@@ -61,7 +61,7 @@
 | source_role | TEXT NOT NULL DEFAULT 'implementation' | 语料角色（版本 26 列） |
 | origin_kind | TEXT NOT NULL DEFAULT 'repo_file' | 来源形态（版本 26 列） |
 | in_target_api | INTEGER NOT NULL DEFAULT 0 | 是否命中目标 API（版本 26 列） |
-| target_status | TEXT NOT NULL DEFAULT 'current' | 目标版本兼容状态（版本 26 列） |
+| target_status | TEXT NOT NULL DEFAULT 'current' | 目标命中状态：resolved_target、prefix_candidate、version_unconfirmed、not_target（版本 26 列） |
 | relation_kind | TEXT NOT NULL DEFAULT 'direct' | 调用形态，与解析来源独立（版本 27 列） |
 
 索引清单如下：
@@ -88,7 +88,7 @@
 | source_role | 语料角色，取 official_example、doc_snippet、readme、test、reference_project、implementation |
 | origin_kind | 形态，取 repo_file、html_code_block、markdown_fence、rustdoc_doctest、manual_snippet |
 | source_url / commit_sha | 来源地址与提交 |
-| selection / target_filter / limits | 选择规则、目标 API 规则、采样上限，JSON 文本 |
+| selection / target_filter / limits | 选择规则、目标 API 规则、采样上限，JSON 文本；target_filter 可声明 declared_library_version、version_required、require_resolved_targets |
 | weight / enabled | 权重与启用状态 |
 
 ### mining_profiles

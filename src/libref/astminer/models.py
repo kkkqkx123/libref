@@ -8,6 +8,11 @@ from pydantic import BaseModel, Field
 
 Confidence = Literal["EXTRACTED", "INFERRED", "AMBIGUOUS"]
 
+TARGET_STATUS_RESOLVED = "resolved_target"
+TARGET_STATUS_PREFIX = "prefix_candidate"
+TARGET_STATUS_UNCONFIRMED = "version_unconfirmed"
+TARGET_STATUS_EXTERNAL = "not_target"
+
 ResolveKind = Literal[
     "alias-direct",
     "alias-external",
@@ -104,5 +109,5 @@ class CallInstanceRecord(BaseModel):
     source_role: str = "implementation"
     origin_kind: str = "repo_file"
     in_target_api: bool = False
-    target_status: str = "current"
+    target_status: str = TARGET_STATUS_RESOLVED
     relation_kind: str = "direct"

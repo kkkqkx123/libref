@@ -1,0 +1,93 @@
+{
+  "library": "demo",
+  "version": "0.1",
+  "implementation": {
+    "kind": "symbol-repo",
+    "pattern_view": "implementation"
+  },
+  "usage_sources": [
+    {
+      "key": "usage:official:basic",
+      "role": "official_example",
+      "origin_kind": "repo_file",
+      "source_url": "https://example.org/demo/examples",
+      "commit_sha": "official-1",
+      "selection": {"path": "examples/basic"},
+      "target_filter": {"prefixes": ["pkg.core.Service."]},
+      "samples": [
+        {
+          "id": "basic-one.py",
+          "language": "python",
+          "code": "pkg.core.Service.create('a')\npkg.core.Service.run('a')\n"
+        },
+        {
+          "id": "basic-two.py",
+          "language": "python",
+          "code": "pkg.core.Service.create('b')\npkg.core.Service.run('b')\n"
+        }
+      ]
+    },
+    {
+      "key": "usage:doc:quickstart",
+      "role": "doc_snippet",
+      "origin_kind": "markdown_fence",
+      "source_url": "https://example.org/demo/docs/quickstart",
+      "commit_sha": "",
+      "selection": {"heading": "Quickstart", "fence": 1},
+      "target_filter": {"prefixes": ["pkg.core.Service."]},
+      "samples": [
+        {
+          "id": "quickstart#1",
+          "language": "python",
+          "code": "pkg.core.Service.create('doc')\npkg.core.Service.run('doc')\n",
+          "origin_location": "https://example.org/demo/docs/quickstart",
+          "origin_start_line": 12
+        }
+      ]
+    },
+    {
+      "key": "usage:reference:transport",
+      "role": "reference_project",
+      "origin_kind": "repo_file",
+      "source_url": "https://example.org/mtl",
+      "commit_sha": "mtl-1",
+      "selection": {"path": "src/transport"},
+      "target_filter": {
+        "prefixes": ["rte_"],
+        "declared_library_version": "0.1",
+        "version_required": true
+      },
+      "samples": [
+        {
+          "id": "transport-a.c",
+          "language": "c",
+          "code": "void send_a(void) { rte_eth_rx_burst(0, 0, 0, 32); rte_eth_tx_burst(0, 0, 0, 32); }\n"
+        },
+        {
+          "id": "transport-b.c",
+          "language": "c",
+          "code": "void send_b(void) { rte_eth_rx_burst(1, 0, 0, 32); rte_eth_tx_burst(1, 0, 0, 32); }\n"
+        }
+      ]
+    }
+  ],
+  "extra_targets": [
+    {"name": "rte_eth_rx_burst", "kind": "function"},
+    {"name": "rte_eth_tx_burst", "kind": "function"}
+  ],
+  "profiles": [
+    {"name": "usage", "source_roles": null},
+    {"name": "usage-official", "source_roles": ["official_example"]},
+    {"name": "usage-reference", "source_roles": ["reference_project"]}
+  ],
+  "expect": {
+    "implementation_only": ["pkg.factory.make_service"],
+    "usage_excludes": ["pkg.factory.make_service"],
+    "official_excludes": ["rte_eth_rx_burst"],
+    "reference_excludes": ["pkg.core.Service.create"],
+    "usage_includes": ["rte_eth_rx_burst", "rte_eth_tx_burst"],
+    "evidence_roles": ["official_example", "doc_snippet", "reference_project"],
+    "health_keys": ["relations", "macro_coverage"],
+    "label_profile": true
+  }
+}

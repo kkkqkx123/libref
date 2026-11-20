@@ -1,0 +1,66 @@
+{
+  "target": {
+    "name": "dpdk",
+    "url": "https://github.com/DPDK/dpdk.git",
+    "tag": "v23.11",
+    "note": "目标库 API 定义与官方 examples 来源",
+    "declared_target_version": "23.11",
+    "version_evidence": "repos.json:target.tag"
+  },
+  "reference": {
+    "name": "mtl",
+    "url": "https://github.com/OpenVisualCloud/Media-Transport-Library.git",
+    "tag": "v23.12",
+    "note": "消费 DPDK 的参考项目，固定提交以限定场景偏置",
+    "declared_target_version": "23.07",
+    "version_evidence": "CHANGELOG.md:6 (dpdk: upgrade dpdk version to 23.07)"
+  },
+  "corpora": {
+    "implementation": {
+      "repo": "target",
+      "role": "implementation",
+      "subdir": "lib",
+      "max_file_bytes": 5000000,
+      "baseline_only_files": [
+        "lib/ethdev/ethdev_driver.c",
+        "lib/ethdev/rte_ethdev.h"
+      ],
+      "target_filter": {
+        "prefixes": ["rte_", "RTE_"],
+        "require_resolved_targets": true
+      }
+    },
+    "official_example": {
+      "repo": "target",
+      "role": "official_example",
+      "subdir": "examples",
+      "max_file_bytes": 5000000,
+      "baseline_only_files": [
+        "examples/l2fwd-event/main.c",
+        "examples/flow_filtering/main.c",
+        "examples/timer/main.c"
+      ],
+      "target_filter": {
+        "prefixes": ["rte_", "RTE_"],
+        "require_resolved_targets": true
+      }
+    },
+    "reference_project": {
+      "repo": "reference",
+      "role": "reference_project",
+      "max_file_bytes": 5000000,
+      "baseline_only_files": [
+        "lib/src/mt_main.c",
+        "lib/src/dev/mt_dev.c",
+        "lib/src/datapath/mt_queue.c"
+      ],
+      "target_filter": {
+        "prefixes": ["rte_", "RTE_"],
+        "require_resolved_targets": true,
+        "declared_library_version": "23.07",
+        "version_required": true,
+        "version_evidence": "CHANGELOG.md:6 (dpdk: upgrade dpdk version to 23.07)"
+      }
+    }
+  }
+}

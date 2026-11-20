@@ -7,6 +7,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -95,6 +96,7 @@ async def index_repo_async(
     only_files: list[str] | None = None,
     exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
+    max_file_bytes: int = 1_000_000,
     heartbeat=None,
     tenant_id: str = "default",
     source_role: str = "implementation",
@@ -130,6 +132,7 @@ async def index_repo_async(
             only_files=only_files,
             exclude_patterns=exclude_patterns,
             max_files=max_files,
+            max_file_bytes=max_file_bytes,
             heartbeat=heartbeat,
             tenant_id=tenant_id,
             source_role=source_role,
@@ -158,6 +161,7 @@ async def _index_repo_inner(
     only_files: list[str] | None = None,
     exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
+    max_file_bytes: int = 1_000_000,
     heartbeat=None,
     tenant_id: str = "default",
     source_role: str = "implementation",
@@ -203,7 +207,11 @@ async def _index_repo_inner(
             resolved_from = cached_origin
     if resolved_from is None:
         resolved_from = "explicit"
-    from libref.services.code.usage_sources import register_source, update_source_commit
+    from libref.services.code.usage_sources import (
+        register_source,
+        source_target_status,
+        update_source_commit,
+    )
 
     catalog = LibraryService(conn)
     library_id, version_id = catalog.ensure_library_version(
@@ -224,8 +232,8 @@ async def _index_repo_inner(
     source_fingerprint = _hashlib.sha1(
         (
             f"{source}\0{subdir or ''}\0{','.join(only_files or [])}"
-            f"\0{','.join(exclude_patterns or [])}\0{target_text}"
-            f"\0{origin_kind}"
+            f"\0{','.join(exclude_patterns or [])}\0{max_file_bytes}"
+            f"\0{target_text}\0{origin_kind}"
         ).encode()
     ).hexdigest()[:12]
     source_id = register_source(
@@ -239,6 +247,7 @@ async def _index_repo_inner(
             "subdir": subdir,
             "only_files": only_files or [],
             "exclude_patterns": exclude_patterns or [],
+            "max_file_bytes": int(max_file_bytes),
         },
         target_filter=target_filter or {},
         tenant_id=tenant_id,
@@ -335,6 +344,7 @@ async def _index_repo_inner(
         ast_config.all_suffixes(),
         subdir=subdir,
         exclude_patterns=exclude_patterns,
+        max_file_bytes=max_file_bytes,
     )
     files = list(census["files"])
     if only_files:
@@ -374,9 +384,15 @@ async def _index_repo_inner(
             )
     batch_size = max(1, int(getattr(settings, "index_batch_files", 200) or 200))
     done, fingerprint = resume_offset(conn, version_id, CODE_KIND, files, fresh=fresh)
-    counts = {"resumed_skipped": done, "batches": 0, "vector_failed": 0}
+    counts: dict[str, Any] = {
+        "resumed_skipped": done,
+        "batches": 0,
+        "vector_failed": 0,
+    }
     counts["files_truncated"] = 0
     counts["skipped_oversize"] = int(census.get("oversized", 0))
+    counts["census_files"] = len(files) + int(census.get("oversized", 0))
+    counts["skipped_paths"] = list(census.get("skipped_paths") or [])
     if counts["skipped_oversize"]:
         import logging as _logging
 
@@ -419,6 +435,11 @@ async def _index_repo_inner(
     counts["entities"] = n_entities
     counts["swept_entities"] = swept_entities
     conn.commit()
+    resolution_decls = all_decls
+    if not persist_definitions:
+        from libref.services.code.usage_ingest import target_declarations
+
+        resolution_decls = all_decls + target_declarations(conn, version_id)
     remaining = files[done:]
     target_names = {
         str(r[0])
@@ -428,9 +449,22 @@ async def _index_repo_inner(
         ).fetchall()
     }
     filt = target_filter or {}
+    source_status = source_target_status(
+        source_role,
+        filt.get("declared_library_version"),
+        version,
+        version_required=bool(filt.get("version_required")),
+    )
     explicit_names = {str(v) for v in filt.get("names", []) if str(v).strip()}
     target_prefixes = tuple(str(v) for v in filt.get("prefixes", []) if str(v).strip())
-    effective_names = explicit_names or target_names
+    if explicit_names:
+        effective_names = explicit_names
+    elif target_prefixes:
+        effective_names = {
+            name for name in target_names if name.startswith(target_prefixes)
+        }
+    else:
+        effective_names = target_names
     wanted_calls: set[str] = set()
     if done > 0:
         # Resume skips the done files, so their call identities must seed the
@@ -453,7 +487,7 @@ async def _index_repo_inner(
         batch_aliases = {rel: file_aliases.get(rel, []) for rel in batch_files}
         batch_raw = _load_raw_batch(conn, repo_name, root, batch_files)
         resolved = ast_resolution.resolve_calls(
-            all_decls,
+            resolution_decls,
             batch_aliases,
             batch_raw,
             repo_name,
@@ -464,6 +498,8 @@ async def _index_repo_inner(
             origin_kind=origin_kind,
             target_names=effective_names,
             target_prefixes=target_prefixes,
+            source_target_status=source_status,
+            strict_target_status=bool(filt.get("require_resolved_targets")),
             stdlib_filter_enabled=bool(
                 getattr(settings, "stdlib_filter_enabled", True)
             ),
@@ -571,6 +607,7 @@ def index_repo(
     only_files: list[str] | None = None,
     exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
+    max_file_bytes: int = 1_000_000,
     heartbeat=None,
     tenant_id: str = "default",
     source_role: str = "implementation",
@@ -597,6 +634,7 @@ def index_repo(
             only_files=only_files,
             exclude_patterns=exclude_patterns,
             max_files=max_files,
+            max_file_bytes=max_file_bytes,
             heartbeat=heartbeat,
             tenant_id=tenant_id,
             source_role=source_role,
@@ -622,6 +660,7 @@ def index_repo_by_name(
     only_files: list[str] | None = None,
     exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
+    max_file_bytes: int = 1_000_000,
     heartbeat=None,
     tenant_id: str = "default",
     source_role: str = "implementation",
@@ -644,6 +683,7 @@ def index_repo_by_name(
             only_files=only_files,
             exclude_patterns=exclude_patterns,
             max_files=max_files,
+            max_file_bytes=max_file_bytes,
             heartbeat=heartbeat,
             tenant_id=tenant_id,
             source_role=source_role,
@@ -669,6 +709,7 @@ async def index_repo_by_name_async(
     only_files: list[str] | None = None,
     exclude_patterns: list[str] | None = None,
     max_files: int | None = None,
+    max_file_bytes: int = 1_000_000,
     heartbeat=None,
     tenant_id: str = "default",
     source_role: str = "implementation",
@@ -713,6 +754,7 @@ async def index_repo_by_name_async(
             only_files=only_files,
             exclude_patterns=exclude_patterns,
             max_files=max_files,
+            max_file_bytes=max_file_bytes,
             heartbeat=heartbeat,
             tenant_id=tenant_id,
             source_role=source_role,
@@ -758,6 +800,7 @@ async def index_repo_by_name_async(
         only_files=only_files,
         exclude_patterns=exclude_patterns,
         max_files=max_files,
+        max_file_bytes=max_file_bytes,
         heartbeat=heartbeat,
         tenant_id=tenant_id,
         source_role=source_role,

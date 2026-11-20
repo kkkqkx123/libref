@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-11-20T05:56:11+00:00",
+  "repos": {
+    "target": {
+      "name": "dpdk",
+      "url": "https://github.com/DPDK/dpdk.git",
+      "tag": "v23.11",
+      "note": "目标库 API 定义与官方 examples 来源",
+      "commit": "d15625009dced269fcec27fc81dd74fd58d54cdb",
+      "path": "tests/e2e/repos/usage/dpdk/v23.11"
+    },
+    "reference": {
+      "name": "mtl",
+      "url": "https://github.com/OpenVisualCloud/Media-Transport-Library.git",
+      "tag": "v23.12",
+      "note": "消费 DPDK 的参考项目，固定提交以限定场景偏置",
+      "commit": "f20b60a982e2c38e61108c4123ee7cb5a385da16",
+      "path": "tests/e2e/repos/usage/mtl/v23.12"
+    }
+  }
+}

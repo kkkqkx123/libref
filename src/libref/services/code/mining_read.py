@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlsplit
 
+from libref.astminer.models import TARGET_STATUS_PREFIX
+from libref.services.code.usage_sources import profile_source_context
 from libref.services.registry.libraries import mining_version_ids
 from libref.text.snippet import call_tag, gap_tag, unit_tag
 
@@ -24,21 +27,26 @@ def _profile_context(
     ).fetchall()
     ids = [int(r[0]) for r in rows]
     sources: set[int] = set()
-    details: dict[int, dict[str, str]] = {}
+    details: dict[int, dict[str, Any]] = {}
     for row in rows:
+        raw = row[2]
+        if not raw:
+            members: list[int] = []
+        else:
+            try:
+                values = json.loads(str(raw))
+            except ValueError:
+                values = []
+            members = [int(v) for v in values] if isinstance(values, list) else []
+        sources.update(members)
+        context = profile_source_context(conn, members)
         details[int(row[0])] = {
             "name": str(row[1]),
             "fingerprint": str(row[3] or ""),
+            "source_ids": members,
+            "source_roles": context["roles"],
+            "source_hint": context["hint"],
         }
-        raw = row[2]
-        if not raw:
-            continue
-        try:
-            values = json.loads(str(raw))
-        except ValueError:
-            values = []
-        if isinstance(values, list):
-            sources.update(int(v) for v in values)
     return ids, sources, details
 
 
@@ -51,7 +59,8 @@ def _source_labels(conn, source_ids: set[int]) -> dict[int, dict[str, Any]]:
     marks = ",".join("?" for _ in source_ids)
     try:
         rows = conn.execute(
-            "SELECT id, source_key, source_role, origin_kind, source_url, selection"
+            "SELECT id, source_key, source_role, origin_kind, source_url, selection,"
+            " commit_sha, target_filter"
             f" FROM code_sources WHERE id IN ({marks})",
             tuple(sorted(source_ids)),
         ).fetchall()
@@ -69,8 +78,56 @@ def _source_labels(conn, source_ids: set[int]) -> dict[int, dict[str, Any]]:
             "origin_kind": str(row[3]),
             "source_url": str(row[4] or ""),
             "heading": str((selection or {}).get("heading") or ""),
+            "commit_sha": str(row[6] or ""),
+            "declared_target_version": str(_load_target_version(row[7])),
         }
     return out
+
+
+def _load_target_version(raw: Any) -> str:
+    if not raw:
+        return ""
+    try:
+        value = json.loads(str(raw))
+    except ValueError:
+        return ""
+    if not isinstance(value, dict):
+        return ""
+    return str(value.get("declared_library_version") or "")
+
+
+def _canonical_url(
+    source_url: str, commit_sha: str, path: str, line_start: int, line_end: int
+) -> str:
+    """Build a commit-pinned URL for GitHub-style repository sources."""
+    if not source_url.startswith(("http://", "https://")) or not commit_sha:
+        return ""
+    parts = urlsplit(source_url)
+    segments = [part for part in parts.path.split("/") if part]
+    if len(segments) < 2:
+        return ""
+    segments[1] = segments[1].removesuffix(".git")
+    rel = str(path or "").strip().lstrip("./")
+    if not rel:
+        return ""
+    suffix = f"#L{int(line_start)}-L{int(line_end)}" if line_start else ""
+    return (
+        f"{parts.scheme}://{parts.netloc}/{'/'.join(segments[:2])}/blob/"
+        f"{commit_sha}/{rel}{suffix}"
+    )
+
+
+def _source_scope_sql(
+    source_ids: list[int] | tuple[int, ...] | set[int] | None,
+) -> tuple[str, list[int]]:
+    """Build a source predicate; an empty profile scope matches no calls."""
+    if source_ids is None:
+        return "", []
+    ids = sorted({int(value) for value in source_ids})
+    if not ids:
+        return " AND 1=0", []
+    marks = ",".join("?" for _ in ids)
+    return f" AND source_id IN ({marks})", ids
 
 
 def _scope_of(table: str) -> str:
@@ -135,6 +192,7 @@ def _render_evidence(
             "lines": f"{call.get('line_start')}-{call.get('line_end')}",
             "confidence": str(call.get("confidence") or ""),
             "resolve": str(call.get("resolve_kind") or ""),
+            "target": str(call.get("target_status") or ""),
             "hit": "true" if idx in set(matched) else "false",
         }
         sig = str(call.get("callee_signature") or "").strip()
@@ -153,6 +211,8 @@ def _render_evidence(
         "sample": str(group.get("sample_id") or ""),
         "profile": str(group.get("profile") or ""),
         "profile_fingerprint": str(group.get("profile_fingerprint") or ""),
+        "canonical_url": str(group.get("canonical_url") or ""),
+        "source_hint": str(group.get("source_hint") or ""),
     }
     return unit_tag(head, inner)
 
@@ -214,7 +274,14 @@ def _call_filter_sql(
     """Shared call filter with review semantics; empty inputs keep history."""
     parts: list[str] = ["(rs.status IS NULL OR rs.status != 'conflict')"]
     params: list[Any] = []
+    parts.append(
+        f"COALESCE({alias}.target_status,'resolved_target') != 'version_unconfirmed'"
+    )
     if not include_ambiguous:
+        parts.append(
+            f"(COALESCE({alias}.target_status,'resolved_target') !='prefix_candidate'"
+            " OR rs.status='approved')"
+        )
         parts.append(f"({alias}.confidence != 'AMBIGUOUS' OR rs.status='approved')")
         # Stdlib/builtin references are certain externals (INFERRED), so the
         # exclusion that once rode on AMBIGUOUS now rides on the source column.
@@ -537,6 +604,7 @@ class MiningReadService:
         tenant_id: str | None = None,
         limit: int = 5,
         include_ambiguous: bool = False,
+        include_unconfirmed: bool = False,
         per_file_limit: int | None = None,
         dedup: bool | None = None,
         with_snippet: bool = True,
@@ -554,14 +622,22 @@ class MiningReadService:
         source_marks = ",".join("?" for _ in sources)
         source_params = list(sources)
         base_filter = "(rs.status IS NULL OR rs.status != 'conflict')"
-        if include_ambiguous:
+        if include_unconfirmed:
             conf = f"AND {base_filter}"
+        elif include_ambiguous:
+            conf = (
+                f"AND {base_filter} "
+                "AND COALESCE(ci.target_status,'resolved_target')"
+                " != 'version_unconfirmed'"
+            )
         else:
             conf = (
                 f"AND {base_filter} "
                 "AND (ci.confidence != 'AMBIGUOUS' OR rs.status='approved')"
                 " AND (COALESCE(ci.resolve_kind,'') NOT IN ('stdlib','builtin')"
                 " OR rs.status='approved')"
+                " AND COALESCE(ci.target_status,'resolved_target')"
+                " NOT IN ('prefix_candidate', 'version_unconfirmed')"
             )
         # Scopes missing any member can never contain the pattern as a subsequence,
         # so only those scopes are loaded in the second phase.
@@ -588,7 +664,8 @@ class MiningReadService:
             "SELECT ci.version_id, l.name, v.version, ci.caller_file, ci.caller,"
             " ci.callee_name, ci.args, ci.line_start, ci.line_end, ci.confidence,"
             " ci.call_order, ci.start_byte, ci.id, ci.resolve_kind,"
-            " ci.source_id, ci.sample_id, ci.source_role, ci.origin_kind"
+            " ci.source_id, ci.sample_id, ci.source_role, ci.origin_kind,"
+            " ci.target_status"
             " FROM call_instances ci LEFT JOIN review_status rs "
             "ON rs.entity_type='call_instance' AND rs.entity_id=ci.id"
             " JOIN versions v ON v.id = ci.version_id"
@@ -621,6 +698,7 @@ class MiningReadService:
             sample_id,
             source_role,
             origin_kind,
+            target_status,
         ) in rows:
             key = (vid, path, caller or "")
             slot = groups.get(key)
@@ -642,6 +720,15 @@ class MiningReadService:
                     "profile_fingerprint": str(
                         _profiles.get(profile_id, {}).get("fingerprint") or ""
                     ),
+                    "source_hint": str(
+                        _profiles.get(profile_id, {}).get("source_hint") or ""
+                    ),
+                    "declared_target_version": str(
+                        label.get("declared_target_version") or ""
+                    ),
+                    "source_commit": str(label.get("commit_sha") or ""),
+                    "canonical_url": "",
+                    "target_status_counts": {},
                     "calls": [],
                 }
                 groups[key] = slot
@@ -658,6 +745,7 @@ class MiningReadService:
                     "line_end": le,
                     "confidence": cf,
                     "resolve_kind": rk,
+                    "target_status": str(target_status or ""),
                 }
             )
         self._attach_signatures(list(groups.values()), vids)
@@ -669,6 +757,19 @@ class MiningReadService:
             if not matched:
                 continue
             groups[key]["matched"] = matched
+            lines = [int(call["line_start"]) for call in calls if call["line_start"]]
+            ends = [int(call["line_end"]) for call in calls if call["line_end"]]
+            groups[key]["canonical_url"] = _canonical_url(
+                str(groups[key].get("source_url") or ""),
+                str(groups[key].get("source_commit") or ""),
+                str(groups[key].get("caller_file") or ""),
+                min(lines) if lines else 0,
+                max(ends) if ends else 0,
+            )
+            groups[key]["target_status_counts"] = {
+                status: sum(1 for call in calls if call["target_status"] == status)
+                for status in sorted({call["target_status"] for call in calls})
+            }
             groups[key]["rendered"] = _render_evidence(groups[key], calls, matched)
             out.append(groups[key])
         from libref.config import setting_or_default
@@ -723,16 +824,39 @@ class MiningReadService:
             profile=profile,
         )
         health = reuse_diversity(patterns, clusters)
+        _pids, sources, _profiles = _profile_context(self._conn, vids, profile)
+        scope = sorted(sources)
         health["resolve_kinds"] = self.resolve_distribution(
-            library, version, ecosystem, tenant_id=tenant_id
+            library, version, ecosystem, tenant_id=tenant_id, source_ids=scope
         )
         health["confidence"] = self.confidence_distribution(
-            library, version, ecosystem, tenant_id=tenant_id
+            library, version, ecosystem, tenant_id=tenant_id, source_ids=scope
         )
         health.update(
-            self.quality_rates(library, version, ecosystem, tenant_id=tenant_id)
+            self.quality_rates(
+                library, version, ecosystem, tenant_id=tenant_id, source_ids=scope
+            )
         )
-        _pids, sources, _profiles = _profile_context(self._conn, vids, profile)
+        if scope:
+            marks = ",".join("?" for _ in scope)
+            rows = self._conn.execute(
+                "SELECT COALESCE(target_status,'resolved_target'), count(*)"
+                " FROM call_instances WHERE version_id IN ("
+                + ",".join("?" for _ in vids)
+                + f") AND source_id IN ({marks}) AND in_target_api=1"
+                " GROUP BY 1 ORDER BY 1",
+                (*vids, *scope),
+            ).fetchall()
+            health["target_status"] = {str(k): int(v) for k, v in rows}
+            total = sum(health["target_status"].values())
+            health["prefix_candidate_rate"] = (
+                round(health["target_status"].get(TARGET_STATUS_PREFIX, 0) / total, 4)
+                if total
+                else 0.0
+            )
+        else:
+            health["target_status"] = {}
+            health["prefix_candidate_rate"] = 0.0
         if sources:
             marks = ",".join("?" for _ in sources)
             rows = self._conn.execute(
@@ -759,20 +883,19 @@ class MiningReadService:
         version: str | None = None,
         ecosystem: str | None = None,
         tenant_id: str | None = None,
+        source_ids: list[int] | tuple[int, ...] | set[int] | None = None,
     ) -> dict[str, int]:
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return {}
         placeholders = ",".join("?" for _ in vids)
-        try:
-            rows = self._conn.execute(
-                "SELECT resolve_kind, count(*) FROM call_instances"
-                f" WHERE version_id IN ({placeholders}) GROUP BY resolve_kind"
-                " ORDER BY resolve_kind",
-                tuple(vids),
-            ).fetchall()
-        except Exception:  # noqa: BLE001
-            return {}
+        scope_sql, scope_params = _source_scope_sql(source_ids)
+        rows = self._conn.execute(
+            "SELECT resolve_kind, count(*) FROM call_instances"
+            f" WHERE version_id IN ({placeholders}){scope_sql}"
+            " GROUP BY resolve_kind ORDER BY resolve_kind",
+            (*vids, *scope_params),
+        ).fetchall()
         return {str(k or ""): int(c) for k, c in rows}
 
     def confidence_distribution(
@@ -781,20 +904,19 @@ class MiningReadService:
         version: str | None = None,
         ecosystem: str | None = None,
         tenant_id: str | None = None,
+        source_ids: list[int] | tuple[int, ...] | set[int] | None = None,
     ) -> dict[str, int]:
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return {}
         placeholders = ",".join("?" for _ in vids)
-        try:
-            rows = self._conn.execute(
-                "SELECT confidence, count(*) FROM call_instances"
-                f" WHERE version_id IN ({placeholders}) GROUP BY confidence"
-                " ORDER BY confidence",
-                tuple(vids),
-            ).fetchall()
-        except Exception:  # noqa: BLE001
-            return {}
+        scope_sql, scope_params = _source_scope_sql(source_ids)
+        rows = self._conn.execute(
+            "SELECT confidence, count(*) FROM call_instances"
+            f" WHERE version_id IN ({placeholders}){scope_sql}"
+            " GROUP BY confidence ORDER BY confidence",
+            (*vids, *scope_params),
+        ).fetchall()
         return {str(k or ""): int(c) for k, c in rows}
 
     def quality_rates(
@@ -803,6 +925,7 @@ class MiningReadService:
         version: str | None = None,
         ecosystem: str | None = None,
         tenant_id: str | None = None,
+        source_ids: list[int] | tuple[int, ...] | set[int] | None = None,
     ) -> dict[str, Any]:
         """Quality face: unresolved share, caller linkage, missing signatures."""
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
@@ -813,44 +936,55 @@ class MiningReadService:
                 "signature_missing_rate": 0.0,
             }
         placeholders = ",".join("?" for _ in vids)
-        try:
-            total = self._conn.execute(
+        scope_sql, scope_params = _source_scope_sql(source_ids)
+        params = (*vids, *scope_params)
+        total_n = int(
+            self._conn.execute(
                 "SELECT count(*) FROM call_instances"
-                f" WHERE version_id IN ({placeholders})",
-                tuple(vids),
-            ).fetchone()
-            total_n = int(total[0]) if total else 0
-            unresolved = self._conn.execute(
+                f" WHERE version_id IN ({placeholders}){scope_sql}",
+                params,
+            ).fetchone()[0]
+        )
+        unresolved_n = int(
+            self._conn.execute(
                 "SELECT count(*) FROM call_instances"
-                f" WHERE version_id IN ({placeholders}) AND resolve_kind='unresolved'",
-                tuple(vids),
-            ).fetchone()
-            unresolved_n = int(unresolved[0]) if unresolved else 0
-            linked = self._conn.execute(
+                f" WHERE version_id IN ({placeholders}){scope_sql}"
+                " AND resolve_kind='unresolved'",
+                params,
+            ).fetchone()[0]
+        )
+        linked_n = int(
+            self._conn.execute(
                 "SELECT count(*) FROM call_instances"
-                f" WHERE version_id IN ({placeholders}) AND caller_entity_id IS NOT NULL",
-                tuple(vids),
-            ).fetchone()
-            linked_n = int(linked[0]) if linked else 0
-            sym_total = self._conn.execute(
-                "SELECT count(*) FROM api_entities"
-                f" WHERE version_id IN ({placeholders})",
-                tuple(vids),
-            ).fetchone()
-            sym_n = int(sym_total[0]) if sym_total else 0
-            sym_missing = self._conn.execute(
-                "SELECT count(*) FROM api_entities"
-                f" WHERE version_id IN ({placeholders})"
-                " AND (signature IS NULL OR signature='')",
-                tuple(vids),
-            ).fetchone()
-            missing_n = int(sym_missing[0]) if sym_missing else 0
-        except Exception:  # noqa: BLE001
-            return {
-                "unresolved_rate": 0.0,
-                "caller_link_rate": 0.0,
-                "signature_missing_rate": 0.0,
-            }
+                f" WHERE version_id IN ({placeholders}){scope_sql}"
+                " AND caller_entity_id IS NOT NULL",
+                params,
+            ).fetchone()[0]
+        )
+        entity_exists = (
+            "EXISTS (SELECT 1 FROM api_entities ae WHERE ae.version_id=ci.version_id"
+            " AND ae.qualified_name=ci.callee_name)"
+        )
+        signature_missing = (
+            "NOT EXISTS (SELECT 1 FROM api_entities ae WHERE ae.version_id=ci.version_id"
+            " AND ae.qualified_name=ci.callee_name"
+            " AND ae.signature IS NOT NULL AND ae.signature != '')"
+        )
+        target_call_sql = (
+            "SELECT count(*) FROM call_instances ci"
+            f" WHERE ci.version_id IN ({placeholders}){scope_sql}"
+            " AND ci.in_target_api=1"
+        )
+        sym_n = int(
+            self._conn.execute(
+                target_call_sql + f" AND {entity_exists}", params
+            ).fetchone()[0]
+        )
+        missing_n = int(
+            self._conn.execute(
+                target_call_sql + f" AND {signature_missing}", params
+            ).fetchone()[0]
+        )
         return {
             "unresolved_rate": (unresolved_n / total_n) if total_n else 0.0,
             "caller_link_rate": (linked_n / total_n) if total_n else 0.0,
@@ -1149,6 +1283,7 @@ class MiningReadService:
             "callee_entity_id": row[14],
             "caller_entity_id": row[15],
             "relation_kind": str(row[16] or "direct"),
+            "target_status": str(row[17] or ""),
         }
 
     def calls_by_callee(
@@ -1183,7 +1318,8 @@ class MiningReadService:
             "SELECT callee_name, caller, caller_file, line_start, line_end,"
             " start_byte, end_byte, confidence, resolve_kind, receiver, func, args,"
             " argument_count, call_order, callee_entity_id, caller_entity_id,"
-            " COALESCE(call_instances.relation_kind,'direct')"
+            " COALESCE(call_instances.relation_kind,'direct'),"
+            " COALESCE(call_instances.target_status,'resolved_target')"
             " FROM call_instances LEFT JOIN review_status rs"
             " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
             f" WHERE version_id IN ({placeholders}) AND callee_name = ?{extra}"
@@ -1226,7 +1362,8 @@ class MiningReadService:
             "SELECT callee_name, caller, caller_file, line_start, line_end,"
             " start_byte, end_byte, confidence, resolve_kind, receiver, func, args,"
             " argument_count, call_order, callee_entity_id, caller_entity_id,"
-            " COALESCE(call_instances.relation_kind,'direct')"
+            " COALESCE(call_instances.relation_kind,'direct'),"
+            " COALESCE(call_instances.target_status,'resolved_target')"
             " FROM call_instances LEFT JOIN review_status rs"
             " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
             f" WHERE version_id IN ({placeholders}) AND caller = ?{extra}"
@@ -1268,7 +1405,8 @@ class MiningReadService:
             "SELECT callee_name, caller, caller_file, line_start, line_end,"
             " start_byte, end_byte, confidence, resolve_kind, receiver, func, args,"
             " argument_count, call_order, callee_entity_id, caller_entity_id,"
-            " COALESCE(call_instances.relation_kind,'direct')"
+            " COALESCE(call_instances.relation_kind,'direct'),"
+            " COALESCE(call_instances.target_status,'resolved_target')"
             " FROM call_instances LEFT JOIN review_status rs"
             " ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id"
             f" WHERE version_id IN ({placeholders}) AND caller_file = ?{extra}"
@@ -1356,6 +1494,12 @@ class MiningReadService:
                     "profile": str(profiles.get(int(pid), {}).get("name") or ""),
                     "profile_fingerprint": str(
                         profiles.get(int(pid), {}).get("fingerprint") or ""
+                    ),
+                    "source_roles": list(
+                        profiles.get(int(pid), {}).get("source_roles") or []
+                    ),
+                    "source_hint": str(
+                        profiles.get(int(pid), {}).get("source_hint") or ""
                     ),
                 }
             )

@@ -56,6 +56,12 @@ def build_pattern_block(labels: list[dict[str, Any]], limit: int) -> str:
             "profile": str(label.get("profile") or ""),
             "profile_fingerprint": str(label.get("profile_fingerprint") or ""),
         }
+        source_roles = label.get("source_roles") or []
+        if source_roles:
+            attrs["source_roles"] = ", ".join(str(role) for role in source_roles)
+        source_hint = str(label.get("source_hint") or "").strip()
+        if source_hint:
+            attrs["source_hint"] = source_hint
         units.append(unit_tag(attrs, truncate_material(body, limit)))
     return (
         f'<pattern_hints count="{len(units)}">\n'

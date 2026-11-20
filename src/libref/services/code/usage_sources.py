@@ -6,6 +6,8 @@ import hashlib
 import json
 from typing import Any
 
+from libref.astminer.models import TARGET_STATUS_UNCONFIRMED
+
 SOURCE_ROLES = frozenset(
     {
         "official_example",
@@ -27,6 +29,33 @@ ORIGIN_KINDS = frozenset(
     }
 )
 DEFAULT_PROFILE = "usage"
+
+
+def _normalize_version(value: Any) -> str:
+    """Normalize tag and dependency spellings for an exact version check."""
+    return str(value or "").strip().removeprefix("v")
+
+
+def source_target_status(
+    role: str,
+    declared_version: Any,
+    target_version: Any,
+    *,
+    version_required: bool = False,
+) -> str:
+    """Decide whether a source's declared dependency pins the target version.
+
+    Only sources that explicitly opt into a version policy are checked. An
+    absent or mismatched declaration is never treated as compatible.
+    """
+    if role == "implementation":
+        return ""
+    if not version_required and not declared_version:
+        return ""
+    declared = _normalize_version(declared_version)
+    if declared and declared == _normalize_version(target_version):
+        return ""
+    return TARGET_STATUS_UNCONFIRMED
 
 
 def _dump(value: Any) -> str:
@@ -158,6 +187,64 @@ def update_source_commit(conn, source_id: int, commit_sha: str) -> None:
     )
 
 
+def update_source_url(conn, source_id: int, source_url: str) -> None:
+    """Replace a local checkout path with the canonical repository address."""
+    conn.execute(
+        "UPDATE code_sources SET source_url=? WHERE id=?",
+        (str(source_url or ""), int(source_id)),
+    )
+
+
+def profile_source_context(conn, source_ids: list[int] | set[int]) -> dict[str, Any]:
+    """Describe profile sources for provenance hints and review gates."""
+    ids = sorted({int(value) for value in source_ids})
+    if not ids:
+        return {"roles": [], "keys": [], "commits": [], "urls": [], "hint": ""}
+    marks = ",".join("?" for _ in ids)
+    try:
+        rows = conn.execute(
+            "SELECT source_key, source_role, source_url, commit_sha, target_filter"
+            f" FROM code_sources WHERE id IN ({marks}) ORDER BY id",
+            ids,
+        ).fetchall()
+    except Exception:  # noqa: BLE001 -- read models may run on partial test schemas
+        return {"roles": [], "keys": [], "commits": [], "urls": [], "hint": ""}
+    roles = sorted({str(row[1]) for row in rows})
+    keys = [str(row[0]) for row in rows]
+    commits = sorted({str(row[3]) for row in rows if row[3]})
+    urls = sorted({str(row[2]) for row in rows if row[2]})
+    filters = [_load(row[4], {}) for row in rows]
+    versions = sorted(
+        {str(item.get("declared_library_version") or "") for item in filters} - {""}
+    )
+    repositories = sorted(
+        {str(item.get("repository") or "") for item in filters} - {""}
+    )
+    tags = sorted({str(item.get("target_tag") or "") for item in filters} - {""})
+    parts = [", ".join(roles) or "unknown role"]
+    if repositories:
+        parts.append("repositories: " + ", ".join(repositories))
+    if tags:
+        parts.append("tags: " + ", ".join(tags))
+    urls_text = ", ".join(
+        f"{url}@{commit}" if commit else url for url, commit in zip(urls, commits)
+    )
+    if urls_text:
+        parts.append(urls_text)
+    if versions:
+        parts.append("declared target " + ", ".join(versions))
+    hint = "review sample; " + "; ".join(parts)
+    if "reference_project" in roles:
+        hint += "; unofficial source, not an official recommendation"
+    return {
+        "roles": roles,
+        "keys": keys,
+        "commits": commits,
+        "urls": urls,
+        "hint": hint,
+    }
+
+
 def _source_identities(conn, source_ids: list[int]) -> list[str]:
     """Stable identity text for every source participating in a profile."""
     ids = sorted({int(v) for v in source_ids})
@@ -202,6 +289,18 @@ def _fingerprint(conn, source_ids: list[int], support_mode: str, params: Any) ->
         }
     ).encode()
     return hashlib.sha1(blob).hexdigest()
+
+
+def profile_fingerprint(
+    conn,
+    source_ids: list[int],
+    support_mode: str = "sample",
+    params: Any = None,
+) -> str:
+    """Recompute a profile fingerprint from its current source rules."""
+    return _fingerprint(
+        conn, sorted({int(v) for v in source_ids}), support_mode, params
+    )
 
 
 def ensure_profile(
@@ -331,14 +430,15 @@ def resolve_profile(
             " WHERE version_id=? AND name=?",
             (int(version_id), str(name)),
         ).fetchone()
-        if row is not None and not overrides:
-            return {
-                "id": int(row[0]),
-                "name": str(name),
-                "source_ids": [int(v) for v in _load(row[1], [])],
-                "support_mode": str(row[2]),
-            }
-        if row is not None and overrides:
+        if row is not None:
+            stored_ids = sorted(int(v) for v in _load(row[1], []) if str(v).strip())
+            if not overrides or (stored_ids == ids and str(row[2]) == support_mode):
+                return {
+                    "id": int(row[0]),
+                    "name": str(name),
+                    "source_ids": stored_ids,
+                    "support_mode": str(row[2]),
+                }
             suffix = _fingerprint(conn, ids, support_mode, params)[:12]
             profile_name = f"{name}:{suffix}"
     elif overrides:

@@ -31,6 +31,7 @@ class InductionInput(BaseModel):
     siblings: list[str] = Field(default_factory=list)
     scope: str = Field(default="")
     signatures: dict[str, str] = Field(default_factory=dict)
+    source_hint: str = Field(default="")
 
 
 class PatternLabel(BaseModel):
@@ -92,9 +93,15 @@ def build_label_prompt(item: InductionInput) -> list[dict[str, str]]:
             sig_parts.append(f"{api}: {cleaned}")
     sigs = "; ".join(sig_parts[:6])
     sig_segment = f"Signatures: {sigs}. " if sigs else ""
+    source_segment = (
+        f"Source context: {item.source_hint.strip()}. "
+        "Treat provenance as evidence, not as an official recommendation. "
+        if item.source_hint.strip()
+        else ""
+    )
     user = (
         "Name and describe this API usage pattern. "
-        f"{scope_segment}"
+        f"{scope_segment}{source_segment}"
         f"Pattern: {' -> '.join(item.pattern)}. "
         f"Support: {item.support}. "
         f"Argument shapes: {shapes or 'unknown'}. "

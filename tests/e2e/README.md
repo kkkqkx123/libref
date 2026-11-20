@@ -38,6 +38,26 @@ uv run python tests/e2e/probe-discovery/fetch_probe_discovery.py --skip-network
 
 解析与抓取审查输出的首行记录生成时间，仓库标签与提交标识沿用清单和索引记录。
 
+## 用法语料核查
+
+`render_usage_mining_outputs.py` 在临时库中生成实现、官方示例、文档代码块与参考项目语料，调用生产挖掘与读模型，把来源、档案、模式、证据、健康、标签和差异判定落到 `outputs/usage_mining/`。默认完全离线，说明见 `fixtures/usage_mining/README.md`。
+
+```bash
+uv run python tests/e2e/render_usage_mining_outputs.py
+```
+
+## 真实仓库用法核查
+
+真实仓库用例使用固定 tag 的 DPDK 与 MTL，流程分为同步与离线回放两步：
+
+```bash
+uv run python tests/e2e/sync_usage_repos.py
+uv run python tests/e2e/run_usage_mining_real.py
+LIBREF_RUN_E2E=1 uv run pytest tests/e2e/test_usage_mining_real.py -q
+```
+
+人工核查报告由 `run_usage_mining_real.py` 输出到 `outputs/usage_mining_real/`；角色语料覆盖全部源码文件（DPDK `lib/` 与 `examples/`、MTL 全仓），版本兼容、解析覆盖差分、档案健康比较与可反推质量门槛各有独立文件。全量语料回放约数分钟，网络失败按环境不可用跳过，不视为回归。
+
 ## 检索问答基准
 
 `bench/` 是检索问答基准目录：用生产抓取服务与生产仓库管理真实获取第三方文档站与官方仓库

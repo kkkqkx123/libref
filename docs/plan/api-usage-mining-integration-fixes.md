@@ -47,8 +47,10 @@
 ## 验证状态
 
 - `python -m compileall -q src tests`、`ruff check src tests`、`ruff format --check src tests`、`mypy src` 均通过。
-- `pytest -q` 通过：829 passed、35 skipped。
+- `pytest -q` 通过：830 passed、35 skipped。
 - 执行中修复了健康统计变量作用域、Markdown 页面标题变量作用域、Web 申请模型字段缺失与批量内重复代码块导致的旧测试口径问题。
+- 新增离线人工核查渲染器与用例，输出到 `tests/e2e/outputs/usage_mining/`，覆盖来源、档案、模式差异、证据、健康与标签。
+- 新增 DPDK v23.11 与 MTL v23.12 固定提交同步、真实索引与挖掘核查链路；`LIBREF_RUN_E2E=1` 用例通过，报告输出到 `tests/e2e/outputs/usage_mining_real/`。
 
 ## 暂不实施的范围
 

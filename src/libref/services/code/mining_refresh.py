@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from libref.astminer.models import (
+    TARGET_STATUS_PREFIX,
+    TARGET_STATUS_RESOLVED,
+    TARGET_STATUS_UNCONFIRMED,
+)
 from libref.services.infra.jobs import INDUCE_LABELS_KIND, MINE_PATTERNS_KIND
 
 MINE_PATTERNS_JOB_KIND = MINE_PATTERNS_KIND
@@ -64,9 +69,19 @@ def _keep_call(
     include_ambiguous: bool,
     relation_kind: str = "direct",
     relation_kinds: set[str] | None = None,
+    target_status: str = TARGET_STATUS_RESOLVED,
+    include_unconfirmed: bool = False,
 ) -> bool:
     if status == "conflict":
         return False
+    if (
+        target_status == TARGET_STATUS_UNCONFIRMED
+        and not include_unconfirmed
+        and status != "approved"
+    ):
+        return False
+    if target_status == TARGET_STATUS_PREFIX and not include_ambiguous:
+        return status == "approved"
     if status == "approved":
         return True
     if relation_kinds and relation_kind not in relation_kinds:
@@ -87,6 +102,7 @@ def _load_kept_calls(
     version_id: int,
     *,
     include_ambiguous: bool = False,
+    include_unconfirmed: bool = False,
     resolve_kinds: list[str] | tuple[str, ...] | None = None,
     min_args: int | None = None,
     max_args: int | None = None,
@@ -101,7 +117,7 @@ def _load_kept_calls(
     sql = (
         "SELECT callee_name, caller_file, caller, confidence, id,"
         " line_start, call_order, start_byte, resolve_kind, argument_count, sample_id,"
-        " COALESCE(relation_kind,'direct')"
+        " COALESCE(relation_kind,'direct'), COALESCE(target_status,'resolved_target')"
         " FROM call_instances WHERE version_id=? AND in_target_api=1"
     )
     params: list[Any] = [version_id]
@@ -120,6 +136,8 @@ def _load_kept_calls(
             include_ambiguous,
             str(r[11] or "direct"),
             wanted_relations,
+            str(r[12] or TARGET_STATUS_RESOLVED),
+            include_unconfirmed,
         ):
             continue
         if wanted and str(r[8] or "") not in wanted:
@@ -174,6 +192,7 @@ def refresh_feature_tree(
     version_id: int,
     *,
     include_ambiguous: bool = False,
+    include_unconfirmed: bool = False,
     resolve_kinds: list[str] | tuple[str, ...] | None = None,
     min_args: int | None = None,
     max_args: int | None = None,
@@ -189,6 +208,7 @@ def refresh_feature_tree(
         conn,
         version_id,
         include_ambiguous=include_ambiguous,
+        include_unconfirmed=include_unconfirmed,
         resolve_kinds=resolve_kinds,
         min_args=min_args,
         max_args=max_args,
@@ -243,6 +263,7 @@ def refresh_clusters(
     version_id: int,
     *,
     include_ambiguous: bool = False,
+    include_unconfirmed: bool = False,
     threshold: float | None = None,
     min_size: int | None = None,
     resolve_kinds: list[str] | tuple[str, ...] | None = None,
@@ -263,6 +284,7 @@ def refresh_clusters(
         conn,
         version_id,
         include_ambiguous=include_ambiguous,
+        include_unconfirmed=include_unconfirmed,
         resolve_kinds=resolve_kinds,
         min_args=min_args,
         max_args=max_args,
@@ -317,6 +339,7 @@ def mine_patterns(
     maxlen: int = DEFAULT_MAXLEN,
     minlen: int = DEFAULT_MINLEN,
     include_ambiguous: bool = False,
+    include_unconfirmed: bool = False,
     cluster_threshold: float | None = None,
     cluster_min_size: int | None = None,
     resolve_kinds: list[str] | tuple[str, ...] | None = None,
@@ -357,6 +380,7 @@ def mine_patterns(
         conn,
         version_id,
         include_ambiguous=include_ambiguous,
+        include_unconfirmed=include_unconfirmed,
         resolve_kinds=resolve_kinds,
         min_args=min_args,
         max_args=max_args,
@@ -381,6 +405,7 @@ def mine_patterns(
         _argc,
         sample_id,
         _relation,
+        _target_status,
     ) in rows:
         key = str(sample_id) or _scope_key(str(caller_file), caller)
         groups.setdefault(key, []).append(
@@ -404,6 +429,7 @@ def mine_patterns(
             library_id,
             version_id,
             include_ambiguous=include_ambiguous,
+            include_unconfirmed=include_unconfirmed,
             resolve_kinds=resolve_kinds,
             min_args=min_args,
             max_args=max_args,
@@ -416,6 +442,7 @@ def mine_patterns(
             library_id,
             version_id,
             include_ambiguous=include_ambiguous,
+            include_unconfirmed=include_unconfirmed,
             threshold=cluster_threshold,
             min_size=cluster_min_size,
             resolve_kinds=resolve_kinds,
@@ -471,6 +498,7 @@ def mine_patterns(
         library_id,
         version_id,
         include_ambiguous=include_ambiguous,
+        include_unconfirmed=include_unconfirmed,
         resolve_kinds=resolve_kinds,
         min_args=min_args,
         max_args=max_args,
@@ -483,6 +511,7 @@ def mine_patterns(
         library_id,
         version_id,
         include_ambiguous=include_ambiguous,
+        include_unconfirmed=include_unconfirmed,
         threshold=cluster_threshold,
         min_size=cluster_min_size,
         resolve_kinds=resolve_kinds,
@@ -507,6 +536,7 @@ def mine_job_params(
     maxlen: int = DEFAULT_MAXLEN,
     minlen: int = DEFAULT_MINLEN,
     include_ambiguous: bool = False,
+    include_unconfirmed: bool = False,
     cluster_threshold: float | None = None,
     cluster_min_size: int | None = None,
     resolve_kinds: list[str] | tuple[str, ...] | None = None,
@@ -526,6 +556,7 @@ def mine_job_params(
         "maxlen": maxlen,
         "minlen": minlen,
         "include_ambiguous": include_ambiguous,
+        "include_unconfirmed": include_unconfirmed,
         "cluster_threshold": cluster_threshold,
         "cluster_min_size": cluster_min_size,
         "resolve_kinds": list(resolve_kinds) if resolve_kinds else None,
@@ -554,6 +585,7 @@ def build_mine_runner(settings, conn):
             maxlen=int(p.get("maxlen", DEFAULT_MAXLEN)),
             minlen=int(p.get("minlen", DEFAULT_MINLEN)),
             include_ambiguous=bool(p.get("include_ambiguous", False)),
+            include_unconfirmed=bool(p.get("include_unconfirmed", False)),
             cluster_threshold=float(
                 p.get("cluster_threshold")
                 if p.get("cluster_threshold") is not None
@@ -592,6 +624,7 @@ def induce_job_params(
     ecosystem: str | None = None,
     topn: int | None = None,
     include_ambiguous: bool = False,
+    include_unconfirmed: bool = False,
     profile: str | None = None,
 ) -> dict[str, Any]:
     """Build induction job params with replayable scope."""
@@ -601,6 +634,7 @@ def induce_job_params(
         "ecosystem": ecosystem,
         "topn": topn,
         "include_ambiguous": include_ambiguous,
+        "include_unconfirmed": include_unconfirmed,
         "profile": profile,
     }
 
@@ -614,6 +648,7 @@ async def induce_labels(
     ecosystem: str | None = None,
     topn: int | None = None,
     include_ambiguous: bool = False,
+    include_unconfirmed: bool = False,
     profile: str | None = None,
     chat=None,
 ) -> dict[str, Any]:
@@ -652,13 +687,17 @@ async def induce_labels(
         )
     else:
         library_id, version_id = catalog.ensure_library_version(library, version)
-    from libref.services.code.usage_sources import resolve_profile
+    from libref.services.code.usage_sources import (
+        profile_source_context,
+        resolve_profile,
+    )
 
     resolved_profile = resolve_profile(
         conn, version_id=version_id, name=profile, tenant_id="default"
     )
     profile_id = int(resolved_profile["id"])
     profile_sources = list(resolved_profile.get("source_ids") or [])
+    source_hint = profile_source_context(conn, profile_sources)["hint"]
     want_topn = (
         int(topn)
         if topn is not None
@@ -706,12 +745,17 @@ async def induce_labels(
             base = "(rs.status IS NULL OR rs.status != 'conflict')"
             shape_filter = (
                 base
-                if include_ambiguous
+                if include_unconfirmed
                 else (
-                    f"{base} AND (call_instances.confidence != 'AMBIGUOUS'"
-                    " OR rs.status='approved')"
-                    " AND (COALESCE(call_instances.resolve_kind,'') NOT IN ('stdlib','builtin')"
-                    " OR rs.status='approved')"
+                    f"{base} AND call_instances.target_status != 'version_unconfirmed'"
+                    if include_ambiguous
+                    else (
+                        f"{base} AND call_instances.target_status = 'resolved_target'"
+                        " AND (call_instances.confidence != 'AMBIGUOUS'"
+                        " OR rs.status='approved')"
+                        " AND (COALESCE(call_instances.resolve_kind,'') NOT IN ('stdlib','builtin')"
+                        " OR rs.status='approved')"
+                    )
                 )
             )
             in_v = ",".join("?" for _ in scope_ids)
@@ -796,6 +840,7 @@ async def induce_labels(
             siblings=siblings,
             scope=scope,
             signatures={k: short_sigs[k] for k in names if k in short_sigs},
+            source_hint=source_hint,
         )
         try:
             import asyncio as _asyncio
@@ -853,6 +898,7 @@ def build_induce_runner(settings, conn):
             ecosystem=p.get("ecosystem"),
             topn=p.get("topn"),
             include_ambiguous=bool(p.get("include_ambiguous", False)),
+            include_unconfirmed=bool(p.get("include_unconfirmed", False)),
             profile=p.get("profile"),
         )
 

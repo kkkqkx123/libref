@@ -17,6 +17,9 @@ def test_all_python_sources_parse() -> None:
     failures: list[str] = []
     for folder in ("src", "tests"):
         for path in sorted((_ROOT / folder).rglob("*.py")):
+            rel = path.relative_to(_ROOT)
+            if rel.parts[:3] == ("tests", "e2e", "repos"):
+                continue
             try:
                 ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             except SyntaxError as exc:

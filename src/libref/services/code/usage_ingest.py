@@ -10,12 +10,12 @@ from libref.astminer.code_blocks import dedupe_snippets, suffix_for_language
 from libref.astminer.config import config_for_suffix
 from libref.astminer.models import ApiDeclRecord, CodeSnippet
 from libref.services.code.repo_persist import _sweep_calls, _upsert_calls
-from libref.services.code.usage_sources import register_source
+from libref.services.code.usage_sources import register_source, source_target_status
 
 _SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
-def _target_decls(conn, version_id: int) -> list[ApiDeclRecord]:
+def target_declarations(conn, version_id: int) -> list[ApiDeclRecord]:
     """Load target API facts; usage sources never define the target surface."""
     rows = conn.execute(
         "SELECT qualified_name, kind, file, line_start, line_end, params,"
@@ -118,11 +118,23 @@ def ingest_snippets(
         weight=weight,
         tenant_id=tenant_id,
     )
-    target_decls = _target_decls(conn, version_id)
+    target_decls = target_declarations(conn, version_id)
     target_names = {decl.qualified_name for decl in target_decls}
     filt = target_filter or {}
+    source_status = source_target_status(
+        source_role,
+        filt.get("declared_library_version"),
+        version,
+        version_required=bool(filt.get("version_required")),
+    )
     explicit_names = {str(v) for v in filt.get("names", []) if str(v).strip()}
     prefixes = tuple(str(v) for v in filt.get("prefixes", []) if str(v).strip())
+    if explicit_names:
+        effective_names = explicit_names
+    elif prefixes:
+        effective_names = {name for name in target_names if name.startswith(prefixes)}
+    else:
+        effective_names = target_names
     wanted: set[str] = set()
     calls = 0
     parsed = 0
@@ -148,8 +160,10 @@ def ingest_snippets(
             sample_prefix="",
             source_role=source_role,
             origin_kind=snippet.origin_kind or origin_kind,
-            target_names=explicit_names or target_names,
+            target_names=effective_names,
             target_prefixes=prefixes,
+            source_target_status=source_status,
+            strict_target_status=bool(filt.get("require_resolved_targets")),
             stdlib_filter_enabled=bool(
                 getattr(settings, "stdlib_filter_enabled", True)
             ),

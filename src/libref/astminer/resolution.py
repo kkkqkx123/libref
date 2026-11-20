@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from libref.astminer import stdlib as _stdlib
 from libref.astminer.models import (
+    TARGET_STATUS_EXTERNAL,
+    TARGET_STATUS_PREFIX,
+    TARGET_STATUS_RESOLVED,
+    TARGET_STATUS_UNCONFIRMED,
     ApiDeclRecord,
     CallInstanceRecord,
     Confidence,
@@ -83,6 +87,8 @@ def resolve_calls(
     target_prefixes: tuple[str, ...] | list[str] | None = None,
     stdlib_filter_enabled: bool = True,
     stdlib_table_version: str = _stdlib.STDLIB_TABLE_VERSION,
+    source_target_status: str = "",
+    strict_target_status: bool = False,
 ) -> list[CallInstanceRecord]:
     by_file: dict[str, set[str]] = {}
     parent_by_qual: dict[str, str | None] = {}
@@ -215,6 +221,20 @@ def resolve_calls(
             in_target = name_hit or prefix_hit
         else:
             in_target = False
+        if source_target_status == TARGET_STATUS_UNCONFIRMED:
+            target_status = TARGET_STATUS_UNCONFIRMED
+        elif not in_target:
+            target_status = TARGET_STATUS_EXTERNAL
+        elif source_role == "implementation" or (
+            name_hit
+            and confidence != "AMBIGUOUS"
+            and resolve_kind not in ("unresolved", "stdlib", "builtin")
+        ):
+            target_status = TARGET_STATUS_RESOLVED
+        elif strict_target_status:
+            target_status = TARGET_STATUS_PREFIX
+        else:
+            target_status = TARGET_STATUS_RESOLVED
         base_sample = (
             f"{call.caller_file}::{call.caller}"
             if call.caller
@@ -245,6 +265,7 @@ def resolve_calls(
                 source_role=source_role,
                 origin_kind=origin_kind,
                 in_target_api=in_target,
+                target_status=target_status,
                 relation_kind=call.relation_kind,
             )
         )
