@@ -23,7 +23,7 @@
     <template v-else-if="loaded">
       <EmptyState v-if="rows.length === 0" :description="messages.importInsight.empty" />
       <template v-else>
-        <RowTable :rows="rows" />
+        <RowTable :rows="rows" :columns="columns" />
         <div class="libref-pager">
           <el-button :disabled="offset === 0" @click="page(-1)">{{ messages.common.previous }}</el-button>
           <span class="libref-muted">{{ messages.common.offset(offset) }}</span>
@@ -36,10 +36,10 @@
 
 <script setup lang="ts">
 import { ElButton, ElForm, ElFormItem, ElInput, ElRadioButton, ElRadioGroup } from 'element-plus';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { ImportInsightRow } from '../api/types';
+import type { ColumnKey, ImportInsightRow } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
@@ -63,8 +63,15 @@ applyScopeFromQuery(route.query);
 
 type View = 'importers' | 'imports';
 const VIEWS: View[] = ['importers', 'imports'];
+
+// importers lists who imports the API; imports lists what one file pulls in.
+const COLUMNS: Record<View, readonly ColumnKey<ImportInsightRow>[]> = {
+  importers: ['importer_file', 'alias', 'kind'],
+  imports: ['alias', 'target', 'kind'],
+};
 const requested = readString(route.query.view) as View;
 const view = ref<View>(VIEWS.includes(requested) ? requested : 'importers');
+const columns = computed(() => COLUMNS[view.value]);
 const apiName = ref(readString(route.query.api));
 const offset = ref(readNumber(route.query.offset, 0));
 const loading = ref(false);

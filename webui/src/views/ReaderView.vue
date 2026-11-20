@@ -62,11 +62,11 @@
       </div>
       <div v-if="(page.chunk_details?.length || 0) > 0" class="libref-card">
         <h4>{{ messages.reader.chunkLocatorCount(page.chunks || 0) }}</h4>
-        <RowTable :rows="page.chunk_details || []" />
+        <RowTable :rows="page.chunk_details || []" :columns="LOCATOR_COLUMNS" />
       </div>
       <div v-if="(page.docs?.length || 0) > 0" class="libref-card">
         <h4>{{ messages.reader.windowChunks }}</h4>
-        <RowTable :rows="page.docs || []" />
+        <RowTable :rows="page.docs || []" :columns="DOC_COLUMNS" />
       </div>
     </template>
     <EmptyState v-else :description="messages.reader.empty" />
@@ -97,6 +97,9 @@ import {
 } from '../utils/query';
 
 type Mode = 'page' | 'window' | 'section';
+
+const LOCATOR_COLUMNS = ['chunk_index', 'total_chunks', 'span_kind', 'length'] as const;
+const DOC_COLUMNS = ['url', 'chunk_index', 'total_chunks', 'span_kind', 'length'] as const;
 
 function readMode(value: string): Mode {
   return value === 'window' || value === 'section' ? value : 'page';

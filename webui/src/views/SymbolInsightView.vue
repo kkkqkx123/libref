@@ -30,6 +30,7 @@
       <template v-else>
         <RowTable
           :rows="rows"
+          :columns="columns"
           :inspect-label="messages.common.verifyCalls"
           @inspect="forwardCalls"
         />
@@ -45,10 +46,10 @@
 
 <script setup lang="ts">
 import { ElButton, ElForm, ElFormItem, ElInput, ElRadioButton, ElRadioGroup } from 'element-plus';
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import { field, type Row, type SymbolInsightRow } from '../api/types';
+import { field, type ColumnKey, type Row, type SymbolInsightRow } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
@@ -83,8 +84,18 @@ function forwardCalls(row: Row): void {
 
 type View = 'detail' | 'file' | 'children' | 'signature';
 const VIEWS: View[] = ['detail', 'file', 'children', 'signature'];
+
+// Each view renders a different row shape; the column set names the fields the
+// table is allowed to show, and every name is checked against the row union.
+const COLUMNS: Record<View, readonly ColumnKey<SymbolInsightRow>[]> = {
+  detail: ['qualified_name', 'kind', 'signature', 'file', 'line_start', 'line_end', 'return_type', 'has_doc'],
+  file: ['qualified_name', 'kind', 'line_start', 'line_end'],
+  children: ['qualified_name', 'kind', 'line_start', 'line_end'],
+  signature: ['api', 'kind', 'signature', 'return_type'],
+};
 const requested = readString(route.query.view) as View;
 const view = ref<View>(VIEWS.includes(requested) ? requested : 'detail');
+const columns = computed(() => COLUMNS[view.value]);
 const apiName = ref(readString(route.query.api));
 const apis = ref<string[]>(readList(route.query.apis));
 const offset = ref(readNumber(route.query.offset, 0));

@@ -75,7 +75,8 @@ def test_health_and_search_and_read(tmp_path, monkeypatch) -> None:
         page = client.get("/read", params={"url": "https://d.example/w.html"})
         assert page.status_code == 200
         assert "quetzalweb" in page.json()["content"]
-        assert page.json()["chunk_details"][0]["source_group_id"] == ""
+        assert page.json()["chunk_details"][0]["span_kind"] == "document_range"
+        assert page.json()["chunk_details"][0]["chunk_index"] == 0
         window_missing = client.get(
             "/read",
             params={"url": "https://d.example/w.html", "mode": "window"},

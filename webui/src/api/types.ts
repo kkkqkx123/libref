@@ -45,6 +45,10 @@ export function field(row: object, key: string): JsonValue {
   return (row as JsonRow)[key];
 }
 
+// A table row type may be a union; column names are checked against the keys of
+// every variant, so a column that no variant carries fails to compile.
+export type ColumnKey<T> = T extends unknown ? Extract<keyof T, string> : never;
+
 export type SearchResponse = Schema<'SearchResponse'>;
 export type SearchItem = Schema<'SearchItem'>;
 export type AnswerResponse = Schema<'AnswerResponse'>;

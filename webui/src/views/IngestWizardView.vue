@@ -92,7 +92,7 @@
         </el-form-item>
       </el-form>
       <div v-if="probeResult" class="libref-resolution">
-        <RowTable :rows="[probeResult]" />
+        <RowTable :rows="[probeResult]" :columns="PROBE_COLUMNS" />
         <el-button type="primary" @click="step = 2">{{ messages.ingest.stepToSubmit }}</el-button>
       </div>
     </div>
@@ -128,7 +128,7 @@ import { ElButton, ElCheckbox, ElForm, ElFormItem, ElInput, ElInputNumber, ElSte
 import { computed, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { DiscoveryCandidate, DocProbeResponse, ResolutionResponse } from '../api/types';
+import type { ColumnKey, DiscoveryCandidate, DocProbeResponse, ResolutionResponse } from '../api/types';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
 import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue';
@@ -143,6 +143,17 @@ import { scopeStore } from '../stores/scope';
 type DiscoverySource = 'registry' | 'web' | 'github';
 
 const router = useRouter();
+// Probe summary: the wizard shows the counts that decide whether to continue.
+const PROBE_COLUMNS: readonly ColumnKey<DocProbeResponse>[] = [
+  'source',
+  'total_discovered',
+  'accepted',
+  'rejected',
+  'truncated',
+  'failed',
+  'max_pages',
+];
+
 const step = ref(0);
 const busy = ref(false);
 const error = ref('');

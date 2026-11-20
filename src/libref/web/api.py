@@ -428,12 +428,8 @@ class AnswerResponse(ContractModel):
 
 
 class ChunkLocator(ContractModel):
-    source_group_id: str = ""
     chunk_id: str = ""
     span_kind: str = "document_range"
-    merged_from: list[JsonValue] = Field(default_factory=list)
-    overlap_from: JsonValue | None = None
-    overlap_text: str = ""
     chunk_index: int = 0
     total_chunks: int = 1
     length: int = 0
@@ -660,15 +656,12 @@ class EvidenceRow(ContractModel):
 
 class FeatureNodeRow(ContractModel):
     path: str
-    parent: str | None
-    depth: int
     kind: str
     calls: int
     scopes: int
 
 
 class ClusterRow(ContractModel):
-    cluster_id: int
     members: list[str]
     size: int
     representative: str | None
@@ -709,11 +702,9 @@ class PatternSnippetRow(ContractModel):
 class SymbolRow(ContractModel):
     qualified_name: str
     kind: str
-    parent: str | None
     signature: str
     params: list[JsonValue]
     bases: list[JsonValue]
-    depth: int
     file: str
     line_start: int
     line_end: int
@@ -737,15 +728,12 @@ class CallRow(ContractModel):
     caller_file: str
     line_start: int
     line_end: int
-    start_byte: int
-    end_byte: int
     confidence: Confidence
     resolve_kind: str
     receiver: str | None
     func: str
     args: JsonValue
     argument_count: int
-    call_order: int
     callee_entity_id: int | None
     caller_entity_id: int | None
 

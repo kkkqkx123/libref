@@ -5,6 +5,10 @@
 > 本文是现状审计，与 `frontend-schema-typing.md`、`frontend-wire-contract.md` 的关系：那两份记录
 > 的是**已完成**的收紧（洞察行结构化、view 判别、置信度 high/low、列表状态、错误码闭合、
 > 时间 ISO 化、多值参数数组化）；本文只审计**当前生成物中仍然存在的**弱类型，不重复已修复项。
+>
+> 收尾状态：本文的改进路线（逐字段收窄 `kind` 等）**未采纳**。行级类型改由「表格列声明 + 行类型
+> 校验」承担，无消费方的字段直接从契约删除；现状、判据与清单见
+> `docs/archive/frontend-weak-typing-decisions.md`。本文行号停留在撰写时，定位字段以该归档文档为准。
 
 ## 0. 事实来源与核验方式
 
@@ -195,6 +199,9 @@ confidence 不同——`CallInstanceRecord.confidence: Confidence`（`astminer/m
 
 净结果：6 个开放点中仅第 1 项产生代码改动（confidence 三处字段 + 删重复别名），其余 5 项
 经事实核查确认维持现状，本轮不改。
+
+这六条是终局结论，不再重开；字段级清单、重开条件与审计未覆盖的两项补充见
+`docs/archive/frontend-weak-typing-decisions.md`。
 
 ## 6. 验证方式
 

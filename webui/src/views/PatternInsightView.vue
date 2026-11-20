@@ -55,7 +55,7 @@
           @inspect="forwardCalls"
           @feedback="forwardFeedback"
         />
-        <RowTable v-else :rows="rows" />
+        <RowTable v-else :rows="rows" :columns="columns" />
       </template>
     </template>
   </div>
@@ -68,6 +68,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
 import {
   field,
+  type ColumnKey,
   type JsonRow,
   type MiningHealthResponse,
   type PatternInsightRow,
@@ -102,8 +103,21 @@ applyScopeFromQuery(route.query);
 const router = useRouter();
 type View = 'patterns' | 'evidence' | 'tree' | 'clusters' | 'health' | 'labels' | 'snippets';
 const VIEWS: View[] = ['patterns', 'evidence', 'tree', 'clusters', 'health', 'labels', 'snippets'];
+
+// One row shape per view; the column list is the view's declared consumption of
+// that shape. `evidence` renders through EvidenceList, hence no columns.
+const COLUMNS: Record<View, readonly ColumnKey<PatternInsightRow>[]> = {
+  patterns: ['pattern', 'support'],
+  evidence: [],
+  tree: ['path', 'kind', 'calls', 'scopes'],
+  clusters: ['representative', 'size', 'members'],
+  health: ['patterns', 'total_support', 'reusability', 'diversity', 'clusters', 'unresolved_rate'],
+  labels: ['pattern', 'name', 'summary', 'category_path', 'model'],
+  snippets: ['caller_file', 'caller', 'rendered'],
+};
 const requested = readString(route.query.view) as View;
 const view = ref<View>(VIEWS.includes(requested) ? requested : 'patterns');
+const columns = computed(() => COLUMNS[view.value]);
 const pattern = ref<string[]>(readList(route.query.pattern));
 const containing = ref<string[]>(readList(route.query.containing));
 const prefix = ref(readString(route.query.prefix));

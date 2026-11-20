@@ -881,10 +881,6 @@ export interface components {
             line_start: number;
             /** Line End */
             line_end: number;
-            /** Start Byte */
-            start_byte: number;
-            /** End Byte */
-            end_byte: number;
             /**
              * Confidence
              * @enum {string}
@@ -899,8 +895,6 @@ export interface components {
             args: components["schemas"]["JsonValue-Output"];
             /** Argument Count */
             argument_count: number;
-            /** Call Order */
-            call_order: number;
             /** Callee Entity Id */
             callee_entity_id: number | null;
             /** Caller Entity Id */
@@ -908,11 +902,6 @@ export interface components {
         };
         /** ChunkLocator */
         ChunkLocator: {
-            /**
-             * Source Group Id
-             * @default
-             */
-            source_group_id: string;
             /**
              * Chunk Id
              * @default
@@ -923,14 +912,6 @@ export interface components {
              * @default document_range
              */
             span_kind: string;
-            /** Merged From */
-            merged_from?: components["schemas"]["JsonValue-Output"][];
-            overlap_from?: components["schemas"]["JsonValue-Output"] | null;
-            /**
-             * Overlap Text
-             * @default
-             */
-            overlap_text: string;
             /**
              * Chunk Index
              * @default 0
@@ -955,8 +936,6 @@ export interface components {
         };
         /** ClusterRow */
         ClusterRow: {
-            /** Cluster Id */
-            cluster_id: number;
             /** Members */
             members: string[];
             /** Size */
@@ -1134,10 +1113,6 @@ export interface components {
         FeatureNodeRow: {
             /** Path */
             path: string;
-            /** Parent */
-            parent: string | null;
-            /** Depth */
-            depth: number;
             /** Kind */
             kind: string;
             /** Calls */
@@ -1318,6 +1293,12 @@ export interface components {
             exclude_patterns?: string[] | null;
             /** Max Files */
             max_files?: number | null;
+            /** Source Role */
+            source_role?: string | null;
+            /** Target Filter */
+            target_filter?: {
+                [key: string]: components["schemas"]["JsonValue-Input"];
+            } | null;
         };
         /** IndexRequestItem */
         IndexRequestItem: {
@@ -1419,6 +1400,12 @@ export interface components {
             exclude_patterns?: string[] | null;
             /** Max Files */
             max_files?: number | null;
+            /** Source Role */
+            source_role?: string | null;
+            /** Target Filter */
+            target_filter?: {
+                [key: string]: components["schemas"]["JsonValue-Output"];
+            } | null;
             /** Resolved From */
             resolved_from?: string | null;
             /** Registry Confirmed */
@@ -1485,6 +1472,8 @@ export interface components {
              * @default false
              */
             include_ambiguous: boolean;
+            /** Profile */
+            profile?: string | null;
         };
         /** IssuedKey */
         IssuedKey: {
@@ -1666,6 +1655,8 @@ export interface components {
             min_args?: number | null;
             /** Max Args */
             max_args?: number | null;
+            /** Profile */
+            profile?: string | null;
         };
         /** MiningHealthResponse */
         MiningHealthResponse: {
@@ -2358,16 +2349,12 @@ export interface components {
             qualified_name: string;
             /** Kind */
             kind: string;
-            /** Parent */
-            parent: string | null;
             /** Signature */
             signature: string;
             /** Params */
             params: components["schemas"]["JsonValue-Output"][];
             /** Bases */
             bases: components["schemas"]["JsonValue-Output"][];
-            /** Depth */
-            depth: number;
             /** File */
             file: string;
             /** Line Start */
@@ -2930,6 +2917,7 @@ export interface operations {
                 limit?: number | null;
                 per_file_limit?: number | null;
                 dedup?: boolean | null;
+                profile?: string | null;
             };
             header?: never;
             path?: never;
@@ -3025,6 +3013,7 @@ export interface operations {
                 offset?: number;
                 include_ambiguous?: boolean;
                 resolve_kinds?: string[] | null;
+                relation_kinds?: string[] | null;
                 min_args?: number | null;
                 max_args?: number | null;
             };

@@ -4,7 +4,7 @@
       v-for="column in columns"
       :key="column"
       :prop="column"
-      :label="column"
+      :label="labelOf(column)"
       show-overflow-tooltip
     >
       <template #default="scope">
@@ -23,34 +23,33 @@
   </el-table>
 </template>
 
-<script setup lang="ts">
+<script setup lang="ts" generic="T extends object">
 import { ElButton, ElTable, ElTableColumn } from 'element-plus';
-import { computed } from 'vue';
+import type { ColumnKey } from '../../api/types';
 import { field, type JsonValue, type Row } from '../../api/types';
 import { messages } from '../../i18n';
 import { formatCell } from '../../utils/format';
 
+// Columns are declared by the caller: the table renders exactly the fields the
+// view consumes, and a column name that the row type does not carry fails
+// type-checking instead of silently showing an empty column.
 const props = withDefaults(
-  defineProps<{ rows: Row[]; maxColumns?: number; inspectLabel?: string }>(),
-  { inspectLabel: '' },
+  defineProps<{
+    rows: T[];
+    columns: readonly ColumnKey<T>[];
+    labels?: Partial<Record<ColumnKey<T>, string>>;
+    inspectLabel?: string;
+  }>(),
+  { inspectLabel: '', labels: undefined },
 );
-const emit = defineEmits<{ inspect: [row: Row] }>();
+const emit = defineEmits<{ inspect: [row: T] }>();
 
-const HIDDEN = new Set(['metadata']);
+function labelOf(column: ColumnKey<T>): string {
+  return props.labels?.[column] ?? column;
+}
 
-const columns = computed(() => {
-  const names: string[] = [];
-  for (const row of props.rows) {
-    for (const key of Object.keys(row)) {
-      if (!HIDDEN.has(key) && !names.includes(key)) names.push(key);
-    }
-    if (names.length >= (props.maxColumns || 8)) break;
-  }
-  return names;
-});
-
-function value(row: Row, key: string): JsonValue {
-  return field(row, key);
+function value(row: T, key: ColumnKey<T>): JsonValue {
+  return field(row as unknown as Row, key);
 }
 
 function isTechnical(value: JsonValue): boolean {

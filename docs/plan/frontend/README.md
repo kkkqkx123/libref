@@ -40,6 +40,8 @@ Web 出口提供约三十个根路径端点与挂载于 `/mcp` 的 MCP 应用，
 - `../frontend-schema-typing.md`：API 类型契约收紧的任务清单与分阶段落地记录，
   覆盖响应模型、请求包装器、枚举、错误契约与结构化行数据。
 - `../frontend-wire-contract.md`：任务种类、动态错误码、时间表示与多值参数的独立收口方案。
+- `../../archive/frontend-weak-typing-decisions.md`：弱类型后续任务的归档决策，含保持弱类型的
+  字段级清单与重开条件；遇到 schema 字段类型问题先查这里，不重跑审计。
 
 ## 实施状态
 

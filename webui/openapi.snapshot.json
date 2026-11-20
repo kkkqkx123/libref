@@ -1102,6 +1102,22 @@
               ],
               "title": "Dedup"
             }
+          },
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Profile"
+            }
           }
         ],
         "responses": {
@@ -1469,6 +1485,25 @@
                 }
               ],
               "title": "Resolve Kinds"
+            }
+          },
+          {
+            "name": "relation_kinds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Relation Kinds"
             }
           },
           {
@@ -4033,14 +4068,6 @@
             "type": "integer",
             "title": "Line End"
           },
-          "start_byte": {
-            "type": "integer",
-            "title": "Start Byte"
-          },
-          "end_byte": {
-            "type": "integer",
-            "title": "End Byte"
-          },
           "confidence": {
             "type": "string",
             "enum": [
@@ -4076,10 +4103,6 @@
             "type": "integer",
             "title": "Argument Count"
           },
-          "call_order": {
-            "type": "integer",
-            "title": "Call Order"
-          },
           "callee_entity_id": {
             "anyOf": [
               {
@@ -4110,15 +4133,12 @@
           "caller_file",
           "line_start",
           "line_end",
-          "start_byte",
-          "end_byte",
           "confidence",
           "resolve_kind",
           "receiver",
           "func",
           "args",
           "argument_count",
-          "call_order",
           "callee_entity_id",
           "caller_entity_id"
         ],
@@ -4126,11 +4146,6 @@
       },
       "ChunkLocator": {
         "properties": {
-          "source_group_id": {
-            "type": "string",
-            "title": "Source Group Id",
-            "default": ""
-          },
           "chunk_id": {
             "type": "string",
             "title": "Chunk Id",
@@ -4140,28 +4155,6 @@
             "type": "string",
             "title": "Span Kind",
             "default": "document_range"
-          },
-          "merged_from": {
-            "items": {
-              "$ref": "#/components/schemas/JsonValue-Output"
-            },
-            "type": "array",
-            "title": "Merged From"
-          },
-          "overlap_from": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/JsonValue-Output"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "overlap_text": {
-            "type": "string",
-            "title": "Overlap Text",
-            "default": ""
           },
           "chunk_index": {
             "type": "integer",
@@ -4217,10 +4210,6 @@
       },
       "ClusterRow": {
         "properties": {
-          "cluster_id": {
-            "type": "integer",
-            "title": "Cluster Id"
-          },
           "members": {
             "items": {
               "type": "string"
@@ -4246,7 +4235,6 @@
         },
         "type": "object",
         "required": [
-          "cluster_id",
           "members",
           "size",
           "representative"
@@ -4834,21 +4822,6 @@
             "type": "string",
             "title": "Path"
           },
-          "parent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent"
-          },
-          "depth": {
-            "type": "integer",
-            "title": "Depth"
-          },
           "kind": {
             "type": "string",
             "title": "Kind"
@@ -4865,8 +4838,6 @@
         "type": "object",
         "required": [
           "path",
-          "parent",
-          "depth",
           "kind",
           "calls",
           "scopes"
@@ -5341,6 +5312,31 @@
               }
             ],
             "title": "Max Files"
+          },
+          "source_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Role"
+          },
+          "target_filter": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue-Input"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Filter"
           }
         },
         "type": "object",
@@ -5629,6 +5625,31 @@
             ],
             "title": "Max Files"
           },
+          "source_role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Role"
+          },
+          "target_filter": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/JsonValue-Output"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Filter"
+          },
           "resolved_from": {
             "anyOf": [
               {
@@ -5832,6 +5853,17 @@
             "type": "boolean",
             "title": "Include Ambiguous",
             "default": false
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile"
           }
         },
         "type": "object",
@@ -6474,6 +6506,17 @@
               }
             ],
             "title": "Max Args"
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile"
           }
         },
         "type": "object",
@@ -8578,17 +8621,6 @@
             "type": "string",
             "title": "Kind"
           },
-          "parent": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent"
-          },
           "signature": {
             "type": "string",
             "title": "Signature"
@@ -8606,10 +8638,6 @@
             },
             "type": "array",
             "title": "Bases"
-          },
-          "depth": {
-            "type": "integer",
-            "title": "Depth"
           },
           "file": {
             "type": "string",
@@ -8643,11 +8671,9 @@
         "required": [
           "qualified_name",
           "kind",
-          "parent",
           "signature",
           "params",
           "bases",
-          "depth",
           "file",
           "line_start",
           "line_end",

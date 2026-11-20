@@ -29,7 +29,7 @@
       <SearchResultList v-else :items="result?.items || []" @open-read="openRead" @open-answer="openAnswer" />
       <div v-if="(result?.suggestions?.length || 0) > 0" class="libref-card">
         <h4>{{ messages.search.suggestions }}</h4>
-        <RowTable :rows="result?.suggestions || []" />
+        <RowTable :rows="result?.suggestions || []" :columns="SUGGESTION_COLUMNS" />
         <p v-if="result?.suggest_error" class="libref-muted">{{ result.suggest_error }}</p>
       </div>
     </template>
@@ -41,7 +41,7 @@ import { ElButton, ElCheckbox, ElInput } from 'element-plus';
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { SearchItem, SearchResponse } from '../api/types';
+import type { ColumnKey, DiscoveryCandidate, SearchItem, SearchResponse } from '../api/types';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
 import SearchResultList from '../components/business/SearchResultList.vue';
 import DegradedBanner from '../components/common/DegradedBanner.vue';
@@ -53,6 +53,15 @@ import { messages } from '../i18n';
 import RowTable from '../components/common/RowTable.vue';
 import { scopeParams, scopeStore, type SearchPreset } from '../stores/scope';
 import { applyScopeFromQuery, readBool, readNumber, readString, scopeSnapshot, useQuerySync } from '../utils/query';
+
+// Suggestions are discovery candidates; the table shows the triage fields only.
+const SUGGESTION_COLUMNS: readonly ColumnKey<DiscoveryCandidate>[] = [
+  'name',
+  'version',
+  'ecosystem',
+  'popularity',
+  'docs_url',
+];
 
 const route = useRoute();
 const router = useRouter();
