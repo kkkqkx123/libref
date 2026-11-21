@@ -15,7 +15,7 @@ from libref.cli.common import (
     as_error,
 )
 from libref.config import redacted_dict, resolve_config_file, settings_fingerprint
-from libref.errors import LibrefError
+from libref.errors import LibrefError, invalid_argument, unavailable
 from libref.services.factory import build_maintenance_service
 from libref.services.infra.jobs import JobManager
 from libref.services.ops.review import ReviewService
@@ -36,8 +36,7 @@ def cmd_reembed(args: argparse.Namespace) -> int:
     try:
         vec_store, embed = _build_vector(settings)
         if vec_store is None or embed is None:
-            print("embedding is not configured (missing key)", file=sys.stderr)
-            return 1
+            raise unavailable("embedding is not configured (missing key)")
         svc, _gw = build_maintenance_service(
             conn, settings, vec_store=vec_store, embed=embed
         )
@@ -63,15 +62,10 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
     try:
         vec_store, embed = _build_vector(settings)
         if vec_store is None or embed is None:
-            print("embedding is not configured (missing key)", file=sys.stderr)
-            return 1
+            raise unavailable("embedding is not configured (missing key)")
         vids = mining_version_ids(conn, args.library, args.version, args.ecosystem)
         if len(vids) != 1:
-            print(
-                "invalid: library version must resolve to a single version",
-                file=sys.stderr,
-            )
-            return 1
+            raise invalid_argument("library version must resolve to a single version")
         out = _asyncio.run(reconcile_version(conn, settings, vec_store, embed, vids[0]))
     finally:
         conn.close()
@@ -466,8 +460,8 @@ def _warn_role_conflicts(conn) -> None:
     )
 
 
-def _prepare_auth(host: str, settings, conn) -> int | None:
-    """Bootstrap identity and validate startup; return an exit code on failure."""
+def _prepare_auth(host: str, settings, conn) -> None:
+    """Bootstrap identity and validate startup; raise on unsafe configuration."""
     from libref.services.infra.auth import check_startup
 
     try:
@@ -478,11 +472,11 @@ def _prepare_auth(host: str, settings, conn) -> int | None:
             bootstrap_key=getattr(settings, "bootstrap_admin_key", None),
             has_principals=_startup_auth_state(settings, conn),
         )
-    except Exception as exc:  # noqa: BLE001 — unsafe startup must never proceed
-        print(f"config error: {exc}", file=sys.stderr)
-        return 2
+    except Exception as exc:
+        raise LibrefError(
+            "config_refresh_failed", f"startup check failed: {exc}"
+        ) from exc
     _warn_role_conflicts(conn)
-    return None
 
 
 def _use_local_principal(settings) -> None:
@@ -511,12 +505,11 @@ def _verify_fingerprint(settings, conn) -> None:
     from libref.services.infra.runtime import check_config_fingerprint
 
     if not check_config_fingerprint(conn, settings):
-        print(
-            "config error: settings fingerprint diverges from the shared "
-            "control plane; refusing to serve",
-            file=sys.stderr,
+        raise LibrefError(
+            "config_refresh_failed",
+            "settings fingerprint diverges from the shared control plane; "
+            "refusing to serve",
         )
-        raise SystemExit(2)
 
 
 def _drain_and_close(settings, conn) -> None:
@@ -545,9 +538,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     port = getattr(args, "port", None) or settings.web_port
     conn = _connect(settings, check_same_thread=False)
     try:
-        failure = _prepare_auth(host, settings, conn)
-        if failure is not None:
-            return failure
+        _prepare_auth(host, settings, conn)
         ctx = build_context(settings)
         if getattr(args, "stdio", False):
             from libref.mcp_server import build_mcp_server as _build_mcp

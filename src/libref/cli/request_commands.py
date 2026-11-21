@@ -5,11 +5,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import sys
 import time
 from typing import Any
 
-from libref.cli.common import _build_vector, _connect, _load_settings
+from libref.cli.common import _build_vector, _connect, _load_settings, as_error
 from libref.cli.remote import base_url_for, call_json
 from libref.services.infra.auth import Principal, dev_principal, lookup_principal
 
@@ -18,19 +17,6 @@ _TERMINAL = frozenset({"done", "failed", "rejected", "cancelled"})
 
 def _print(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
-
-
-def _fail(message: str) -> int:
-    print(message, file=sys.stderr)
-    return 1
-
-
-def _error(exc: Exception) -> int:
-    from libref.services.ops.index_requests import IndexRequestError
-
-    if isinstance(exc, IndexRequestError):
-        return _fail(f"{exc.code}: {exc.message}")
-    return _fail(f"failed: {exc}")
 
 
 def _local_principal(conn: Any, settings: Any) -> Principal:
@@ -269,8 +255,8 @@ def cmd_request(args: argparse.Namespace) -> int:
                     )
             finally:
                 conn.close()
-    except Exception as exc:  # noqa: BLE001 — CLI surfaces stable messages, not tracebacks
-        return _error(exc)
+    except Exception as exc:
+        raise as_error(exc) from exc
 
     if action == "list":
         for row in item.get("items", []):

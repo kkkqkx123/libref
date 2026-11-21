@@ -18,6 +18,7 @@ from libref.cli.common import (
     as_error,
 )
 from libref.crawler.registry import RegistryError
+from libref.errors import invalid_argument, unavailable
 from libref.services.docs.answer import answer_query
 from libref.services.docs.ingest import (
     IngestService,
@@ -233,11 +234,11 @@ def _remote_ingest(args: argparse.Namespace, settings) -> int:
         getattr(args, "ecosystem", None) is not None
         or getattr(args, "start_url", None) is None
     ):
-        print(
-            "remote ingest requires explicit library version start_url (resolve locally first)",
-            file=__import__("sys").stderr,
+        raise invalid_argument(
+            "remote ingest requires explicit library version start_url "
+            "(resolve locally first)",
+            field="start_url",
         )
-        return 2
     payload = {
         "library": args.library,
         "version": args.version,
@@ -266,9 +267,8 @@ def _remote_ingest(args: argparse.Namespace, settings) -> int:
                 _q = _c2.get(f"{base}/jobs/{int(job_id)}", headers=_ah3(settings))
                 _q.raise_for_status()
                 info = _q.json()
-        except Exception as exc:  # noqa: BLE001
-            print(f"remote poll failed: {exc}", file=__import__("sys").stderr)
-            return 1
+        except Exception as exc:
+            raise unavailable(f"remote poll failed: {exc}") from exc
         status = info.get("status")
         print(
             f"job {info.get('id')} {status}"
@@ -277,8 +277,7 @@ def _remote_ingest(args: argparse.Namespace, settings) -> int:
         if status in ("done", "failed"):
             return 0 if status == "done" else 1
         if _time.monotonic() >= deadline:
-            print("remote poll timeout", file=__import__("sys").stderr)
-            return 1
+            raise unavailable("remote poll timeout")
         _time.sleep(1.0)
 
 
@@ -295,13 +294,14 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         resolve_mode = args.ecosystem is not None or args.start_url is None
         if resolve_mode:
             if not args.library:
-                print("resolve mode requires library (package name)", file=sys.stderr)
-                return 2
-            if args.start_url is not None:
-                print(
-                    "--ecosystem and start_url are mutually exclusive", file=sys.stderr
+                raise invalid_argument(
+                    "resolve mode requires library (package name)", field="library"
                 )
-                return 2
+            if args.start_url is not None:
+                raise invalid_argument(
+                    "--ecosystem and start_url are mutually exclusive",
+                    field="ecosystem",
+                )
             try:
                 resolution = _resolve_for_cli(
                     settings,
@@ -331,10 +331,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             )
         else:
             if not (args.library and args.version and args.start_url):
-                print(
-                    "explicit mode requires library version start_url", file=sys.stderr
+                raise invalid_argument(
+                    "explicit mode requires library version start_url"
                 )
-                return 2
             library, version, start_url = args.library, args.version, args.start_url
             ecosystem, resolved_from = "custom", "explicit"
             registry_confirmed, homepage, repo_url = True, None, None
@@ -625,8 +624,7 @@ def cmd_dump_chunks(args: argparse.Namespace) -> int:
     suffix = Path(args.source).suffix
     cfg = ast_config.config_for_suffix(suffix)
     if cfg is None:
-        print(f"unsupported suffix: {suffix}", file=sys.stderr)
-        return 2
+        raise invalid_argument(f"unsupported suffix: {suffix}", field="source")
     decls, _aliases, _raw = ast_engine.extract_file(args.source, cfg, data)
     groups = ast_grouping.build_groups(decls, data, args.source)
     by_qual = {d.qualified_name: d for d in decls}

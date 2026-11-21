@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 
 from libref.cli.common import (
     _build_vector,
@@ -13,6 +12,7 @@ from libref.cli.common import (
     _registry_overrides,
     as_error,
 )
+from libref.errors import invalid_argument
 from libref.services.code.code_ingest import (
     INDEX_REPO_JOB_KIND,
     build_repo_runner,
@@ -45,11 +45,13 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
     try:
         if args.source is not None:
             if args.version is None:
-                print("explicit mode requires library version source", file=sys.stderr)
-                return 2
+                raise invalid_argument(
+                    "explicit mode requires library version source", field="version"
+                )
             if args.ecosystem is not None:
-                print("--ecosystem and source are mutually exclusive", file=sys.stderr)
-                return 2
+                raise invalid_argument(
+                    "--ecosystem and source are mutually exclusive", field="ecosystem"
+                )
             library, ecosystem = args.library.strip(), "custom"
             version, source = args.version, args.source
             resolved_from, registry_confirmed = "explicit", True
@@ -363,11 +365,9 @@ def cmd_pattern_insight(args: argparse.Namespace) -> int:
         )
         pattern = args.pattern.split(",") if getattr(args, "pattern", None) else None
         if getattr(args, "dedup", False) and getattr(args, "no_dedup", False):
-            print(
-                "invalid: --dedup and --no-dedup are mutually exclusive",
-                file=sys.stderr,
+            raise invalid_argument(
+                "--dedup and --no-dedup are mutually exclusive", field="dedup"
             )
-            return 2
         if getattr(args, "dedup", False):
             dedup_value = True
         elif getattr(args, "no_dedup", False):
