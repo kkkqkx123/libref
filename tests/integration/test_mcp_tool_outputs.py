@@ -56,7 +56,13 @@ def test_every_mcp_tool_has_reviewable_output(tmp_path, monkeypatch) -> None:
     catalog = json.loads((out_dir / "catalog.txt").read_text(encoding="utf-8"))
     assert all(c["result"]["count"] >= 1 for c in catalog["cases"])
 
-    expected_errors = {"empty-query", "empty-url", "empty-name", "local-rejected"}
+    expected_errors = {
+        "empty-query",
+        "empty-url",
+        "empty-name",
+        "local-rejected",
+        "chat-disabled",
+    }
     for tool in TOOL_ORDER:
         body = json.loads((out_dir / f"{tool}.txt").read_text(encoding="utf-8"))
         for case in body["cases"]:

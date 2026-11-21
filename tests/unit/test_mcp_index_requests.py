@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import Iterator
 
@@ -42,6 +43,15 @@ def _call(server, name: str, args: dict):
     return result.structured_content
 
 
+def _failure(server, name: str, args: dict) -> dict:
+    """Failure payload of a rejected call: the runner raises, the exit renders."""
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    with pytest.raises(ToolError) as caught:
+        asyncio.run(server.call_tool(name, args))
+    return json.loads(str(caught.value).partition(": ")[2])
+
+
 def test_index_request_tools_are_visible(mcp) -> None:
     expected = {
         "request_repo_index",
@@ -57,13 +67,13 @@ def test_index_request_tools_are_visible(mcp) -> None:
 def test_unauthorized_request_and_approval_are_denied(mcp) -> None:
     token = current_principal.set(None)
     try:
-        result = _call(
+        result = _failure(
             mcp,
             "request_repo_index",
             {"library": "demo", "version": "1.0", "source": "https://github.com/a/b"},
         )
         assert result["error"] == "unauthorized"
-        approval = _call(mcp, "review_index_request", {"action": "list"})
+        approval = _failure(mcp, "review_index_request", {"action": "list"})
         assert approval["error"] == "unauthorized"
     finally:
         current_principal.reset(token)

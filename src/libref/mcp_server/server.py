@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import logging
 import sqlite3
 from typing import Any, Literal
 
@@ -10,6 +11,17 @@ from mcp.server.mcpserver import MCPServer
 
 from libref.config import ConfigError, LibrefSettings, load_settings
 from libref.crawler.registry import RegistryError
+from libref.errors import LibrefError, normalize
+from libref.limits import (
+    ANSWER_MATERIALS,
+    INSIGHT_ROWS,
+    LISTING_ROWS,
+    SEARCH_RESULTS,
+    require_limit,
+)
+from libref.mcp_server.contract import ToolFailure
+from libref.mcp_server.contract import failed as as_tool_failure
+from libref.mcp_server.contract import install as install_contract
 from libref.observe import setup_logging
 from libref.services.code.code_ingest import list_repo_dependencies
 from libref.services.code.mining_read import MiningReadService
@@ -32,42 +44,32 @@ from libref.services.ops.review import ReviewService
 from libref.services.registry.libraries import LibraryService
 from libref.services.registry.resolver import resolve as _resolve
 
+logger = logging.getLogger(__name__)
 
-def _invalid(message: str) -> dict[str, Any]:
-    return {"error": "invalid", "message": message}
+
+def _invalid(
+    message: str, *, field: str | None = None, hint: str | None = None
+) -> ToolFailure:
+    """Caller mistake: the caller can correct it, so it is reported as a failure."""
+    return ToolFailure("invalid_argument", message, field=field, hint=hint)
 
 
 def _not_found(message: str) -> dict[str, Any]:
+    """Absent resource: a normal result, so the caller keeps its own control flow."""
     return {"error": "not_found", "message": message}
-
-
-def _failed(message: str) -> dict[str, Any]:
-    return {"error": "failed", "message": message}
 
 
 def _items(items: list[dict[str, Any]]) -> dict[str, Any]:
     return {"items": items, "count": len(items)}
 
 
-def _request_error(exc: Exception) -> dict[str, Any]:
-    """Keep index-request failures structured across every MCP tool."""
-    from libref.services.ops.index_requests import IndexRequestError
-
-    if isinstance(exc, IndexRequestError):
-        return {"error": exc.code, "message": exc.message}
-    return _failed(str(exc))
-
-
-def _check_limit(
-    limit: int | None, *, low: int, high: int, name: str = "limit"
-) -> str | None:
-    if limit is None:
-        return None
-    if not isinstance(limit, int) or isinstance(limit, bool):
-        return f"{name} must be an integer"
-    if limit < low or limit > high:
-        return f"{name} must be between {low} and {high}"
-    return None
+def _as_error(exc: BaseException) -> ToolFailure:
+    """Turn any service exception into the single value an exit can render."""
+    found = normalize(exc)
+    if found is not None:
+        return as_tool_failure(found)
+    logger.error("tool failure: %s", exc, exc_info=exc)
+    return ToolFailure("unavailable", str(exc) or type(exc).__name__)
 
 
 ALL_MCP_TOOLS: frozenset[str] = frozenset(
@@ -156,9 +158,14 @@ def build_mcp_server(
             return dev_principal(resolve_settings)
         return None
 
-    def _deny(principal, *scopes: str):
+    def _require(principal, *scopes: str) -> None:
+        """Fail the call when credentials or scopes are missing."""
         if principal is None:
-            return {"error": "unauthorized", "message": "missing credentials"}
+            raise ToolFailure(
+                "unauthorized",
+                "missing credentials",
+                hint="send an Authorization: Bearer token",
+            )
         missing = missing_scopes(principal, *scopes)
         if missing:
             from libref.services.ops.audit import write_audit
@@ -171,8 +178,11 @@ def build_mcp_server(
                 target=",".join(missing),
                 result="denied",
             )
-            return {"error": "forbidden", "message": f"missing {','.join(missing)}"}
-        return None
+            raise ToolFailure(
+                "forbidden",
+                f"missing {','.join(missing)}",
+                hint="request the missing scope or use another account",
+            )
 
     def _tenant(principal) -> str:
         scopes = set(getattr(principal, "scopes", set()) or ())
@@ -239,10 +249,8 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Preset retrieval: precise uses exact full-text, balanced and thorough use fused recall."""
         if not query.strip():
-            return _invalid("query is empty")
-        bad = _check_limit(limit, low=1, high=100)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid("query is empty", field="query")
+        require_limit(limit, low=1, high=SEARCH_RESULTS)
         try:
             _rc, _bundle, _should_close = _make_bundle()
             try:
@@ -257,10 +265,8 @@ def build_mcp_server(
                 )
             finally:
                 _close(_rc, _should_close)
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
         out: dict[str, Any] = {
             "items": results,
             "count": len(results),
@@ -279,12 +285,13 @@ def build_mcp_server(
                     include_prerelease=include_prerelease,
                 )
             except ValueError as exc:
-                return _invalid(str(exc))
+                raise _invalid(str(exc)) from exc
             except RegistryError as exc:
+                # A failed suggestion pass must not discard the results already found.
                 out["suggestions"] = []
                 out["suggest_error"] = f"{exc.kind}: {exc}"
-            except Exception as exc:  # noqa: BLE001
-                return _failed(str(exc))
+            except Exception as exc:
+                raise _as_error(exc) from exc
         return out
 
     async def library_search(
@@ -295,22 +302,16 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Fuzzy discovery across registries (pypi/npm/maven/go/crates/nuget; language aliases accepted)."""
         if not query.strip():
-            return _invalid("query is empty")
-        bad = _check_limit(limit, low=1, high=100)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid("query is empty", field="query")
+        require_limit(limit, low=1, high=SEARCH_RESULTS)
         try:
             return _items(
                 await discovery_svc.search_async(
                     query, ecosystem, limit, include_prerelease=include_prerelease
                 )
             )
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except RegistryError as exc:
-            return {"error": exc.kind, "message": str(exc)}
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     async def web_search(
         query: str,
@@ -318,18 +319,12 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Explicit web search for library docs or repos; results are unverified, confirm before use."""
         if not query.strip():
-            return _invalid("query is empty")
-        bad = _check_limit(limit, low=1, high=100)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid("query is empty", field="query")
+        require_limit(limit, low=1, high=SEARCH_RESULTS)
         try:
             return _items(await discovery_svc.search_web_async(query, limit))
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except RegistryError as exc:
-            return {"error": exc.kind, "message": str(exc)}
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     async def github_search(
         query: str,
@@ -337,18 +332,12 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Explicit hosted search for repos; results are unverified, confirm before use."""
         if not query.strip():
-            return _invalid("query is empty")
-        bad = _check_limit(limit, low=1, high=100)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid("query is empty", field="query")
+        require_limit(limit, low=1, high=SEARCH_RESULTS)
         try:
             return _items(await discovery_svc.search_github_async(query, limit))
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except RegistryError as exc:
-            return {"error": exc.kind, "message": str(exc)}
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     async def answer(
         query: str,
@@ -362,10 +351,8 @@ def build_mcp_server(
         from libref.services.docs.answer import answer_query_async
 
         if not query.strip():
-            return _invalid("query is empty")
-        bad = _check_limit(limit, low=1, high=50)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid("query is empty", field="query")
+        require_limit(limit, low=1, high=ANSWER_MATERIALS)
         _rc2, _bundle2, _should_close2 = _make_bundle()
         try:
             try:
@@ -385,9 +372,13 @@ def build_mcp_server(
                     tenant_id=_tenant(_principal()),
                 )
             except ValueError as exc:
-                return {"error": "unavailable", "message": str(exc)}
-            except Exception as exc:  # noqa: BLE001
-                return {"error": "failed", "message": str(exc)}
+                raise ToolFailure(
+                    "unavailable",
+                    str(exc),
+                    hint="configure the chat model before asking for a generated answer",
+                ) from exc
+            except Exception as exc:
+                raise _as_error(exc) from exc
         finally:
             _close(_rc2, _should_close2)
 
@@ -403,20 +394,13 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Read a document by URL: full page, neighboring window, or whole section."""
         if not url.strip():
-            return _invalid("url is empty")
-        if mode not in ("page", "window", "section"):
-            return _invalid(f"unsupported read mode: {mode}")
-        if (
-            not isinstance(radius, int)
-            or isinstance(radius, bool)
-            or radius < 0
-            or radius > 20
-        ):
-            return _invalid("radius must be between 0 and 20")
+            raise _invalid("url is empty", field="url")
+        if radius < 0 or radius > 20:
+            raise _invalid("radius must be between 0 and 20", field="radius")
         if mode == "window" and sort_order is None:
-            return _invalid("window mode requires sort_order")
+            raise _invalid("window mode requires sort_order")
         if mode == "section" and not source_group_id:
-            return _invalid("section mode requires source_group_id")
+            raise _invalid("section mode requires source_group_id")
         _rc3, _bundle3, _should_close3 = _make_bundle()
         try:
             try:
@@ -431,10 +415,8 @@ def build_mcp_server(
                     ecosystem=ecosystem,
                     tenant_id=_tenant(_principal()),
                 )
-            except ValueError as exc:
-                return _invalid(str(exc))
-            except Exception as exc:  # noqa: BLE001
-                return _failed(str(exc))
+            except Exception as exc:
+                raise _as_error(exc) from exc
         finally:
             _close(_rc3, _should_close3)
         if page is None:
@@ -455,10 +437,8 @@ def build_mcp_server(
                 )
             finally:
                 _close(_rc4, _should_close4)
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     async def doc_probe(
         start_url: str,
@@ -470,20 +450,10 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Probe a documentation site structure without storing; confirm the range before scraping."""
         if not start_url.strip():
-            return _invalid("start_url is empty")
-        bad = _check_limit(sample_limit, low=1, high=100)
-        if bad is not None:
-            return _invalid(bad)
-        bad = _check_limit(fetch_sample_limit, low=0, high=100)
-        if bad is not None:
-            return _invalid(bad)
-        bad = _check_limit(max_pages, low=1, high=100000)
-        if bad is not None:
-            return _invalid(bad)
-        if not isinstance(prefilter, bool):
-            return _invalid("prefilter must be a boolean")
-        if scope is not None and not isinstance(scope, dict):
-            return _invalid("scope must be an object")
+            raise _invalid("start_url is empty", field="start_url")
+        require_limit(sample_limit, low=1, high=100)
+        require_limit(fetch_sample_limit, low=0, high=100)
+        require_limit(max_pages, low=1, high=100000)
         try:
             probe = await probe_docs_async(
                 conn,
@@ -495,10 +465,8 @@ def build_mcp_server(
                 max_pages=max_pages,
                 prefilter=prefilter,
             )
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
         return probe.model_dump()
 
     def repo_probe(
@@ -513,34 +481,24 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Probe a repository structure without parsing; confirm the range before indexing."""
         if not source.strip():
-            return _invalid("source is empty")
-        bad = _check_limit(sample_limit, low=1, high=100)
-        if bad is not None:
-            return _invalid(bad)
-        bad = _check_limit(max_files, low=1, high=100000)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid("source is empty", field="source")
+        require_limit(sample_limit, low=1, high=100)
+        require_limit(max_files, low=1, high=100000)
         if only_files is not None and (
-            not isinstance(only_files, list)
-            or not only_files
-            or any(not isinstance(item, str) or not item.strip() for item in only_files)
+            not only_files or any(not item.strip() for item in only_files)
         ):
-            return _invalid("only_files must be a non-empty string list")
-        if exclude_patterns is not None and (
-            not isinstance(exclude_patterns, list)
-            or not exclude_patterns
-            or any(
-                not isinstance(item, str) or not item.strip()
-                for item in exclude_patterns
+            raise _invalid(
+                "only_files must be a non-empty string list", field="only_files"
             )
+        if exclude_patterns is not None and (
+            not exclude_patterns or any(not item.strip() for item in exclude_patterns)
         ):
-            return _invalid("exclude_patterns must be a non-empty string list")
-        bad = _check_limit(tree_depth, low=1, high=10)
-        if bad is not None:
-            return _invalid(bad)
-        bad = _check_limit(samples_per_dir, low=1, high=50)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid(
+                "exclude_patterns must be a non-empty string list",
+                field="exclude_patterns",
+            )
+        require_limit(tree_depth, low=1, high=10)
+        require_limit(samples_per_dir, low=1, high=50)
         try:
             probe = probe_repo(
                 source,
@@ -554,10 +512,8 @@ def build_mcp_server(
                 samples_per_dir=samples_per_dir,
                 allow_local=False,
             )
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
         return probe.model_dump()
 
     def repo_dependencies(
@@ -568,9 +524,9 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Manifest-declared dependencies for one library version, rebuilt at index time."""
         if not library.strip():
-            return _invalid("library is empty")
+            raise _invalid("library is empty", field="library")
         if not version.strip():
-            return _invalid("version is empty")
+            raise _invalid("version is empty", field="version")
         _rcd, _bundled, _scd = _make_bundle()
         try:
             try:
@@ -586,10 +542,8 @@ def build_mcp_server(
                 )
             finally:
                 _close(_rcd, _scd)
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     def link_stats(
         library: str,
@@ -606,12 +560,10 @@ def build_mcp_server(
         )
 
         if not library.strip():
-            return _invalid("library is empty")
+            raise _invalid("library is empty", field="library")
         if not version.strip():
-            return _invalid("version is empty")
-        bad = _check_limit(limit, low=1, high=500)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid("version is empty", field="version")
+        require_limit(limit, low=1, high=INSIGHT_ROWS)
         _rcl, _bundlel, _scl = _make_bundle()
         try:
             try:
@@ -643,10 +595,8 @@ def build_mcp_server(
                 }
             finally:
                 _close(_rcl, _scl)
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     def api_insight(
         view: Literal["usage", "related", "args", "common"],
@@ -658,15 +608,11 @@ def build_mcp_server(
         limit: int | None = None,
     ) -> dict[str, Any]:
         """API-centric usage: frequency ranking, co-occurring APIs, argument shapes."""
-        if view not in ("usage", "related", "args", "common"):
-            return _invalid(f"unsupported api view: {view}")
         if view in ("related", "args") and not api:
-            return _invalid(f"{view} view requires api")
+            raise _invalid(f"{view} view requires api")
         if view == "common" and not api and not apis:
-            return _invalid("common view requires api or apis")
-        bad = _check_limit(limit, low=1, high=500)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid("common view requires api or apis")
+        require_limit(limit, low=1, high=INSIGHT_ROWS)
         _rca, _bundlea, _sca = _make_bundle()
         try:
             try:
@@ -684,10 +630,8 @@ def build_mcp_server(
                 )
             finally:
                 _close(_rca, _sca)
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     def pattern_insight(
         view: Literal[
@@ -705,24 +649,10 @@ def build_mcp_server(
         profile: str | None = None,
     ) -> dict[str, Any]:
         """Sequence and structure insight: patterns, evidence, feature tree, clusters."""
-        if view not in (
-            "patterns",
-            "evidence",
-            "tree",
-            "clusters",
-            "health",
-            "labels",
-            "snippets",
-        ):
-            return _invalid(f"unsupported pattern view: {view}")
         if view == "evidence" and not pattern:
-            return _invalid("evidence view requires a non-empty pattern")
-        bad = _check_limit(limit, low=1, high=500)
-        if bad is not None:
-            return _invalid(bad)
-        bad = _check_limit(per_file_limit, low=1, high=20)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid("evidence view requires a non-empty pattern")
+        require_limit(limit, low=1, high=INSIGHT_ROWS)
+        require_limit(per_file_limit, low=1, high=20)
         _rcp, _bundlep, _scp = _make_bundle()
         try:
             try:
@@ -744,10 +674,8 @@ def build_mcp_server(
                 )
             finally:
                 _close(_rcp, _scp)
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     def symbol_insight(
         view: Literal["detail", "file", "children", "signature"],
@@ -760,15 +688,11 @@ def build_mcp_server(
         offset: int = 0,
     ) -> dict[str, Any]:
         """Symbol detail views over version-scoped entities."""
-        if view not in ("detail", "file", "children", "signature"):
-            return _invalid(f"unsupported symbol view: {view}")
         if view == "detail" and not api and not apis:
-            return _invalid("detail view requires api or apis")
+            raise _invalid("detail view requires api or apis")
         if view in ("file", "children", "signature") and not api:
-            return _invalid(f"{view} view requires api")
-        bad = _check_limit(limit, low=1, high=500)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid(f"{view} view requires api")
+        require_limit(limit, low=1, high=INSIGHT_ROWS)
         _rcs, _bundles, _scs = _make_bundle()
         try:
             try:
@@ -787,10 +711,8 @@ def build_mcp_server(
                 )
             finally:
                 _close(_rcs, _scs)
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     def call_insight(
         view: Literal["callee", "caller", "file"],
@@ -807,13 +729,9 @@ def build_mcp_server(
         max_args: int | None = None,
     ) -> dict[str, Any]:
         """Bidirectional call views with shared mining filters."""
-        if view not in ("callee", "caller", "file"):
-            return _invalid(f"unsupported call view: {view}")
         if not api:
-            return _invalid(f"{view} view requires api")
-        bad = _check_limit(limit, low=1, high=500)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid(f"{view} view requires api")
+        require_limit(limit, low=1, high=INSIGHT_ROWS)
         _rcc, _bundlec, _scc = _make_bundle()
         try:
             try:
@@ -836,10 +754,8 @@ def build_mcp_server(
                 )
             finally:
                 _close(_rcc, _scc)
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     def import_insight(
         view: Literal["importers", "imports"],
@@ -851,13 +767,9 @@ def build_mcp_server(
         offset: int = 0,
     ) -> dict[str, Any]:
         """Import edge views for fan-in and fan-out."""
-        if view not in ("importers", "imports"):
-            return _invalid(f"unsupported import view: {view}")
         if not api:
-            return _invalid(f"{view} view requires api")
-        bad = _check_limit(limit, low=1, high=500)
-        if bad is not None:
-            return _invalid(bad)
+            raise _invalid(f"{view} view requires api")
+        require_limit(limit, low=1, high=INSIGHT_ROWS)
         _rci, _bundlei, _sci = _make_bundle()
         try:
             try:
@@ -875,10 +787,8 @@ def build_mcp_server(
                 )
             finally:
                 _close(_rci, _sci)
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     def mining_health(
         library: str | None = None,
@@ -897,10 +807,8 @@ def build_mcp_server(
                 )
             finally:
                 _close(_rch, _sch)
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     def review(
         action: Literal["list", "approve", "conflict", "reopen"],
@@ -910,16 +818,10 @@ def build_mcp_server(
         """Review workflow: list pending items or transition one item."""
         principal = _principal()
         need = "review:read" if action == "list" else "review:write"
-        denied = _deny(principal, need)
-        if denied is not None:
-            return denied
-        if action not in ("list", "approve", "conflict", "reopen"):
-            return _invalid(f"unsupported review action: {action}")
-        bad = _check_limit(limit, low=1, high=500)
-        if bad is not None:
-            return _invalid(bad)
+        _require(principal, need)
+        require_limit(limit, low=1, high=INSIGHT_ROWS)
         if action != "list" and entity_id is None:
-            return _invalid(f"{action} requires entity_id")
+            raise _invalid(f"{action} requires entity_id")
         _rcr, _bundler, _scr = _make_bundle()
         try:
             try:
@@ -944,10 +846,10 @@ def build_mcp_server(
             except ValueError as exc:
                 text = str(exc)
                 if "cannot transition" in text or "cannot reopen" in text:
-                    return {"error": "conflict", "message": text}
-                return _invalid(text)
-            except Exception as exc:  # noqa: BLE001
-                return _failed(str(exc))
+                    raise ToolFailure("review_conflict", text, field="action") from exc
+                raise _invalid(text) from exc
+            except Exception as exc:
+                raise _as_error(exc) from exc
         finally:
             _close(_rcr, _scr)
         if isinstance(result, list):
@@ -957,9 +859,7 @@ def build_mcp_server(
     def job_show(job_id: int | None = None, limit: int = 20) -> dict[str, Any]:
         """Show job results, listing recent jobs when no id is given."""
         principal = _principal()
-        bad = _check_limit(limit, low=1, high=200)
-        if bad is not None:
-            return _invalid(bad)
+        require_limit(limit, low=1, high=LISTING_ROWS)
         _rcj, _bundlej, _scj = _make_bundle()
         try:
             try:
@@ -971,10 +871,12 @@ def build_mcp_server(
                 ).show(job_id, limit, tenant_id=_tenant(principal))
             finally:
                 _close(_rcj, _scj)
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except LibrefError as exc:
+            if exc.code == "not_found":
+                return _not_found(exc.message)
+            raise
+        except Exception as exc:
+            raise _as_error(exc) from exc
 
     async def resolve(
         ecosystem: str | None,
@@ -987,9 +889,7 @@ def build_mcp_server(
         from libref.crawler.http import build_async_client
 
         if not name.strip():
-            return _invalid("empty package name")
-        if target not in ("docs", "repo"):
-            return _invalid(f"unsupported resolve target: {target}")
+            raise _invalid("empty package name", field="name")
         try:
             async with build_async_client(resolve_settings) as client:
                 resolution = await _resolve(
@@ -1002,25 +902,8 @@ def build_mcp_server(
                     target,
                     include_prerelease,
                 )
-        except ValueError as exc:
-            return {"error": "invalid", "message": str(exc)}
-        except RegistryError as exc:
-            from libref.services.registry.resolver import next_actions_for
-
-            hint = exc.hint or {}
-            return {
-                "error": exc.kind,
-                "message": str(exc),
-                "hint": hint,
-                "next_actions": next_actions_for(
-                    hint.get("ecosystem", ecosystem),
-                    hint.get("name", name),
-                    target,
-                    exc.kind,
-                ),
-            }
-        except Exception as exc:  # noqa: BLE001
-            return {"error": "failed", "message": str(exc)}
+        except Exception as exc:
+            raise _as_error(exc) from exc
         return resolution.model_dump()
 
     def submit_feedback(
@@ -1031,11 +914,9 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Submit developer feedback without touching review state."""
         principal = _principal()
-        denied = _deny(principal, "feedback:write")
-        if denied is not None:
-            return denied
+        _require(principal, "feedback:write")
         if not (body or "").strip():
-            return _invalid("body is empty")
+            raise _invalid("body is empty", field="body")
         try:
             from libref.services.ops.audit import write_audit
             from libref.services.ops.feedback import FeedbackService
@@ -1057,10 +938,8 @@ def build_mcp_server(
                 target=str(fid),
                 request_id="",
             )
-        except ValueError as exc:
-            return _invalid(str(exc))
-        except Exception as exc:  # noqa: BLE001
-            return _failed(str(exc))
+        except Exception as exc:
+            raise _as_error(exc) from exc
         return {"id": fid, "ok": True}
 
     def _request_service(rc, bundle):
@@ -1098,11 +977,9 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Request repository indexing by package coordinates or an HTTP(S) Git URL."""
         principal = _principal()
-        denied = _deny(principal, "index:request")
-        if denied is not None:
-            return denied
+        _require(principal, "index:request")
         if not library.strip():
-            return _invalid("library is empty")
+            raise _invalid("library is empty", field="library")
         payload = {
             "kind": "repo",
             "library": library,
@@ -1125,8 +1002,8 @@ def build_mcp_server(
                 item = await _request_service(rc, bundle).submit(
                     payload, principal, tenant_id=_tenant(principal)
                 )
-            except Exception as exc:  # noqa: BLE001 — tools return failures as payloads
-                return _request_error(exc)
+            except Exception as exc:
+                raise _as_error(exc) from exc
             return _with_next(item)
         finally:
             _close(rc, should_close)
@@ -1142,11 +1019,9 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Request documentation indexing by coordinates or an HTTP(S) start URL."""
         principal = _principal()
-        denied = _deny(principal, "index:request")
-        if denied is not None:
-            return denied
+        _require(principal, "index:request")
         if not library.strip():
-            return _invalid("library is empty")
+            raise _invalid("library is empty", field="library")
         payload = {
             "kind": "docs",
             "library": library,
@@ -1163,8 +1038,8 @@ def build_mcp_server(
                 item = await _request_service(rc, bundle).submit(
                     payload, principal, tenant_id=_tenant(principal)
                 )
-            except Exception as exc:  # noqa: BLE001 — tools return failures as payloads
-                return _request_error(exc)
+            except Exception as exc:
+                raise _as_error(exc) from exc
             return _with_next(item)
         finally:
             _close(rc, should_close)
@@ -1172,17 +1047,15 @@ def build_mcp_server(
     def index_request_status(request_id: int) -> dict[str, Any]:
         """Read one index request: status, job id, error, and the next tool to call."""
         principal = _principal()
-        denied = _deny(principal, "read")
-        if denied is not None:
-            return denied
+        _require(principal, "read")
         rc, bundle, should_close = _make_bundle()
         try:
             try:
                 item = _request_service(rc, bundle).get(
                     request_id, principal, tenant_id=_tenant(principal)
                 )
-            except Exception as exc:  # noqa: BLE001 — tools return failures as payloads
-                return _request_error(exc)
+            except Exception as exc:
+                raise _as_error(exc) from exc
             return _with_next(item)
         finally:
             _close(rc, should_close)
@@ -1192,13 +1065,11 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """Poll one index request up to a bounded timeout and return its state."""
         principal = _principal()
-        denied = _deny(principal, "read")
-        if denied is not None:
-            return denied
+        _require(principal, "read")
         if timeout < 0 or timeout > 900:
-            return _invalid("timeout must be between 0 and 900 seconds")
+            raise _invalid("timeout must be between 0 and 900 seconds")
         if poll <= 0 or poll > 5:
-            return _invalid("poll must be between 0 and 5 seconds")
+            raise _invalid("poll must be between 0 and 5 seconds")
         rc, bundle, should_close = _make_bundle()
         try:
             try:
@@ -1209,8 +1080,8 @@ def build_mcp_server(
                     timeout=timeout,
                     poll=poll,
                 )
-            except Exception as exc:  # noqa: BLE001 — tools return failures as payloads
-                return _request_error(exc)
+            except Exception as exc:
+                raise _as_error(exc) from exc
             result = _with_next(item)
             from libref.services.ops.index_requests import ACTIVE_STATUSES
 
@@ -1225,12 +1096,8 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """List your own index requests, or the pending queue when allowed."""
         principal = _principal()
-        denied = _deny(principal, "index:request")
-        if denied is not None:
-            return denied
-        bad = _check_limit(limit, low=1, high=200)
-        if bad is not None:
-            return _invalid(bad)
+        _require(principal, "index:request")
+        require_limit(limit, low=1, high=LISTING_ROWS)
         rc, bundle, should_close = _make_bundle()
         try:
             try:
@@ -1241,8 +1108,8 @@ def build_mcp_server(
                     pending=pending,
                     limit=limit,
                 )
-            except Exception as exc:  # noqa: BLE001 — tools return failures as payloads
-                return _request_error(exc)
+            except Exception as exc:
+                raise _as_error(exc) from exc
             return _items(items)
         finally:
             _close(rc, should_close)
@@ -1255,16 +1122,12 @@ def build_mcp_server(
     ) -> dict[str, Any]:
         """List pending index requests, approve one, or reject one with a reason."""
         principal = _principal()
-        denied = _deny(principal, "index:approve")
-        if denied is not None:
-            return denied
-        bad = _check_limit(limit, low=1, high=200)
-        if bad is not None:
-            return _invalid(bad)
+        _require(principal, "index:approve")
+        require_limit(limit, low=1, high=LISTING_ROWS)
         if action != "list" and request_id is None:
-            return _invalid(f"{action} requires request_id")
+            raise _invalid(f"{action} requires request_id")
         if action == "reject" and not (reason or "").strip():
-            return _invalid("reject requires a reason")
+            raise _invalid("reject requires a reason")
         rc, bundle, should_close = _make_bundle()
         try:
             try:
@@ -1288,8 +1151,8 @@ def build_mcp_server(
                         request_id, reason, principal, tenant_id=_tenant(principal)
                     )
                 return _with_next(item)
-            except Exception as exc:  # noqa: BLE001 — tools return failures as payloads
-                return _request_error(exc)
+            except Exception as exc:
+                raise _as_error(exc) from exc
         finally:
             _close(rc, should_close)
 
@@ -1320,30 +1183,38 @@ def build_mcp_server(
     )
 
     def _wrap(name: str, func: Any) -> Any:
-        if name in ("review", "submit_feedback"):
-            return func
-        if name not in _read_tools:
-            return func
         import functools as _ft
+
+        # Only read tools need the scope guard; review/feedback do their own.
+        check_scope = name in _read_tools and name not in (
+            "review",
+            "submit_feedback",
+        )
 
         if inspect.iscoroutinefunction(func):
 
             @_ft.wraps(func)
             async def _guarded(*args: Any, **kwargs: Any) -> Any:
-                denied = _deny(_principal(), "read")
-                if denied is not None:
-                    return denied
-                return await func(*args, **kwargs)
+                if check_scope:
+                    _require(_principal(), "read")
+                try:
+                    return await func(*args, **kwargs)
+                except LibrefError as exc:
+                    # A shared error (e.g. require_limit) is not a ToolError, so
+                    # the runner would turn it into a crash notice without this.
+                    raise as_tool_failure(exc) from exc
 
             _guarded.__name__ = name
             return _guarded
 
         @_ft.wraps(func)
         def _guarded_sync(*args: Any, **kwargs: Any) -> Any:
-            denied = _deny(_principal(), "read")
-            if denied is not None:
-                return denied
-            return func(*args, **kwargs)
+            if check_scope:
+                _require(_principal(), "read")
+            try:
+                return func(*args, **kwargs)
+            except LibrefError as exc:
+                raise as_tool_failure(exc) from exc
 
         _guarded_sync.__name__ = name
         return _guarded_sync
@@ -1381,4 +1252,5 @@ def build_mcp_server(
         if name in enabled:
             mcp.tool()(_wrap(name, func))
 
+    install_contract(mcp)
     return mcp

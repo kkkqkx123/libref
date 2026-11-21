@@ -11,6 +11,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from libref.config import LibrefSettings, settings_fingerprint
 from libref.crawler.registry import RegistryError
 from libref.db.contract import MetadataSession
+from libref.errors import LibrefError
 from libref.services.code.mining_read import MiningReadService
 from libref.services.docs.pages import PageService
 from libref.services.docs.search import SearchService
@@ -1331,10 +1332,12 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             mgr = bundle["jobs"]
-            out = mgr.show(params.job_id, params.limit, tenant_id=_tenant_of(principal))
-            if "error" in out and "id" not in out:
-                raise ApiRejection(404, "job_not_found", "job not found")
-            return out
+            try:
+                return mgr.show(
+                    params.job_id, params.limit, tenant_id=_tenant_of(principal)
+                )
+            except LibrefError as exc:
+                raise ApiRejection(404, "job_not_found", exc.message) from exc
         finally:
             if should_close:
                 try:
@@ -1350,10 +1353,10 @@ def build_web_app(
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             mgr = bundle["jobs"]
-            out = mgr.show(job_id, tenant_id=_tenant_of(principal))
-            if "error" in out and "id" not in out:
-                raise ApiRejection(404, "job_not_found", "job not found")
-            return out
+            try:
+                return mgr.show(job_id, tenant_id=_tenant_of(principal))
+            except LibrefError as exc:
+                raise ApiRejection(404, "job_not_found", exc.message) from exc
         finally:
             if should_close:
                 try:

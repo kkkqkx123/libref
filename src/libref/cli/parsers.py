@@ -973,7 +973,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report principals whose roles break separation of duties",
         parents=[_config_parent],
     )
-    p_role_audit.add_argument("--json", action="store_true", help="Print JSON")
     p_role_audit.add_argument(
         "--strict",
         action="store_true",
@@ -1002,7 +1001,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_role_split.add_argument(
         "--dry-run", action="store_true", help="Print the plan without writing"
     )
-    p_role_split.add_argument("--json", action="store_true", help="Print JSON")
     p_role_split.set_defaults(func=cmd_role_split)
 
     p_request = sub.add_parser(

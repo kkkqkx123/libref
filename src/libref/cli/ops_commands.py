@@ -12,8 +12,10 @@ from libref.cli.common import (
     _load_settings,
     _mcp_tools_overrides,
     applied_count,
+    as_error,
 )
 from libref.config import redacted_dict, resolve_config_file, settings_fingerprint
+from libref.errors import LibrefError
 from libref.services.factory import build_maintenance_service
 from libref.services.infra.jobs import JobManager
 from libref.services.ops.review import ReviewService
@@ -159,10 +161,8 @@ def cmd_review(args: argparse.Namespace) -> int:
         except ValueError as exc:
             text = str(exc)
             if "cannot transition" in text or "cannot reopen" in text:
-                print(f"conflict: {text}", file=sys.stderr)
-            else:
-                print(f"invalid: {text}", file=sys.stderr)
-            return 1
+                raise LibrefError("review_conflict", text) from exc
+            raise as_error(exc) from exc
         if action == "list":
             for r in result:
                 print(
@@ -219,11 +219,8 @@ def _remote_job_show(args: argparse.Namespace, settings) -> int:
                     f"{job.get('id')} {job.get('kind')} {job.get('status')} {job.get('finished_at') or ''}"
                 )
             return 0
-    except Exception as exc:  # noqa: BLE001
-        import sys as _sys2
-
-        print(f"remote failed: {exc}", file=_sys2.stderr)
-        return 1
+    except Exception as exc:
+        raise as_error(exc) from exc
 
 
 def cmd_job_show(args: argparse.Namespace) -> int:
@@ -245,9 +242,6 @@ def cmd_job_show(args: argparse.Namespace) -> int:
                 )
             return 0
         out = mgr.show(args.job_id)
-        if "error" in out and "id" not in out:
-            print(f"(unknown job: {args.job_id})", file=sys.stderr)
-            return 1
         print(
             f"job {out['id']} {out['status']}"
             + (f" error={out['error']}" if out.get("error") else "")
@@ -280,8 +274,7 @@ def cmd_purge(args: argparse.Namespace) -> int:
             vec_store=vec_store,
         )
     except ValueError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return 1
+        raise as_error(exc) from exc
     finally:
         conn.close()
     for key, value in out.items():
@@ -384,8 +377,7 @@ def cmd_role_split(args: argparse.Namespace) -> int:
                 target=f"{result['principal_id']}->{len(result['new_principals'])}",
             )
     except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
+        raise as_error(exc) from exc
     finally:
         conn.close()
     if getattr(args, "json", False):
@@ -734,11 +726,8 @@ def _remote_job_cancel(args: argparse.Namespace, settings) -> int:
                 f"{base}/jobs/{int(args.job_id)}/cancel", headers=_ah3(settings)
             )
             _r.raise_for_status()
-    except Exception as exc:  # noqa: BLE001
-        import sys as _sys3
-
-        print(f"remote failed: {exc}", file=_sys3.stderr)
-        return 1
+    except Exception as exc:
+        raise as_error(exc) from exc
     print("ok")
     return 0
 

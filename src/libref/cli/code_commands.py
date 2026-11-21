@@ -11,6 +11,7 @@ from libref.cli.common import (
     _load_settings,
     _print_job,
     _registry_overrides,
+    as_error,
 )
 from libref.services.code.code_ingest import (
     INDEX_REPO_JOB_KIND,
@@ -73,16 +74,9 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
 
                 resolution = asyncio.run(_resolve())
             except ValueError as exc:
-                print(f"invalid: {exc}", file=sys.stderr)
-                return 2
+                raise as_error(exc) from exc
             except RegistryError as exc:
-                from libref.cli.common import format_registry_error
-
-                print(
-                    format_registry_error(exc, target="repo"),
-                    file=sys.stderr,
-                )
-                return 1
+                raise as_error(exc) from exc
             assert resolution.repo_url is not None
             library, version, source = (
                 resolution.name,
@@ -158,11 +152,9 @@ def cmd_index_repo(args: argparse.Namespace) -> int:
                 target_filter=target_filter,
             )
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
-            return 1
-        except Exception as exc:  # noqa: BLE001 — any fetch failure exits 1 without a traceback
-            print(f"failed: {exc}", file=sys.stderr)
-            return 1
+            raise as_error(exc) from exc
+        except Exception as exc:
+            raise as_error(exc) from exc
     finally:
         conn.close()
     for outcome, n in counts.items():
@@ -269,8 +261,7 @@ def cmd_repo_deps(args: argparse.Namespace) -> int:
                 ecosystem=getattr(args, "ecosystem", None),
             )
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
-            return 2
+            raise as_error(exc) from exc
     finally:
         conn.close()
     for r in rows:
@@ -353,8 +344,7 @@ def cmd_api_insight(args: argparse.Namespace) -> int:
                 limit=args.limit,
             )
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
-            return 2
+            raise as_error(exc) from exc
     finally:
         conn.close()
     for r in rows:
@@ -399,8 +389,7 @@ def cmd_pattern_insight(args: argparse.Namespace) -> int:
                 profile=getattr(args, "profile", None),
             )
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
-            return 2
+            raise as_error(exc) from exc
     finally:
         conn.close()
     for r in rows:
@@ -427,8 +416,7 @@ def cmd_symbol_insight(args: argparse.Namespace) -> int:
                 offset=int(getattr(args, "offset", 0) or 0),
             )
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
-            return 2
+            raise as_error(exc) from exc
     finally:
         conn.close()
     for r in rows:
@@ -467,8 +455,7 @@ def cmd_call_insight(args: argparse.Namespace) -> int:
                 max_args=getattr(args, "max_args", None),
             )
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
-            return 2
+            raise as_error(exc) from exc
     finally:
         conn.close()
     for r in rows:
@@ -493,8 +480,7 @@ def cmd_import_insight(args: argparse.Namespace) -> int:
                 offset=int(getattr(args, "offset", 0) or 0),
             )
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
-            return 2
+            raise as_error(exc) from exc
     finally:
         conn.close()
     for r in rows:
@@ -515,8 +501,7 @@ def cmd_mining_health(args: argparse.Namespace) -> int:
                 ecosystem=getattr(args, "ecosystem", None),
             )
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
-            return 2
+            raise as_error(exc) from exc
     finally:
         conn.close()
     print(json.dumps(health, ensure_ascii=False))
@@ -543,10 +528,8 @@ def cmd_probe_repo(args: argparse.Namespace) -> int:
             samples_per_dir=getattr(args, "samples_per_dir", None),
         )
     except ValueError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return 2
-    except Exception as exc:  # noqa: BLE001 — probe failures stay readable without a traceback
-        print(f"failed: {exc}", file=sys.stderr)
-        return 1
+        raise as_error(exc) from exc
+    except Exception as exc:
+        raise as_error(exc) from exc
     print(_json.dumps(probe.model_dump(), ensure_ascii=False))
     return 0

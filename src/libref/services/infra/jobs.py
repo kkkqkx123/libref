@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final, Literal
 
 from libref.db.contract import MetadataSession
+from libref.errors import LibrefError
 from libref.services.infra.tenant import GLOBAL_TENANT
 from libref.services.infra.timestamps import iso_utc
 
@@ -342,10 +343,12 @@ class JobManager:
                 ]
             }
         job = self.get(job_id)
-        if job is None:
-            return {"error": "not_found", "message": f"unknown job: {job_id}"}
-        if tenant_id is not None and tenant_id != "*" and job.tenant_id != tenant_id:
-            return {"error": "not_found", "message": f"unknown job: {job_id}"}
+        # A missing job and a job outside the caller's tenant are the same answer:
+        # reporting a distinct code would confirm that the id exists elsewhere.
+        if job is None or (
+            tenant_id is not None and tenant_id != "*" and job.tenant_id != tenant_id
+        ):
+            raise LibrefError("not_found", f"unknown job: {job_id}", field="job_id")
         return {
             "id": job.id,
             "kind": job.kind,

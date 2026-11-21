@@ -116,11 +116,27 @@ def _now() -> str:
 
 
 def _call(server, name: str, args: dict[str, Any]) -> dict[str, Any]:
-    result = asyncio.run(server.call_tool(name, args))
+    from mcp.server.mcpserver.exceptions import ToolError
+
+    try:
+        result = asyncio.run(server.call_tool(name, args))
+    except ToolError as exc:
+        return {"_is_error": True, **_error_payload(exc)}
     payload = result.structured_content
     out = dict(payload) if isinstance(payload, dict) else {"value": payload}
-    out["_is_error"] = bool(getattr(result, "isError", False))
+    out["_is_error"] = bool(getattr(result, "is_error", False))
     return out
+
+
+def _error_payload(exc: Exception) -> dict[str, Any]:
+    """Recover the one-line payload a failed call carries after the runner prefix."""
+    text = str(exc)
+    _, _, body = text.partition(": ")
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        return {"message": text}
+    return parsed if isinstance(parsed, dict) else {"message": text}
 
 
 async def _label_chat(messages: list[dict[str, Any]]) -> str:

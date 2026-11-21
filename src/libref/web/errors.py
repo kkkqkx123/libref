@@ -13,19 +13,18 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from libref.errors import ALL_CODES, coarse
 from libref.services.infra.timestamps import iso_utc
-from libref.web.api import ALL_CODES, KnownErrorCode
-
-SERVICE_CODE_ALIASES = {
-    "conflict": "index_request_conflict",
-    "cancelled": "index_request_conflict",
-    "invalid": "invalid_argument",
-}
+from libref.web.api import KnownErrorCode
 
 
 def known_error_code(value: str) -> KnownErrorCode:
-    """Narrow service-provided codes at the HTTP boundary."""
-    code = SERVICE_CODE_ALIASES.get(value, value)
+    """Narrow a service-provided code to one the table defines.
+
+    Services name the field inside the message, so an HTTP-only variant is
+    collapsed here rather than kept as a second vocabulary.
+    """
+    code = value if value in ALL_CODES else coarse(value)
     return code if code in ALL_CODES else "unavailable"
 
 

@@ -296,9 +296,10 @@ def test_next_actions_for_docs_and_repo() -> None:
     assert any(a["kind"] == "manual" and "retry" in a["detail"] for a in retry)
 
 
-def test_format_registry_error_renders_guidance() -> None:
-    from libref.cli.common import format_registry_error
+def test_registry_failure_renders_guidance() -> None:
+    from libref.cli.common import render_error
     from libref.crawler.registry import RegistryError
+    from libref.errors import normalize
 
     exc = RegistryError(
         "no_docs",
@@ -309,9 +310,11 @@ def test_format_registry_error_renders_guidance() -> None:
             "homepage": "https://demo.dev/",
         },
     )
-    text = format_registry_error(exc, target="repo")
-    assert "no_docs" in text and "go" in text
-    assert "libref discover" in text and "index-repo" in text
+    error = normalize(exc)
+    assert error is not None
+    text = render_error(error)
+    assert text.startswith("not_found: ")
+    assert "libref discover" in text
 
 
 DDG_FIXTURE = (

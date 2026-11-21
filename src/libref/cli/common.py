@@ -7,6 +7,7 @@ import sys
 
 from libref.config import LibrefSettings, load_settings
 from libref.db import apply_migrations, open_db
+from libref.errors import LibrefError, exit_code_for, normalize
 from libref.observe import setup_logging
 from libref.services.factory import build_discovery_service, build_vector
 
@@ -40,6 +41,11 @@ _config_parent.add_argument(
     "--base-url",
     default=None,
     help="Server base URL for --remote; defaults to the client.base_url setting",
+)
+_config_parent.add_argument(
+    "--json",
+    action="store_true",
+    help="Print failures as one JSON object on stdout; results keep their own format",
 )
 
 
@@ -158,8 +164,6 @@ def _print_suggestions(conn, settings, args: argparse.Namespace) -> int:
     import asyncio as _asyncio
     import json as _json
 
-    from libref.crawler.registry import RegistryError
-
     try:
         candidates = _asyncio.run(
             build_discovery_service(conn, settings).search_async(
@@ -169,12 +173,8 @@ def _print_suggestions(conn, settings, args: argparse.Namespace) -> int:
                 include_prerelease=bool(getattr(args, "include_prerelease", False)),
             )
         )
-    except ValueError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return 2
-    except RegistryError as exc:
-        print(f"discovery failed [{exc.kind}]: {exc}", file=sys.stderr)
-        return 1
+    except Exception as exc:
+        raise as_error(exc) from exc
     if not candidates:
         print("(no suggestions)")
         return 0
@@ -182,38 +182,6 @@ def _print_suggestions(conn, settings, args: argparse.Namespace) -> int:
     for c in candidates:
         print(_json.dumps(c, ensure_ascii=False))
     return 0
-
-
-def format_registry_error(exc, *, target: str = "docs") -> str:
-    """Render a registry failure with context and follow-ups for humans and agents."""
-    from libref.services.registry.resolver import next_actions_for
-
-    lines = [f"resolve failed [{exc.kind}]: {exc}"]
-    hint = getattr(exc, "hint", None) or {}
-    for key in (
-        "ecosystem",
-        "name",
-        "requested_version",
-        "homepage",
-        "repo_url",
-        "docs_url",
-    ):
-        if hint.get(key) is not None:
-            lines.append(f"  {key}: {hint[key]}")
-    candidates = hint.get("candidates") or []
-    if candidates:
-        shown = ", ".join(candidates[:5])
-        if len(candidates) > 5:
-            shown += ", ..."
-        lines.append(f"  candidates: {shown}")
-    for action in next_actions_for(
-        hint.get("ecosystem"), hint.get("name") or "", target, exc.kind
-    ):
-        if action["kind"] == "tool":
-            lines.append(f"  try: {action['cli']} : {action['purpose']}")
-        else:
-            lines.append(f"  try: {action['detail']}")
-    return "\n".join(lines)
 
 
 def _print_job(job) -> None:
@@ -225,3 +193,34 @@ def _print_job(job) -> None:
         print(f"result: {_json.dumps(result, ensure_ascii=False)[:2000]}")
     if getattr(job, "finished_at", None):
         print(f"finished_at: {job.finished_at}")
+
+
+def as_error(exc: BaseException) -> LibrefError:
+    """Classify a failure for the exit boundary; unknown ones keep their traceback."""
+    found = normalize(exc)
+    if found is None:
+        raise exc
+    return found
+
+
+def render_error(error: LibrefError) -> str:
+    """One code line, then the follow-ups a caller can take."""
+    lines = [f"{error.code}: {error.message}"]
+    if error.hint:
+        lines.append(f"  hint: {error.hint}")
+    for action in error.next_actions or []:
+        if action.get("kind") == "tool" and action.get("cli"):
+            lines.append(f"  try: {action['cli']} : {action.get('purpose', '')}")
+        elif action.get("detail"):
+            lines.append(f"  try: {action['detail']}")
+    if error.request_id:
+        lines.append(f"  request_id: {error.request_id}")
+    return "\n".join(lines)
+
+
+def report_failure(error: LibrefError, args: argparse.Namespace | None) -> int:
+    """Print a failure and return the exit status its code implies."""
+    print(render_error(error), file=sys.stderr)
+    if getattr(args, "json", False):
+        print(error.to_json())
+    return exit_code_for(error.code)

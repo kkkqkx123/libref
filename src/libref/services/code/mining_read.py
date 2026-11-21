@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from libref.astminer.models import TARGET_STATUS_PREFIX
+from libref.limits import INSIGHT_ROWS, PER_FILE_ROWS, require_limit
 from libref.services.code.usage_sources import profile_source_context
 from libref.services.registry.libraries import mining_version_ids
 from libref.text.snippet import call_tag, gap_tag, unit_tag
@@ -1758,6 +1759,7 @@ class MiningReadService:
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
         """Unified API view: frequency ranking, co-occurring APIs, argument shapes."""
+        require_limit(limit, high=INSIGHT_ROWS)
         if view == "common":
             wanted = apis if apis is not None else ([api] if api else [])
             if not wanted:
@@ -1819,6 +1821,8 @@ class MiningReadService:
         profile: str | None = None,
     ) -> list[dict[str, Any]]:
         """Unified pattern view: patterns, evidence, feature tree, clusters."""
+        require_limit(limit, high=INSIGHT_ROWS)
+        require_limit(per_file_limit, high=PER_FILE_ROWS, name="per_file_limit")
         if view == "health":
             return [
                 self.mining_health(
@@ -1924,6 +1928,7 @@ class MiningReadService:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Thin symbol views over version-scoped entities."""
+        require_limit(limit, high=INSIGHT_ROWS)
         if view == "detail":
             wanted = list(apis or []) + ([api] if api else [])
             if not wanted:
@@ -1988,6 +1993,7 @@ class MiningReadService:
         relation_kinds: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Thin bidirectional call views with shared filters."""
+        require_limit(limit, high=INSIGHT_ROWS)
         capped = limit if limit is not None else 100
         if view == "callee":
             if not api:
@@ -2055,6 +2061,7 @@ class MiningReadService:
         offset: int = 0,
     ) -> list[dict[str, Any]]:
         """Thin import edge views for fan-in and fan-out."""
+        require_limit(limit, high=INSIGHT_ROWS)
         if view == "importers":
             if not api:
                 raise ValueError("importers view requires api as target")

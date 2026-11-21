@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import sys
 
-from libref.cli.common import _connect, _load_settings, _print_suggestions
+from libref.cli.common import (
+    _connect,
+    _load_settings,
+    _print_suggestions,
+    as_error,
+)
 from libref.crawler.registry import RegistryError
 
 
@@ -34,11 +38,9 @@ def cmd_search_web(args: argparse.Namespace) -> int:
                 )
             )
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
-            return 2
+            raise as_error(exc) from exc
         except RegistryError as exc:
-            print(f"discovery failed [{exc.kind}]: {exc}", file=sys.stderr)
-            return 1
+            raise as_error(exc) from exc
         if not candidates:
             print("(no suggestions)")
             return 0
@@ -66,11 +68,9 @@ def cmd_search_github(args: argparse.Namespace) -> int:
                 )
             )
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
-            return 2
+            raise as_error(exc) from exc
         except RegistryError as exc:
-            print(f"discovery failed [{exc.kind}]: {exc}", file=sys.stderr)
-            return 1
+            raise as_error(exc) from exc
         if not candidates:
             print("(no suggestions)")
             return 0
@@ -101,11 +101,8 @@ def _remote_catalog(args: argparse.Namespace, settings) -> int:
             _r = _c.get(f"{base}/catalog", params=params, headers=_ah(settings))
             _r.raise_for_status()
             data = _r.json()
-    except Exception as exc:  # noqa: BLE001
-        import sys as _sys
-
-        print(f"remote failed: {exc}", file=_sys.stderr)
-        return 1
+    except Exception as exc:
+        raise as_error(exc) from exc
     for r in data.get("items") or []:
         print(_json.dumps(r, ensure_ascii=False))
     return 0
@@ -161,16 +158,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         try:
             resolution = asyncio.run(_run())
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
-            return 2
+            raise as_error(exc) from exc
         except RegistryError as exc:
-            from libref.cli.common import format_registry_error
-
-            print(
-                format_registry_error(exc, target=getattr(args, "target", "docs")),
-                file=sys.stderr,
-            )
-            return 1
+            raise as_error(exc) from exc
     finally:
         conn.close()
     print(_json.dumps(resolution.model_dump(), ensure_ascii=False))

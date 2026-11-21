@@ -15,6 +15,7 @@ from libref.cli.common import (
     _resolve_for_cli,
     _scope_from_args,
     _window_overrides,
+    as_error,
 )
 from libref.crawler.registry import RegistryError
 from libref.services.docs.answer import answer_query
@@ -139,8 +140,7 @@ def cmd_link_stats(args: argparse.Namespace) -> int:
                 ),
             }
     except ValueError as exc:
-        print(f"invalid: {exc}", file=sys.stderr)
-        return 2
+        raise as_error(exc) from exc
     finally:
         conn.close()
     print(_json.dumps(out, ensure_ascii=False))
@@ -254,9 +254,8 @@ def _remote_ingest(args: argparse.Namespace, settings) -> int:
             _r = _c.post(f"{base}/scrape", json=payload, headers=_ah3(settings))
             _r.raise_for_status()
             data = _r.json()
-    except Exception as exc:  # noqa: BLE001
-        print(f"remote failed: {exc}", file=__import__("sys").stderr)
-        return 1
+    except Exception as exc:
+        raise as_error(exc) from exc
     job_id = data.get("id")
     print(f"job {job_id}")
     # Poll until settle, reusing wait semantics
@@ -313,16 +312,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     bool(getattr(args, "include_prerelease", False)),
                 )
             except ValueError as exc:
-                print(f"invalid: {exc}", file=sys.stderr)
-                return 2
+                raise as_error(exc) from exc
             except RegistryError as exc:
-                from libref.cli.common import format_registry_error
-
-                print(
-                    format_registry_error(exc, target="docs"),
-                    file=sys.stderr,
-                )
-                return 1
+                raise as_error(exc) from exc
             assert resolution.docs_url is not None
             library, version, start_url = (
                 resolution.name,
@@ -417,9 +409,8 @@ def _remote_search(args: argparse.Namespace, settings) -> int:
             _r = _c.get(f"{base}/search", params=params, headers=_ah(settings))
             _r.raise_for_status()
             data = _r.json()
-    except Exception as exc:  # noqa: BLE001
-        print(f"remote failed: {exc}", file=__import__("sys").stderr)
-        return 1
+    except Exception as exc:
+        raise as_error(exc) from exc
     for r in data.get("items") or []:
         print(
             f"[{r.get('score', 0):.3f}] {r.get('title') or '(untitled)'} — {r.get('url')}"
@@ -557,9 +548,8 @@ def _remote_read(args: argparse.Namespace, settings) -> int:
                 return 1
             _r.raise_for_status()
             page = _r.json()
-    except Exception as exc:  # noqa: BLE001
-        print(f"remote failed: {exc}", file=__import__("sys").stderr)
-        return 1
+    except Exception as exc:
+        raise as_error(exc) from exc
     if args.mode == "page":
         print(page.get("content", ""))
     else:
@@ -589,8 +579,7 @@ def cmd_read(args: argparse.Namespace) -> int:
                 ecosystem=getattr(args, "ecosystem", None),
             )
         except ValueError as exc:
-            print(f"invalid: {exc}", file=sys.stderr)
-            return 2
+            raise as_error(exc) from exc
     finally:
         conn.close()
     if page is None:

@@ -7,52 +7,15 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from libref.astminer.models import Confidence
+from libref.errors import ALL_CODES as ERROR_CODES
+from libref.errors import ErrorCode
 from libref.services.infra.jobs import JobKind
 
 JobStatus = Literal["pending", "running", "done", "failed"]
 IsoDateTime = Annotated[str, Field(json_schema_extra={"format": "date-time"})]
-KnownErrorCode = Literal[
-    "unauthorized",
-    "forbidden",
-    "missing_scope",
-    "origin_forbidden",
-    "not_found",
-    "page_not_found",
-    "job_not_found",
-    "quota_exceeded",
-    "review_conflict",
-    "invalid_limit",
-    "invalid_offset",
-    "invalid_scope",
-    "invalid_ecosystem",
-    "invalid_argument",
-    "chat_disabled",
-    "upstream_unavailable",
-    "unavailable",
-    "index_request_conflict",
-    "config_refresh_failed",
-]
-ALL_CODES: tuple[KnownErrorCode, ...] = (
-    "unauthorized",
-    "forbidden",
-    "missing_scope",
-    "origin_forbidden",
-    "not_found",
-    "page_not_found",
-    "job_not_found",
-    "quota_exceeded",
-    "review_conflict",
-    "invalid_limit",
-    "invalid_offset",
-    "invalid_scope",
-    "invalid_ecosystem",
-    "invalid_argument",
-    "chat_disabled",
-    "upstream_unavailable",
-    "unavailable",
-    "index_request_conflict",
-    "config_refresh_failed",
-)
+KnownErrorCode = ErrorCode
+ALL_CODES: tuple[ErrorCode, ...] = ERROR_CODES
+
 IndexRequestStatus = Literal[
     "pending",
     "approved",

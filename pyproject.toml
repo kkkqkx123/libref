@@ -12,6 +12,7 @@ dependencies = [
     "fastapi>=0.162.2",
     "httpx[http2]>=0.27",
     "jieba>=0.42.1",
+    "jsonschema>=4.26.0",
     "markdownify>=0.13",
     "mcp>=2.3.0",
     "psycopg>=3.3.9",
@@ -88,6 +89,7 @@ dev = [
     "numpy>=2.5.4",
     "pytest>=8",
     "ruff>=0.17,<0.18",
+    "types-jsonschema>=4.26.0.20261006",
 ]
 
 [build-system]
