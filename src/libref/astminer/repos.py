@@ -27,18 +27,17 @@ _SKIP_DIRS = frozenset(
         ".svn",
         ".idea",
         ".vscode",
+        "test",
+        "testing",
+        "__tests__",
     }
 )
-
-_SKIP_DIR_SUBSTRINGS = ("test", "testing", "__tests__")
 
 
 def _should_skip(rel: str) -> bool:
     lowered = rel.lower()
     for part in lowered.split("/"):
         if part in _SKIP_DIRS:
-            return True
-        if part in _SKIP_DIR_SUBSTRINGS:
             return True
     filename = lowered.rsplit("/", 1)[-1]
     if filename.startswith("test_") or filename.endswith("_test.py"):

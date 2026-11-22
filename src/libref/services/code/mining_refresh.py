@@ -22,16 +22,14 @@ DEFAULT_MINLEN = 2
 def _cluster_defaults(
     threshold: float | None, min_size: int | None
 ) -> tuple[float, int]:
-    """When cluster params are missing, resolve from the settings-class defaults instead of copying numbers."""
+    """When cluster params are missing, resolve through the full settings precedence chain (env and config file included)."""
     if threshold is not None and min_size is not None:
         return threshold, min_size
     from libref.config import LibrefSettings
 
-    fields = LibrefSettings.model_fields
-    resolved_threshold = (
-        fields["cluster_threshold"].default if threshold is None else threshold
-    )
-    resolved_size = fields["cluster_min_size"].default if min_size is None else min_size
+    settings = LibrefSettings()
+    resolved_threshold = settings.cluster_threshold if threshold is None else threshold
+    resolved_size = settings.cluster_min_size if min_size is None else min_size
     return float(resolved_threshold), int(resolved_size)
 
 
@@ -131,6 +129,20 @@ def _load_kept_calls(
         marks = ",".join("?" for _ in source_ids)
         sql += f" AND source_id IN ({marks})"
         params.extend(int(v) for v in source_ids)
+    if wanted:
+        marks = ",".join("?" for _ in wanted)
+        sql += f" AND COALESCE(resolve_kind,'') IN ({marks})"
+        params.extend(wanted)
+    if wanted_relations:
+        marks = ",".join("?" for _ in wanted_relations)
+        sql += f" AND COALESCE(relation_kind,'direct') IN ({marks})"
+        params.extend(sorted(wanted_relations))
+    if min_args is not None:
+        sql += " AND COALESCE(argument_count,0) >= ?"
+        params.append(int(min_args))
+    if max_args is not None:
+        sql += " AND COALESCE(argument_count,0) <= ?"
+        params.append(int(max_args))
     rows = conn.execute(sql, params).fetchall()
     review = _review_map(conn, version_id)
     macro_names: set[str] = set()
@@ -147,7 +159,7 @@ def _load_kept_calls(
     for r in rows:
         if macro_policy == "exclude" and str(r[0]) in macro_names:
             continue
-        if not _keep_call(
+        if _keep_call(
             str(r[3]),
             str(r[8] or ""),
             review.get(int(r[4])),
@@ -158,18 +170,7 @@ def _load_kept_calls(
             include_unconfirmed,
             macro_policy,
         ):
-            continue
-        if wanted and str(r[8] or "") not in wanted:
-            continue
-        try:
-            argc = int(r[9] or 0)
-        except TypeError, ValueError:
-            argc = 0
-        if min_args is not None and argc < int(min_args):
-            continue
-        if max_args is not None and argc > int(max_args):
-            continue
-        out.append(r)
+            out.append(r)
     return out
 
 
