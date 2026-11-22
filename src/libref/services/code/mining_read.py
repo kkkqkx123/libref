@@ -1680,9 +1680,9 @@ class MiningReadService:
             {"facet": r[0], "value": r[1], "calls": r[2], "scopes": r[3]} for r in rows
         ]
         if api:
-            from libref.mining.scoring import facet_callee_of
+            from libref.mining.facets import facet_callee
 
-            out = [r for r in out if facet_callee_of(str(r["value"])) == api]
+            out = [r for r in out if facet_callee(str(r["value"])) == api]
         if containing:
             out = [r for r in out if all(n in str(r["value"]) for n in containing)]
         return out[:limit]

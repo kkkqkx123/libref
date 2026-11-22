@@ -79,13 +79,6 @@ def cluster_hit_weak(content: str, members: set[str]) -> bool:
     return sum(1 for n in members if name_hit(n, full, toks)) == 1
 
 
-def facet_callee_of(value: str) -> str:
-    """Owning callee of a stored facet value, across dimension encodings."""
-    text = str(value or "")
-    cuts = [pos for pos in (text.find("("), text.find("@")) if pos >= 0]
-    return text[: min(cuts)] if cuts else text
-
-
 def facet_bonus_for_entities(
     entities: list[str], weights: list[tuple[str, float]]
 ) -> float:

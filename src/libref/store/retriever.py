@@ -392,8 +392,7 @@ def _facet_weights(
     conn: sqlite3.Connection, version_ids: list[int]
 ) -> dict[int, list[tuple[str, float]]]:
     """Per-version callee weights from stored arg-shape facets."""
-    from libref.mining.facets import FACET_ARG_SHAPE
-    from libref.mining.scoring import facet_callee_of
+    from libref.mining.facets import FACET_ARG_SHAPE, facet_callee
 
     if not version_ids:
         return {}
@@ -417,7 +416,7 @@ def _facet_weights(
     for vid, value, calls in rows:
         top = ceiling.get(int(vid), 0)
         weight = (int(calls) / top) if top > 0 else 0.0
-        out.setdefault(int(vid), []).append((facet_callee_of(str(value)), weight))
+        out.setdefault(int(vid), []).append((facet_callee(str(value)), weight))
     return out
 
 

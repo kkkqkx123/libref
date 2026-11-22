@@ -19,6 +19,7 @@
 | support | INTEGER NOT NULL | 支持度 |
 | is_closed | INTEGER NOT NULL DEFAULT 0 | 闭合标记，写入恒为 1 |
 | profile_id | INTEGER NOT NULL | 所属挖掘档案 |
+| tenant_id | TEXT NOT NULL DEFAULT 'default' | 租户 |
 | UNIQUE(profile_id, pattern) | 唯一键 | 同档案模式唯一 |
 
 另有 `idx_seq_patterns_support(version_id, profile_id, support DESC)`。
@@ -37,10 +38,11 @@
 | calls | INTEGER NOT NULL | 调用数 |
 | scopes | INTEGER NOT NULL | 作用域数 |
 | profile_id | INTEGER NOT NULL | 所属挖掘档案 |
+| tenant_id | TEXT NOT NULL DEFAULT 'default' | 租户 |
 | UNIQUE(profile_id, path) | 唯一键 | 同档案路径唯一 |
 
-另有 `idx_feature_nodes_parent(version_id, parent)`、
-`idx_feature_nodes_calls(version_id, calls DESC)`。
+另有 `idx_feature_nodes_parent(version_id, profile_id, parent)`、
+`idx_feature_nodes_calls(version_id, profile_id, calls DESC)`。
 
 ### api_clusters
 
@@ -54,9 +56,10 @@
 | size | INTEGER NOT NULL | 簇大小 |
 | representative | TEXT NOT NULL | 代表成员 |
 | profile_id | INTEGER NOT NULL | 所属挖掘档案 |
+| tenant_id | TEXT NOT NULL DEFAULT 'default' | 租户 |
 | UNIQUE(profile_id, member) | 唯一键 | 同档案成员唯一 |
 
-另有 `idx_api_clusters_version(version_id, cluster_id)`。
+另有 `idx_api_clusters_version(version_id, profile_id, cluster_id)`。
 
 ### pattern_labels
 
@@ -76,9 +79,10 @@
 | workflow | TEXT NOT NULL DEFAULT '' | 工作流 |
 | related_apis | JSON NOT NULL DEFAULT '[]' | 关联接口 |
 | updated_at | TEXT NOT NULL DEFAULT 当前时间 | 更新时间 |
-| UNIQUE(version_id, pattern_hash, model, prompt_version) | 唯一键 | 幂等键 |
+| tenant_id | TEXT NOT NULL DEFAULT 'default' | 租户 |
+| UNIQUE(profile_id, pattern_hash, model, prompt_version) | 唯一键 | 幂等键 |
 
-另有 `idx_pattern_labels_version(version_id)`。
+另有 `idx_pattern_labels_version(version_id, profile_id)`。
 
 ## 写入
 
@@ -87,26 +91,26 @@
 形态、树、聚类三表批量幂等写入后按集合差清理：
 
 ```sql
-INSERT INTO seq_patterns(library_id, version_id, pattern, support, is_closed)
-VALUES(?, ?, ?, ?, 1)
-ON CONFLICT(version_id, pattern) DO UPDATE SET support=excluded.support,
+INSERT INTO seq_patterns(library_id, version_id, profile_id, pattern, support, is_closed)
+VALUES(?, ?, ?, ?, ?, 1)
+ON CONFLICT(profile_id, pattern) DO UPDATE SET support=excluded.support,
 is_closed=1;
 
-INSERT INTO feature_nodes(library_id, version_id, path, parent, depth, kind, calls, scopes)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(version_id, path) DO UPDATE SET parent=excluded.parent,
+INSERT INTO feature_nodes(library_id, version_id, profile_id, path, parent, depth, kind, calls, scopes)
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(profile_id, path) DO UPDATE SET parent=excluded.parent,
 depth=excluded.depth, kind=excluded.kind,
 calls=excluded.calls, scopes=excluded.scopes;
 
-INSERT INTO api_clusters(library_id, version_id, cluster_id, member, size, representative)
-VALUES(?, ?, ?, ?, ?, ?)
-ON CONFLICT(version_id, member) DO UPDATE SET cluster_id=excluded.cluster_id,
+INSERT INTO api_clusters(library_id, version_id, profile_id, cluster_id, member, size, representative)
+VALUES(?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(profile_id, member) DO UPDATE SET cluster_id=excluded.cluster_id,
 size=excluded.size, representative=excluded.representative;
 
 -- 集合差清理模板（表名与列名按调用点代入，先读存活列再分批删，空集整版清空）
-DELETE FROM <表> WHERE version_id=?;
-SELECT <列> FROM <表> WHERE version_id=?;   -- 内存求差
-DELETE FROM <表> WHERE version_id=? AND <列> IN (...);   -- 每批五百
+DELETE FROM <表> WHERE version_id=? AND profile_id=?;
+SELECT <列> FROM <表> WHERE version_id=? AND profile_id=?;   -- 内存求差
+DELETE FROM <表> WHERE version_id=? AND profile_id=? AND <列> IN (...);   -- 每批五百
 ```
 
 标签幂等键命中直接跳过，形态批量预取，共现保持逐接口查询，
@@ -124,13 +128,13 @@ AND rs.entity_id=call_instances.id
 
 -- 幂等检查
 SELECT count(*) FROM pattern_labels
-WHERE version_id=? AND pattern_hash=? AND model=? AND prompt_version=?;
+WHERE version_id=? AND profile_id=? AND pattern_hash=? AND model=? AND prompt_version=?;
 
 -- 标签写入
-INSERT INTO pattern_labels(library_id, version_id, pattern_hash, pattern, model,
+INSERT INTO pattern_labels(library_id, version_id, profile_id, pattern_hash, pattern, model,
 prompt_version, name, summary, category_path, workflow, related_apis)
-VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT(version_id, pattern_hash, model, prompt_version) DO UPDATE SET
+VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(profile_id, pattern_hash, model, prompt_version) DO UPDATE SET
 pattern=excluded.pattern, name=excluded.name, summary=excluded.summary,
 category_path=excluded.category_path, workflow=excluded.workflow,
 related_apis=excluded.related_apis, updated_at=datetime('now');
@@ -143,7 +147,7 @@ related_apis=excluded.related_apis, updated_at=datetime('now');
 
 ```sql
 SELECT pattern, support FROM seq_patterns
- WHERE version_id IN (...)
+ WHERE profile_id IN (...)
  ORDER BY support DESC, pattern [LIMIT ?];
 ```
 
@@ -151,7 +155,7 @@ SELECT pattern, support FROM seq_patterns
 
 ```sql
 SELECT path, parent, depth, kind, calls, scopes FROM feature_nodes
- WHERE version_id IN (...)
+ WHERE profile_id IN (...)
  [AND (path = ? OR path LIKE ? ESCAPE '\')]
  ORDER BY calls DESC, path LIMIT ?;
 ```
@@ -160,7 +164,7 @@ SELECT path, parent, depth, kind, calls, scopes FROM feature_nodes
 
 ```sql
 SELECT cluster_id, member, size, representative FROM api_clusters
- WHERE version_id IN (...)
+ WHERE profile_id IN (...)
  ORDER BY cluster_id, member;
 ```
 
@@ -171,7 +175,7 @@ SELECT cluster_id, member, size, representative FROM api_clusters
 SELECT pattern, pattern_hash, model, prompt_version, name,
 summary, category_path, workflow, related_apis, updated_at
  FROM pattern_labels
- WHERE version_id IN (...)
+ WHERE profile_id IN (...)
  ORDER BY updated_at DESC, pattern_hash, model, prompt_version;
 ```
 
@@ -188,9 +192,10 @@ summary, category_path, workflow, related_apis, updated_at
 | value | TEXT NOT NULL | 维度取值 |
 | calls | INTEGER NOT NULL | 调用数 |
 | scopes | INTEGER NOT NULL | 作用域数 |
+| tenant_id | TEXT NOT NULL DEFAULT 'default' | 租户 |
 | UNIQUE(profile_id, facet_key) | 唯一键 | 同档案维度取值唯一 |
 
-另有按档案加维度加调用数倒序的索引，供浏览与检索加成加载。
+另有 `idx_feature_facets_lookup(version_id, profile_id, facet, calls DESC)`，供浏览与检索加成加载。
 
 ### cluster_labels
 
@@ -211,27 +216,30 @@ summary, category_path, workflow, related_apis, updated_at
 | related_apis | JSON NOT NULL | 关联接口，须落在版本实体集合内 |
 | source_note | TEXT NOT NULL | 来源说明必填，写明场景来源与非官方推荐声明 |
 | updated_at | TEXT NOT NULL DEFAULT 当前时间 | 更新时间 |
+| tenant_id | TEXT NOT NULL DEFAULT 'default' | 租户 |
 | UNIQUE(profile_id, cluster_key, model, prompt_version) | 唯一键 | 幂等键 |
+
+另有 `idx_cluster_labels_version(version_id, profile_id)`。
 
 问答编排取少量标签作展示增强材料，不参与排序与引用定位。
 检索加成按版本加载模式、聚类与形态，加成关闭时跳过加载：
 
 ```sql
 SELECT version_id, pattern, support FROM seq_patterns
-WHERE version_id IN (...);   -- 内存排序后每版本截断五百
+WHERE profile_id IN (...);   -- 内存排序后每版本截断五百
 
 SELECT version_id, cluster_id, member FROM api_clusters
-WHERE version_id IN (...);   -- 内存按簇号分组
+WHERE profile_id IN (...);   -- 内存按簇号分组
 
 SELECT version_id, value, calls FROM feature_facets
-WHERE version_id IN (...) AND facet='arg_shape';   -- 按版本归一为归属权重
+WHERE profile_id IN (...) AND facet='arg_shape';   -- 按版本归一为归属权重
 ```
 
 形态按调用数倒序，支持维度过滤，归属过滤在内存完成：
 
 ```sql
 SELECT facet, value, calls, scopes FROM feature_facets
- WHERE version_id IN (...)
+ WHERE profile_id IN (...)
  [AND facet=?]
  ORDER BY calls DESC, value [LIMIT ?];
 ```
@@ -243,7 +251,7 @@ SELECT facet, value, calls, scopes FROM feature_facets
 SELECT cluster_key, members, model, prompt_version, name,
 summary, category_path, workflow, related_apis, source_note, updated_at
  FROM cluster_labels
- WHERE version_id IN (...)
+ WHERE profile_id IN (...)
  ORDER BY updated_at DESC, cluster_key, model, prompt_version;
 ```
 

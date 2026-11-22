@@ -136,7 +136,8 @@ CREATE TABLE call_instances(
 
 CREATE INDEX idx_call_instances_callee ON call_instances(callee_entity_id);
 
--- seq_patterns: sequence mining output
+-- seq_patterns: version-scoped baseline, superseded by the profile-scoped
+-- rebuild in the usage-corpus migration below; kept here to preserve history.
 CREATE TABLE seq_patterns(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
@@ -273,7 +274,8 @@ CREATE TABLE IF NOT EXISTS version_locks(
   heartbeat_at REAL NOT NULL
 );
 """
-# ── Hierarchical features and API grouping: built in batch, browsed at query time ──
+# ── Hierarchical features and API grouping: version-scoped baseline, superseded
+# ── by the profile-scoped rebuild in the usage-corpus migration; kept for history ──
 FEATURE_TREE_CLUSTER_SQL = """
 CREATE TABLE feature_nodes(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -493,7 +495,8 @@ CREATE TABLE repo_dependencies(
 CREATE INDEX IF NOT EXISTS idx_repo_dependencies_version ON repo_dependencies(version_id);
 """
 
-# ── Pattern-level semantic labels: rebuildable model output, never mixed with static facts ──
+# ── Pattern-level semantic labels: version-scoped baseline, superseded by the
+# ── profile-scoped rebuild in the usage-corpus migration; kept for history ──
 PATTERN_LABEL_SQL = """
 CREATE TABLE pattern_labels(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
