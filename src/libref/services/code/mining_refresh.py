@@ -33,6 +33,33 @@ def _cluster_defaults(
     return float(resolved_threshold), int(resolved_size)
 
 
+def _facet_defaults(
+    topn: int | None,
+    candidate_budget: int | None,
+    min_gain: float | None,
+    guard_enabled: bool | None,
+) -> tuple[int, int, float, bool]:
+    """Fill missing facet selection params from the settings precedence chain."""
+    if (
+        topn is not None
+        and candidate_budget is not None
+        and min_gain is not None
+        and guard_enabled is not None
+    ):
+        return topn, candidate_budget, min_gain, guard_enabled
+    from libref.config import LibrefSettings
+
+    settings = LibrefSettings()
+    return (
+        int(settings.facet_topn) if topn is None else topn,
+        int(settings.facet_candidate_budget)
+        if candidate_budget is None
+        else candidate_budget,
+        float(settings.facet_min_gain) if min_gain is None else min_gain,
+        bool(settings.guard_enabled) if guard_enabled is None else guard_enabled,
+    )
+
+
 def _clear_derived(conn, version_id: int, profile_id: int) -> None:
     """Clear derived outputs for one mining profile."""
     conn.execute(
@@ -50,6 +77,16 @@ def _clear_derived(conn, version_id: int, profile_id: int) -> None:
     if _label_table_ready(conn):
         conn.execute(
             "DELETE FROM pattern_labels WHERE version_id=? AND profile_id=?",
+            (version_id, profile_id),
+        )
+    if _table_ready(conn, "feature_facets"):
+        conn.execute(
+            "DELETE FROM feature_facets WHERE version_id=? AND profile_id=?",
+            (version_id, profile_id),
+        )
+    if _table_ready(conn, "cluster_labels"):
+        conn.execute(
+            "DELETE FROM cluster_labels WHERE version_id=? AND profile_id=?",
             (version_id, profile_id),
         )
 
@@ -121,7 +158,8 @@ def _load_kept_calls(
     sql = (
         "SELECT callee_name, caller_file, caller, confidence, id,"
         " line_start, call_order, start_byte, resolve_kind, argument_count, sample_id,"
-        " COALESCE(relation_kind,'direct'), COALESCE(target_status,'resolved_target')"
+        " COALESCE(relation_kind,'direct'), COALESCE(target_status,'resolved_target'),"
+        " args"
         " FROM call_instances WHERE version_id=? AND in_target_api=1"
     )
     params: list[Any] = [version_id]
@@ -279,6 +317,109 @@ def refresh_feature_tree(
     return len(nodes)
 
 
+def refresh_facets(
+    conn,
+    library_id: int,
+    version_id: int,
+    *,
+    include_ambiguous: bool = False,
+    include_unconfirmed: bool = False,
+    resolve_kinds: list[str] | tuple[str, ...] | None = None,
+    min_args: int | None = None,
+    max_args: int | None = None,
+    profile_id: int,
+    source_ids: list[int] | tuple[int, ...] | None = None,
+    relation_kinds: list[str] | tuple[str, ...] | None = None,
+    macro_policy: str = "exclude",
+    facet_topn: int | None = None,
+    candidate_budget: int | None = None,
+    min_gain: float | None = None,
+    guard_enabled: bool | None = None,
+) -> int:
+    """Rebuild usage facet rows in bulk; returns the facet row count."""
+    import json as _json
+
+    from libref.mining import facets as _facets
+    from libref.mining import scope_key as _scope_key
+
+    topn, budget, gain, guards = _facet_defaults(
+        facet_topn, candidate_budget, min_gain, guard_enabled
+    )
+    if not _table_ready(conn, "feature_facets"):
+        return 0
+    rows = _load_kept_calls(
+        conn,
+        version_id,
+        include_ambiguous=include_ambiguous,
+        include_unconfirmed=include_unconfirmed,
+        resolve_kinds=resolve_kinds,
+        min_args=min_args,
+        max_args=max_args,
+        source_ids=source_ids,
+        relation_kinds=relation_kinds,
+        macro_policy=macro_policy,
+    )
+    if not rows:
+        conn.execute(
+            "DELETE FROM feature_facets WHERE version_id=? AND profile_id=?",
+            (version_id, profile_id),
+        )
+        return 0
+    facet_rows: list[dict] = []
+    for r in rows:
+        if not r[0]:
+            continue
+        try:
+            parsed = _json.loads(r[13]) if len(r) > 13 and r[13] else []
+        except ValueError:
+            parsed = [r[13]] if len(r) > 13 and r[13] else []
+        facet_rows.append(
+            {
+                "callee": str(r[0]),
+                "args": list(parsed) if isinstance(parsed, list) else [parsed],
+                "relation": str(r[11] or "direct"),
+                "scope": str(r[10]) or _scope_key(str(r[1]), r[2]),
+                "line": int(r[5]),
+                "order": int(r[6]),
+            }
+        )
+    selected = _facets.aggregate_facets(
+        facet_rows,
+        guard_enabled=guards,
+        candidate_budget=budget,
+        topn=topn,
+        min_gain=gain,
+    )
+    wanted = [f"{row['facet']}\0{row['value']}" for row in selected]
+    if not wanted:
+        conn.execute(
+            "DELETE FROM feature_facets WHERE version_id=? AND profile_id=?",
+            (version_id, profile_id),
+        )
+        return 0
+    conn.executemany(
+        "INSERT INTO feature_facets(library_id, version_id, profile_id, facet,"
+        " facet_key, value, calls, scopes) VALUES(?, ?, ?, ?, ?, ?, ?, ?)"
+        " ON CONFLICT(profile_id, facet_key) DO UPDATE SET value=excluded.value,"
+        " calls=excluded.calls, scopes=excluded.scopes",
+        [
+            (
+                library_id,
+                version_id,
+                profile_id,
+                str(row["facet"]),
+                f"{row['facet']}\0{row['value']}",
+                str(row["value"]),
+                int(row["calls"]),
+                int(row["scopes"]),
+            )
+            for row in selected
+        ],
+    )
+    _delete_not_in(conn, "feature_facets", version_id, profile_id, "facet_key", wanted)
+    return len(selected)
+
+
 def refresh_clusters(
     conn,
     library_id: int,
@@ -328,6 +469,11 @@ def refresh_clusters(
             "DELETE FROM api_clusters WHERE version_id=? AND profile_id=?",
             (version_id, profile_id),
         )
+        if _table_ready(conn, "cluster_labels"):
+            conn.execute(
+                "DELETE FROM cluster_labels WHERE version_id=? AND profile_id=?",
+                (version_id, profile_id),
+            )
         return 0
     conn.executemany(
         "INSERT INTO api_clusters(library_id, version_id, profile_id, cluster_id,"
@@ -349,6 +495,13 @@ def refresh_clusters(
         ],
     )
     _delete_not_in(conn, "api_clusters", version_id, profile_id, "member", wanted)
+    if _table_ready(conn, "cluster_labels"):
+        from libref.mining.induction import cluster_key as _cluster_key
+
+        live_keys = [_cluster_key(list(g["members"])) for g in groups]
+        _delete_not_in(
+            conn, "cluster_labels", version_id, profile_id, "cluster_key", live_keys
+        )
     return len(groups)
 
 
@@ -437,6 +590,7 @@ def mine_patterns(
         sample_id,
         _relation,
         _target_status,
+        _args,
     ) in rows:
         key = str(sample_id) or _scope_key(str(caller_file), caller)
         groups.setdefault(key, []).append(
@@ -477,6 +631,20 @@ def mine_patterns(
             include_unconfirmed=include_unconfirmed,
             threshold=cluster_threshold,
             min_size=cluster_min_size,
+            resolve_kinds=resolve_kinds,
+            min_args=min_args,
+            max_args=max_args,
+            profile_id=profile_id,
+            source_ids=source_ids,
+            relation_kinds=relation_kinds,
+            macro_policy=policy,
+        )
+        refresh_facets(
+            conn,
+            library_id,
+            version_id,
+            include_ambiguous=include_ambiguous,
+            include_unconfirmed=include_unconfirmed,
             resolve_kinds=resolve_kinds,
             min_args=min_args,
             max_args=max_args,
@@ -548,6 +716,20 @@ def mine_patterns(
         include_unconfirmed=include_unconfirmed,
         threshold=cluster_threshold,
         min_size=cluster_min_size,
+        resolve_kinds=resolve_kinds,
+        min_args=min_args,
+        max_args=max_args,
+        profile_id=profile_id,
+        source_ids=source_ids,
+        relation_kinds=relation_kinds,
+        macro_policy=policy,
+    )
+    refresh_facets(
+        conn,
+        library_id,
+        version_id,
+        include_ambiguous=include_ambiguous,
+        include_unconfirmed=include_unconfirmed,
         resolve_kinds=resolve_kinds,
         min_args=min_args,
         max_args=max_args,
@@ -645,14 +827,18 @@ def build_mine_runner(settings, conn):
     return runner
 
 
-def _label_table_ready(conn) -> bool:
+def _table_ready(conn, name: str) -> bool:
     if hasattr(conn, "table_columns"):
-        return bool(conn.table_columns("pattern_labels"))
+        return bool(conn.table_columns(name))
     try:
-        conn.execute("SELECT 1 FROM pattern_labels LIMIT 1").fetchone()
+        conn.execute(f"SELECT 1 FROM {name} LIMIT 1").fetchone()
     except Exception:  # noqa: BLE001 -- optional derived table on either backend
         return False
     return True
+
+
+def _label_table_ready(conn) -> bool:
+    return _table_ready(conn, "pattern_labels")
 
 
 def induce_job_params(
@@ -934,6 +1120,197 @@ async def induce_labels(
         )
         labeled += 1
         if labeled % batch_size == 0:
+            conn.commit()
+    conn.commit()
+    clusters = await induce_cluster_labels(
+        conn,
+        settings,
+        library,
+        version,
+        ecosystem=ecosystem,
+        topn=topn,
+        include_ambiguous=include_ambiguous,
+        profile=profile,
+        macro_policy=macro_policy,
+        chat=resolve_chat,
+    )
+    return {
+        "disabled": False,
+        "labeled": labeled,
+        "failed": failed,
+        "skipped": skipped,
+        "clusters": clusters,
+    }
+
+
+async def induce_cluster_labels(
+    conn,
+    settings,
+    library: str,
+    version: str,
+    *,
+    ecosystem: str | None = None,
+    topn: int | None = None,
+    include_ambiguous: bool = False,
+    profile: str | None = None,
+    macro_policy: str | None = None,
+    chat=None,
+) -> dict[str, Any]:
+    """Induce names for API groups; shares the gateway and idempotency shape."""
+    import json as _json
+
+    from libref.config import setting_or_default
+    from libref.llm.errors import LlmConfigError
+    from libref.mining.induction import (
+        ClusterInductionInput,
+        build_cluster_prompt,
+        cluster_key,
+        parse_cluster_payload,
+    )
+    from libref.services.code.mining_read import MiningReadService
+    from libref.services.registry.libraries import LibraryService
+
+    if not _table_ready(conn, "cluster_labels"):
+        return {"disabled": True, "labeled": 0, "failed": 0, "skipped": 0}
+    if not bool(setting_or_default(settings, "induction_enabled")):
+        return {"disabled": True, "labeled": 0, "failed": 0, "skipped": 0}
+    resolve_chat = chat
+    if resolve_chat is None:
+        try:
+            from libref.services.infra.vectors import build_gateway
+
+            resolve_chat = build_gateway(settings).chat_fn()
+        except Exception:  # noqa: BLE001 -- missing key disables induction
+            resolve_chat = None
+    if resolve_chat is None:
+        raise LlmConfigError("chat is not enabled: enable chat and set an api key")
+    catalog = LibraryService(conn)
+    if ecosystem is not None:
+        library_id, version_id = catalog.ensure_library_version(
+            library, version, ecosystem
+        )
+    else:
+        library_id, version_id = catalog.ensure_library_version(library, version)
+    from libref.services.code.usage_sources import (
+        profile_source_context,
+        resolve_profile,
+    )
+
+    resolved_profile = resolve_profile(
+        conn, version_id=version_id, name=profile, tenant_id="default"
+    )
+    profile_id = int(resolved_profile["id"])
+    policy = str(macro_policy or resolved_profile.get("macro_policy") or "exclude")
+    profile_context = profile_source_context(
+        conn, list(resolved_profile.get("source_ids") or [])
+    )
+    source_hint = str(profile_context.get("hint") or "")
+    source_roles = [str(r) for r in (profile_context.get("roles") or [])]
+    source_hint += f"; macro policy {policy}"
+    want_topn = (
+        int(topn)
+        if topn is not None
+        else int(setting_or_default(settings, "induction_topn"))
+    )
+    prompt_version = (
+        str(setting_or_default(settings, "induction_prompt_version")) + ":" + policy
+    )
+    model = str(setting_or_default(settings, "chat_model"))
+    batch_size = max(1, int(setting_or_default(settings, "induction_batch")))
+    reader = MiningReadService(conn, settings)
+    groups = reader.api_clusters(
+        library, version, ecosystem, limit=max(1, want_topn), profile=profile
+    )
+    entity_rows = conn.execute(
+        "SELECT qualified_name FROM api_entities WHERE version_id=?", (version_id,)
+    ).fetchall()
+    entity_names = {str(r[0]) for r in entity_rows if r[0]}
+    labeled = 0
+    failed = 0
+    skipped = 0
+    done = 0
+    for group in groups:
+        members = sorted({str(m) for m in (group.get("members") or []) if m})
+        if not members:
+            continue
+        key = cluster_key(members)
+        exists = conn.execute(
+            "SELECT count(*) FROM cluster_labels WHERE version_id=? AND profile_id=?"
+            " AND cluster_key=? AND model=? AND prompt_version=?",
+            (version_id, profile_id, key, model, prompt_version),
+        ).fetchone()
+        if exists and int(exists[0]) > 0:
+            skipped += 1
+            continue
+        representative = str(
+            group.get("representative") or (members[0] if members else "")
+        )
+        siblings: list[str] = []
+        try:
+            sibling_rows = reader.related_apis(
+                representative,
+                library,
+                version,
+                ecosystem,
+                limit=4,
+                include_ambiguous=include_ambiguous,
+            )
+        except Exception:  # noqa: BLE001 -- siblings are advisory for prompts
+            sibling_rows = []
+        for rel in sibling_rows:
+            text = str(rel.get("api") or "")
+            if text and text not in siblings and text not in members:
+                siblings.append(text)
+        allowed = set(members) | set(siblings)
+        scope = f"{library}@{version}" + (f"({ecosystem})" if ecosystem else "")
+        item = ClusterInductionInput(
+            members=members,
+            representative=representative,
+            size=int(group.get("size") or len(members)),
+            siblings=siblings[:6],
+            scope=scope,
+            source_hint=source_hint,
+            source_roles=source_roles,
+        )
+        try:
+            import asyncio as _asyncio
+
+            messages = build_cluster_prompt(item)
+            produced = resolve_chat(messages)
+            if _asyncio.iscoroutine(produced):
+                produced = await produced
+            label = parse_cluster_payload(str(produced), allowed, entity_names)
+        except Exception:  # noqa: BLE001 -- one bad reply must not block the batch
+            failed += 1
+            continue
+        conn.execute(
+            "INSERT INTO cluster_labels(library_id, version_id, profile_id, cluster_key,"
+            " members, model, prompt_version, name, summary, category_path, workflow,"
+            " related_apis, source_note) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " ON CONFLICT(profile_id, cluster_key, model, prompt_version) DO UPDATE SET"
+            " members=excluded.members, name=excluded.name, summary=excluded.summary,"
+            " category_path=excluded.category_path, workflow=excluded.workflow,"
+            " related_apis=excluded.related_apis, source_note=excluded.source_note,"
+            " updated_at=datetime('now')",
+            (
+                library_id,
+                version_id,
+                profile_id,
+                key,
+                _json.dumps(members, ensure_ascii=False),
+                model,
+                prompt_version,
+                label.name,
+                label.summary,
+                _json.dumps(label.category_path, ensure_ascii=False),
+                label.workflow,
+                _json.dumps(label.related_apis, ensure_ascii=False),
+                label.source_note,
+            ),
+        )
+        labeled += 1
+        done += 1
+        if done % batch_size == 0:
             conn.commit()
     conn.commit()
     return {"disabled": False, "labeled": labeled, "failed": failed, "skipped": skipped}

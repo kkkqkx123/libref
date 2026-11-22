@@ -514,6 +514,50 @@ CREATE TABLE pattern_labels(
 CREATE INDEX idx_pattern_labels_version ON pattern_labels(version_id);
 """
 
+# ── Usage facet rows: per-dimension aggregated call shapes, rebuilt per profile ──
+FACET_DERIVED_SQL = """
+CREATE TABLE IF NOT EXISTS feature_facets(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id INTEGER NOT NULL,
+  facet TEXT NOT NULL,
+  facet_key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  calls INTEGER NOT NULL,
+  scopes INTEGER NOT NULL,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, facet_key)
+);
+CREATE INDEX IF NOT EXISTS idx_feature_facets_lookup
+  ON feature_facets(version_id, profile_id, facet, calls DESC);
+"""
+
+# ── Group-level semantic labels: rebuildable model output for clusters ──
+CLUSTER_LABEL_SQL = """
+CREATE TABLE IF NOT EXISTS cluster_labels(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id INTEGER NOT NULL,
+  cluster_key TEXT NOT NULL,
+  members JSON NOT NULL DEFAULT '[]',
+  model TEXT NOT NULL,
+  prompt_version TEXT NOT NULL DEFAULT 'v1',
+  name TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  category_path JSON NOT NULL DEFAULT '[]',
+  workflow TEXT NOT NULL DEFAULT '',
+  related_apis JSON NOT NULL DEFAULT '[]',
+  source_note TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, cluster_key, model, prompt_version)
+);
+CREATE INDEX IF NOT EXISTS idx_cluster_labels_version
+  ON cluster_labels(version_id, profile_id);
+"""
+
 # ── Ingest progress cursors: one row per version and kind, resume offset plus list fingerprint ──
 PROGRESS_SQL = """
 CREATE TABLE IF NOT EXISTS ingest_progress(

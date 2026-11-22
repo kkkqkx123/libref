@@ -635,7 +635,17 @@ def build_mcp_server(
 
     def pattern_insight(
         view: Literal[
-            "patterns", "evidence", "tree", "clusters", "health", "labels", "snippets"
+            "patterns",
+            "evidence",
+            "tree",
+            "clusters",
+            "health",
+            "labels",
+            "snippets",
+            "facets",
+            "feature_summary",
+            "cluster_labels",
+            "drift",
         ],
         pattern: list[str] | None = None,
         containing: list[str] | None = None,
@@ -647,8 +657,10 @@ def build_mcp_server(
         per_file_limit: int | None = None,
         dedup: bool | None = None,
         profile: str | None = None,
+        facet: str | None = None,
+        compare_profile: str | None = None,
     ) -> dict[str, Any]:
-        """Sequence and structure insight: patterns, evidence, feature tree, clusters."""
+        """Sequence and structure insight: patterns, evidence, tree, clusters, facets."""
         if view == "evidence" and not pattern:
             raise _invalid("evidence view requires a non-empty pattern")
         require_limit(limit, low=1, high=INSIGHT_ROWS)
@@ -669,6 +681,8 @@ def build_mcp_server(
                         per_file_limit=per_file_limit,
                         dedup=dedup,
                         profile=profile,
+                        facet=facet,
+                        compare_profile=compare_profile,
                         tenant_id=_tenant(_principal()),
                     )
                 )

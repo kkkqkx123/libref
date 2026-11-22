@@ -321,6 +321,44 @@ CREATE TABLE IF NOT EXISTS pattern_labels(
 
 CREATE INDEX IF NOT EXISTS idx_pattern_labels_version ON pattern_labels(version_id, profile_id);
 
+CREATE TABLE IF NOT EXISTS feature_facets(
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  library_id BIGINT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id BIGINT NOT NULL,
+  facet TEXT NOT NULL,
+  facet_key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  calls INTEGER NOT NULL,
+  scopes INTEGER NOT NULL,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, facet_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_feature_facets_lookup ON feature_facets(version_id, profile_id, facet, calls DESC);
+
+CREATE TABLE IF NOT EXISTS cluster_labels(
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  library_id BIGINT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id BIGINT NOT NULL,
+  cluster_key TEXT NOT NULL,
+  members JSONB NOT NULL DEFAULT '[]',
+  model TEXT NOT NULL,
+  prompt_version TEXT NOT NULL DEFAULT 'v1',
+  name TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  category_path JSONB NOT NULL DEFAULT '[]',
+  workflow TEXT NOT NULL DEFAULT '',
+  related_apis JSONB NOT NULL DEFAULT '[]',
+  source_note TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, cluster_key, model, prompt_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cluster_labels_version ON cluster_labels(version_id, profile_id);
+
 CREATE TABLE IF NOT EXISTS discovery_cache(
   ecosystem TEXT NOT NULL,
   query TEXT NOT NULL,

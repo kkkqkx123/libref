@@ -387,6 +387,8 @@ def cmd_pattern_insight(args: argparse.Namespace) -> int:
                 per_file_limit=getattr(args, "per_file_limit", None),
                 dedup=dedup_value,
                 profile=getattr(args, "profile", None),
+                facet=getattr(args, "facet", None),
+                compare_profile=getattr(args, "compare_profile", None),
             )
         except ValueError as exc:
             raise as_error(exc) from exc

@@ -79,6 +79,27 @@ def cluster_hit_weak(content: str, members: set[str]) -> bool:
     return sum(1 for n in members if name_hit(n, full, toks)) == 1
 
 
+def facet_callee_of(value: str) -> str:
+    """Owning callee of a stored facet value, across dimension encodings."""
+    text = str(value or "")
+    cuts = [pos for pos in (text.find("("), text.find("@")) if pos >= 0]
+    return text[: min(cuts)] if cuts else text
+
+
+def facet_bonus_for_entities(
+    entities: list[str], weights: list[tuple[str, float]]
+) -> float:
+    """Best facet weight covered by the given entities, normalized to 0..1."""
+    if not entities or not weights:
+        return 0.0
+    have = set(entities)
+    hit = max(
+        (weight for callee, weight in weights if callee in have),
+        default=0.0,
+    )
+    return max(0.0, min(1.0, float(hit)))
+
+
 def pattern_contains_all(names: list[str], wanted: list[str]) -> bool:
     """Whether a mined pattern covers every requested API."""
     if not wanted:

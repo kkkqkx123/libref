@@ -18,6 +18,8 @@ from libref.mining.scoring import (
     cluster_hit_exact,
     cluster_hit_weak,
     cluster_hit_weak_exact,
+    content_idents,
+    name_hit,
     support_for_content,
     support_for_entities,
 )
@@ -386,6 +388,39 @@ def _pattern_supports(
     return out
 
 
+def _facet_weights(
+    conn: sqlite3.Connection, version_ids: list[int]
+) -> dict[int, list[tuple[str, float]]]:
+    """Per-version callee weights from stored arg-shape facets."""
+    from libref.mining.facets import FACET_ARG_SHAPE
+    from libref.mining.scoring import facet_callee_of
+
+    if not version_ids:
+        return {}
+    profiles = _profile_id_by_version(conn, version_ids)
+    if not profiles:
+        return {}
+    try:
+        conn.execute("SELECT 1 FROM feature_facets LIMIT 1").fetchone()
+    except Exception:  # noqa: BLE001 -- facets are an optional derived table
+        return {}
+    marks = ",".join("?" for _ in profiles.values())
+    rows = conn.execute(
+        "SELECT version_id, value, calls FROM feature_facets "
+        f"WHERE profile_id IN ({marks}) AND facet=?",
+        (*profiles.values(), FACET_ARG_SHAPE),
+    ).fetchall()
+    ceiling: dict[int, int] = {}
+    for vid, _value, calls in rows:
+        ceiling[int(vid)] = max(ceiling.get(int(vid), 0), int(calls))
+    out: dict[int, list[tuple[str, float]]] = {}
+    for vid, value, calls in rows:
+        top = ceiling.get(int(vid), 0)
+        weight = (int(calls) / top) if top > 0 else 0.0
+        out.setdefault(int(vid), []).append((facet_callee_of(str(value)), weight))
+    return out
+
+
 def _cluster_sets(
     conn: sqlite3.Connection, version_ids: list[int]
 ) -> dict[int, list[set[str]]]:
@@ -737,6 +772,7 @@ class HybridRetriever:
         rerank_scores: dict[int, float] | None = None,
     ) -> list[dict[str, Any]]:
         from libref.config import setting_or_default
+        from libref.mining.scoring import facet_bonus_for_entities
 
         radius = int(setting_or_default(self._settings, "snippet_radius"))
         cap = int(setting_or_default(self._settings, "snippet_cap"))
@@ -746,10 +782,11 @@ class HybridRetriever:
         fts_set, vec_set = set(fts_ids), set(vec_ids)
         raw_alpha = float(setting_or_default(self._settings, "freq_alpha"))
         cluster_alpha = float(setting_or_default(self._settings, "cluster_alpha"))
+        facet_alpha = float(setting_or_default(self._settings, "facet_alpha"))
         rrf = self._rrf_scores(fts_ids, vec_ids)
         vids = sorted({details[d]["version_id"] for d in fused if d in details})
         wanted: set[str] = set()
-        if raw_alpha > 0:
+        if raw_alpha > 0 or facet_alpha > 0:
             for doc in fused:
                 info = details.get(doc)
                 if info is None:
@@ -759,12 +796,14 @@ class HybridRetriever:
                         wanted.add(str(entity))
         patterns = _pattern_supports(self._conn, vids, wanted) if raw_alpha > 0 else {}
         clusters = _cluster_sets(self._conn, vids) if cluster_alpha > 0 else {}
+        facet_weights = _facet_weights(self._conn, vids) if facet_alpha > 0 else {}
         health_rows = [{"support": s} for plist in patterns.values() for _, s in plist]
         health = reuse_diversity(
             health_rows,
             [{"members": members} for sets in clusters.values() for members in sets],
         )
         alpha = capped_alpha(raw_alpha, float(health.get("reusability", 0.0)))
+        facet_gate = capped_alpha(facet_alpha, float(health.get("reusability", 0.0)))
         scored: list[tuple[float, int]] = []
         for doc in fused:
             info = details.get(doc)
@@ -806,7 +845,24 @@ class HybridRetriever:
                             if cluster_hit_weak(content, members):
                                 cluster_bonus = 0.3
                                 break
-            final = base * (1.0 + alpha * bonus + cluster_alpha * cluster_bonus)
+            facet_bonus = 0.0
+            fweights = facet_weights.get(info["version_id"], [])
+            if fweights and facet_gate > 0:
+                if have_entities:
+                    facet_bonus = facet_bonus_for_entities(have_entities, fweights)
+                else:
+                    content = info["content"] or ""
+                    full, toks = content_idents(content)
+                    for callee, _weight in fweights:
+                        if name_hit(callee, full, toks):
+                            facet_bonus = 1.0
+                            break
+            final = base * (
+                1.0
+                + alpha * bonus
+                + cluster_alpha * cluster_bonus
+                + facet_gate * facet_bonus
+            )
             scored.append((final, doc))
         scored.sort(key=lambda kv: kv[0], reverse=True)
         out: list[dict[str, Any]] = []

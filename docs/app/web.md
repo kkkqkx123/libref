@@ -89,7 +89,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### GET /pattern-insight
 
-`view` 七选一：`patterns/evidence/tree/clusters/health/labels/snippets`。带来源过滤的挖掘写入带指纹的独立档案，不改写默认 `usage`。`evidence` 要求非空 `pattern`（逗号分隔序列）。`containing` 为逗号分隔的必含接口集合，`prefix` 为点分前缀，`per_file_limit` 限每文件证据数，`dedup` 三态（真/假/缺省跟随配置），`profile` 选择挖掘档案，缺省为 `usage`。
+`view` 十一选一：`patterns/evidence/tree/clusters/health/labels/snippets/facets/feature_summary/cluster_labels/drift`。带来源过滤的挖掘写入带指纹的独立档案，不改写默认 `usage`。`evidence` 要求非空 `pattern`（逗号分隔序列），`drift` 要求 `compare_profile`。`containing` 为逗号分隔的必含接口集合，`prefix` 为点分前缀，`facet` 按维度过滤形态，`per_file_limit` 限每文件证据数，`dedup` 三态（真/假/缺省跟随配置），`profile` 选择挖掘档案，缺省为 `usage`。
 
 ### GET /symbol-insight
 
@@ -212,6 +212,6 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 * 服务暴露：`web_host/web_port` 为组合 `serve` 的唯一监听，`mcp_path` 为 `/mcp` 挂载路径。HTTP 与 `/mcp` 共用顶层鉴权中间件，健康检查与静态资源除外；`allowed_origins` 按来源精确匹配，非浏览器请求可不带 Origin。
 * 检索问答：同 MCP 的向量、嵌入、精排、融合、片段、窗口、问答与发现注册表各键，详尽预设强制开窗口。
 * 用法语料：`usage_mining_enabled/doc_code_mining_enabled` 控制源码文档注释与文档代码块是否进入 usage 档案。
-* 洞察：`evidence_per_file_limit/evidence_dedup` 证据默认，`cluster_threshold/cluster_min_size` 分组默认。
+* 洞察：`evidence_per_file_limit/evidence_dedup` 证据默认，`cluster_threshold/cluster_min_size` 分组默认，`facet_topn/facet_candidate_budget/facet_min_gain/guard_enabled` 形态选择，`induction_*` 标签归纳，`drift_topn` 漂移截断。
 * 写入：抓取并发与超时、范围、分块、嵌入与向量后端各键，`snapshot_*` 快照与 `repos_dir/repos_quota_mb` 配额。
 * 日志：`log_level/log_file/log_format`。

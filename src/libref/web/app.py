@@ -688,6 +688,10 @@ def build_web_app(
             "health",
             "labels",
             "snippets",
+            "facets",
+            "feature_summary",
+            "cluster_labels",
+            "drift",
         ],
         pattern: Annotated[list[str] | None, Query()] = None,
         containing: Annotated[list[str] | None, Query()] = None,
@@ -699,6 +703,8 @@ def build_web_app(
         per_file_limit: int | None = None,
         dedup: bool | None = None,
         profile: str | None = None,
+        facet: str | None = None,
+        compare_profile: str | None = None,
         principal=Depends(_guard),
     ) -> dict[str, Any]:
         params = PatternInsightQuery(
@@ -713,6 +719,8 @@ def build_web_app(
             per_file_limit=per_file_limit,
             dedup=dedup,
             profile=profile,
+            facet=facet,
+            compare_profile=compare_profile,
         )
         _need(principal, "read")
         rc, should_close, est, bundle = _req_bundle(request, principal)
@@ -732,6 +740,8 @@ def build_web_app(
                         per_file_limit=params.per_file_limit,
                         dedup=params.dedup,
                         profile=params.profile,
+                        facet=params.facet,
+                        compare_profile=params.compare_profile,
                         tenant_id=_tenant_of(principal),
                     ),
                 )

@@ -90,6 +90,10 @@ class PatternInsightQuery(BaseModel):
         "health",
         "labels",
         "snippets",
+        "facets",
+        "feature_summary",
+        "cluster_labels",
+        "drift",
     ]
     pattern: list[str] | None = None
     containing: list[str] | None = None
@@ -101,6 +105,8 @@ class PatternInsightQuery(BaseModel):
     per_file_limit: int | None = Field(default=None, ge=1, le=20)
     dedup: bool | None = None
     profile: str | None = None
+    facet: str | None = None
+    compare_profile: str | None = None
 
 
 class SymbolInsightQuery(BaseModel):
@@ -585,6 +591,9 @@ class ApiRankRow(ContractModel):
 class ApiArgRow(ContractModel):
     args: JsonValue
     count: int
+    facet: str | None = None
+    facet_calls: int | None = None
+    facet_scopes: int | None = None
 
 
 class PatternRow(ContractModel):
@@ -641,6 +650,7 @@ class PatternHealthRow(ContractModel):
     unresolved_rate: float
     caller_link_rate: float
     signature_missing_rate: float
+    facet_counts: dict[str, int] | None = None
 
 
 class PatternLabelRow(ContractModel):
@@ -660,6 +670,46 @@ class PatternSnippetRow(ContractModel):
     caller: str | None
     snippet: JsonValue | None
     rendered: str | None
+
+
+class FacetRow(ContractModel):
+    facet: str
+    value: str
+    calls: int
+    scopes: int
+
+
+class FeatureSummaryRow(ContractModel):
+    facets: dict[str, JsonValue]
+    patterns: int
+    total_support: int
+    reusability: float
+    diversity: float
+
+
+class ClusterLabelRow(ContractModel):
+    cluster_key: str
+    members: list[str]
+    model: str | None
+    prompt_version: str | None
+    name: str | None
+    summary: str | None
+    category_path: list[str]
+    workflow: str | None
+    related_apis: list[str]
+    source_note: str | None
+
+
+class DriftRow(ContractModel):
+    kind: str
+    pattern: list[str] | None = None
+    facet: str | None = None
+    value: str | None = None
+    support_before: int | None = None
+    support_after: int | None = None
+    calls_before: int | None = None
+    calls_after: int | None = None
+    delta: int | None = None
 
 
 class SymbolRow(ContractModel):
@@ -748,6 +798,22 @@ class PatternSnippetInsightResponse(InsightEnvelope[PatternSnippetRow]):
     view: Literal["snippets"]
 
 
+class PatternFacetInsightResponse(InsightEnvelope[FacetRow]):
+    view: Literal["facets"]
+
+
+class PatternFeatureSummaryInsightResponse(InsightEnvelope[FeatureSummaryRow]):
+    view: Literal["feature_summary"]
+
+
+class PatternClusterLabelInsightResponse(InsightEnvelope[ClusterLabelRow]):
+    view: Literal["cluster_labels"]
+
+
+class PatternDriftInsightResponse(InsightEnvelope[DriftRow]):
+    view: Literal["drift"]
+
+
 class SymbolInsightResponse(InsightEnvelope[SymbolRow]):
     view: Literal["detail", "file", "children"]
 
@@ -773,6 +839,10 @@ PatternInsightResult = (
     | PatternHealthInsightResponse
     | PatternLabelInsightResponse
     | PatternSnippetInsightResponse
+    | PatternFacetInsightResponse
+    | PatternFeatureSummaryInsightResponse
+    | PatternClusterLabelInsightResponse
+    | PatternDriftInsightResponse
 )
 SymbolInsightResult = SymbolInsightResponse | SignatureInsightResponse
 CallInsightResult = CallInsightResponse

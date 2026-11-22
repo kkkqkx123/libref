@@ -184,6 +184,12 @@ class LibrefSettings(BaseSettings):
     answer_weak_threshold: float = Field(default=0.5, ge=0, le=1)
     cluster_threshold: float = Field(default=0.15, ge=0)
     cluster_min_size: int = Field(default=2, ge=1)
+    facet_topn: int = Field(default=50, ge=1)
+    facet_candidate_budget: int = Field(default=500, ge=0)
+    facet_min_gain: float = Field(default=0.0, ge=0)
+    guard_enabled: bool = False
+    facet_alpha: float = Field(default=0.05, ge=0)
+    drift_topn: int = Field(default=20, ge=1)
     evidence_per_file_limit: int = Field(default=1, ge=1)
     evidence_dedup: bool = True
     induction_enabled: bool = False
@@ -514,8 +520,14 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "rrf_w_vec",
             "freq_alpha",
             "cluster_alpha",
+            "facet_alpha",
             "cluster_threshold",
             "cluster_min_size",
+            "facet_topn",
+            "facet_candidate_budget",
+            "facet_min_gain",
+            "guard_enabled",
+            "drift_topn",
             "evidence_per_file_limit",
             "evidence_dedup",
             "induction_enabled",

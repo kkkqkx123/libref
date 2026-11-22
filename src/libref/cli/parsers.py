@@ -643,6 +643,10 @@ def build_parser() -> argparse.ArgumentParser:
             "health",
             "labels",
             "snippets",
+            "facets",
+            "feature_summary",
+            "cluster_labels",
+            "drift",
         ],
     )
     p_pattern.add_argument(
@@ -656,6 +660,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Comma-separated APIs that must all be present",
     )
     p_pattern.add_argument("--prefix", default=None)
+    p_pattern.add_argument("--facet", default=None)
+    p_pattern.add_argument("--compare-profile", default=None)
     p_pattern.add_argument("--library", default=None)
     p_pattern.add_argument("--version", default=None)
     p_pattern.add_argument("--ecosystem", default=None)

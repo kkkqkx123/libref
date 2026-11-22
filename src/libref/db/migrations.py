@@ -11,8 +11,10 @@ from libref.db.schema import (
     CALL_RELATION_SQL,
     CALL_RESOLVE_SQL,
     CALL_SCOPE_SQL,
+    CLUSTER_LABEL_SQL,
     DISCOVERY_CACHE_SQL,
     DOC_LINK_EDGES_SQL,
+    FACET_DERIVED_SQL,
     FEATURE_TREE_CLUSTER_SQL,
     GOVERNANCE_SQL,
     IMPORT_EDGES_SQL,
@@ -76,6 +78,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(26, "usage-corpus-mining-profiles", USAGE_CORPUS_SQL),
     Migration(27, "call-relation-kind", CALL_RELATION_SQL),
     Migration(28, "macro-body-evidence", MACRO_EVIDENCE_SQL),
+    Migration(29, "feature-facets", FACET_DERIVED_SQL),
+    Migration(30, "cluster-labels", CLUSTER_LABEL_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

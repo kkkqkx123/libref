@@ -130,6 +130,12 @@
 | answer_weak_threshold | 浮点（0～1） | 0.5 | LIBREF_ANSWER_WEAK_THRESHOLD | 证据弱档下限，低于此值记为不可答并弃答 |
 | cluster_threshold | 浮点（≥0） | 0.15 | LIBREF_CLUSTER_THRESHOLD | 聚类阈值，挖掘与加权共用 |
 | cluster_min_size | 整数（≥1） | 2 | LIBREF_CLUSTER_MIN_SIZE | 聚类最小规模 |
+| facet_topn | 整数（≥1） | 50 | LIBREF_FACET_TOPN | 形态每层截断上限 |
+| facet_candidate_budget | 整数（≥0） | 500 | LIBREF_FACET_CANDIDATE_BUDGET | 形态候选组合预算上限 |
+| facet_min_gain | 浮点（≥0） | 0.0 | LIBREF_FACET_MIN_GAIN | 形态贡献占比过滤阈值 |
+| guard_enabled | 布尔 | 关 | LIBREF_GUARD_ENABLED | 守卫特征开关，默认关闭 |
+| facet_alpha | 浮点（≥0） | 0.05 | LIBREF_FACET_ALPHA | 形态检索加成权重 |
+| drift_topn | 整数（≥1） | 20 | LIBREF_DRIFT_TOPN | 漂移清单截断数 |
 | evidence_per_file_limit | 整数（≥1） | 1 | LIBREF_EVIDENCE_PER_FILE_LIMIT | 每文件证据上限（挖掘读取按此值解析） |
 | evidence_dedup | 布尔 | 开 | LIBREF_EVIDENCE_DEDUP | 证据去重默认 |
 | induction_enabled | 布尔 | 关 | LIBREF_INDUCTION_ENABLED | 标签归纳开关 |
