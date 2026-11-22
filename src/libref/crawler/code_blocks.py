@@ -24,6 +24,8 @@ def html_code_blocks(
         return []
     out: list[CodeSnippet] = []
     search_at = 0
+    # Origin byte offsets are UTF-8 byte offsets into the host HTML,
+    # matching the byte convention used for markdown fences and rustdoc.
     for ordinal, node in enumerate(tree.css("pre code, pre"), start=1):
         classes = " ".join(str(node.attributes.get("class") or "").split())
         language = ""
@@ -46,8 +48,15 @@ def html_code_blocks(
             found = html.find(raw_code)
         if found >= 0:
             search_at = found + len(raw_code)
-        start_line = html.count("\n", 0, found) + 1 if found >= 0 else 0
-        end_line = html.count("\n", 0, found + len(raw_code)) + 1 if found >= 0 else 0
+            start_byte = len(html[:found].encode("utf-8"))
+            end_byte = start_byte + len(raw_code.encode("utf-8"))
+            start_line = html.count("\n", 0, found) + 1
+            end_line = html.count("\n", 0, found + len(raw_code)) + 1
+        else:
+            start_byte = 0
+            end_byte = 0
+            start_line = 0
+            end_line = 0
         out.append(
             CodeSnippet(
                 sample_id=f"{sample_prefix}#{ordinal}",
@@ -58,8 +67,8 @@ def html_code_blocks(
                 ordinal=ordinal,
                 origin_kind="html_code_block",
                 origin_location=url,
-                origin_start_byte=found,
-                origin_end_byte=found + len(raw_code) if found >= 0 else 0,
+                origin_start_byte=start_byte,
+                origin_end_byte=end_byte,
                 origin_start_line=start_line,
                 origin_end_line=end_line,
             )

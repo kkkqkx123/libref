@@ -73,6 +73,9 @@ def _relocate_snippet_calls(resolved, snippet: CodeSnippet):
         if snippet.origin_start_byte:
             call.start_byte = snippet.origin_start_byte + call.start_byte
             call.end_byte = snippet.origin_start_byte + call.end_byte
+        call.sample_id = (
+            f"{snippet.sample_id}::{call.caller}" if call.caller else snippet.sample_id
+        )
     return resolved
 
 
