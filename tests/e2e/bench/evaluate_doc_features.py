@@ -146,16 +146,19 @@ def _ingest_code_blocks(
 def _resolve_anchor(conn, question: dict, version_id: int) -> list[str]:
     problems: list[str] = []
     for url in question.get("targets", []):
-        row = conn.execute(
-            "SELECT json_extract(metadata, '$.path') FROM documents"
-            " WHERE url=? AND version_id=? LIMIT 1",
-            (str(url), version_id),
-        ).fetchone()
-        if row is None:
+        paths = [
+            str(row[0] or "")
+            for row in conn.execute(
+                "SELECT DISTINCT json_extract(metadata, '$.path') FROM documents"
+                " WHERE url=? AND version_id=?",
+                (str(url), version_id),
+            ).fetchall()
+        ]
+        if not paths:
             problems.append(f"url:{url}")
             continue
         heading = str(question.get("expected_facets", {}).get("heading") or "")
-        if heading and heading.lower() not in str(row[0] or "").lower():
+        if heading and not any(heading.lower() in path.lower() for path in paths):
             problems.append(f"heading:{heading}")
     for name in question.get("expected_entities", []):
         if (
@@ -236,6 +239,28 @@ def _grade(item: dict, question: dict) -> int:
     return int((question.get("grades") or {}).get("strong", 2))
 
 
+def _filter_stats(conn, found: list[dict], question: dict) -> dict[str, Any]:
+    from libref.store.retriever import filter_by_doc_facets
+
+    targets = {str(url) for url in question.get("targets", [])}
+    ids = [int(item["id"]) for item in found]
+    url_by_id = {int(item["id"]): str(item.get("url") or "") for item in found}
+    options = {
+        "examples_only": {"block_type": "example"},
+        "exclude_deprecated": {"exclude_deprecated": True},
+        "aligned_only": {"aligned_only": True},
+    }
+    out: dict[str, Any] = {}
+    for name, kwargs in options.items():
+        kept = filter_by_doc_facets(conn, ids, **kwargs)
+        out[name] = {
+            "results": len(ids),
+            "kept": len(kept),
+            "hits": int(any(url_by_id[doc_id] in targets for doc_id in kept)),
+        }
+    return out
+
+
 def _rank(
     conn, settings, questions: list[dict], info: dict, version_id: int, alpha: float
 ) -> dict[str, Any]:
@@ -257,6 +282,8 @@ def _rank(
     }
     rows: dict[str, list[dict]] = {"off": [], "on": []}
     ranks: dict[str, dict[str, int]] = {}
+    filter_rows: list[dict] = []
+    found_by_query: dict[str, list[dict]] = {}
     for question in questions:
         best = 2 if question.get("expected_facets", {}).get("heading") else 1
         ranks[str(question["id"])] = {}
@@ -266,6 +293,7 @@ def _rank(
                     question["query"], "balanced", **scope, limit=K
                 )
             )
+            found_by_query[label + str(question["id"])] = found
             gains = [_grade(item, question) for item in found]
             rows[label].append(
                 {"gains": gains, "best": best, "count": len(found), "duplicates": 0}
@@ -273,7 +301,28 @@ def _rank(
             ranks[str(question["id"])][label] = next(
                 (index + 1 for index, gain in enumerate(gains) if gain > 0), 0
             )
-    return {"ranks": ranks, "rows": rows, "version_id": version_id}
+        filter_rows.append(
+            _filter_stats(conn, found_by_query["off" + str(question["id"])], question)
+        )
+    total = len(filter_rows)
+    filters = {
+        name: {
+            "queries": total,
+            "results": sum(row[name]["results"] for row in filter_rows),
+            "kept": sum(row[name]["kept"] for row in filter_rows),
+            "hits": sum(row[name]["hits"] for row in filter_rows),
+            "hit_rate": (
+                sum(row[name]["hits"] for row in filter_rows) / total if total else 0.0
+            ),
+        }
+        for name in ("examples_only", "exclude_deprecated", "aligned_only")
+    }
+    return {
+        "ranks": ranks,
+        "rows": rows,
+        "version_id": version_id,
+        "filters": filters,
+    }
 
 
 def _evaluate_fixture(
@@ -330,6 +379,7 @@ def _evaluate_fixture(
         "derivation": counts,
         "questions": entries,
         "ranks": ranking["ranks"],
+        "filters": ranking["filters"],
         "metrics": {
             "off": before,
             "on": after,
@@ -392,6 +442,11 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             f"- 判定一致：{sum(1 for row in entries if row['verdict_match'])}/{len(entries)}",
             f"- 覆盖行数：{item['derivation']['coverage']}",
         ]
+        for name, stats in item["filters"].items():
+            lines.append(
+                f"- 过滤 {name}：保留 {stats['kept']}/{stats['results']}，"
+                f"命中 {stats['hits']}，命中率 {stats['hit_rate']:.3f}"
+            )
         if not item["snippet_counts"]["snippets"]:
             lines.append(
                 "- 该站原始正文没有语言标记代码块：实体对齐率只作记录，不计入门禁。"

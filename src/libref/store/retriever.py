@@ -301,6 +301,10 @@ def filter_by_doc_facets(
     return [doc for doc in doc_ids if doc in keep]
 
 
+# Per-edge weight by evidence strength; weak name matches stay advisory.
+ALIGNMENT_BONUS = {"symbol": 0.1, "signature": 0.05, "name_fuzzy": 0.01}
+
+
 def _doc_feature_bonuses(
     conn: sqlite3.Connection, vids: list[int]
 ) -> dict[int, dict[int, float]]:
@@ -338,13 +342,15 @@ def _doc_feature_bonuses(
         elif facet == "deprecated" and value.get("details", {}).get("value"):
             out[int(version_id)][int(doc_id)] = slot - 0.5
     link_rows = conn.execute(
-        "SELECT version_id, document_id, count(*) FROM doc_api_links"
-        f" WHERE version_id IN ({marks}) GROUP BY version_id, document_id",
+        "SELECT version_id, document_id, match_kind, count(*) FROM doc_api_links"
+        f" WHERE version_id IN ({marks}) GROUP BY version_id, document_id, match_kind",
         vids,
     ).fetchall()
-    for version_id, doc_id, count in link_rows:
+    for version_id, doc_id, kind, count in link_rows:
         slot = out.setdefault(int(version_id), {}).setdefault(int(doc_id), 0.0)
-        out[int(version_id)][int(doc_id)] = slot + min(5, int(count)) / 10.0
+        out[int(version_id)][int(doc_id)] = slot + min(5, int(count)) * float(
+            ALIGNMENT_BONUS.get(str(kind), 0.0)
+        )
     return {
         vid: {doc: max(0.0, min(1.0, value)) for doc, value in rows.items()}
         for vid, rows in out.items()

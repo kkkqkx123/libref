@@ -506,12 +506,18 @@ def refresh_clusters(
 
 
 def _refresh_doc_derived(
-    conn, library: str, version: str, profile: str | None, tenant_id: str
+    conn,
+    library: str,
+    version: str,
+    profile: str | None,
+    tenant_id: str,
+    ecosystem: str | None = None,
 ) -> None:
     """Rebuild document coverage after a pattern refresh, without failing mining."""
     try:
         from libref.services.docs.feature_refresh import refresh_doc_features
 
+        identity = {"ecosystem": ecosystem} if ecosystem is not None else {}
         refresh_doc_features(
             conn,
             library,
@@ -519,6 +525,7 @@ def _refresh_doc_derived(
             profile=profile,
             scope="derived",
             tenant_id=tenant_id,
+            **identity,
         )
     except Exception as exc:  # noqa: BLE001 — mining truth is already committed
         import logging
@@ -675,7 +682,7 @@ def mine_patterns(
             macro_policy=policy,
         )
         conn.commit()
-        _refresh_doc_derived(conn, library, version, profile, tenant_id)
+        _refresh_doc_derived(conn, library, version, profile, tenant_id, ecosystem)
         return []
 
     if not str_seqs:
@@ -761,7 +768,7 @@ def mine_patterns(
         macro_policy=policy,
     )
     conn.commit()
-    _refresh_doc_derived(conn, library, version, profile, tenant_id)
+    _refresh_doc_derived(conn, library, version, profile, tenant_id, ecosystem)
     results.sort(key=lambda r: (-r["support"], r["pattern"]))
     return results
 

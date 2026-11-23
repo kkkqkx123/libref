@@ -16,7 +16,7 @@ uv run python tests/e2e/render_doc_feature_outputs.py
 uv run pytest tests/integration/test_doc_feature_outputs.py -q
 ```
 
-输出到 `tests/e2e/outputs/doc_features/`，按 `01` 至 `09` 分别核查输入、块 facet、对齐边、模式覆盖、一致性判定、锚点解析、排名对照、指标与跨版本变化。`SUMMARY.txt` 只汇总条数、锚点解析与不变量，人工判定不写进单元测试。
+输出到 `tests/e2e/outputs/doc_features/`，按 `01` 至 `09` 分别核查输入、块 facet、对齐边、模式覆盖、一致性判定、锚点解析、排名对照、指标与跨版本变化。`08-metrics.txt` 同时记录仅示例、排除废弃、仅对齐三类过滤后的结果数、保留数与命中率。`SUMMARY.txt` 只汇总条数、锚点解析与不变量，人工判定不写进单元测试。
 
 判定口径：稳定锚点只用 URL、标题路径、块分组标识与限定符号名；不用数据库 id、行号或块序号。相关等级沿用检索基准的强相关 2 分、一般相关 1 分、未命中 0 分。同一题目在 `doc_feature_alpha` 关闭与开启两列并排，数值差分与区间只作人工标定依据。
 

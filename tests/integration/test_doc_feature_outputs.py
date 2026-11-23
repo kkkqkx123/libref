@@ -24,4 +24,9 @@ def test_doc_feature_outputs(tmp_path) -> None:
     )
     assert summary["counts"]["coverage"] > 0
     assert summary["metrics"]["questions"] > 0
+    assert set(summary["metrics"]["filters"]) == {
+        "examples_only",
+        "exclude_deprecated",
+        "aligned_only",
+    }
     assert "Invariants:" in (out_dir / "SUMMARY.txt").read_text(encoding="utf-8")

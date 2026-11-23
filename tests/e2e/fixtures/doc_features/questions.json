@@ -95,7 +95,7 @@
       "query_lang": "en",
       "query": "Timeout object with connect read write pool values",
       "targets": ["https://www.python-httpx.org/advanced/timeouts/"],
-      "expected_entities": ["httpx.Timeout"],
+      "expected_entities": ["httpx._config.Timeout"],
       "expected_facets": {"heading": "Fine tuning"},
       "expected_verdict": "unknown",
       "grades": {"strong": 2, "general": 1, "miss": 0}

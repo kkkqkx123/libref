@@ -18,9 +18,9 @@ pytestmark = pytest.mark.integration
 _URL = "https://docs.example/client"
 
 
-def _seed(conn):
+def _seed(conn, ecosystem="custom"):
     catalog = LibraryService(conn)
-    library_id, version_id = catalog.ensure_library_version("demo", "1.0", "custom")
+    library_id, version_id = catalog.ensure_library_version("demo", "1.0", ecosystem)
     conn.execute("INSERT INTO pages(version_id, url) VALUES(?, ?)", (version_id, _URL))
     page_id = conn.execute(
         "SELECT id FROM pages WHERE version_id=? AND url=?", (version_id, _URL)
@@ -161,6 +161,78 @@ def test_disabled_derivation_writes_nothing(conn, monkeypatch, tmp_path):
     counts = refresh_doc_features(conn, "demo", "1.0", settings=settings)
     assert counts["features"] == 0
     assert conn.execute("SELECT count(*) FROM doc_features").fetchone()[0] == 0
+
+
+def test_mining_refresh_keeps_document_ecosystem(conn, monkeypatch):
+    import libref.services.docs.feature_refresh as doc_features
+    from libref.services.code.mining_refresh import _refresh_doc_derived
+
+    seen: list[str | None] = []
+    original = doc_features.refresh_doc_features
+
+    def capture(conn, *args, **kwargs):
+        seen.append(kwargs.get("ecosystem"))
+        return original(conn, *args, **kwargs)
+
+    monkeypatch.setattr(doc_features, "refresh_doc_features", capture)
+    _seed(conn, ecosystem="pypi")
+    _refresh_doc_derived(conn, "demo", "1.0", None, "default", "pypi")
+
+    assert seen == ["pypi"]
+    libraries = conn.execute(
+        "SELECT ecosystem FROM libraries WHERE name='demo'"
+    ).fetchall()
+    assert [row[0] for row in libraries] == ["pypi"]
+
+
+def test_alignment_bonus_weights_evidence(conn):
+    from libref.store.retriever import ALIGNMENT_BONUS, _doc_feature_bonuses
+
+    assert ALIGNMENT_BONUS == {
+        "symbol": 0.1,
+        "signature": 0.05,
+        "name_fuzzy": 0.01,
+    }
+    library_id, version_id, _doc_id = _seed(conn)
+    conn.execute(
+        "INSERT INTO pages(version_id, url) VALUES(?, ?)",
+        (version_id, "https://docs.example/weak"),
+    )
+    page_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute(
+        "INSERT INTO documents(library_id, version_id, page_id, url, content, metadata,"
+        " sort_order) VALUES(?,?,?,?,?,?,0)",
+        (
+            library_id,
+            version_id,
+            page_id,
+            "https://docs.example/weak",
+            "weak evidence",
+            '{"path":"Weak","title":"Weak"}',
+        ),
+    )
+    weak_id = int(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+    conn.execute(
+        "INSERT INTO doc_api_links(library_id, version_id, document_id, api_entity_id,"
+        " match_kind, confidence, evidence, tenant_id) VALUES(?,?,?,?,?,0.4,'{}','default')",
+        (library_id, version_id, weak_id, 1, "name_fuzzy"),
+    )
+    conn.commit()
+
+    def bonus():
+        return _doc_feature_bonuses(conn, [version_id])[version_id][weak_id]
+
+    assert bonus() == pytest.approx(0.01)
+    conn.execute(
+        "UPDATE doc_api_links SET match_kind='signature' WHERE document_id=?",
+        (weak_id,),
+    )
+    assert bonus() == pytest.approx(0.05)
+    conn.execute(
+        "UPDATE doc_api_links SET match_kind='symbol' WHERE document_id=?",
+        (weak_id,),
+    )
+    assert bonus() == pytest.approx(0.1)
 
 
 def test_job_kind_is_registered(conn, monkeypatch, tmp_path):

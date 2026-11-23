@@ -367,6 +367,29 @@ def _grade(item: dict, question: dict) -> int:
     return int(grades.get("strong", 2))
 
 
+def _filter_stats(conn, found: list[dict], question: dict) -> dict[str, Any]:
+    """Observe how many hits survive each explicit document-derived filter."""
+    from libref.store.retriever import filter_by_doc_facets
+
+    targets = {str(url) for url in question.get("targets", [])}
+    ids = [int(item["id"]) for item in found]
+    url_by_id = {int(item["id"]): str(item.get("url") or "") for item in found}
+    filters = {
+        "examples_only": {"block_type": "example"},
+        "exclude_deprecated": {"exclude_deprecated": True},
+        "aligned_only": {"aligned_only": True},
+    }
+    out: dict[str, Any] = {}
+    for name, options in filters.items():
+        kept = filter_by_doc_facets(conn, ids, **options)
+        out[name] = {
+            "results": len(ids),
+            "kept": len(kept),
+            "hits": int(any(url_by_id[doc_id] in targets for doc_id in kept)),
+        }
+    return out
+
+
 def _rank_questions(
     conn, settings, questions: list[dict], limit: int
 ) -> dict[str, Any]:
@@ -384,6 +407,7 @@ def _rank_questions(
     on = SearchService(conn, on_settings, vec_store=vectors, embed=embedder)
     rows_off: list[dict] = []
     rows_on: list[dict] = []
+    filter_rows: list[dict] = []
     lines = [
         "# Retrieval ranking with doc_feature_alpha off and on",
         "",
@@ -426,9 +450,25 @@ def _rank_questions(
                 if g > 0
             ]
             lines.append(f"  {label}: {_dump(top) if top else '(no target hit)'}")
+        stats = _filter_stats(conn, results["off"], question)
+        lines.append(f"  filters: {_dump(stats)}")
         rows_off.append(per_query["off"])
         rows_on.append(per_query["on"])
-    return {"lines": lines, "off": rows_off, "on": rows_on}
+        filter_rows.append(stats)
+    total = len(filter_rows)
+    filters = {
+        name: {
+            "queries": total,
+            "results": sum(row[name]["results"] for row in filter_rows),
+            "kept": sum(row[name]["kept"] for row in filter_rows),
+            "hits": sum(row[name]["hits"] for row in filter_rows),
+            "hit_rate": (
+                sum(row[name]["hits"] for row in filter_rows) / total if total else 0.0
+            ),
+        }
+        for name in ("examples_only", "exclude_deprecated", "aligned_only")
+    }
+    return {"lines": lines, "off": rows_off, "on": rows_on, "filters": filters}
 
 
 def _metrics(
@@ -505,6 +545,7 @@ def _metrics(
         "mrr_on": after["mrr_at_k"],
         "ndcg_delta": deltas["ndcg"],
         "mrr_delta": deltas["mrr"],
+        "filters": ranking["filters"],
     }
     lines = ["# Derived metrics (review observations, not unit assertions)", ""]
     for key, value in values.items():
@@ -515,6 +556,12 @@ def _metrics(
         else:
             shown = f"{value:.3f}"
         lines.append(f"- {key}: {shown}")
+    lines += ["", "Filter effectiveness:"]
+    for name, stats in ranking["filters"].items():
+        lines.append(
+            f"- {name}: kept={stats['kept']}/{stats['results']} "
+            f"hits={stats['hits']} hit_rate={stats['hit_rate']:.3f}"
+        )
     lines.append("")
     lines.append(f"Covered patterns: {_dump(sorted(covered))}")
     lines.append(f"Expected patterns: {_dump(sorted(expected_coverage))}")
