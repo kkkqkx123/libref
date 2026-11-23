@@ -27,8 +27,15 @@ SCRAPE_DOCS_KIND: Final = "scrape_docs"
 INDEX_REPO_KIND: Final = "index_repo"
 MINE_PATTERNS_KIND: Final = "mine_patterns"
 INDUCE_LABELS_KIND: Final = "induce_labels"
-JobKind = Literal["scrape_docs", "index_repo", "mine_patterns", "induce_labels"]
-DirectJobKind = Literal["mine_patterns", "induce_labels"]
+DOC_FEATURE_KIND: Final = "derive_doc_features"
+JobKind = Literal[
+    "scrape_docs",
+    "index_repo",
+    "mine_patterns",
+    "induce_labels",
+    "derive_doc_features",
+]
+DirectJobKind = Literal["mine_patterns", "induce_labels", "derive_doc_features"]
 
 
 def _table_columns(conn: MetadataSession, table: str) -> set[str]:

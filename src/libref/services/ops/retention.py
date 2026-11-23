@@ -186,8 +186,18 @@ def _purge_inner(
         "SELECT count(*) FROM documents WHERE version_id=?", (version_id,)
     ).fetchone()
     removed_docs = int(count_row[0]) if count_row else 0
-    conn.execute("DELETE FROM seq_patterns WHERE version_id=?", (version_id,))
-    conn.execute("DELETE FROM feature_nodes WHERE version_id=?", (version_id,))
+    for table in (
+        "doc_consistency",
+        "doc_pattern_coverage",
+        "doc_api_links",
+        "doc_features",
+        "seq_patterns",
+        "feature_nodes",
+    ):
+        try:
+            conn.execute(f"DELETE FROM {table} WHERE version_id=?", (version_id,))
+        except Exception:  # noqa: BLE001, S110 — derived tables may not exist on older layouts
+            pass
     conn.execute("DELETE FROM api_clusters WHERE version_id=?", (version_id,))
     conn.execute(
         "DELETE FROM review_status WHERE entity_type='call_instance'"

@@ -411,6 +411,71 @@ CREATE TABLE IF NOT EXISTS doc_link_edges(
 CREATE INDEX IF NOT EXISTS idx_doc_link_edges_dst ON doc_link_edges(version_id, dst_url);
 CREATE INDEX IF NOT EXISTS idx_doc_link_edges_src ON doc_link_edges(version_id, src_url);
 
+CREATE TABLE IF NOT EXISTS doc_features(
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  library_id BIGINT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  document_id BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  facet TEXT NOT NULL,
+  value JSONB NOT NULL DEFAULT '{}',
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(version_id, document_id, facet)
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_features_lookup ON doc_features(version_id, facet, document_id);
+
+CREATE TABLE IF NOT EXISTS doc_api_links(
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  library_id BIGINT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  document_id BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  api_entity_id BIGINT NOT NULL REFERENCES api_entities(id) ON DELETE CASCADE,
+  match_kind TEXT NOT NULL CHECK (match_kind IN ('symbol','signature','name_fuzzy')),
+  confidence DOUBLE PRECISION NOT NULL,
+  evidence JSONB NOT NULL DEFAULT '{}',
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(version_id, document_id, api_entity_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_api_links_entity ON doc_api_links(version_id, api_entity_id);
+
+CREATE TABLE IF NOT EXISTS doc_pattern_coverage(
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  library_id BIGINT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id BIGINT NOT NULL,
+  document_id BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  pattern_hash TEXT NOT NULL,
+  pattern JSONB NOT NULL,
+  covered_kind TEXT NOT NULL CHECK (covered_kind IN ('example_code','prose')),
+  support INTEGER NOT NULL DEFAULT 0,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, document_id, pattern_hash, covered_kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_pattern_coverage_lookup
+  ON doc_pattern_coverage(profile_id, version_id, covered_kind);
+
+CREATE TABLE IF NOT EXISTS doc_consistency(
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  library_id BIGINT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id BIGINT NOT NULL,
+  document_id BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  facet TEXT NOT NULL,
+  verdict TEXT NOT NULL CHECK (verdict IN ('match','drift','unknown')),
+  note TEXT NOT NULL DEFAULT '',
+  evidence_hash TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT 'rule',
+  prompt_version TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, document_id, facet, model, prompt_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_consistency_lookup
+  ON doc_consistency(profile_id, version_id, verdict);
+
 CREATE TABLE IF NOT EXISTS ingest_progress(
   version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,

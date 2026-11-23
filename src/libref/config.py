@@ -189,7 +189,33 @@ class LibrefSettings(BaseSettings):
     facet_min_gain: float = Field(default=0.0, ge=0)
     guard_enabled: bool = False
     facet_alpha: float = Field(default=0.05, ge=0)
+    doc_feature_alpha: float = Field(default=0.0, ge=0)
     drift_topn: int = Field(default=20, ge=1)
+    doc_feature_enabled: bool = True
+    doc_feature_candidate_budget: int = Field(default=200, ge=1)
+    doc_feature_terms_per_facet: int = Field(default=20, ge=1)
+    doc_feature_min_confidence: float = Field(default=0.4, ge=0, le=1)
+    doc_feature_enabled_facets: Annotated[
+        list[str], NoDecode, BeforeValidator(_split_tool_names)
+    ] = Field(
+        default_factory=lambda: [
+            "block_type",
+            "heading_depth",
+            "length_bucket",
+            "code_ratio",
+            "has_table",
+            "deprecated",
+            "version_marker",
+            "example_language",
+            "example_symbols",
+            "param_names",
+            "return_hint",
+            "term_candidates",
+        ]
+    )
+    doc_consistency_min_support: int = Field(default=2, ge=1)
+    doc_consistency_llm_enabled: bool = False
+    doc_consistency_batch: int = Field(default=8, ge=1)
     evidence_per_file_limit: int = Field(default=1, ge=1)
     evidence_dedup: bool = True
     induction_enabled: bool = False
@@ -521,6 +547,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "freq_alpha",
             "cluster_alpha",
             "facet_alpha",
+            "doc_feature_alpha",
             "cluster_threshold",
             "cluster_min_size",
             "facet_topn",
@@ -549,6 +576,18 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "fts_w_path",
             "answer_strong_threshold",
             "answer_weak_threshold",
+        }
+    ),
+    "doc_features": frozenset(
+        {
+            "doc_feature_enabled",
+            "doc_feature_candidate_budget",
+            "doc_feature_terms_per_facet",
+            "doc_feature_min_confidence",
+            "doc_feature_enabled_facets",
+            "doc_consistency_min_support",
+            "doc_consistency_llm_enabled",
+            "doc_consistency_batch",
         }
     ),
     "registry": frozenset(

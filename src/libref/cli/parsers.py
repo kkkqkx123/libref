@@ -19,6 +19,8 @@ from libref.cli.code_commands import (
 from libref.cli.common import _config_parent
 from libref.cli.docs_commands import (
     cmd_answer,
+    cmd_doc_features,
+    cmd_doc_insight,
     cmd_dump_chunks,
     cmd_ingest,
     cmd_read,
@@ -307,6 +309,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Local debug override for the configured window radius",
     )
+    p_search.add_argument("--block-type", default=None)
+    p_search.add_argument("--exclude-deprecated", action="store_true")
+    p_search.add_argument("--aligned-only", action="store_true")
     p_search.add_argument(
         "--suggest",
         action="store_true",
@@ -379,6 +384,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Local debug override for the configured window radius",
     )
+    p_answer.add_argument("--block-type", default=None)
+    p_answer.add_argument("--exclude-deprecated", action="store_true")
+    p_answer.add_argument("--aligned-only", action="store_true")
     p_answer.add_argument(
         "--material-limit",
         type=int,
@@ -673,6 +681,57 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-dedup", action="store_true", help="Disable evidence dedup"
     )
     p_pattern.set_defaults(func=cmd_pattern_insight)
+
+    p_doc_insight = sub.add_parser(
+        "doc-insight", help="Document feature views", parents=[_config_parent]
+    )
+    p_doc_insight.add_argument(
+        "view", choices=["features", "links", "coverage", "consistency"]
+    )
+    p_doc_insight.add_argument("--library", required=True)
+    p_doc_insight.add_argument("--version", required=True)
+    p_doc_insight.add_argument("--ecosystem", default=None)
+    p_doc_insight.add_argument("--profile", default=None)
+    p_doc_insight.add_argument("--facet", default=None)
+    p_doc_insight.add_argument("--api", default=None)
+    p_doc_insight.add_argument("--pattern", default=None)
+    p_doc_insight.add_argument("--verdict", default=None)
+    p_doc_insight.add_argument("--block-type", default=None)
+    p_doc_insight.add_argument("--limit", type=int, default=50)
+    p_doc_insight.set_defaults(func=cmd_doc_insight)
+
+    p_doc_features = sub.add_parser(
+        "doc-features",
+        help="Rebuild document-derived features",
+        parents=[_config_parent],
+    )
+    doc_feature_sub = p_doc_features.add_subparsers(
+        dest="doc_feature_command", required=True
+    )
+    p_doc_refresh = doc_feature_sub.add_parser(
+        "refresh", help="Rebuild one derivation scope"
+    )
+    p_doc_refresh.add_argument("--library", required=True)
+    p_doc_refresh.add_argument("--version", required=True)
+    p_doc_refresh.add_argument("--ecosystem", default=None)
+    p_doc_refresh.add_argument("--profile", default=None)
+    p_doc_refresh.add_argument(
+        "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
+    )
+    p_doc_refresh.add_argument(
+        "--scope",
+        choices=[
+            "structure",
+            "links",
+            "sources",
+            "coverage",
+            "consistency",
+            "derived",
+            "all",
+        ],
+        default="all",
+    )
+    p_doc_features.set_defaults(func=cmd_doc_features)
 
     p_symbol = sub.add_parser(
         "symbol-insight", help="Symbol detail views", parents=[_config_parent]

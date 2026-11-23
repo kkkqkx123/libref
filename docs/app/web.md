@@ -215,3 +215,5 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 * 洞察：`evidence_per_file_limit/evidence_dedup` 证据默认，`cluster_threshold/cluster_min_size` 分组默认，`facet_topn/facet_candidate_budget/facet_min_gain/guard_enabled` 形态选择，`induction_*` 标签归纳，`drift_topn` 漂移截断。
 * 写入：抓取并发与超时、范围、分块、嵌入与向量后端各键，`snapshot_*` 快照与 `repos_dir/repos_quota_mb` 配额。
 * 日志：`log_level/log_file/log_format`。
+
+文档派生：`GET /doc-insight` 提供 `features` / `links` / `coverage` / `consistency` 四视图；`GET /search` 支持 `block_type`、`exclude_deprecated`、`aligned_only` 过滤。

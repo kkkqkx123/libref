@@ -32,7 +32,7 @@ def test_every_mcp_tool_has_reviewable_output(tmp_path, monkeypatch) -> None:
         summary = render(conn, settings, out_dir)
     finally:
         conn.close()
-    assert summary["tools"] == len(TOOL_ORDER) == 27
+    assert summary["tools"] == len(TOOL_ORDER) == 28
     assert summary["unexpected_errors"] == []
     assert {item["tool"] for item in summary["skipped_network"]} == {
         "doc_probe",

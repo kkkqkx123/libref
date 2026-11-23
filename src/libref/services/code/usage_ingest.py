@@ -15,6 +15,11 @@ from libref.services.code.usage_sources import register_source, source_target_st
 _SAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
+def doc_source_key(version_id: int, url: str) -> str:
+    """Identity of the usage source created from one documentation page."""
+    return f"doc:{int(version_id)}:{url}"
+
+
 def target_declarations(conn, version_id: int) -> list[ApiDeclRecord]:
     """Load target API facts; usage sources never define the target surface."""
     rows = conn.execute(

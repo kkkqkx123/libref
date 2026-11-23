@@ -87,6 +87,7 @@ ALL_MCP_TOOLS: frozenset[str] = frozenset(
         "link_stats",
         "api_insight",
         "pattern_insight",
+        "doc_insight",
         "symbol_insight",
         "call_insight",
         "import_insight",
@@ -204,6 +205,7 @@ def build_mcp_server(
                     pass
                 raise
             return rc, bundle, True
+        from libref.services.docs.doc_insight import DocInsightService
         from libref.services.infra.jobs import JobManager
         from libref.services.ops.index_requests import IndexRequestService
 
@@ -215,6 +217,7 @@ def build_mcp_server(
                 "pages": pages,
                 "catalog": catalog_svc,
                 "mining": mining,
+                "doc_insight": DocInsightService(conn, resolve_settings),
                 "review": review_svc,
                 "jobs": local_jobs,
                 "index_requests": IndexRequestService(
@@ -246,6 +249,9 @@ def build_mcp_server(
         preset: Literal["precise", "balanced", "thorough"] = "balanced",
         suggest: bool = False,
         include_prerelease: bool = False,
+        block_type: str | None = None,
+        exclude_deprecated: bool = False,
+        aligned_only: bool = False,
     ) -> dict[str, Any]:
         """Preset retrieval: precise uses exact full-text, balanced and thorough use fused recall."""
         if not query.strip():
@@ -262,6 +268,9 @@ def build_mcp_server(
                     ecosystem=ecosystem,
                     limit=limit,
                     tenant_id=_tenant(_principal()),
+                    block_type=block_type,
+                    exclude_deprecated=exclude_deprecated,
+                    aligned_only=aligned_only,
                 )
             finally:
                 _close(_rc, _should_close)
@@ -688,6 +697,45 @@ def build_mcp_server(
                 )
             finally:
                 _close(_rcp, _scp)
+        except Exception as exc:
+            raise _as_error(exc) from exc
+
+    def doc_insight(
+        view: Literal["features", "links", "coverage", "consistency"],
+        library: str,
+        version: str,
+        ecosystem: str | None = None,
+        profile: str | None = None,
+        facet: str | None = None,
+        api: str | None = None,
+        pattern: str | None = None,
+        verdict: str | None = None,
+        block_type: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Document insight: block facets, API alignment, pattern coverage, and verdicts."""
+        require_limit(limit, low=1, high=INSIGHT_ROWS)
+        _rcd, _bundled, _scd = _make_bundle()
+        try:
+            try:
+                return _items(
+                    _bundled["doc_insight"].insight(
+                        library,
+                        version,
+                        view=view,
+                        ecosystem=ecosystem,
+                        profile=profile,
+                        facet=facet,
+                        api=api,
+                        pattern=pattern,
+                        verdict=verdict,
+                        block_type=block_type,
+                        limit=limit,
+                        tenant_id=_tenant(_principal()),
+                    )
+                )
+            finally:
+                _close(_rcd, _scd)
         except Exception as exc:
             raise _as_error(exc) from exc
 
@@ -1185,6 +1233,7 @@ def build_mcp_server(
             "link_stats",
             "api_insight",
             "pattern_insight",
+            "doc_insight",
             "symbol_insight",
             "call_insight",
             "import_insight",
@@ -1247,6 +1296,7 @@ def build_mcp_server(
         "link_stats": link_stats,
         "api_insight": api_insight,
         "pattern_insight": pattern_insight,
+        "doc_insight": doc_insight,
         "symbol_insight": symbol_insight,
         "call_insight": call_insight,
         "import_insight": import_insight,

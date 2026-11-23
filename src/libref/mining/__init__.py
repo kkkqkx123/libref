@@ -57,13 +57,13 @@ from .scoring import (
 )
 
 __all__ = [
-    "ClusterInductionInput",
-    "ClusterLabel",
     "FACET_ARG_SHAPE",
     "FACET_CALL_ORDER",
     "FACET_CALL_SHAPE",
     "FACET_COMBO",
     "FACET_GUARD",
+    "ClusterInductionInput",
+    "ClusterLabel",
     "InductionInput",
     "PatternLabel",
     "PrefixSpan",

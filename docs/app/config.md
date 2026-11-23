@@ -115,6 +115,15 @@
 | rrf_w_vec | 浮点（≥0） | 1.0 | LIBREF_RRF_W_VEC | 向量路权重 |
 | freq_alpha | 浮点（≥0） | 0.15 | LIBREF_FREQ_ALPHA | 序列支持度加权 |
 | cluster_alpha | 浮点（≥0） | 0.05 | LIBREF_CLUSTER_ALPHA | 聚类加权 |
+| doc_feature_alpha | 浮点（≥0） | 0.0 | LIBREF_DOC_FEATURE_ALPHA | 文档特征加权，默认关闭 |
+| doc_feature_enabled | 布尔 | 开 | LIBREF_DOC_FEATURE_ENABLED | 抓取后重建文档派生特征 |
+| doc_feature_candidate_budget | 整数（≥1） | 200 | LIBREF_DOC_FEATURE_CANDIDATE_BUDGET | 每块特征候选上限 |
+| doc_feature_terms_per_facet | 整数（≥1） | 20 | LIBREF_DOC_FEATURE_TERMS_PER_FACET | 每个特征取值上限 |
+| doc_feature_min_confidence | 浮点（0～1） | 0.4 | LIBREF_DOC_FEATURE_MIN_CONFIDENCE | 对齐边最低置信度 |
+| doc_feature_enabled_facets | 字符串列表 | 全部 | LIBREF_DOC_FEATURE_ENABLED_FACETS | 允许落库的块特征面 |
+| doc_consistency_min_support | 整数（≥1） | 2 | LIBREF_DOC_CONSISTENCY_MIN_SUPPORT | 漂移判定的最小模式支持度 |
+| doc_consistency_llm_enabled | 布尔 | 关 | LIBREF_DOC_CONSISTENCY_LLM_ENABLED | 漂移说明的模型归纳开关 |
+| doc_consistency_batch | 整数（≥1） | 8 | LIBREF_DOC_CONSISTENCY_BATCH | 漂移说明归纳批大小 |
 | candidate_multiplier | 整数（≥1） | 3 | LIBREF_CANDIDATE_MULTIPLIER | 召回预算倍数 |
 | assemble_multiplier | 整数（≥1） | 2 | LIBREF_ASSEMBLE_MULTIPLIER | 组装窗口倍数 |
 | assemble_min | 整数（≥1） | 10 | LIBREF_ASSEMBLE_MIN | 组装窗口下限 |

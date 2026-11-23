@@ -1,10 +1,10 @@
-# 派生库表：序列模式、特征树、聚类、形态与语义标签
+# 派生库表：序列模式、特征树、聚类、形态、语义标签与文档特征
 
-六表均为按挖掘档案重建的派生数据，真源是调用实例；档案绑定版本、语料源集合与参数。同一版本可并存多个档案，
+十表均为按挖掘档案重建的派生数据，真源是调用实例；档案绑定版本、语料源集合与参数。同一版本可并存多个档案，
 审核冲突的行不进入构建。标签另依赖模型输出，
 缺表时读取返回空，不抛错。
 
-特征语义总纲见 `docs/features/feature-mining.md`，此处只记录表结构与读写口径。
+代码侧特征语义总纲见 `docs/features/feature-mining.md`，文档侧见 `docs/features/doc-feature-mining.md`；此处只记录表结构与读写口径。
 
 ## 表结构
 
@@ -263,3 +263,14 @@ facet_key, value, calls, scopes) VALUES(?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(profile_id, facet_key) DO UPDATE SET value=excluded.value,
 calls=excluded.calls, scopes=excluded.scopes;
 ```
+
+## 文档侧派生表
+
+| 表 | 唯一键 | 说明 |
+|---|---|---|
+| doc_features | (version_id, document_id, facet) | 块结构与内容特征，value 为 `kind` 与 `details` 的 JSON |
+| doc_api_links | (version_id, document_id, api_entity_id) | 对齐边，match_kind 为 symbol / signature / name_fuzzy |
+| doc_pattern_coverage | (profile_id, document_id, pattern_hash, covered_kind) | 模式覆盖，pattern 保存序列原文 |
+| doc_consistency | (profile_id, document_id, facet, model, prompt_version) | 一致性判定与可选模型归纳 |
+
+前两表按版本重建，后两表按档案重建。写入沿用批量幂等加集合差清理，并按同一版本清除后重灌；文档块实体名单由对齐边回写。详细语义见 `docs/features/doc-feature-mining.md`。

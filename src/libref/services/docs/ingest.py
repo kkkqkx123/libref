@@ -721,6 +721,27 @@ class IngestService:
                     repair=False,
                 )
                 counts["vectors_ms"] += int((_time.monotonic() - vectors_start) * 1000)
+                try:
+                    from libref.services.docs.feature_refresh import (
+                        refresh_doc_features,
+                    )
+
+                    derived = refresh_doc_features(
+                        self._conn,
+                        library,
+                        version,
+                        ecosystem=ecosystem,
+                        scope="sources",
+                        tenant_id=tenant_id,
+                        settings=self._settings,
+                    )
+                    for key, value in derived.items():
+                        counts[f"doc_{key}"] = counts.get(f"doc_{key}", 0) + int(value)
+                except Exception as exc:  # noqa: BLE001 — derived features never overturn source writes
+                    logger.warning("document feature refresh failed: %s", exc)
+                    counts["doc_feature_failed"] = (
+                        counts.get("doc_feature_failed", 0) + 1
+                    )
                 self._record_site_version(catalog, store, version_id, version, counts)
                 clear_progress(self._conn, version_id, DOCS_KIND)
                 _beat()

@@ -388,7 +388,9 @@ class PagePipeline:
                     (version_id,),
                 ).fetchone()
                 if meta is not None:
-                    prefix = f"doc:{version_id}:{url}"
+                    from libref.services.code.usage_ingest import doc_source_key
+
+                    prefix = doc_source_key(version_id, url)
                     if kind == "html":
                         blocks = html_code_blocks(
                             scraped.cleaned_html,

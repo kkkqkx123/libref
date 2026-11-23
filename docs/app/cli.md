@@ -273,9 +273,11 @@ answer query [--library ...] [--version ...] [--ecosystem ...] [--limit 5] [--pr
 * 分块：`chunk_embed_*` 嵌入轨道分块预算，`chunk_bm25_*` 全文轨道分块预算，`chunk_reserve_ratio` 预留比。
 * 嵌入：`embedding_model/embedding_dim/embedding_api_base/embed_batch`，密钥 `embedding_api_key` 只走环境。
 * 精排：`rerank_model/rerank_enabled/rerank_candidate_limit/rerank_top_n/rerank_truncate`，其中 `rerank_top_n` 不得超过 `rerank_candidate_limit`。
-* 检索：`rrf_k/rrf_w_fts/rrf_w_vec` 融合权重，`freq_alpha/cluster_alpha/facet_alpha` 挖掘加权，`candidate_multiplier/assemble_multiplier/assemble_min` 召回与组装预算，`retrieval_max_versions` 跨版本扇出上限，`snippet_radius/snippet_cap` 片段形态（前者须小于后者），`window_preview_cap` 窗口预览上限，`fts_w_content/fts_w_title/fts_w_url/fts_w_path` 全文列权重，`answer_strong_threshold/answer_weak_threshold` 证据充分档位（前者须不小于后者），`cluster_threshold/cluster_min_size` 聚类，`retriever_window_radius/retriever_expand_window` 窗口默认，详尽预设强制开窗口。
+* 检索：`rrf_k/rrf_w_fts/rrf_w_vec` 融合权重，`freq_alpha/cluster_alpha/facet_alpha/doc_feature_alpha` 挖掘与文档特征加权，`candidate_multiplier/assemble_multiplier/assemble_min` 召回与组装预算，`retrieval_max_versions` 跨版本扇出上限，`snippet_radius/snippet_cap` 片段形态（前者须小于后者），`window_preview_cap` 窗口预览上限，`fts_w_content/fts_w_title/fts_w_url/fts_w_path` 全文列权重，`answer_strong_threshold/answer_weak_threshold` 证据充分档位（前者须不小于后者），`cluster_threshold/cluster_min_size` 聚类，`retriever_window_radius/retriever_expand_window` 窗口默认，详尽预设强制开窗口。
 * 问答：`material_limit` 单材料上限，`answer_total_budget` 回答总预算，`chat_model/chat_enabled/chat_api_base/chat_timeout/chat_enable_thinking`，密钥 `chat_api_key` 只走环境。
 * 注册表与发现：`registry_*` 解析缓存、离线、私有、镜像、地址覆盖与覆盖有效期，`discovery_*` 发现开关、条数、缓存、离线，令牌 `discovery_github_token` 只走环境。
 * 服务暴露：组合 `serve` 用 `web_host/web_port/mcp_path`，工具裁剪 `mcp_enabled_tools/mcp_disabled_tools`；鉴权 `[auth]`（`auth_mode/dev_principal/allowed_hosts/allowed_origins`，引导与客户端 key 只走环境），API Key 为唯一凭据，来源按 `allowed_origins` 精确匹配；客户端 `[client]`（`base_url`，`client_api_key` 只走环境）；进程标识 `instance_id` 归 `[server]`。
 * 治理：`snapshot_enabled/snapshot_dir/snapshot_quota_mb` 快照，`repos_dir/repos_quota_mb` 仓库配额，`deletion_log_ttl_days` 删除记录保留。
 * 日志：`log_level` 取 `DEBUG/INFO/WARNING/ERROR`，`log_file/log_format` 取 `text/json`。
+
+文档派生：`doc-features refresh` 按 `structure` / `links` / `sources` / `coverage` / `consistency` / `derived` / `all` 重建特征；`doc-insight` 提供四视图。`search` 与 `answer` 另有 `--block-type`、`--exclude-deprecated`、`--aligned-only` 过滤项。

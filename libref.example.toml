@@ -112,6 +112,8 @@ rrf_w_fts = 1.0
 rrf_w_vec = 1.0
 freq_alpha = 0.15
 cluster_alpha = 0.05
+# 文档侧特征加权默认关闭，待判定集标定后再开启
+doc_feature_alpha = 0.0
 # 候选放大与段落组装：召回倍数、组装倍数与下限、跨版本上限
 candidate_multiplier = 3
 assemble_multiplier = 2
@@ -138,6 +140,17 @@ induction_batch = 8
 induction_prompt_version = "v1"
 retriever_window_radius = 1
 retriever_expand_window = false
+
+[doc_features]
+# 文档侧结构/对齐派生：默认随抓取重建，覆盖与一致性在挖掘重建后刷新
+doc_feature_enabled = true
+doc_feature_candidate_budget = 200
+doc_feature_terms_per_facet = 20
+doc_feature_min_confidence = 0.4
+doc_feature_enabled_facets = ["block_type", "heading_depth", "length_bucket", "code_ratio", "has_table", "deprecated", "version_marker", "example_language", "example_symbols", "param_names", "return_hint", "term_candidates"]
+doc_consistency_min_support = 2
+doc_consistency_llm_enabled = false
+doc_consistency_batch = 8
 
 [registry]
 # 注册表解析：缓存有效期、离线开关、私有放行、镜像预设、生态基址映射、外部覆盖文件

@@ -1,0 +1,51 @@
+{
+  "entities": [
+    {"id": 1, "qualified_name": "demo.Client.connect"},
+    {"id": 2, "qualified_name": "demo.Client.close"}
+  ],
+  "blocks": [
+    {
+      "document_id": 1,
+      "url": "https://docs.example/client",
+      "path": "Client / Examples",
+      "content": "# Examples\n\n```python\nclient.connect()\nclient.close()\n```\n\n`Client.connect` accepts a timeout. Returns a session.",
+      "code_hashes": ["hash-1"],
+      "call_sequence": ["demo.Client.connect", "demo.Client.close"],
+      "deprecated": false
+    },
+    {
+      "document_id": 2,
+      "url": "https://docs.example/deprecated",
+      "path": "Client / Notes",
+      "content": "Client.close is deprecated and no longer supported.",
+      "code_hashes": [],
+      "call_sequence": [],
+      "deprecated": true
+    }
+  ],
+  "snippet_calls": [
+    {
+      "api_entity_id": 1,
+      "callee": "demo.Client.connect",
+      "sample_id": "doc:1:https://docs.example/client#1",
+      "url": "https://docs.example/client",
+      "code_hash": "hash-1",
+      "confidence": "EXTRACTED"
+    },
+    {
+      "api_entity_id": 2,
+      "callee": "demo.Client.close",
+      "sample_id": "doc:1:https://docs.example/client#1",
+      "url": "https://docs.example/client",
+      "code_hash": "hash-1",
+      "confidence": "EXTRACTED"
+    }
+  ],
+  "expected_links": [
+    {"document_id": 1, "api_entity_id": 1, "match_kind": "symbol"},
+    {"document_id": 1, "api_entity_id": 2, "match_kind": "symbol"}
+  ],
+  "patterns": [
+    {"pattern": ["demo.Client.connect", "demo.Client.close"], "support": 3}
+  ]
+}

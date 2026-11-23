@@ -446,6 +446,9 @@ def cmd_search(args: argparse.Namespace) -> int:
                 version=args.version,
                 ecosystem=getattr(args, "ecosystem", None),
                 limit=args.limit,
+                block_type=getattr(args, "block_type", None),
+                exclude_deprecated=bool(getattr(args, "exclude_deprecated", False)),
+                aligned_only=bool(getattr(args, "aligned_only", False)),
             )
         )
         degraded = bool(status.get("degraded", False))
@@ -500,6 +503,9 @@ def cmd_answer(args: argparse.Namespace) -> int:
             rerank=gateway.rerank_fn(),
             chat=gateway.chat_fn(),
             preset=getattr(args, "preset", "balanced"),
+            block_type=getattr(args, "block_type", None),
+            exclude_deprecated=bool(getattr(args, "exclude_deprecated", False)),
+            aligned_only=bool(getattr(args, "aligned_only", False)),
         )
     finally:
         conn.close()
@@ -519,6 +525,76 @@ def cmd_answer(args: argparse.Namespace) -> int:
     if out.get("confidence") == "low":
         print("(low confidence: answer cites no material)", file=sys.stderr)
     return 0
+
+
+def cmd_doc_insight(args: argparse.Namespace) -> int:
+    import json as _json
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        from libref.services.docs.doc_insight import DocInsightService
+
+        rows = DocInsightService(conn, settings).insight(
+            args.library,
+            args.version,
+            view=args.view,
+            ecosystem=getattr(args, "ecosystem", None),
+            profile=getattr(args, "profile", None),
+            facet=getattr(args, "facet", None),
+            api=getattr(args, "api", None),
+            pattern=getattr(args, "pattern", None),
+            verdict=getattr(args, "verdict", None),
+            block_type=getattr(args, "block_type", None),
+            limit=int(args.limit),
+        )
+        print(_json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    finally:
+        conn.close()
+
+
+def cmd_doc_features(args: argparse.Namespace) -> int:
+    import json as _json
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    try:
+        if getattr(args, "run_async", False):
+            from libref.services.docs.feature_jobs import (
+                run_doc_feature_job_sync,
+                start_doc_feature_job,
+            )
+
+            mgr = JobManager(conn, stale_after=float(settings.heartbeat_timeout))
+            mgr.recover()
+            job_id = start_doc_feature_job(
+                mgr,
+                args.library,
+                args.version,
+                ecosystem=getattr(args, "ecosystem", None),
+                profile=getattr(args, "profile", None),
+                scope=args.scope,
+            )
+            job = run_doc_feature_job_sync(mgr, settings, conn, job_id)
+            _print_job(job)
+            return 0 if job.status == "done" else 1
+
+        from libref.services.docs.feature_refresh import refresh_doc_features
+
+        counts = refresh_doc_features(
+            conn,
+            args.library,
+            args.version,
+            ecosystem=getattr(args, "ecosystem", None),
+            profile=getattr(args, "profile", None),
+            scope=args.scope,
+            settings=settings,
+        )
+        print(_json.dumps(counts, ensure_ascii=False))
+        return 0
+    finally:
+        conn.close()
 
 
 def _remote_read(args: argparse.Namespace, settings) -> int:

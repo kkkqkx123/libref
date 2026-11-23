@@ -13,6 +13,7 @@ from libref.db.schema import (
     CALL_SCOPE_SQL,
     CLUSTER_LABEL_SQL,
     DISCOVERY_CACHE_SQL,
+    DOC_FEATURE_SQL,
     DOC_LINK_EDGES_SQL,
     FACET_DERIVED_SQL,
     FEATURE_TREE_CLUSTER_SQL,
@@ -80,6 +81,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(28, "macro-body-evidence", MACRO_EVIDENCE_SQL),
     Migration(29, "feature-facets", FACET_DERIVED_SQL),
     Migration(30, "cluster-labels", CLUSTER_LABEL_SQL),
+    Migration(31, "doc-feature-facets", DOC_FEATURE_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

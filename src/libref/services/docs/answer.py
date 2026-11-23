@@ -164,6 +164,9 @@ async def answer_query_async(
     chat: ChatFn | None = None,
     preset: str = "balanced",
     tenant_id: str | None = None,
+    block_type: str | None = None,
+    exclude_deprecated: bool = False,
+    aligned_only: bool = False,
 ) -> dict[str, Any]:
     """Retrieve candidates then generate an answer grounded in those materials."""
     from libref.services.docs.search import SearchService, normalize_preset
@@ -195,6 +198,9 @@ async def answer_query_async(
         limit=limit,
         expand_window=False,
         tenant_id=tenant_id,
+        block_type=block_type,
+        exclude_deprecated=exclude_deprecated,
+        aligned_only=aligned_only,
     )
     degraded = bool(status.get("degraded", False))
     reasons = list(status.get("reasons", []) or [])
@@ -273,6 +279,9 @@ def answer_query(
     chat: ChatFn | None = None,
     preset: str = "balanced",
     tenant_id: str | None = None,
+    block_type: str | None = None,
+    exclude_deprecated: bool = False,
+    aligned_only: bool = False,
 ) -> dict[str, Any]:
     """Synchronous entry for command-line use."""
     return _run_coro(
@@ -290,5 +299,8 @@ def answer_query(
             chat=chat,
             preset=preset,
             tenant_id=tenant_id,
+            block_type=block_type,
+            exclude_deprecated=exclude_deprecated,
+            aligned_only=aligned_only,
         )
     )

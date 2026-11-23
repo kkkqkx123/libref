@@ -42,6 +42,9 @@ class SearchQuery(BaseModel):
     preset: Literal["precise", "balanced", "thorough"] = "balanced"
     suggest: bool = False
     include_prerelease: bool = False
+    block_type: str | None = None
+    exclude_deprecated: bool = False
+    aligned_only: bool = False
 
 
 class LibrarySearchQuery(BaseModel):
@@ -107,6 +110,20 @@ class PatternInsightQuery(BaseModel):
     profile: str | None = None
     facet: str | None = None
     compare_profile: str | None = None
+
+
+class DocInsightQuery(BaseModel):
+    view: Literal["features", "links", "coverage", "consistency"]
+    library: str
+    version: str
+    ecosystem: str | None = None
+    profile: str | None = None
+    facet: str | None = None
+    api: str | None = None
+    pattern: str | None = None
+    verdict: str | None = None
+    block_type: str | None = None
+    limit: int = Field(default=50, ge=1, le=500)
 
 
 class SymbolInsightQuery(BaseModel):
@@ -814,6 +831,10 @@ class PatternDriftInsightResponse(InsightEnvelope[DriftRow]):
     view: Literal["drift"]
 
 
+class DocInsightResponse(InsightEnvelope[dict[str, JsonValue]]):
+    view: Literal["features", "links", "coverage", "consistency"]
+
+
 class SymbolInsightResponse(InsightEnvelope[SymbolRow]):
     view: Literal["detail", "file", "children"]
 
@@ -845,6 +866,7 @@ PatternInsightResult = (
     | PatternDriftInsightResponse
 )
 SymbolInsightResult = SymbolInsightResponse | SignatureInsightResponse
+DocInsightResult = DocInsightResponse
 CallInsightResult = CallInsightResponse
 ImportInsightResult = ImportInsightResponse
 

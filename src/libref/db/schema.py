@@ -561,6 +561,72 @@ CREATE INDEX IF NOT EXISTS idx_cluster_labels_version
   ON cluster_labels(version_id, profile_id);
 """
 
+# ── Document-derived features: version-scoped structure/alignment plus profile-scoped coverage ──
+DOC_FEATURE_SQL = """
+CREATE TABLE IF NOT EXISTS doc_features(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  facet TEXT NOT NULL,
+  value JSON NOT NULL DEFAULT '{}',
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(version_id, document_id, facet)
+);
+CREATE INDEX IF NOT EXISTS idx_doc_features_lookup
+  ON doc_features(version_id, facet, document_id);
+
+CREATE TABLE IF NOT EXISTS doc_api_links(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  api_entity_id INTEGER NOT NULL REFERENCES api_entities(id) ON DELETE CASCADE,
+  match_kind TEXT NOT NULL CHECK (match_kind IN ('symbol','signature','name_fuzzy')),
+  confidence REAL NOT NULL,
+  evidence JSON NOT NULL DEFAULT '{}',
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(version_id, document_id, api_entity_id)
+);
+CREATE INDEX IF NOT EXISTS idx_doc_api_links_entity
+  ON doc_api_links(version_id, api_entity_id);
+
+CREATE TABLE IF NOT EXISTS doc_pattern_coverage(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id INTEGER NOT NULL,
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  pattern_hash TEXT NOT NULL,
+  pattern JSON NOT NULL,
+  covered_kind TEXT NOT NULL CHECK (covered_kind IN ('example_code','prose')),
+  support INTEGER NOT NULL DEFAULT 0,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, document_id, pattern_hash, covered_kind)
+);
+CREATE INDEX IF NOT EXISTS idx_doc_pattern_coverage_lookup
+  ON doc_pattern_coverage(profile_id, version_id, covered_kind);
+
+CREATE TABLE IF NOT EXISTS doc_consistency(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id INTEGER NOT NULL,
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  facet TEXT NOT NULL,
+  verdict TEXT NOT NULL CHECK (verdict IN ('match','drift','unknown')),
+  note TEXT NOT NULL DEFAULT '',
+  evidence_hash TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT 'rule',
+  prompt_version TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, document_id, facet, model, prompt_version)
+);
+CREATE INDEX IF NOT EXISTS idx_doc_consistency_lookup
+  ON doc_consistency(profile_id, version_id, verdict);
+"""
+
 # ── Ingest progress cursors: one row per version and kind, resume offset plus list fingerprint ──
 PROGRESS_SQL = """
 CREATE TABLE IF NOT EXISTS ingest_progress(

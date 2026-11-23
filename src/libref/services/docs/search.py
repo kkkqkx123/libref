@@ -39,10 +39,17 @@ class SearchService:
         ecosystem: str | None = None,
         limit: int = 8,
         tenant_id: str | None = None,
+        block_type: str | None = None,
+        exclude_deprecated: bool = False,
+        aligned_only: bool = False,
     ) -> list[dict[str, Any]]:
         """Exact full-text query: the FTS single path used by the precise preset."""
         from libref.config import setting_or_default
-        from libref.store.retriever import alignment_key, fts_search
+        from libref.store.retriever import (
+            alignment_key,
+            filter_by_doc_facets,
+            fts_search,
+        )
 
         weights = (
             float(setting_or_default(self._settings, "fts_w_content")),
@@ -151,7 +158,15 @@ class SearchService:
                     "entities": list(meta.get("entities", []) or []),
                 }
             )
-        return out[:limit]
+        kept = filter_by_doc_facets(
+            self._conn,
+            [int(item["id"]) for item in out],
+            block_type=block_type,
+            exclude_deprecated=exclude_deprecated,
+            aligned_only=aligned_only,
+        )
+        keep_set = set(kept)
+        return [item for item in out if int(item["id"]) in keep_set][:limit]
 
     async def search_with_mode(
         self,
@@ -164,6 +179,9 @@ class SearchService:
         limit: int = 8,
         expand_window: bool | None = None,
         tenant_id: str | None = None,
+        block_type: str | None = None,
+        exclude_deprecated: bool = False,
+        aligned_only: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Route presets: precise keeps the exact full-text path, the others fuse recall.
 
@@ -182,6 +200,9 @@ class SearchService:
                 ecosystem=ecosystem,
                 limit=limit,
                 tenant_id=tenant_id,
+                block_type=block_type,
+                exclude_deprecated=exclude_deprecated,
+                aligned_only=aligned_only,
             )
             pool = pool_texts(self._conn, [int(r["id"]) for r in results])
             # The lexical lane cannot answer a query whose script the corpus never
@@ -224,4 +245,7 @@ class SearchService:
             limit=limit,
             expand_window=expand,
             tenant_id=tenant_id,
+            block_type=block_type,
+            exclude_deprecated=exclude_deprecated,
+            aligned_only=aligned_only,
         )

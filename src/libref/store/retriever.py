@@ -256,6 +256,101 @@ def _fetch_details(
     return out
 
 
+def filter_by_doc_facets(
+    conn: sqlite3.Connection,
+    doc_ids: list[int],
+    *,
+    block_type: str | None = None,
+    exclude_deprecated: bool = False,
+    aligned_only: bool = False,
+) -> list[int]:
+    """Apply document-derived filters after fusion, before rerank and assembly."""
+    if not doc_ids or not (block_type or exclude_deprecated or aligned_only):
+        return doc_ids
+    try:
+        conn.execute("SELECT 1 FROM doc_features LIMIT 0").fetchone()
+        conn.execute("SELECT 1 FROM doc_api_links LIMIT 0").fetchone()
+    except sqlite3.Error:
+        return doc_ids
+    marks = ",".join("?" for _ in doc_ids)
+    keep: set[int] = set(doc_ids)
+    if block_type:
+        rows = conn.execute(
+            "SELECT DISTINCT document_id FROM doc_features WHERE document_id IN ("
+            + marks
+            + ") AND facet='block_type' AND json_extract(value, '$.kind')=?",
+            [*doc_ids, block_type],
+        ).fetchall()
+        keep &= {int(row[0]) for row in rows}
+    if exclude_deprecated:
+        rows = conn.execute(
+            "SELECT DISTINCT document_id FROM doc_features WHERE document_id IN ("
+            + marks
+            + ") AND facet='deprecated' AND json_extract(value, '$.details.value')=1",
+            doc_ids,
+        ).fetchall()
+        keep -= {int(row[0]) for row in rows}
+    if aligned_only:
+        rows = conn.execute(
+            "SELECT DISTINCT document_id FROM doc_api_links WHERE document_id IN ("
+            + marks
+            + ")",
+            doc_ids,
+        ).fetchall()
+        keep &= {int(row[0]) for row in rows}
+    return [doc for doc in doc_ids if doc in keep]
+
+
+def _doc_feature_bonuses(
+    conn: sqlite3.Connection, vids: list[int]
+) -> dict[int, dict[int, float]]:
+    """Per-version document bonuses from example facets, deprecated marks, and links."""
+    if not vids:
+        return {}
+    try:
+        conn.execute("SELECT 1 FROM doc_features LIMIT 0").fetchone()
+        conn.execute("SELECT 1 FROM doc_api_links LIMIT 0").fetchone()
+    except sqlite3.Error:
+        return {}
+    marks = ",".join("?" for _ in vids)
+    out: dict[int, dict[int, float]] = {}
+    for version_id in vids:
+        out[int(version_id)] = {}
+    rows = conn.execute(
+        "SELECT version_id, document_id, facet, value FROM doc_features"
+        f" WHERE version_id IN ({marks})"
+        " AND facet IN ('block_type', 'deprecated', 'code_ratio')",
+        vids,
+    ).fetchall()
+    for version_id, doc_id, facet, raw in rows:
+        try:
+            value = json.loads(raw) if raw else {}
+        except TypeError, ValueError:
+            value = {}
+        slot = out.setdefault(int(version_id), {}).setdefault(int(doc_id), 0.0)
+        if facet == "block_type" and value.get("kind") == "example":
+            out[int(version_id)][int(doc_id)] = slot + 0.5
+        elif (
+            facet == "code_ratio"
+            and float(value.get("details", {}).get("value") or 0) > 0
+        ):
+            out[int(version_id)][int(doc_id)] = slot + 0.25
+        elif facet == "deprecated" and value.get("details", {}).get("value"):
+            out[int(version_id)][int(doc_id)] = slot - 0.5
+    link_rows = conn.execute(
+        "SELECT version_id, document_id, count(*) FROM doc_api_links"
+        f" WHERE version_id IN ({marks}) GROUP BY version_id, document_id",
+        vids,
+    ).fetchall()
+    for version_id, doc_id, count in link_rows:
+        slot = out.setdefault(int(version_id), {}).setdefault(int(doc_id), 0.0)
+        out[int(version_id)][int(doc_id)] = slot + min(5, int(count)) / 10.0
+    return {
+        vid: {doc: max(0.0, min(1.0, value)) for doc, value in rows.items()}
+        for vid, rows in out.items()
+    }
+
+
 def alignment_key(meta: dict[str, Any] | None, url: str | None, doc_id: int) -> str:
     """Cross-path alignment key: document section first, chunk id next, entity as fallback.
 
@@ -504,6 +599,9 @@ class HybridRetriever:
         limit: int = 8,
         expand_window: bool | None = None,
         tenant_id: str | None = None,
+        block_type: str | None = None,
+        exclude_deprecated: bool = False,
+        aligned_only: bool = False,
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Hybrid retrieval, returning results plus a status map with degraded reasons and road counts.
 
@@ -523,6 +621,8 @@ class HybridRetriever:
         )
         candidate_mult = int(setting_or_default(self._settings, "candidate_multiplier"))
         recall_budget = max(candidate_mult * limit, candidate_floor)
+        if block_type or exclude_deprecated or aligned_only:
+            recall_budget *= candidate_mult
         assemble_mult = int(setting_or_default(self._settings, "assemble_multiplier"))
         assemble_min = int(setting_or_default(self._settings, "assemble_min"))
         assemble_window = max(assemble_mult * limit, assemble_min)
@@ -619,6 +719,13 @@ class HybridRetriever:
         fused = self._rrf(fts_ids, vec_ids)
         fused_order = list(fused)
         fused = _collapse_duplicates(self._conn, fused)
+        fused = filter_by_doc_facets(
+            self._conn,
+            fused,
+            block_type=block_type,
+            exclude_deprecated=exclude_deprecated,
+            aligned_only=aligned_only,
+        )
         cross_lingual = _cross_lingual_miss(query, fts_ids, vec_ids)
         if not fused:
             return [], self._status(
@@ -782,6 +889,7 @@ class HybridRetriever:
         raw_alpha = float(setting_or_default(self._settings, "freq_alpha"))
         cluster_alpha = float(setting_or_default(self._settings, "cluster_alpha"))
         facet_alpha = float(setting_or_default(self._settings, "facet_alpha"))
+        doc_alpha = float(setting_or_default(self._settings, "doc_feature_alpha"))
         rrf = self._rrf_scores(fts_ids, vec_ids)
         vids = sorted({details[d]["version_id"] for d in fused if d in details})
         wanted: set[str] = set()
@@ -796,6 +904,7 @@ class HybridRetriever:
         patterns = _pattern_supports(self._conn, vids, wanted) if raw_alpha > 0 else {}
         clusters = _cluster_sets(self._conn, vids) if cluster_alpha > 0 else {}
         facet_weights = _facet_weights(self._conn, vids) if facet_alpha > 0 else {}
+        doc_bonuses = _doc_feature_bonuses(self._conn, vids) if doc_alpha > 0 else {}
         health_rows = [{"support": s} for plist in patterns.values() for _, s in plist]
         health = reuse_diversity(
             health_rows,
@@ -803,6 +912,7 @@ class HybridRetriever:
         )
         alpha = capped_alpha(raw_alpha, float(health.get("reusability", 0.0)))
         facet_gate = capped_alpha(facet_alpha, float(health.get("reusability", 0.0)))
+        doc_gate = capped_alpha(doc_alpha, float(health.get("reusability", 0.0)))
         scored: list[tuple[float, int]] = []
         for doc in fused:
             info = details.get(doc)
@@ -844,6 +954,9 @@ class HybridRetriever:
                             if cluster_hit_weak(content, members):
                                 cluster_bonus = 0.3
                                 break
+            doc_bonus = float(
+                doc_bonuses.get(info["version_id"], {}).get(info["id"], 0.0)
+            )
             facet_bonus = 0.0
             fweights = facet_weights.get(info["version_id"], [])
             if fweights and facet_gate > 0:
@@ -861,6 +974,7 @@ class HybridRetriever:
                 + alpha * bonus
                 + cluster_alpha * cluster_bonus
                 + facet_gate * facet_bonus
+                + doc_gate * doc_bonus
             )
             scored.append((final, doc))
         scored.sort(key=lambda kv: kv[0], reverse=True)

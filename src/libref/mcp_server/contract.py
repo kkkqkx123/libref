@@ -108,7 +108,19 @@ class ArgumentContract:
         properties: dict[str, Any] = schema.get("properties") or {}
         unknown = [key for key in arguments if key not in properties]
         if unknown:
-            accepted = ", ".join(sorted(properties))
+            names = sorted(properties)
+            priority: list[str] = [
+                n for n in ("query", "limit", "preset") if n in names
+            ]
+            rest = [n for n in names if n not in priority]
+            chosen: list[str] = list(priority)
+            for candidate_name in rest:
+                candidate = ", ".join([*chosen, candidate_name])
+                if len(candidate) > 72:
+                    break
+                chosen.append(candidate_name)
+            remaining = len(names) - len(chosen)
+            accepted = ", ".join(chosen) + (f", +{remaining} more" if remaining else "")
             return invalid_argument(
                 f"unknown parameter: {unknown[0]}",
                 field=unknown[0],

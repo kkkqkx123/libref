@@ -58,6 +58,7 @@ class AppContext:
     def services_for(self, conn: MetadataSession):
         """Build request-scoped services from the current generation dependencies."""
         from libref.services.code.mining_read import MiningReadService
+        from libref.services.docs.doc_insight import DocInsightService
         from libref.services.docs.pages import PageService
         from libref.services.docs.search import SearchService
         from libref.services.infra.jobs import JobManager
@@ -92,6 +93,7 @@ class AppContext:
             "pages": PageService(conn),
             "catalog": LibraryService(conn),
             "mining": MiningReadService(conn, self.settings),
+            "doc_insight": DocInsightService(conn, self.settings),
             "review": ReviewService(conn),
             "index_requests": IndexRequestService(conn, self.settings, jobs=jobs),
             "jobs": jobs,

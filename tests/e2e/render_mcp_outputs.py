@@ -45,6 +45,7 @@ TOOL_ORDER: tuple[str, ...] = (
     "link_stats",
     "api_insight",
     "pattern_insight",
+    "doc_insight",
     "symbol_insight",
     "call_insight",
     "import_insight",
@@ -505,6 +506,30 @@ def build_cases(ctx: dict[str, Any]) -> list[Case]:
                 "library": "demo",
                 "version": "0.1",
             },
+            "reader",
+        ),
+        Case(
+            "doc_insight",
+            "features",
+            {"view": "features", "library": "demo", "version": "0.1"},
+            "reader",
+        ),
+        Case(
+            "doc_insight",
+            "links",
+            {"view": "links", "library": "demo", "version": "0.1"},
+            "reader",
+        ),
+        Case(
+            "doc_insight",
+            "coverage",
+            {"view": "coverage", "library": "demo", "version": "0.1"},
+            "reader",
+        ),
+        Case(
+            "doc_insight",
+            "consistency",
+            {"view": "consistency", "library": "demo", "version": "0.1"},
             "reader",
         ),
         Case(

@@ -38,6 +38,8 @@ from libref.web.api import (
     ConfigRefreshResponse,
     DependencyResponse,
     DiscoveryResponse,
+    DocInsightQuery,
+    DocInsightResult,
     DocProbeRequest,
     DocProbeResponse,
     ErrorResponse,
@@ -313,6 +315,7 @@ def build_web_app(
             # Override settings inside bundle with latest effective settings
             return rc, True, est, bundle
         # Fallback single-connection path for tests without context
+        from libref.services.docs.doc_insight import DocInsightService
         from libref.services.ops.index_requests import IndexRequestService
 
         jobs = JobManager(conn)
@@ -321,6 +324,7 @@ def build_web_app(
             "pages": pages,
             "catalog": catalog,
             "mining": mining,
+            "doc_insight": DocInsightService(conn, est),
             "review": review,
             "index_requests": IndexRequestService(conn, est, jobs=jobs),
             "jobs": jobs,
@@ -405,6 +409,9 @@ def build_web_app(
         preset: Literal["precise", "balanced", "thorough"] = "balanced",
         suggest: bool = False,
         include_prerelease: bool = False,
+        block_type: str | None = None,
+        exclude_deprecated: bool = False,
+        aligned_only: bool = False,
         principal=Depends(_guard),
     ) -> dict[str, Any]:
         params = SearchQuery(
@@ -416,6 +423,9 @@ def build_web_app(
             preset=preset,
             suggest=suggest,
             include_prerelease=include_prerelease,
+            block_type=block_type,
+            exclude_deprecated=exclude_deprecated,
+            aligned_only=aligned_only,
         )
         _need(principal, "read")
         rc, should_close, est, bundle = _req_bundle(request, principal)
@@ -429,6 +439,9 @@ def build_web_app(
                     ecosystem=params.ecosystem,
                     limit=params.limit,
                     tenant_id=_tenant_of(principal),
+                    block_type=params.block_type,
+                    exclude_deprecated=params.exclude_deprecated,
+                    aligned_only=params.aligned_only,
                 )
             except ValueError as exc:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
@@ -742,6 +755,65 @@ def build_web_app(
                         profile=params.profile,
                         facet=params.facet,
                         compare_profile=params.compare_profile,
+                        tenant_id=_tenant_of(principal),
+                    ),
+                )
+            except ValueError as exc:
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
+        finally:
+            if should_close:
+                try:
+                    rc.close()
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+    @app.get("/doc-insight", response_model=DocInsightResult)
+    def doc_insight(
+        request: Request,
+        view: Literal["features", "links", "coverage", "consistency"],
+        library: str,
+        version: str,
+        ecosystem: str | None = None,
+        profile: str | None = None,
+        facet: str | None = None,
+        api: str | None = None,
+        pattern: str | None = None,
+        verdict: str | None = None,
+        block_type: str | None = None,
+        limit: int = 50,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        params = DocInsightQuery(
+            view=view,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            profile=profile,
+            facet=facet,
+            api=api,
+            pattern=pattern,
+            verdict=verdict,
+            block_type=block_type,
+            limit=limit,
+        )
+        _need(principal, "read")
+        rc, should_close, est, bundle = _req_bundle(request, principal)
+        try:
+            try:
+                return insight_envelope(
+                    view,
+                    bundle["doc_insight"].insight(
+                        params.library,
+                        params.version,
+                        view=params.view,
+                        ecosystem=params.ecosystem,
+                        profile=params.profile,
+                        facet=params.facet,
+                        api=params.api,
+                        pattern=params.pattern,
+                        verdict=params.verdict,
+                        block_type=params.block_type,
+                        limit=params.limit,
                         tenant_id=_tenant_of(principal),
                     ),
                 )
