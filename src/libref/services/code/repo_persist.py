@@ -373,7 +373,7 @@ def _persist_import_edges(conn, library_id: int, version_id: int, file_aliases) 
 
 
 def _check_manifest_identity(ecosystem: str, library: str, root) -> None:
-    """Warn when the checked-out manifests declare a different identity; never blocks."""
+    """Warn on real identity drift; registry spelling differences are not drift."""
     from libref.astminer import manifests as _manifests
     from libref.crawler.registry import SUPPORTED_ECOSYSTEMS, canonical_ecosystem
 
@@ -381,7 +381,7 @@ def _check_manifest_identity(ecosystem: str, library: str, root) -> None:
     if eco not in SUPPORTED_ECOSYSTEMS:
         return
     declared = _manifests.manifest_identity(root)
-    if declared is None or declared == (eco, library):
+    if declared is None or _manifests.identity_matches(declared, (eco, library)):
         return
     logger.warning(
         "manifest identity mismatch: requested %s:%s declared %s:%s; continuing",

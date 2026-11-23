@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import tempfile
 import time
@@ -159,6 +160,8 @@ def _check_docs(name: str, entry: dict[str, Any], info: dict) -> None:
     fixture measures, so it is measured from the indexed pages instead of trusted.
     A fixture that limits its stream with path prefixes additionally asserts every
     page stays inside them: a prefix that matches nothing fails silently otherwise.
+    Declared URL exclusions are checked the same way, so a re-acquisition that
+    starts pulling the excluded pages again cannot pass as the same corpus.
     """
     if not info["pages"] or not info["chunks"]:
         raise bench_archive.ArchiveError(
@@ -187,6 +190,18 @@ def _check_docs(name: str, entry: dict[str, Any], info: dict) -> None:
             raise bench_archive.ArchiveError(
                 f"fixture {name}: {len(outside)} pages escape path_prefixes "
                 f"{prefixes}: {outside[:3]}"
+            )
+    exclusions = [str(p) for p in (entry.get("exclude_patterns") or ())]
+    if exclusions:
+        hits = [
+            url
+            for url in info.get("page_paths", [])
+            if any(re.search(pattern, url) for pattern in exclusions)
+        ]
+        if hits:
+            raise bench_archive.ArchiveError(
+                f"fixture {name}: {len(hits)} pages match exclude_patterns "
+                f"{exclusions}: {hits[:3]}"
             )
     _check_budget(name, entry, info)
 

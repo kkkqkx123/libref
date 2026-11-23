@@ -40,6 +40,8 @@ fiber 的片段调用绝大多数是 `not_target`/`AMBIGUOUS`，最终 AST 精�
 - 建立源码实体到文档版本的正式投影或版本绑定，并明确多版本文档的实体身份；评测器里的复制逻辑只是回放前置条件。
 - 为 Go/Java 等依赖别名与导入的文档片段补充可解析上下文，提高 `doc_snippet` 调用的目标解析率；在此之前不把实体对齐率写入门禁。
 - 人工抽检 `drift` 样本以计算误报率，并补充 `param_names` / `return_hint` 的结构化口径，避免把关键词列表当成参数真值。
+- 无答案查询的答案性判定需要与判定集、门禁一起重标定；单纯按候选池词频加权会显著提高可答查询的误弃答率，已在 `docs/plan/bench-followup-fixes.md` 记录差分结论。
+- 给文档获取配方增加排除规则，挡掉 Read the Docs 的 `_sources/*.md.txt` 原始副本；给 NuGet/Go 清单身份告警补大小写归一与短名映射。
 
 ## 四、验收
 
@@ -62,6 +64,26 @@ fiber 的片段调用绝大多数是 `not_target`/`AMBIGUOUS`，最终 AST 精�
 | 结构化参数与返回 | pydantic、zod、httpx `/api/`、jsoup cookbook、gradle | 参数表、返回值小节与围栏交替出现，能检验 facet 是关键词候选还是可判定字段 |
 | 候选噪声与跨库消歧 | 六个干扰池源码夹具：boltons、mitt、gson、mysql、once_cell、Dapper | 提供同生态近义名称，使泛词候选在无答案与全局查询里可被识别 |
 
-本轮用现有 `tests.e2e.bench.fetch` 通过 7890 代理完成获取，24 个夹具全部生成归档并通过 `archive.verify`：十八个主夹具加六个干扰池。各代码夹具修订与门禁记录一致；文档夹具因上游站点变化产生新修订，门禁文件未改。为容纳当前站点规模，仅调整获取预算与版本身份：zod 80 页、pydantic 120 页、vue 120 页、FluentValidation 80 页、gradle 300 页；Rocket 文档版本改为站点声明的 `v0.5`；fiber 源码构建预算按本机实测放宽到 45000 毫秒。这些字段不进入载荷配方，改变的是获取口径，不是评测方法。
+本轮用现有 `tests.e2e.bench.fetch` 通过 7890 代理完成获取，24 个夹具全部生成归档并通过 `archive.verify`：十八个主夹具加六个干扰池。除 `httpx/code-head` 外，其余代码夹具修订与门禁记录一致；文档夹具及该源码夹具因上游变化产生新修订，门禁文件未改。为容纳当前站点规模，仅调整获取预算与版本身份：zod 80 页、pydantic 120 页、vue 120 页、FluentValidation 80 页、gradle 300 页；Rocket 文档版本改为站点声明的 `v0.5`；fiber 源码构建预算按本机实测放宽到 45000 毫秒。这些字段不进入载荷配方，改变的是获取口径，不是评测方法。
 
-归档已就绪，但完整数据集尚未重建；后续判定集扩充与跨版本对齐应基于这些修订重放，并重新记录观测值。
+归档已就绪，完整数据集也已离线重建并回放；后续判定集扩充与跨版本对齐应基于这些修订重放，并重新记录观测值。
+
+## 六、实跑结果与问题清单
+
+本轮实际执行了全量单测、24 个夹具的离线建库、文档特征归档评测、检索矩阵评测与离线特征渲染。结果如下：
+
+- `uv run pytest -q`：`910 passed, 36 skipped`，无失败。
+- `python -m tests.e2e.bench.build`：退出码 0，24 个夹具全部通过身份、配方与摘要校验；数据集重建成功。
+- `python -m tests.e2e.bench.evaluate_doc_features`：退出码 0；httpx/jsoup/fiber 的派生与判定链路可跑通，`invariants: PASS` 的离线渲染同时通过。
+- `python -m tests.e2e.bench.evaluate`：退出码 1，共 14 项失败；`gates.json` 未改。
+
+按影响排序，发现的问题为：
+
+1. **门禁绑定全部过期（10 项）**。9 个文档夹具加 `httpx/code-head` 的归档修订与门禁记录不一致；其余 8 个源码夹具修订仍一致。这是重新获取后的预期结果，不能通过降低阈值绕过，需要在新修订上重新测量下限。
+2. **无答案弃答率回归（4 项）**。`zod/docs` 的 precise/fused/fused_rerank 三路 test 弃答率为 0.500，低于 0.600；`pydantic/docs/fused_rerank` 为 0.250，低于 0.350。诊断显示不是召回问题：无答案查询仍返回 3–5 条结果，命中页多为 `zod.dev/ecosystem`、`v4/versioning`、`pydantic_settings` 等通用词页面，词面覆盖被判成 `weak` 而非 `none`。根因在 `store/evidence.py` 的答案性启发式对扩 corpus 后通用词重叠过于敏感，而不是排序链路本身。该项同时受修订过期影响，但即使重测下限也应先修判定逻辑。
+3. **FluentValidation 文档混入原始源码副本**。当前归档 61 页里有 30 页来自 Sphinx 的 `_sources/*.md.txt`，与 30 页渲染 HTML 内容重复；它们贡献 402/799 个文档块，约一半。判定目标仍指向 HTML，因此重复率报表为 0，但原始副本会占据 top-k 名额并抬高词面重叠。获取规格只有包含前缀、没有排除规则，需要在不改动载荷摘要契约的前提下增加排除项并重新获取。
+4. **清单身份告警（4 项）**。fiber/go 与 mysql/go 声明的是 Go 模块导入路径，FluentValidation/nuget 与 Dapper/nuget 是 NuGet 包名大小写差异；`repo_persist._check_manifest_identity` 仅做精确相等比较并只告警。库表没有产生重复实体，构建不中断；NuGet 分支应按大小写不敏感比较，Go 分支需显式记录短名与导入路径的映射，而不是当成身份漂移。
+5. **文档特征回放仍只有三个夹具**。httpx/jsoup/fiber 有判定，新增的六套文档夹具没有人工确认的题目与锚点，因此本轮无法评价它们的实体对齐/漂移质量；fiber 的 30149 条链接仍以弱证据为主，不能据此标定 `doc_feature_alpha`。
+6. **成本文档过时**。`tests/e2e/bench/README.md` 的规模表列的是旧站点快照数字，且表头列数与内容不一致；已按本轮实测更新页/块/实体/耗时，并修正表头。fiber 文档建库 298 秒仍是主要成本，文档特征回放单它一项约 367 秒。
+
+上述 1–5 项都是下一轮判定集与门禁标定前必须处理的输入缺陷；本轮不改 `gates.json`，也不把环境性失败记为检索实现回归。

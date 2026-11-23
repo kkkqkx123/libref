@@ -46,6 +46,7 @@ _RECIPE_KEYS = {
         "max_pages",
         "crawl_delay",
         "path_prefixes",
+        "exclude_patterns",
         "doc_version",
         "follow_links",
         "extra_urls",

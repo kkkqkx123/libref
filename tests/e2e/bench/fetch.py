@@ -82,6 +82,27 @@ def _snapshot_rows(store_root: Path, entry: dict[str, Any]) -> list[dict[str, An
     return rows
 
 
+def _doc_scope(entry: dict[str, Any]) -> dict[str, Any]:
+    """Acquisition-scope options a documentation fixture declares in its recipe."""
+    scope: dict[str, Any] = {}
+    prefixes = list(entry.get("path_prefixes") or ())
+    if prefixes:
+        scope["path_prefixes"] = prefixes
+    exclusions = list(entry.get("exclude_patterns") or ())
+    if exclusions:
+        scope["exclude_patterns"] = exclusions
+    if entry.get("follow_links"):
+        # The sitemap names only the landing page; the stream is
+        # discovered by following site links within the prefixes.
+        scope["follow_links"] = True
+    extra = [str(url) for url in (entry.get("extra_urls") or ())]
+    if extra:
+        # Seed pages the main-content prune hides: navigation-only
+        # links never surface through link following.
+        scope["urls"] = extra
+    return scope
+
+
 def _crawl_docs(entry: dict[str, Any]) -> dict[str, Any]:
     """Crawl the documentation site, then export the raw page bodies."""
     from libref.db import apply_migrations, open_db
@@ -101,19 +122,8 @@ def _crawl_docs(entry: dict[str, Any]) -> dict[str, Any]:
                 snapshot_quota_mb=0,
                 crawl_delay_default=float(entry.get("crawl_delay", 0.2)),
             )
-            prefixes = list(entry.get("path_prefixes") or ())
-            scope: dict[str, Any] = {}
-            if prefixes:
-                scope["path_prefixes"] = prefixes
-            if entry.get("follow_links"):
-                # The sitemap names only the landing page; the stream is
-                # discovered by following site links within the prefixes.
-                scope["follow_links"] = True
-            extra = [str(url) for url in (entry.get("extra_urls") or ())]
-            if extra:
-                # Seed pages the main-content prune hides: navigation-only
-                # links never surface through link following.
-                scope["urls"] = extra
+            scope = _doc_scope(entry)
+            extra = list(scope.get("urls") or ())
             counts = IngestService(settings, conn).scrape_docs(
                 entry["library"],
                 entry["version"],

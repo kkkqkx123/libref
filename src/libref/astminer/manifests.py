@@ -7,6 +7,7 @@ result as version-scoped relation edges.
 
 from __future__ import annotations
 
+import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -425,6 +426,35 @@ def manifest_dependencies(root) -> list[ManifestDep]:
         for name, req in _csproj_requires(text):
             _push("nuget", name, req, rel)
     return out
+
+
+_GO_VERSION_SEGMENT = re.compile(r"^v\d+$", re.IGNORECASE)
+
+
+def _go_short_name(path: str) -> str:
+    """Package name a Go module path ends in, without its major-version suffix."""
+    segments = [part for part in path.strip().strip("/").split("/") if part]
+    if segments and _GO_VERSION_SEGMENT.match(segments[-1]):
+        segments.pop()
+    name = segments[-1] if segments else path
+    return re.sub(r"\.v\d+$", "", name, flags=re.IGNORECASE).casefold()
+
+
+def identity_matches(declared: tuple[str, str], requested: tuple[str, str]) -> bool:
+    """Compare a parsed manifest identity with the identity a caller requested.
+
+    Registry names are case-insensitive; a Go module declares an import path,
+    so only its package segment can be compared with the short library name.
+    """
+    declared_eco, declared_name = declared
+    requested_eco, requested_name = requested
+    if declared_eco.casefold() != requested_eco.casefold():
+        return False
+    if declared_eco.casefold() == "go":
+        return _go_short_name(declared_name) == requested_name.casefold()
+    return normalize_dep_name(declared_eco, declared_name) == normalize_dep_name(
+        requested_eco, requested_name
+    )
 
 
 def normalize_dep_name(ecosystem: str, name: str) -> str:

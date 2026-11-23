@@ -219,10 +219,13 @@
       "start_url": "https://docs.fluentvalidation.net/en/latest/",
       "max_pages": 80,
       "crawl_delay": 0.2,
-      "note": "Read the Docs 多版本站：sitemap 只列落地页，其余靠站内跟随链接发现；path_prefixes 把 12.x 稳定流与其他版本隔开",
+      "note": "Read the Docs 多版本站：sitemap 只列落地页，其余靠站内跟随链接发现；path_prefixes 把 12.x 稳定流与其他版本隔开，exclude_patterns 挡掉与渲染页重复的原始 Markdown 副本",
       "doc_version": "latest",
       "path_prefixes": [
         "/en/latest/"
+      ],
+      "exclude_patterns": [
+        "/_sources/"
       ],
       "corpus_lang": "en",
       "tier": "main",

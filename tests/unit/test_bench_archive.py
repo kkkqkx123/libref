@@ -290,3 +290,14 @@ def test_recipe_records_the_exclusions(monkeypatch, tmp_path):
     monkeypatch.setattr(bench_archive, "SPEC", _spec(tmp_path, entry))
     loaded = bench_archive.load_spec()[0]
     assert bench_archive.recipe(loaded)["exclude_patterns"] == [r".*_test\.go$"]
+
+
+def test_docs_recipe_records_url_exclusions():
+    entry = {
+        "kind": "docs",
+        "start_url": "https://example.invalid/docs/",
+        "max_pages": 10,
+        "doc_version": "unversioned",
+        "exclude_patterns": ["/_sources/"],
+    }
+    assert bench_archive.recipe(entry)["exclude_patterns"] == ["/_sources/"]

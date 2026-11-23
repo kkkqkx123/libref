@@ -111,6 +111,21 @@ def test_manifest_identity_priority_and_empty(tmp_path) -> None:
     assert manifest_identity(tmp_path) == ("go", "example.com/demo")
 
 
+def test_identity_matches_registry_and_go_short_names() -> None:
+    from libref.astminer.manifests import identity_matches
+
+    assert identity_matches(
+        ("nuget", "fluentvalidation"), ("nuget", "FluentValidation")
+    )
+    assert identity_matches(("nuget", "dapper"), ("nuget", "Dapper"))
+    assert identity_matches(("go", "github.com/gofiber/fiber/v3"), ("go", "fiber"))
+    assert identity_matches(("go", "github.com/go-sql-driver/mysql"), ("go", "mysql"))
+    assert identity_matches(("go", "gopkg.in/yaml.v3"), ("go", "yaml"))
+    assert not identity_matches(("go", "github.com/acme/other"), ("go", "mysql"))
+    assert not identity_matches(("nuget", "other"), ("nuget", "Dapper"))
+    assert not identity_matches(("crates", "rocket"), ("nuget", "Rocket"))
+
+
 def test_normalize_dep_name() -> None:
     from libref.astminer.manifests import normalize_dep_name
 
