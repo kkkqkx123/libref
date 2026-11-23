@@ -1,0 +1,37 @@
+# 文档特征核查夹具
+
+本目录为 `tests/e2e/render_doc_feature_outputs.py` 提供离线确定性输入，默认不联网、不访问向量后端与模型。
+
+## 文件清单
+
+- `cases.json`：库与版本、页面清单、API 实体、社区模式、下一版本覆盖页与可手算期望。
+- `pages/*.md`、`pages/*.html`：固定正文。围栏示例调用同一 API 的两种顺序，参数表与返回值小节、废弃标记、变更日志、歧义短名与无实体页面各占一页。
+- `pages_v11/*.md`：下一版本覆盖页，用于跨版本 facet 与实体变化清单。
+- `questions.json`：人工确认后的判定集，按语料标识分组；离线 `demo` 场景与冻结归档场景共用固定字段。每题带来源、来源判定引用、题目、稳定锚点、期望实体、期望块特征、期望判定与分级。
+
+## 生成与核查
+
+```bash
+uv run python tests/e2e/render_doc_feature_outputs.py
+uv run pytest tests/integration/test_doc_feature_outputs.py -q
+```
+
+输出到 `tests/e2e/outputs/doc_features/`，按 `01` 至 `09` 分别核查输入、块 facet、对齐边、模式覆盖、一致性判定、锚点解析、排名对照、指标与跨版本变化。`SUMMARY.txt` 只汇总条数、锚点解析与不变量，人工判定不写进单元测试。
+
+判定口径：稳定锚点只用 URL、标题路径、块分组标识与限定符号名；不用数据库 id、行号或块序号。相关等级沿用检索基准的强相关 2 分、一般相关 1 分、未命中 0 分。同一题目在 `doc_feature_alpha` 关闭与开启两列并排，数值差分与区间只作人工标定依据。
+
+## 候选生成
+
+`tests/e2e/generate_doc_feature_questions.py` 只读 `tests/e2e/bench/judgments.json` 产出候选：文档分支继承题目与 URL/标题锚点，源码分支从目标路径与题目抽取符号，只有同时具备文档锚点与源码符号的跨分支候选才标为可审。候选写到忽略的输出目录，需人工确认实体与块特征后才能进入 `questions.json`；单边证据保持草稿，不参与评分。
+
+## 冻结归档层
+
+归档需要显式下载，默认测试不依赖：
+
+```bash
+uv run python -m tests.e2e.bench.fetch --only httpx/docs --only httpx/code-head
+uv run python -m tests.e2e.bench.build --fixture httpx/docs --fixture httpx/code-head
+uv run python -m tests.e2e.bench.evaluate_doc_features
+```
+
+评测把归档原始正文中的围栏与 HTML 代码块登记为 `doc_snippet` 语料源，再从源码分支复制声明到文档版本，然后运行生产派生与读模型。报告写到 `tests/e2e/bench/outputs/retrieval-bench/doc-features/`，记录归档修订但不改门禁。缺少语言标记代码块的站点仍可核查规则匹配与检索加权，实体对齐率只作记录。

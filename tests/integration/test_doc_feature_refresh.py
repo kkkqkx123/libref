@@ -58,7 +58,7 @@ def _seed(conn):
             " repo, caller_file, line_start, line_end, confidence, library_id, version_id,"
             " sample_id, call_order, source_role, origin_kind, target_status)"
             " VALUES(?,?,?,'[]','docs',?,1,2,'EXTRACTED',?,?,?,?,'doc_snippet',"
-            " 'markdown_fence','current')",
+            " 'markdown_fence','resolved_target')",
             (
                 f"call-{entity_id}",
                 entity_id,

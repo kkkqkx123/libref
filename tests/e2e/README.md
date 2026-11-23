@@ -58,6 +58,18 @@ LIBREF_RUN_E2E=1 uv run pytest tests/e2e/test_usage_mining_real.py -q
 
 人工核查报告由 `run_usage_mining_real.py` 输出到 `outputs/usage_mining_real/`；角色语料覆盖全部源码文件（DPDK `lib/` 与 `examples/`、MTL 全仓），版本兼容、解析覆盖差分、档案健康比较与可反推质量门槛各有独立文件。全量语料回放约数分钟，网络失败按环境不可用跳过，不视为回归。
 
+## 文档特征核查
+
+`render_doc_feature_outputs.py` 用版本化夹具在临时库里走通生产文档块派生、实体对齐、模式覆盖、一致性与检索加权，把逐项结果写到 `outputs/doc_features/`；默认离线，说明见 `fixtures/doc_features/README.md`。`generate_doc_feature_questions.py` 只从 bench 判定集产出候选题目，人工确认后的判定存于夹具目录。
+
+```bash
+uv run python tests/e2e/render_doc_feature_outputs.py
+uv run pytest tests/integration/test_doc_feature_outputs.py -q
+uv run python tests/e2e/generate_doc_feature_questions.py
+```
+
+冻结归档层的评测入口是 `bench/evaluate_doc_features.py`，需先显式下载并构建 bench 归档，归档缺失时按环境不可用跳过；报告落到 `bench/outputs/retrieval-bench/doc-features/`，不写门禁。
+
 ## 检索问答基准
 
 `bench/` 是检索问答基准目录：用生产抓取服务与生产仓库管理真实获取第三方文档站与官方仓库

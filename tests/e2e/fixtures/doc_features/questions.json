@@ -1,0 +1,164 @@
+{
+  "demo": [
+    {
+      "id": "L1",
+      "source": "docs",
+      "source_ref": "local:quickstart",
+      "type": "semantic",
+      "split": "test",
+      "query_lang": "en",
+      "query": "which example connects a client and then closes the session",
+      "targets": ["https://docs.example/demo/quickstart"],
+      "expected_entities": ["demo.Client.connect", "demo.Client.close"],
+      "expected_facets": {"block_type": "example", "heading": "Examples"},
+      "expected_verdict": "match",
+      "grades": {"strong": 2, "general": 1, "miss": 0}
+    },
+    {
+      "id": "L2",
+      "source": "docs",
+      "source_ref": "local:api",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "timeout parameter and return value of client connect",
+      "targets": ["https://docs.example/demo/api"],
+      "expected_entities": ["demo.Client.connect"],
+      "expected_facets": {"block_type": "params", "return_hint": true},
+      "expected_verdict": "unknown",
+      "grades": {"strong": 2, "general": 1, "miss": 0}
+    },
+    {
+      "id": "L3",
+      "source": "docs",
+      "source_ref": "local:deprecated",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "which client method is deprecated and no longer supported",
+      "targets": ["https://docs.example/demo/deprecated"],
+      "expected_entities": ["demo.Client.close"],
+      "expected_facets": {"block_type": "narrative", "deprecated": true},
+      "expected_verdict": "drift",
+      "grades": {"strong": 2, "general": 1, "miss": 0}
+    },
+    {
+      "id": "L4",
+      "source": "docs",
+      "source_ref": "local:changelog",
+      "type": "semantic",
+      "split": "dev",
+      "query_lang": "en",
+      "query": "what changed for client connect in the latest release",
+      "targets": ["https://docs.example/demo/changelog"],
+      "expected_entities": ["demo.Client.connect"],
+      "expected_facets": {"block_type": "changelog"},
+      "expected_verdict": "unknown",
+      "grades": {"strong": 2, "general": 1, "miss": 0}
+    },
+    {
+      "id": "L5",
+      "source": "code",
+      "source_ref": "local:ambiguous",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "en",
+      "query": "the short name connect without a package qualifier",
+      "targets": ["https://docs.example/demo/ambiguous"],
+      "expected_entities": [],
+      "expected_facets": {"block_type": "narrative"},
+      "expected_verdict": "unknown",
+      "grades": {"strong": 2, "general": 1, "miss": 0}
+    },
+    {
+      "id": "L6",
+      "source": "docs",
+      "source_ref": "local:notes",
+      "type": "semantic",
+      "split": "test",
+      "query_lang": "en",
+      "query": "general conventions unrelated to any tracked API",
+      "targets": ["https://docs.example/demo/notes"],
+      "expected_entities": [],
+      "expected_facets": {"block_type": "narrative"},
+      "expected_verdict": "unknown",
+      "grades": {"strong": 2, "general": 1, "miss": 0}
+    }
+  ],
+  "httpx/docs": [
+    {
+      "id": "FH1",
+      "source": "docs",
+      "source_ref": "httpx/docs:D1",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "Timeout object with connect read write pool values",
+      "targets": ["https://www.python-httpx.org/advanced/timeouts/"],
+      "expected_entities": ["httpx.Timeout"],
+      "expected_facets": {"heading": "Fine tuning"},
+      "expected_verdict": "unknown",
+      "grades": {"strong": 2, "general": 1, "miss": 0}
+    },
+    {
+      "id": "FH2",
+      "source": "cross",
+      "source_ref": "httpx/docs:D10/httpx/code-head:C4",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "ASGITransport configuration for calling into an ASGI app",
+      "targets": ["https://www.python-httpx.org/advanced/transports/"],
+      "expected_entities": ["httpx._transports.asgi.ASGITransport"],
+      "expected_facets": {"heading": "ASGI Transport"},
+      "expected_verdict": "unknown",
+      "grades": {"strong": 2, "general": 1, "miss": 0}
+    }
+  ],
+  "jsoup/docs": [
+    {
+      "id": "FJ1",
+      "source": "cross",
+      "source_ref": "jsoup/docs:JD1/jsoup/code-jsoup-1.24.1:JC1",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "Jsoup.parse body fragment into elements",
+      "targets": ["https://jsoup.org/cookbook/input/parse-body-fragment"],
+      "expected_entities": ["org.jsoup.Jsoup.parseBodyFragment"],
+      "expected_facets": {"heading": "Parsing a body fragment"},
+      "expected_verdict": "unknown",
+      "grades": {"strong": 2, "general": 1, "miss": 0}
+    },
+    {
+      "id": "FJ2",
+      "source": "docs",
+      "source_ref": "jsoup/docs:JD2",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "en",
+      "query": "Safelist basic relaxed sanitize untrusted HTML",
+      "targets": ["https://jsoup.org/cookbook/cleaning-html/safelist-sanitizer"],
+      "expected_entities": ["org.jsoup.safety.Safelist"],
+      "expected_facets": {"heading": "Sanitize untrusted HTML"},
+      "expected_verdict": "unknown",
+      "grades": {"strong": 2, "general": 1, "miss": 0}
+    }
+  ],
+  "fiber/docs": [
+    {
+      "id": "FF1",
+      "source": "cross",
+      "source_ref": "fiber/docs:FD1/fiber/code-v3.7.0:target",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "app.Get app.Post route handlers",
+      "targets": ["https://docs.gofiber.io/api/app"],
+      "expected_entities": ["app.App.Get"],
+      "expected_facets": {"heading": "Route Handlers"},
+      "expected_verdict": "unknown",
+      "grades": {"strong": 2, "general": 1, "miss": 0}
+    }
+  ]
+}

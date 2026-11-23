@@ -1,0 +1,70 @@
+{
+  "library": "demo",
+  "version": "1.0",
+  "ecosystem": "custom",
+  "next_version": "1.1",
+  "entities": [
+    {"qualified_name": "demo.Client.connect", "kind": "function"},
+    {"qualified_name": "demo.Client.close", "kind": "function"},
+    {"qualified_name": "demo.Other.connect", "kind": "function"}
+  ],
+  "patterns": [
+    {"pattern": ["demo.Client.connect", "demo.Client.close"], "support": 3},
+    {"pattern": ["demo.Client.close", "demo.Client.connect"], "support": 2}
+  ],
+  "pages": [
+    {
+      "url": "https://docs.example/demo/quickstart",
+      "title": "Quickstart",
+      "path": "Quickstart / Examples",
+      "file": "pages/quickstart.md",
+      "kind": "markdown"
+    },
+    {
+      "url": "https://docs.example/demo/api",
+      "title": "Client API",
+      "path": "Client API / Parameters",
+      "file": "pages/api.html",
+      "kind": "html"
+    },
+    {
+      "url": "https://docs.example/demo/deprecated",
+      "title": "Deprecated API",
+      "path": "Deprecated API / Notes",
+      "file": "pages/deprecated.md",
+      "kind": "markdown"
+    },
+    {
+      "url": "https://docs.example/demo/changelog",
+      "title": "Changelog",
+      "path": "Changelog / 1.1",
+      "file": "pages/changelog.md",
+      "kind": "markdown"
+    },
+    {
+      "url": "https://docs.example/demo/ambiguous",
+      "title": "Ambiguous short name",
+      "path": "Ambiguous short name / Notes",
+      "file": "pages/ambiguous.md",
+      "kind": "markdown"
+    },
+    {
+      "url": "https://docs.example/demo/notes",
+      "title": "Notes",
+      "path": "Notes / Misc",
+      "file": "pages/notes.md",
+      "kind": "markdown"
+    }
+  ],
+  "next_pages": {
+    "https://docs.example/demo/quickstart": "pages_v11/quickstart.md",
+    "https://docs.example/demo/deprecated": "pages_v11/deprecated.md"
+  },
+  "expect": {
+    "pages": 6,
+    "links_at_least": 4,
+    "covered_patterns": ["demo.Client.connect -> demo.Client.close"],
+    "verdicts": ["match", "drift", "unknown"],
+    "dropped_ambiguous_short_name": true
+  }
+}

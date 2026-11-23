@@ -13,6 +13,7 @@ import re
 from collections import defaultdict
 from typing import Any
 
+from libref.astminer.models import TARGET_STATUS_RESOLVED
 from libref.chunking.doc_facets import (
     DocBlock,
     aggregate_doc_facets,
@@ -114,7 +115,7 @@ def _load_snippet_calls(conn, version_id: int, tenant_id: str) -> list[dict[str,
     for row in conn.execute(sql, params).fetchall():
         if reviews.get(int(row[0])) == "conflict":
             continue
-        if str(row[11]) not in ("current", "resolved"):
+        if str(row[11]) != TARGET_STATUS_RESOLVED:
             continue
         out.append(
             {
