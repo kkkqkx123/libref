@@ -8,7 +8,7 @@
 门禁下限也只在归档修订不变时有效。
 
 - **归档**：`fixtures/{项目}/docs` 与 `fixtures/{项目}/code-{ref}`，一目录一份；源码分支的目录名
-  带 ref 标签，跟随默认分支的固定叫 `head`（如 `fixtures/httpx/code-head`），固定发布的写成标签名，
+  带 ref 标签（固定发布写标签名，提交钉死写完整 commit，如 `fixtures/httpx/code-7cff5f79…`），无跟随分支的浮动夹具，
   所以列出目录就能看出载荷是分支头还是某次发布。文档分支存原始正文（不是净化文本），
   源码分支存固定提交、**只含被索引子树**的工作树打包（不含版本库，条目保留仓库相对路径，
   所以源码地址与索引整仓时一致）。身份（库、生态、版本）写在元数据里，不写进路径，
@@ -20,7 +20,7 @@
 
   | 夹具 | 生态 / 语言 | 档位 | 机制 |
   |---|---|---|---|
-  | `httpx/docs`＋`httpx/code-head` | pypi / Python | 中 | 相对导入、装饰器、异步、协议 |
+  | `httpx/docs`＋`httpx/code-7cff5f79` | pypi / Python | 中 | 相对导入、装饰器、异步、协议（源码 ref 已钉死） |
   | `zod/docs`＋`zod/code-v4.6.7` | npm / TypeScript | 中 | 路径别名、桶文件重导出、多包 |
   | `jsoup/docs`＋`jsoup/code-jsoup-1.24.1` | maven / Java | 中 | 泛型、重载、内部类、注解 |
   | `fiber/docs`＋`fiber/code-v3.7.0` | go / Go | 中 | 接口嵌入、包级命名、同名方法跨包 |
@@ -56,7 +56,7 @@
 | 夹具 | 载荷 | 块 / 实体 | 构建耗时 |
 |---|---|---|---|
 | `httpx/docs` | 23 页 | 483 块 | 2.6s |
-| `httpx/code-head` | 23 文件 | 739 实体 | 1.3s |
+| `httpx/code-7cff5f79` | 23 文件 | 739 实体 | 1.3s |
 | `zod/docs` | 17 页 | 743 块 | 33.8s |
 | `zod/code-v4.6.7` | 112 文件 | 4212 实体 | 12.8s |
 | `jsoup/docs` | 24 页 | 177 块 | 0.7s |

@@ -9,6 +9,8 @@ coverages that cost no extra scoring:
   no amount of ranking can fix that.
 - head coverage: how much of the query the best few bodies contain. It separates
   a pool that merely shares words from rows that speak to the question.
+- concentration: the best single body's coverage. Coverage scattered across many
+  bodies is discounted, because no result then speaks to the whole question.
 
 Two other candidates were measured on the benchmark and dropped: the gap between
 the head score and the rest (it inverted on the full-text path, where junk
@@ -38,6 +40,10 @@ _WEIGHTS = {"pool": 0.6, "head": 0.4}
 # Reported value for a query whose script the corpus cannot match: the midpoint,
 # which lands in the weak band rather than in the refusal band.
 NEUTRAL = 0.5
+
+# A body covering at least this share of the query is a concentrated answer.
+CONCENTRATION_FLOOR = 0.5
+DISPERSION_PENALTY = 0.75
 
 
 def script_mismatch(query: str, pool: list[str]) -> bool:
@@ -101,11 +107,21 @@ def assess(query: str, pool: list[str], head: list[str]) -> dict[str, Any]:
         return {
             "pool": NEUTRAL,
             "head": NEUTRAL,
+            "concentration": NEUTRAL,
             "measurable": False,
             "strength": NEUTRAL,
         }
     parts = {"pool": _share(pool, units), "head": _share(head, units)}
-    return {**parts, "measurable": True, "strength": _strength(parts)}
+    concentration = max((_share([text], units) for text in pool), default=0.0)
+    strength = _strength(parts)
+    if concentration < CONCENTRATION_FLOOR and not script_mismatch(query, pool):
+        strength -= DISPERSION_PENALTY * max(0.0, parts["pool"] - concentration)
+    return {
+        **parts,
+        "concentration": concentration,
+        "measurable": True,
+        "strength": max(0.0, min(1.0, strength)),
+    }
 
 
 def verdict(

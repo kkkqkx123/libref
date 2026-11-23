@@ -172,11 +172,15 @@ def _checkout(entry: dict[str, Any], root: Path) -> tuple[Path, str]:
 
     Without a ref the fixture follows the default branch and goes through the
     production repository manager, which is how every other indexing run gets
-    its checkout. A pinned ref is a different acquisition: it needs a shallow
-    checkout of that ref instead of the branch tip, so it is done here and the
-    resolved commit is recorded, which is what makes "the same view of upstream"
-    verifiable later.
+    its checkout. A pinned ref is a different acquisition: it needs a checkout
+    of that ref instead of the branch tip, so it is done here and the resolved
+    commit is recorded, which is what makes "the same view of upstream"
+    verifiable later. A 40-hex ref names a commit rather than a branch or tag
+    and is checked out detached after a full clone, so the view stays exact no
+    matter how the branch moves afterwards.
     """
+    import re as _re
+
     name = f"{entry['ecosystem']}/{entry['library']}/{entry['version']}"
     ref = str(entry.get("ref") or "")
     if not ref:
@@ -194,12 +198,23 @@ def _checkout(entry: dict[str, Any], root: Path) -> tuple[Path, str]:
 
     target = root / "repos" / name
     target.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        repo = porcelain.clone(str(entry["repo_url"]), str(target), depth=1, branch=ref)
-    except Exception as exc:
-        raise ArchiveError(
-            f"cannot check out ref {ref!r} of {entry['repo_url']}: {exc}"
-        ) from exc
+    if _re.fullmatch(r"[0-9a-f]{40}", ref):
+        try:
+            repo = porcelain.clone(str(entry["repo_url"]), str(target))
+            porcelain.reset(repo, mode="hard", treeish=ref)
+        except Exception as exc:
+            raise ArchiveError(
+                f"cannot check out commit {ref!r} of {entry['repo_url']}: {exc}"
+            ) from exc
+    else:
+        try:
+            repo = porcelain.clone(
+                str(entry["repo_url"]), str(target), depth=1, branch=ref
+            )
+        except Exception as exc:
+            raise ArchiveError(
+                f"cannot check out ref {ref!r} of {entry['repo_url']}: {exc}"
+            ) from exc
     try:
         head = repo.head()
     finally:

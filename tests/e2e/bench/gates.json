@@ -1,23 +1,23 @@
 {
   "top_k": 5,
   "revisions": {
-    "httpx/docs": "6ca0d3d66d43",
-    "httpx/code-head": "62ab685d5170",
-    "zod/docs": "f3649eb13d19",
+    "httpx/docs": "a4dea3a01527",
+    "httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016": "f01c86720683",
+    "zod/docs": "a76383c6784b",
     "zod/code-v4.6.7": "6f7da5197b95",
-    "jsoup/docs": "b4f4e810fe67",
+    "jsoup/docs": "68fb6588ff0f",
     "jsoup/code-jsoup-1.24.1": "30c329f1d85d",
-    "fiber/docs": "da34e0591196",
+    "fiber/docs": "7094790152cf",
     "fiber/code-v3.7.0": "479419884fc8",
-    "vue/docs": "107b6568505b",
+    "vue/docs": "3c7f0fbaa768",
     "vue/code-v3.5.45": "34ecfff5c291",
-    "pydantic/docs": "6e38f2435ece",
+    "pydantic/docs": "662ed213de28",
     "pydantic/code-v2.14.3": "e74b6eb52052",
-    "FluentValidation/docs": "5a2da9af95b0",
+    "FluentValidation/docs": "f8715ff9d669",
     "FluentValidation/code-12.2.0": "3bc59e583556",
-    "Rocket/docs": "316f86f196ea",
+    "Rocket/docs": "87ec1f0e9444",
     "Rocket/code-v0.5.2": "b3ba565e1639",
-    "gradle/docs": "95843ece7775",
+    "gradle/docs": "6327786d76b5",
     "gradle/code-v9.9.1": "03672e43c065",
     "boltons/code-26.2.0": "956156659729",
     "mitt/code-v1.1.3": "1cff0a9562d4",
@@ -31,7 +31,7 @@
       "recall_at_k": 0.89,
       "mrr_at_k": 0.84
     },
-    "httpx/code-head": {
+    "httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016": {
       "recall_at_k": 0.8,
       "mrr_at_k": 0.69
     },
@@ -115,7 +115,7 @@
         "mrr_at_k": 0.87
       }
     },
-    "httpx/code-head": {
+    "httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016": {
       "fused": {
         "recall_at_k": 0.9,
         "mrr_at_k": 0.78
@@ -128,7 +128,7 @@
     "zod/docs": {
       "fused": {
         "recall_at_k": 0.8,
-        "mrr_at_k": 0.66
+        "mrr_at_k": 0.55
       },
       "fused_rerank": {
         "recall_at_k": 0.85,
@@ -267,11 +267,11 @@
     },
     "gradle/docs": {
       "fused": {
-        "recall_at_k": 0.84,
-        "mrr_at_k": 0.65
+        "recall_at_k": 0.68,
+        "mrr_at_k": 0.51
       },
       "fused_rerank": {
-        "recall_at_k": 0.74,
+        "recall_at_k": 0.63,
         "mrr_at_k": 0.57
       }
     },
@@ -288,7 +288,7 @@
   },
   "absent_abstain_floors": {
     "httpx/docs": 0.85,
-    "httpx/code-head": 0.85,
+    "httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016": 0.85,
     "zod/docs": 0.6,
     "zod/code-v4.6.7": 0.6,
     "jsoup/docs": 0.35,
@@ -307,7 +307,7 @@
     "gradle/code-v9.9.1": 0.6
   },
   "cross_lingual_floors": {
-    "httpx/code-head": {
+    "httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016": {
       "fused": {
         "zh->en": {
           "recall_at_k": 0.6

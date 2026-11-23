@@ -83,6 +83,47 @@ def test_level_boundaries() -> None:
     assert level_of(0.49, strong=0.8, weak=0.5) == "none"
 
 
+def test_dispersed_coverage_is_discounted_but_concentrated_coverage_is_not() -> None:
+    units = "alpha1 bravo1 charlie1 delta1 echo1 foxtrot1 golf1 hotel1"
+    concentrated = assess(units, [units], [units])
+    dispersed = assess(
+        units,
+        ["alpha1 bravo1", "charlie1 delta1", "echo1 foxtrot1", "golf1 hotel1"],
+        ["alpha1 bravo1", "charlie1 delta1", "echo1 foxtrot1"],
+    )
+    assert concentrated["strength"] == pytest.approx(1.0)
+    assert dispersed["concentration"] == pytest.approx(0.25)
+    assert dispersed["strength"] < 0.5
+
+
+def test_unmeasurable_signal_reports_a_concentration() -> None:
+    signal = assess(
+        "证书校验失败怎么关闭校验", pool=["ssl verify"], head=["ssl verify"]
+    )
+    assert signal["measurable"] is False
+    assert signal["concentration"] == NEUTRAL
+
+
+def test_cross_lingual_downgrade_skips_the_dispersion_penalty() -> None:
+    query = "证书 timeout settings retry policy"
+    pool = ["timeout", "settings", "retry", "policy"]
+    signal = assess(query, pool, pool[:3])
+    assert signal["concentration"] == pytest.approx(0.25)
+    assert signal["strength"] == pytest.approx(0.9)
+
+
+def test_verdict_refuses_when_topic_words_are_scattered_across_candidates() -> None:
+    query = "webpack code splitting configuration rules plugins babel"
+    words = query.split()
+    out = verdict(
+        query,
+        [_row(index + 1) for index in range(len(words))],
+        {index + 1: word for index, word in enumerate(words)},
+        settings=None,
+    )
+    assert out["evidence"] == "none"
+
+
 def test_verdict_without_results_is_never_answerable() -> None:
     out = verdict("anything", [], {})
     assert out == {"answerability": 0.0, "evidence": "none", "answerable": False}

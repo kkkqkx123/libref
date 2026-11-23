@@ -303,11 +303,14 @@ def _resolve_anchor(conn, corpus: str, question: dict) -> list[str]:
             continue
         heading = str(question.get("expected_facets", {}).get("heading") or "")
         if heading:
-            path = conn.execute(
-                "SELECT json_extract(metadata, '$.path') FROM documents WHERE url=? LIMIT 1",
-                (url,),
-            ).fetchone()[0]
-            if heading.lower() not in str(path or "").lower():
+            paths = [
+                str(row[0] or "")
+                for row in conn.execute(
+                    "SELECT DISTINCT json_extract(metadata, '$.path') FROM documents WHERE url=?",
+                    (url,),
+                ).fetchall()
+            ]
+            if not any(heading.lower() in path.lower() for path in paths):
                 problems.append(f"heading:{heading}@{url}")
     for name in question.get("expected_entities", []):
         row = conn.execute(

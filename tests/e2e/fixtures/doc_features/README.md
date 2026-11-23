@@ -29,8 +29,8 @@ uv run pytest tests/integration/test_doc_feature_outputs.py -q
 归档需要显式下载，默认测试不依赖：
 
 ```bash
-uv run python -m tests.e2e.bench.fetch --only httpx/docs --only httpx/code-head
-uv run python -m tests.e2e.bench.build --fixture httpx/docs --fixture httpx/code-head
+uv run python -m tests.e2e.bench.fetch --only httpx/docs --only httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016
+uv run python -m tests.e2e.bench.build --fixture httpx/docs --fixture httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016
 uv run python -m tests.e2e.bench.evaluate_doc_features
 ```
 

@@ -185,6 +185,23 @@ def test_mining_refresh_keeps_document_ecosystem(conn, monkeypatch):
     assert [row[0] for row in libraries] == ["pypi"]
 
 
+def test_mine_patterns_does_not_add_library_or_version(conn):
+    from libref.services.code.mining_refresh import mine_patterns
+
+    _seed(conn, ecosystem="pypi")
+    before_libraries = conn.execute("SELECT count(*) FROM libraries").fetchone()[0]
+    before_versions = conn.execute("SELECT count(*) FROM versions").fetchone()[0]
+    mine_patterns(conn, "demo", "1.0", ecosystem="pypi")
+    after_libraries = conn.execute("SELECT count(*) FROM libraries").fetchone()[0]
+    after_versions = conn.execute("SELECT count(*) FROM versions").fetchone()[0]
+    assert after_libraries == before_libraries
+    assert after_versions == before_versions
+    ecosystems = conn.execute(
+        "SELECT ecosystem FROM libraries WHERE name='demo'"
+    ).fetchall()
+    assert [row[0] for row in ecosystems] == ["pypi"]
+
+
 def test_alignment_bonus_weights_evidence(conn):
     from libref.store.retriever import ALIGNMENT_BONUS, _doc_feature_bonuses
 

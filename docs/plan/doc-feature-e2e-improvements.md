@@ -40,7 +40,7 @@ fiber 的片段调用绝大多数是 `not_target`/`AMBIGUOUS`，最终 AST 精�
 - 建立源码实体到文档版本的正式投影或版本绑定，并明确多版本文档的实体身份；评测器里的复制逻辑只是回放前置条件。
 - 为 Go/Java 等依赖别名与导入的文档片段补充可解析上下文，提高 `doc_snippet` 调用的目标解析率；在此之前不把实体对齐率写入门禁。
 - 人工抽检 `drift` 样本以计算误报率，并补充 `param_names` / `return_hint` 的结构化口径，避免把关键词列表当成参数真值。
-- 无答案查询的答案性判定需要与判定集、门禁一起重标定；单纯按候选池词频加权会显著提高可答查询的误弃答率，已在 `docs/plan/bench-followup-fixes.md` 记录差分结论。
+- 无答案查询的答案性判定已用有界覆盖集中度扣减消除当前误判；单纯按候选池词频加权会显著提高误弃答率，差分结论见 `docs/plan/bench-followup-fixes.md` 与 `docs/plan/benchmark-failures-analysis.md`。
 - 给文档获取配方增加排除规则，挡掉 Read the Docs 的 `_sources/*.md.txt` 原始副本；给 NuGet/Go 清单身份告警补大小写归一与短名映射。
 
 ## 四、验收

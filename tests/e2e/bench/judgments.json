@@ -508,7 +508,7 @@
       "scope": "global"
     }
   ],
-  "httpx/code-head": [
+  "httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016": [
     {
       "id": "C1",
       "type": "qualified",
@@ -962,7 +962,7 @@
       "query_lang": "en",
       "split": "dev",
       "query": "AsyncClient send handling authentication flows",
-      "targets": ["repo://pypi/httpx/head/httpx/_client.py"],
+      "targets": ["repo://pypi/httpx/7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016/httpx/_client.py"],
       "scope": "global"
     },
     {
@@ -971,7 +971,7 @@
       "query_lang": "en",
       "split": "dev",
       "query": "Timeout class with connect read write pool fields",
-      "targets": ["repo://pypi/httpx/head/httpx/_config.py"],
+      "targets": ["repo://pypi/httpx/7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016/httpx/_config.py"],
       "scope": "global"
     }
   ],

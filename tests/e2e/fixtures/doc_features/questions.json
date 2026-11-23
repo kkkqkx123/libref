@@ -103,7 +103,7 @@
     {
       "id": "FH2",
       "source": "cross",
-      "source_ref": "httpx/docs:D10/httpx/code-head:C4",
+      "source_ref": "httpx/docs:D10/httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016:C4",
       "type": "qualified",
       "split": "test",
       "query_lang": "en",
