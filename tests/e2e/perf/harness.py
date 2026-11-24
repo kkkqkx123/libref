@@ -560,6 +560,148 @@ def case_fts_scope(cfg: dict[str, Any], ctx: dict[str, Any]) -> list[dict[str, A
         conn.close()
 
 
+def case_html_clean(cfg: dict[str, Any], ctx: dict[str, Any]) -> list[dict[str, Any]]:
+    """Attribute the document cleaning stage to its individual pure steps."""
+    import gzip
+    import hashlib
+
+    from markdownify import markdownify as md
+    from selectolax.lexbor import LexborHTMLParser
+
+    from libref.crawler import extract
+    from libref.text.normalize import normalize_markdown
+
+    path = ROOT / "tests/e2e/bench/fixtures" / str(cfg["fixture"]) / "pages.jsonl.gz"
+    pages: list[tuple[str, str]] = []
+    with gzip.open(path, "rt", encoding="utf-8") as stream:
+        for line in stream:
+            row = json.loads(line)
+            pages.append((str(row.get("body") or ""), str(row.get("url") or "")))
+            if len(pages) >= int(cfg["pages"]):
+                break
+    if not pages:
+        raise RuntimeError(f"no frozen pages for {cfg['fixture']}")
+
+    def tree_of(raw: str) -> LexborHTMLParser:
+        return LexborHTMLParser(raw)
+
+    def strip_noise(tree: LexborHTMLParser) -> None:
+        for tag in extract._STRIP_TAGS:
+            for node in list(tree.css(tag)):
+                node.decompose()
+        for node in list(tree.css('[role="navigation"]')):
+            node.decompose()
+
+    def root_of(raw: str, url: str, *, prune: bool = False, empty: bool = False):
+        tree = tree_of(raw)
+        _ = extract._extract_metadata(tree, url)
+        if url:
+            extract._absolutize_links(tree, url)
+        _ = extract._collect_structure_links(tree, url)
+        strip_noise(tree)
+        root = extract._pick_main_root(tree)
+        if prune:
+            extract._prune_scored(
+                root,
+                threshold=extract._FIXED_THRESHOLD,
+                threshold_type="fixed",
+                min_word_threshold=None,
+                preserve_tags=set(),
+                preserve_classes=set(),
+            )
+        if empty:
+            extract._prune_empty_nodes(root)
+        return root
+
+    stages: dict[str, tuple[Any, Any]] = {
+        "parser": (lambda raw, url: raw, lambda state: tree_of(state[0])),
+        "metadata": (
+            lambda raw, url: (tree_of(raw), url),
+            lambda state: extract._extract_metadata(state[0], state[1]),
+        ),
+        "absolutize": (
+            lambda raw, url: (tree_of(raw), url),
+            lambda state: extract._absolutize_links(state[0], state[1]),
+        ),
+        "structure_links": (
+            lambda raw, url: (tree_of(raw), url),
+            lambda state: extract._collect_structure_links(state[0], state[1]),
+        ),
+        "noise_strip": (
+            lambda raw, url: tree_of(raw),
+            lambda state: strip_noise(state),
+        ),
+        "score_prune": (
+            lambda raw, url: root_of(raw, url),
+            lambda state: extract._prune_scored(
+                state,
+                threshold=extract._FIXED_THRESHOLD,
+                threshold_type="fixed",
+                min_word_threshold=None,
+                preserve_tags=set(),
+                preserve_classes=set(),
+            ),
+        ),
+        "empty_prune": (
+            lambda raw, url: root_of(raw, url, prune=True),
+            lambda state: extract._prune_empty_nodes(state),
+        ),
+        "content_links": (
+            lambda raw, url: (root_of(raw, url, prune=True, empty=True), url),
+            lambda state: extract._collect_links(state[0], state[1]),
+        ),
+        "serialize": (
+            lambda raw, url: root_of(raw, url, prune=True, empty=True),
+            lambda state: state.html or "",
+        ),
+        "markdown": (
+            lambda raw, url: root_of(raw, url, prune=True, empty=True).html or "",
+            lambda state: md(state, heading_style="ATX", strip=["img"]),
+        ),
+        "normalize": (
+            lambda raw, url: md(
+                root_of(raw, url, prune=True, empty=True).html or "",
+                heading_style="ATX",
+                strip=["img"],
+            ),
+            lambda state: normalize_markdown(state),
+        ),
+        "cache_key": (
+            lambda raw, url: raw,
+            lambda state: hashlib.sha1(
+                f"html\0fingerprint\0{state}".encode("utf-8", "ignore")
+            ).hexdigest(),
+        ),
+    }
+
+    def run_stage(action: Any, setup: Any) -> float:
+        elapsed = 0.0
+        for raw, url in pages:
+            state = setup(raw, url)
+            started = time.perf_counter()
+            action(state)
+            elapsed += (time.perf_counter() - started) * 1000
+        return elapsed
+
+    out: list[dict[str, Any]] = []
+    for name, (setup, action) in stages.items():
+        for _ in range(int(cfg["warmup"])):
+            run_stage(action, setup)
+        samples = [run_stage(action, setup) for _ in range(int(cfg["repeats"]))]
+        out.append(
+            _result(
+                "micro.html_clean",
+                name,
+                {"samples_ms": samples, "stats": stats(samples)},
+                counters={
+                    "pages": len(pages),
+                    "bytes": sum(len(raw) for raw, _ in pages),
+                },
+            )
+        )
+    return out
+
+
 def case_mining_scan(cfg: dict[str, Any], ctx: dict[str, Any]) -> list[dict[str, Any]]:
     dataset = ctx.get("dataset", DEFAULT_DATASET)
     fixture = str(cfg["fixture"])
@@ -596,6 +738,12 @@ def case_mining_scan(cfg: dict[str, Any], ctx: dict[str, Any]) -> list[dict[str,
             table: int(conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
             for table in ("seq_patterns", "feature_nodes", "api_clusters")
         }
+        failures = [] if scans == 1 else [f"expected one call scan, got {scans}"]
+        failures.extend(
+            f"mining derived table {table} is empty"
+            for table, value in counts.items()
+            if not value
+        )
         return [
             _result(
                 "store.mining_scan",
@@ -606,9 +754,7 @@ def case_mining_scan(cfg: dict[str, Any], ctx: dict[str, Any]) -> list[dict[str,
                     "call_instances_scans": scans,
                     **counts,
                 },
-                notes=[
-                    "scan count is an audit observation; the single-scan gate lands with the mining fix"
-                ],
+                failures=failures,
             )
         ]
     finally:
@@ -752,6 +898,7 @@ CASES: dict[str, Callable[[dict[str, Any], dict[str, Any]], list[dict[str, Any]]
     "micro.prefixspan": case_prefixspan,
     "micro.chunking": case_chunking,
     "micro.ast": case_ast,
+    "micro.html_clean": case_html_clean,
     "pipeline.index": case_pipeline_index,
     "store.fts_scope": case_fts_scope,
     "store.mining_scan": case_mining_scan,

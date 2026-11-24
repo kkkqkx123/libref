@@ -129,3 +129,14 @@ def test_api_args_view_carries_facet_tags(conn, tmp_path):
     assert rows
     assert all(str(r["facet"]).startswith("numpy.array(") for r in rows)
     assert any(r.get("facet_calls", 0) > 0 for r in rows)
+
+
+def test_health_sample_reports_population(conn, tmp_path, monkeypatch):
+    from libref.services.code import mining_read
+
+    svc = _seed_demo(conn, tmp_path)
+    monkeypatch.setattr(mining_read, "INSIGHT_ROWS", 1)
+    health = svc.mining_health("demo", "0.1", profile="implementation")
+    assert health["sampling"]["patterns"]["population"] >= 1
+    assert health["sampling"]["patterns"]["sample"] <= 1
+    assert health["sampling"]["clusters"]["sample"] <= 1

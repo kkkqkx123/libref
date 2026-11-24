@@ -18,6 +18,8 @@ from libref.services.code.mining_evidence import (
 from libref.services.code.usage_sources import profile_source_context
 from libref.services.registry.libraries import mining_version_ids
 
+ProfileContext = tuple[list[int], set[int], dict[int, dict[str, Any]]]
+
 
 def _profile_context(
     conn, version_ids: list[int], profile: str | None = None
@@ -80,16 +82,6 @@ def _source_scope_sql(
         return " AND 1=0", []
     marks = ",".join("?" for _ in ids)
     return f" AND source_id IN ({marks})", ids
-
-
-def _scope_of(table: str) -> str:
-    """Grouping identity of one call scope, preferring the persisted key."""
-    if table:
-        return (
-            f"COALESCE({table}.scope,"
-            f" {table}.caller_file || char(0) || COALESCE({table}.caller, ''))"
-        )
-    return "COALESCE(scope, caller_file || char(0) || COALESCE(caller, ''))"
 
 
 def is_subsequence(pattern: list[str], names: list[str]) -> bool:
@@ -177,6 +169,19 @@ def _call_filter_sql(
     return " AND " + " AND ".join(parts), params
 
 
+def _sibling_filter(alias: str, review: str, include_ambiguous: bool) -> str:
+    """Review and confidence filter shared by single and batched sibling reads."""
+    base = f"AND ({review}.status IS NULL OR {review}.status != 'conflict')"
+    if include_ambiguous:
+        return base
+    return (
+        base
+        + f" AND ({alias}.confidence != 'AMBIGUOUS' OR {review}.status='approved')"
+        + f" AND (COALESCE({alias}.resolve_kind,'') NOT IN ('stdlib','builtin')"
+        + f" OR {review}.status='approved')"
+    )
+
+
 class MiningReadService:
     """Read-only queries over call_instances, seq_patterns, and derived tables."""
 
@@ -210,7 +215,7 @@ class MiningReadService:
             )
         sql = (
             "SELECT callee_name, count(*), "
-            f"count(DISTINCT {_scope_of('call_instances')}) "
+            f"count(DISTINCT call_instances.scope) "
             "FROM call_instances LEFT JOIN review_status rs "
             "ON rs.entity_type='call_instance' AND rs.entity_id=call_instances.id "
             f"WHERE version_id IN ({placeholders}) {conf} "
@@ -280,42 +285,69 @@ class MiningReadService:
         if not vids:
             return []
         placeholders = ",".join("?" for _ in vids)
-        no_conflict_c = "(rc.status IS NULL OR rc.status != 'conflict')"
-        no_conflict_t = "(rt.status IS NULL OR rt.status != 'conflict')"
-        if include_ambiguous:
-            conf = f"AND {no_conflict_c}"
-            tconf = f"AND {no_conflict_t}"
-        else:
-            conf = (
-                f"AND {no_conflict_c} "
-                "AND (c.confidence != 'AMBIGUOUS' OR rc.status='approved')"
-                " AND (COALESCE(c.resolve_kind,'') NOT IN ('stdlib','builtin')"
-                " OR rc.status='approved')"
-            )
-            tconf = (
-                f"AND {no_conflict_t} "
-                "AND (call_instances.confidence != 'AMBIGUOUS'"
-                " OR rt.status='approved')"
-                " AND (COALESCE(call_instances.resolve_kind,'') NOT IN ('stdlib','builtin')"
-                " OR rt.status='approved')"
-            )
+        conf = _sibling_filter("c", "rc", include_ambiguous)
+        tconf = _sibling_filter("call_instances", "rt", include_ambiguous)
         rows = self._conn.execute(
             "WITH target(s) AS ("
-            f" SELECT DISTINCT {_scope_of('call_instances')}"
+            f" SELECT DISTINCT call_instances.scope"
             " FROM call_instances LEFT JOIN review_status rt "
             "ON rt.entity_type='call_instance' AND rt.entity_id=call_instances.id"
             f" WHERE version_id IN ({placeholders}) AND callee_name = ? {tconf})"
             " SELECT c.callee_name,"
-            f" count(DISTINCT {_scope_of('c')}),"
+            f" count(DISTINCT c.scope),"
             " count(*) FROM call_instances c LEFT JOIN review_status rc "
             "ON rc.entity_type='call_instance' AND rc.entity_id=c.id"
-            f" JOIN target t ON {_scope_of('c')} = t.s"
+            f" JOIN target t ON c.scope = t.s"
             f" WHERE c.version_id IN ({placeholders}) AND c.callee_name != ? {conf}"
             " GROUP BY c.callee_name"
             " ORDER BY 2 DESC, 3 DESC, c.callee_name LIMIT ?",
             (*vids, api, *vids, api, limit),
         ).fetchall()
         return [{"api": r[0], "scopes": r[1], "calls": r[2]} for r in rows]
+
+    def related_apis_batch(
+        self,
+        apis: list[str] | tuple[str, ...] | set[str],
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        tenant_id: str | None = None,
+        limit: int = 4,
+        include_ambiguous: bool = False,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Sibling APIs for every requested API in one grouped query."""
+        wanted = sorted({str(api) for api in apis if api})
+        if not wanted:
+            return {}
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
+        if not vids:
+            return {api: [] for api in wanted}
+        placeholders = ",".join("?" for _ in vids)
+        marks = ",".join("?" for _ in wanted)
+        conf = _sibling_filter("c", "rc", include_ambiguous)
+        tconf = _sibling_filter("call_instances", "rt", include_ambiguous)
+        rows = self._conn.execute(
+            "WITH target(api, s) AS ("
+            f" SELECT DISTINCT call_instances.callee_name, call_instances.scope"
+            " FROM call_instances LEFT JOIN review_status rt "
+            "ON rt.entity_type='call_instance' AND rt.entity_id=call_instances.id"
+            f" WHERE version_id IN ({placeholders}) AND callee_name IN ({marks}) {tconf})"
+            " SELECT t.api, c.callee_name, count(DISTINCT c.scope), count(*)"
+            " FROM call_instances c LEFT JOIN review_status rc "
+            "ON rc.entity_type='call_instance' AND rc.entity_id=c.id"
+            " JOIN target t ON c.scope = t.s"
+            f" WHERE c.version_id IN ({placeholders}) {conf}"
+            " GROUP BY t.api, c.callee_name"
+            " ORDER BY t.api, 3 DESC, 4 DESC, c.callee_name",
+            (*vids, *wanted, *vids),
+        ).fetchall()
+        out: dict[str, list[dict[str, Any]]] = {api: [] for api in wanted}
+        for api, sibling, scopes, calls in rows:
+            api, sibling = str(api), str(sibling)
+            if api == sibling or len(out[api]) >= limit:
+                continue
+            out[api].append({"api": sibling, "scopes": scopes, "calls": calls})
+        return out
 
     def list_patterns(
         self,
@@ -326,13 +358,15 @@ class MiningReadService:
         containing: list[str] | None = None,
         limit: int = 50,
         profile: str | None = None,
+        *,
+        _ctx: ProfileContext | None = None,
     ) -> list[dict[str, Any]]:
         from libref.mining.scoring import pattern_contains_all
 
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
-        pids, _sources, _profiles = _profile_context(self._conn, vids, profile)
+        pids = (_ctx or _profile_context(self._conn, vids, profile))[0]
         if not pids:
             return []
         placeholders = ",".join("?" for _ in pids)
@@ -411,16 +445,16 @@ class MiningReadService:
                 " OR rh.status='approved')"
             )
         hit_rows = self._conn.execute(
-            f"SELECT {_scope_of('h')}, h.callee_name"
+            f"SELECT h.scope, h.callee_name"
             " FROM call_instances h LEFT JOIN review_status rh"
             " ON rh.entity_type='call_instance' AND rh.entity_id=h.id"
-            f" JOIN (SELECT {_scope_of('h2')} AS hk"
+            f" JOIN (SELECT h2.scope AS hk"
             " FROM call_instances h2 LEFT JOIN review_status rh2"
             " ON rh2.entity_type='call_instance' AND rh2.entity_id=h2.id"
             f" WHERE h2.version_id IN ({placeholders}) AND h2.callee_name IN ({placeholders_w}) {inner_conf}"
             " GROUP BY hk"
             f" HAVING COUNT(DISTINCT h2.callee_name) = {len(wanted)})"
-            f" ON {_scope_of('h')} = hk"
+            f" ON h.scope = hk"
             f" WHERE h.version_id IN ({placeholders}) {outer_conf}",
             (*vids, *wanted, *vids),
         ).fetchall()
@@ -529,13 +563,13 @@ class MiningReadService:
         members = sorted(set(pattern))
         marks_w = ",".join("?" for _ in members)
         scope_rows = self._conn.execute(
-            f"SELECT {_scope_of('ci')}"
+            f"SELECT ci.scope"
             " FROM call_instances ci LEFT JOIN review_status rs "
             "ON rs.entity_type='call_instance' AND rs.entity_id=ci.id"
             f" WHERE ci.version_id IN ({placeholders})"
             f" AND ci.callee_name IN ({marks_w}) AND ci.in_target_api=1"
             f" AND ci.source_id IN ({source_marks}) {conf}"
-            f" GROUP BY {_scope_of('ci')}"
+            f" GROUP BY ci.scope"
             f" HAVING COUNT(DISTINCT ci.callee_name) = {len(members)}"
             " ORDER BY 1 LIMIT 1000",
             (*vids, *members, *source_params),
@@ -558,7 +592,7 @@ class MiningReadService:
             " JOIN libraries l ON l.id = v.library_id"
             f" WHERE ci.version_id IN ({placeholders}) {conf}"
             f" AND ci.in_target_api=1 AND ci.source_id IN ({source_marks})"
-            f" AND {_scope_of('ci')} IN ({scope_marks})"
+            f" AND ci.scope IN ({scope_marks})"
             " ORDER BY ci.version_id, ci.caller_file, ci.line_start,"
             " ci.start_byte, ci.call_order, ci.id",
             (*vids, *source_params, *wanted_scopes),
@@ -710,6 +744,82 @@ class MiningReadService:
                 )
         return out
 
+    def _sample_patterns(
+        self, pids: list[int], cap: int
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Read a bounded random pattern sample and its population count."""
+        if not pids:
+            return [], 0
+        placeholders = ",".join("?" for _ in pids)
+        where = f" WHERE profile_id IN ({placeholders})"
+        total = int(
+            self._conn.execute(
+                "SELECT count(*) FROM seq_patterns" + where, tuple(pids)
+            ).fetchone()[0]
+        )
+        if total <= cap:
+            return self.list_patterns(limit=cap, _ctx=(pids, set(), {})), total
+        rows = self._conn.execute(
+            "SELECT pattern, support FROM seq_patterns"
+            + where
+            + " ORDER BY random() LIMIT ?",
+            (*pids, cap),
+        ).fetchall()
+        out: list[dict[str, Any]] = []
+        for raw, support in rows:
+            try:
+                names = json.loads(raw)
+            except TypeError, ValueError:
+                continue
+            out.append({"pattern": names, "support": support})
+        return out, total
+
+    def _sample_clusters(
+        self, pids: list[int], cap: int
+    ) -> tuple[list[dict[str, Any]], int]:
+        """Read a bounded random cluster sample and its population count."""
+        if not pids:
+            return [], 0
+        placeholders = ",".join("?" for _ in pids)
+        where = f" WHERE profile_id IN ({placeholders})"
+        total = int(
+            self._conn.execute(
+                "SELECT count(DISTINCT cluster_id) FROM api_clusters" + where,
+                tuple(pids),
+            ).fetchone()[0]
+        )
+        ids = [
+            int(row[0])
+            for row in self._conn.execute(
+                "SELECT DISTINCT cluster_id FROM api_clusters"
+                + where
+                + " ORDER BY random() LIMIT ?",
+                (*pids, cap),
+            ).fetchall()
+        ]
+        if not ids:
+            return [], total
+        marks = ",".join("?" for _ in ids)
+        rows = self._conn.execute(
+            "SELECT cluster_id, member, size, representative FROM api_clusters"
+            f" WHERE profile_id IN ({placeholders}) AND cluster_id IN ({marks})"
+            " ORDER BY cluster_id, member",
+            (*pids, *ids),
+        ).fetchall()
+        grouped: dict[int, dict[str, Any]] = {}
+        for cid, member, size, rep in rows:
+            slot = grouped.setdefault(
+                int(cid),
+                {
+                    "cluster_id": int(cid),
+                    "members": [],
+                    "size": int(size),
+                    "representative": rep,
+                },
+            )
+            slot["members"].append(member)
+        return [grouped[cid] for cid in ids if cid in grouped], total
+
     def mining_health(
         self,
         library: str | None = None,
@@ -717,28 +827,29 @@ class MiningReadService:
         ecosystem: str | None = None,
         tenant_id: str | None = None,
         profile: str | None = None,
+        *,
+        _ctx: ProfileContext | None = None,
     ) -> dict[str, Any]:
         from libref.mining.idiom import reuse_diversity
 
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
-        patterns = self.list_patterns(
-            library=library,
-            version=version,
-            ecosystem=ecosystem,
-            limit=100000,
-            tenant_id=tenant_id,
-            profile=profile,
-        )
-        clusters = self.api_clusters(
-            library=library,
-            version=version,
-            ecosystem=ecosystem,
-            limit=100000,
-            tenant_id=tenant_id,
-            profile=profile,
-        )
+        ctx = _ctx or _profile_context(self._conn, vids, profile)
+        pids, sources, _profiles = ctx
+        patterns, pattern_total = self._sample_patterns(pids, INSIGHT_ROWS)
+        clusters, cluster_total = self._sample_clusters(pids, INSIGHT_ROWS)
         health = reuse_diversity(patterns, clusters)
-        pids, sources, _profiles = _profile_context(self._conn, vids, profile)
+        health["sampling"] = {
+            "patterns": {
+                "sample": len(patterns),
+                "population": pattern_total,
+                "truncated": len(patterns) < pattern_total,
+            },
+            "clusters": {
+                "sample": len(clusters),
+                "population": cluster_total,
+                "truncated": len(clusters) < cluster_total,
+            },
+        }
         scope = sorted(sources)
         health["resolve_kinds"] = self.resolve_distribution(
             library, version, ecosystem, tenant_id=tenant_id, source_ids=scope
@@ -1611,11 +1722,13 @@ class MiningReadService:
         containing: list[str] | None = None,
         limit: int = 50,
         profile: str | None = None,
+        *,
+        _ctx: ProfileContext | None = None,
     ) -> list[dict[str, Any]]:
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
-        pids, _sources, _profiles = _profile_context(self._conn, vids, profile)
+        pids = (_ctx or _profile_context(self._conn, vids, profile))[0]
         if not pids:
             return []
         placeholders = ",".join("?" for _ in pids)
@@ -1655,11 +1768,13 @@ class MiningReadService:
         api: str | None = None,
         limit: int = 50,
         profile: str | None = None,
+        *,
+        _ctx: ProfileContext | None = None,
     ) -> list[dict[str, Any]]:
         vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
         if not vids:
             return []
-        pids, _sources, _profiles = _profile_context(self._conn, vids, profile)
+        pids = (_ctx or _profile_context(self._conn, vids, profile))[0]
         if not pids:
             return []
         if not self._table_present("feature_facets"):
@@ -1696,6 +1811,8 @@ class MiningReadService:
         limit: int = 50,
         profile: str | None = None,
     ) -> list[dict[str, Any]]:
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
+        ctx = _profile_context(self._conn, vids, profile)
         rows = self.list_facets(
             library,
             version,
@@ -1703,6 +1820,7 @@ class MiningReadService:
             tenant_id,
             limit=max(limit, 500),
             profile=profile,
+            _ctx=ctx,
         )
         by_facet: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
@@ -1716,7 +1834,12 @@ class MiningReadService:
             for facet, values in sorted(by_facet.items())
         }
         health = self.mining_health(
-            library, version, ecosystem, tenant_id=tenant_id, profile=profile
+            library,
+            version,
+            ecosystem,
+            tenant_id=tenant_id,
+            profile=profile,
+            _ctx=ctx,
         )
         return [
             {
@@ -1740,6 +1863,8 @@ class MiningReadService:
     ) -> dict[str, Any]:
         from libref.mining.facets import score_facet_row
 
+        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
+        ctx = _profile_context(self._conn, vids, profile)
         rows = self.list_facets(
             library,
             version,
@@ -1748,12 +1873,12 @@ class MiningReadService:
             facet=facet,
             limit=100000,
             profile=profile,
+            _ctx=ctx,
         )
         target = next((r for r in rows if str(r["value"]) == value), None)
         if target is None:
             raise ValueError(f"unknown facet value: {facet}={value}")
-        vids = mining_version_ids(self._conn, library, version, ecosystem, tenant_id)
-        _pids, sources, _profiles = _profile_context(self._conn, vids, profile)
+        _pids, sources, _profiles = ctx
         total_calls = self._count_profile_calls(vids, sources)
         total_scopes = self._count_profile_scopes(vids, sources)
         return score_facet_row(
@@ -2010,7 +2135,7 @@ class MiningReadService:
         if not vids:
             return 0
         filt, params = _source_scope_sql(sources if sources else None)
-        scope_expr = _scope_of("call_instances")
+        scope_expr = "call_instances.scope"
         try:
             row = self._conn.execute(
                 f"SELECT count(DISTINCT {scope_expr}) FROM call_instances"

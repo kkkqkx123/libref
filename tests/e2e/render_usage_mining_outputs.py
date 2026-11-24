@@ -86,6 +86,9 @@ def _seed(conn: sqlite3.Connection, settings: Any, tmp_path: Path, cases: dict):
     (root / "app.py").write_text(
         "import pkg.core as core\n"
         "from pkg.factory import make_service\n\n\n"
+        "def prepare():\n"
+        "    service = make_service()\n"
+        "    service.run('b')\n\n\n"
         "def main():\n"
         "    service = make_service()\n"
         "    service.run('a')\n"
@@ -218,13 +221,13 @@ def render(conn: sqlite3.Connection, settings: Any, out_dir: Path) -> dict[str, 
                 conn,
                 library,
                 version,
-                minsup=1,
-                minlen=1,
+                minsup=2,
+                minlen=2,
                 profile=name,
                 source_roles=roles,
             )
         impl_patterns = mine_patterns(
-            conn, library, version, minsup=1, minlen=1, profile="implementation"
+            conn, library, version, minsup=2, minlen=2, profile="implementation"
         )
         patterns["implementation"] = impl_patterns
         conn.commit()

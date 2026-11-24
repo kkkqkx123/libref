@@ -26,6 +26,13 @@
       "languages": ["python", "java", "go", "rust", "csharp", "javascript", "kotlin", "groovy"],
       "repeats": 5
     },
+    "micro.html_clean": {
+      "gear": "corpus",
+      "fixture": "httpx/docs",
+      "pages": 3,
+      "warmup": 1,
+      "repeats": 5
+    },
     "pipeline.index": {
       "gear": "corpus",
       "fixtures": [

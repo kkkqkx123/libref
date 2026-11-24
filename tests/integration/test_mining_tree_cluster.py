@@ -124,12 +124,12 @@ def test_mine_clears_derived_when_calls_gone(conn, monkeypatch, tmp_path):
         ),
     )
     conn.commit()
-    mine_patterns(conn, "demo", "t", minsup=1, minlen=1, profile="implementation")
+    mine_patterns(conn, "demo", "t", minsup=2, minlen=2, profile="implementation")
     assert conn.execute("SELECT count(*) FROM feature_nodes").fetchone()[0] >= 1
     conn.execute("DELETE FROM call_instances WHERE version_id=?", (version_id,))
     conn.commit()
     assert (
-        mine_patterns(conn, "demo", "t", minsup=1, minlen=1, profile="implementation")
+        mine_patterns(conn, "demo", "t", minsup=2, minlen=2, profile="implementation")
         == []
     )
     assert conn.execute("SELECT count(*) FROM feature_nodes").fetchone()[0] == 0

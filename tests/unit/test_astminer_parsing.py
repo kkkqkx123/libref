@@ -380,3 +380,19 @@ def test_java_explicit_constructor_invocation_skipped(monkeypatch, tmp_path):
     by_raw = {c.raw_callee: c for c in raw}
     assert "super" not in by_raw
     assert by_raw["this.helper"].caller == "B.B"
+
+
+def test_warm_configs_prepares_only_requested_languages():
+    from libref.astminer import config as ast_config
+    from libref.astminer import engine as ast_engine
+
+    ast_engine._parsers.clear()
+    ast_engine._compiled.clear()
+    try:
+        ast_engine.warm_configs([ast_config.PYTHON_CONFIG])
+        assert "python" in ast_engine._parsers
+        assert any(key.startswith("python\x00") for key in ast_engine._compiled)
+        assert "java" not in ast_engine._parsers
+    finally:
+        ast_engine._parsers.clear()
+        ast_engine._compiled.clear()

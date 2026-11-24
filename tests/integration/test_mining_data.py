@@ -21,19 +21,29 @@ def _seed_calls(conn, library="demo", version="t", rows=()):
     )
     from libref.services.code.usage_sources import register_source
 
-    source_id = register_source(
-        conn,
-        version_id=version_id,
-        source_key="seeded:implementation",
-        source_role="implementation",
+    existing = conn.execute(
+        "SELECT id FROM code_sources WHERE version_id=? AND source_role='implementation'"
+        " ORDER BY id LIMIT 1",
+        (version_id,),
+    ).fetchone()
+    source_id = (
+        int(existing[0])
+        if existing is not None
+        else register_source(
+            conn,
+            version_id=version_id,
+            source_key="seeded:implementation",
+            source_role="implementation",
+        )
     )
     for i, (callee, path, caller, line, order, start, conf, args) in enumerate(rows):
+        scope = f"{path}\0{caller or ''}"
         conn.execute(
             "INSERT INTO call_instances(call_uid, callee_name, args, repo,"
             " caller_file, line_start, line_end, confidence,"
-            " library_id, version_id, caller, call_order, start_byte,"
+            " library_id, version_id, caller, call_order, start_byte, scope,"
             " source_id, sample_id, source_role, in_target_api)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 f"uid-{i}",
                 callee,
@@ -48,6 +58,7 @@ def _seed_calls(conn, library="demo", version="t", rows=()):
                 caller,
                 order,
                 start,
+                scope,
                 source_id,
                 f"{path}::{caller}" if caller else path,
                 "implementation",
@@ -226,7 +237,24 @@ def test_import_edges_queryable(conn, tmp_path):
 
 def test_evidence_carries_signatures(conn, tmp_path):
     index_symbol_repo(conn, tmp_path)
-    mine_patterns(conn, "demo", "0.1", minsup=1, minlen=1, profile="implementation")
+    _seed_calls(
+        conn,
+        version="0.1",
+        rows=[
+            ("pkg.core.Service", "extra.py", "main2", 1, 1, 10, "INFERRED", []),
+            (
+                "pkg.core.Service.create",
+                "extra.py",
+                "main2",
+                2,
+                2,
+                20,
+                "INFERRED",
+                [],
+            ),
+        ],
+    )
+    mine_patterns(conn, "demo", "0.1", minsup=2, minlen=2, profile="implementation")
     svc = MiningReadService(conn)
     patterns = svc.list_patterns("demo", "0.1", limit=10, profile="implementation")
     assert patterns
@@ -247,3 +275,66 @@ def test_evidence_carries_signatures(conn, tmp_path):
         for c in (g.get("calls") or [])
     )
     assert any("<call" in str(g.get("rendered") or "") for g in groups)
+
+
+def test_mine_reads_calls_once(conn):
+    _seed_calls(
+        conn,
+        rows=[
+            ("first", "a.py", "f", 1, 1, 10, "INFERRED", []),
+            ("second", "a.py", "f", 2, 2, 20, "INFERRED", []),
+            ("first", "b.py", "g", 1, 1, 10, "INFERRED", []),
+            ("second", "b.py", "g", 2, 2, 20, "INFERRED", []),
+        ],
+    )
+    captured: list[str] = []
+    conn.set_trace_callback(captured.append)
+    try:
+        results = mine_patterns(conn, "demo", "t", minsup=2, profile="implementation")
+    finally:
+        conn.set_trace_callback(None)
+    assert results
+    scans = sum(
+        1
+        for sql in captured
+        if sql.startswith("SELECT callee_name, caller_file, caller, confidence")
+    )
+    assert scans == 1
+
+
+def test_batch_siblings_match_single_reads(conn):
+    _seed_calls(
+        conn,
+        rows=[
+            ("first", "a.py", "f", 1, 1, 10, "INFERRED", []),
+            ("neighbor", "a.py", "f", 2, 2, 20, "INFERRED", []),
+            ("first", "b.py", "g", 1, 1, 10, "INFERRED", []),
+            ("neighbor", "b.py", "g", 2, 2, 20, "INFERRED", []),
+        ],
+    )
+    svc = MiningReadService(conn)
+    single = svc.related_apis("first", "demo", "t", limit=4)
+    captured: list[str] = []
+    conn.set_trace_callback(captured.append)
+    try:
+        batch = svc.related_apis_batch(["first"], "demo", "t", limit=4)
+    finally:
+        conn.set_trace_callback(None)
+    assert batch["first"] == single
+    assert sum(1 for sql in captured if sql.startswith("WITH target")) == 1
+
+
+def test_read_scope_uses_persisted_column(conn):
+    _seed_calls(
+        conn,
+        rows=[("first", "a.py", "f", 1, 1, 10, "INFERRED", [])],
+    )
+    captured: list[str] = []
+    conn.set_trace_callback(captured.append)
+    try:
+        MiningReadService(conn).api_usage_counts("demo", "t")
+    finally:
+        conn.set_trace_callback(None)
+    sql = " ".join(captured)
+    assert "call_instances.scope" in sql
+    assert "COALESCE(scope" not in sql

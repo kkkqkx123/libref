@@ -102,6 +102,7 @@ async def index_repo_async(
     source_role: str = "implementation",
     origin_kind: str = "repo_file",
     target_filter: dict | None = None,
+    warm_ast: bool = False,
 ) -> dict[str, int]:
     """Lock one version across doc and code writers, then run the ingest."""
     from libref.services.infra.version_lock import version_lock
@@ -138,6 +139,7 @@ async def index_repo_async(
             source_role=source_role,
             origin_kind=origin_kind,
             target_filter=target_filter,
+            warm_ast=warm_ast,
         )
 
 
@@ -167,6 +169,7 @@ async def _index_repo_inner(
     source_role: str = "implementation",
     origin_kind: str = "repo_file",
     target_filter: dict | None = None,
+    warm_ast: bool = False,
 ) -> dict[str, int]:
     from libref.astminer import cache as ast_cache
     from libref.astminer import config as ast_config
@@ -354,6 +357,15 @@ async def _index_repo_inner(
         raise BudgetExceeded(
             f"source budget exceeded: {len(files)} files over budget {max_files}"
         )
+    if warm_ast:
+        from libref.astminer import engine as ast_engine
+
+        by_name: dict[str, Any] = {}
+        for rel in files:
+            cfg = ast_config.config_for_suffix(Path(rel).suffix)
+            if cfg is not None:
+                by_name[cfg.name] = cfg
+        ast_engine.warm_configs(by_name.values())
     if settings is not None and bool(getattr(settings, "usage_mining_enabled", True)):
         from libref.astminer.code_blocks import rust_doc_blocks
         from libref.services.code.usage_ingest import ingest_snippets
@@ -401,7 +413,13 @@ async def _index_repo_inner(
             counts["skipped_oversize"],
             root,
         )
-    _vectors_live = settings is not None and vec_store is not None and embed is not None
+    code_search = source_role == "implementation"
+    _vectors_live = (
+        code_search
+        and settings is not None
+        and vec_store is not None
+        and embed is not None
+    )
     _doc_store = None
     if _vectors_live:
         from libref.services.ops.maintenance import (
@@ -421,7 +439,10 @@ async def _index_repo_inner(
     counts.update(counts_source)
     counts["evicted"] = ast_cache.sweep_repo(conn, repo_name, live)
     conn.commit()
-    persist_definitions = source_role == "implementation"
+    persist_definitions = code_search
+    filt = target_filter or {}
+    explicit_names = {str(v) for v in filt.get("names", []) if str(v).strip()}
+    target_prefixes = tuple(str(v) for v in filt.get("prefixes", []) if str(v).strip())
     if persist_definitions:
         n_entities, swept_entities = _persist_entities(
             conn, library_id, version_id, all_decls
@@ -436,35 +457,33 @@ async def _index_repo_inner(
     counts["swept_entities"] = swept_entities
     conn.commit()
     resolution_decls = all_decls
-    if not persist_definitions:
+    if persist_definitions:
+        target_names = {
+            str(r[0])
+            for r in conn.execute(
+                "SELECT qualified_name FROM api_entities WHERE version_id=?",
+                (version_id,),
+            ).fetchall()
+        }
+    else:
         from libref.services.code.usage_ingest import target_declarations
 
-        resolution_decls = all_decls + target_declarations(conn, version_id)
+        target_decls = target_declarations(
+            conn,
+            version_id,
+            names=explicit_names or None,
+            prefixes=None if explicit_names else target_prefixes,
+        )
+        resolution_decls = all_decls + target_decls
+        target_names = {decl.qualified_name for decl in target_decls}
     remaining = files[done:]
-    target_names = {
-        str(r[0])
-        for r in conn.execute(
-            "SELECT qualified_name FROM api_entities WHERE version_id=?",
-            (version_id,),
-        ).fetchall()
-    }
-    filt = target_filter or {}
     source_status = source_target_status(
         source_role,
         filt.get("declared_library_version"),
         version,
         version_required=bool(filt.get("version_required")),
     )
-    explicit_names = {str(v) for v in filt.get("names", []) if str(v).strip()}
-    target_prefixes = tuple(str(v) for v in filt.get("prefixes", []) if str(v).strip())
-    if explicit_names:
-        effective_names = explicit_names
-    elif target_prefixes:
-        effective_names = {
-            name for name in target_names if name.startswith(target_prefixes)
-        }
-    else:
-        effective_names = target_names
+    effective_names = explicit_names or target_names
     wanted_calls: set[str] = set()
     if done > 0:
         # Resume skips the done files, so their call identities must seed the
@@ -511,23 +530,24 @@ async def _index_repo_inner(
         n_calls += batch_count
         wanted_calls.update(batch_wanted)
         conn.commit()
-        batch_live = {rel: live[rel] for rel in batch_files if rel in live}
-        batch_chunks, batch_dropped, batch_removed, batch_inserted = (
-            _store_source_chunks(
-                conn,
-                repo_name,
-                root,
-                sorted(batch_live),
-                all_decls,
-                library_id,
-                version_id,
+        if code_search:
+            batch_live = {rel: live[rel] for rel in batch_files if rel in live}
+            batch_chunks, batch_dropped, batch_removed, batch_inserted = (
+                _store_source_chunks(
+                    conn,
+                    repo_name,
+                    root,
+                    sorted(batch_live),
+                    all_decls,
+                    library_id,
+                    version_id,
+                )
             )
-        )
-        n_chunks += batch_chunks
-        chunk_dropped += batch_dropped
-        removed_ids.extend(batch_removed)
-        inserted_ids.extend(batch_inserted)
-        conn.commit()
+            n_chunks += batch_chunks
+            chunk_dropped += batch_dropped
+            removed_ids.extend(batch_removed)
+            inserted_ids.extend(batch_inserted)
+            conn.commit()
         counts["batches"] += 1
         if _vectors_live:
             await _sync_docs(
@@ -561,7 +581,7 @@ async def _index_repo_inner(
     _check_manifest_identity(ecosystem, library, root)
     n_deps = _persist_repo_deps(conn, library_id, version_id, root)
     counts["manifest_deps"] = n_deps
-    swept_pages = _sweep_source_pages(conn, repo_name, set(live))
+    swept_pages = _sweep_source_pages(conn, repo_name, set(live)) if code_search else []
     removed_ids.extend(swept_pages)
     counts["swept_pages"] = len(swept_pages)
     conn.commit()
@@ -613,6 +633,7 @@ def index_repo(
     source_role: str = "implementation",
     origin_kind: str = "repo_file",
     target_filter: dict | None = None,
+    warm_ast: bool = False,
 ) -> dict[str, int]:
     return asyncio.run(
         index_repo_async(
@@ -640,6 +661,7 @@ def index_repo(
             source_role=source_role,
             origin_kind=origin_kind,
             target_filter=target_filter,
+            warm_ast=warm_ast,
         )
     )
 
@@ -666,6 +688,7 @@ def index_repo_by_name(
     source_role: str = "implementation",
     origin_kind: str = "repo_file",
     target_filter: dict | None = None,
+    warm_ast: bool = False,
 ) -> dict[str, int]:
     return asyncio.run(
         index_repo_by_name_async(
@@ -689,6 +712,7 @@ def index_repo_by_name(
             source_role=source_role,
             origin_kind=origin_kind,
             target_filter=target_filter,
+            warm_ast=warm_ast,
         )
     )
 
@@ -715,6 +739,7 @@ async def index_repo_by_name_async(
     source_role: str = "implementation",
     origin_kind: str = "repo_file",
     target_filter: dict | None = None,
+    warm_ast: bool = False,
 ) -> dict[str, int]:
     from libref.services.registry.resolver import resolve_repo
 
@@ -760,6 +785,7 @@ async def index_repo_by_name_async(
             source_role=source_role,
             origin_kind=origin_kind,
             target_filter=target_filter,
+            warm_ast=warm_ast,
         )
     async with _client(settings) as client:
         resolution = await resolve_repo(
@@ -865,6 +891,7 @@ def build_repo_runner(
             source_role=p.get("source_role", "implementation"),
             origin_kind=p.get("origin_kind", "repo_file"),
             target_filter=p.get("target_filter"),
+            warm_ast=True,
         )
 
     return runner

@@ -9,6 +9,7 @@ from libref.astminer.models import (
     TARGET_STATUS_RESOLVED,
     TARGET_STATUS_UNCONFIRMED,
 )
+from libref.errors import LibrefError
 from libref.services.infra.jobs import INDUCE_LABELS_KIND, MINE_PATTERNS_KIND
 
 MINE_PATTERNS_JOB_KIND = MINE_PATTERNS_KIND
@@ -17,6 +18,36 @@ INDUCE_LABELS_JOB_KIND = INDUCE_LABELS_KIND
 DEFAULT_MINSUP = 2
 DEFAULT_MAXLEN = 10
 DEFAULT_MINLEN = 2
+MIN_MINLEN = 2
+
+
+def validate_mining_params(
+    minsup: int, maxlen: int, minlen: int, *, topn: int | None = None
+) -> None:
+    """Keep sequence mining inside a bounded capacity envelope."""
+    values = {"minsup": minsup, "maxlen": maxlen, "minlen": minlen}
+    for name, value in values.items():
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise LibrefError(
+                "invalid_argument", f"{name} must be an integer", field=name
+            )
+    if minsup < DEFAULT_MINSUP:
+        raise LibrefError(
+            "invalid_argument",
+            f"minsup must be at least {DEFAULT_MINSUP}",
+            field="minsup",
+        )
+    if not MIN_MINLEN <= minlen <= maxlen <= DEFAULT_MAXLEN:
+        raise LibrefError(
+            "invalid_argument",
+            f"minlen and maxlen must satisfy {MIN_MINLEN} <= minlen <= maxlen"
+            f" <= {DEFAULT_MAXLEN}",
+            field="maxlen",
+        )
+    if topn is not None and (not isinstance(topn, int) or topn < 1):
+        raise LibrefError(
+            "invalid_argument", "topn must be a positive integer", field="topn"
+        )
 
 
 def _cluster_defaults(
@@ -249,32 +280,13 @@ def refresh_feature_tree(
     library_id: int,
     version_id: int,
     *,
-    include_ambiguous: bool = False,
-    include_unconfirmed: bool = False,
-    resolve_kinds: list[str] | tuple[str, ...] | None = None,
-    min_args: int | None = None,
-    max_args: int | None = None,
+    rows: list,
     profile_id: int,
-    source_ids: list[int] | tuple[int, ...] | None = None,
-    relation_kinds: list[str] | tuple[str, ...] | None = None,
-    macro_policy: str = "exclude",
 ) -> int:
-    """Rebuild hierarchical feature nodes in bulk; returns the node count."""
+    """Rebuild hierarchical feature nodes from one shared call set."""
     from libref.mining import feature_tree as _tree
     from libref.mining import scope_key as _scope_key
 
-    rows = _load_kept_calls(
-        conn,
-        version_id,
-        include_ambiguous=include_ambiguous,
-        include_unconfirmed=include_unconfirmed,
-        resolve_kinds=resolve_kinds,
-        min_args=min_args,
-        max_args=max_args,
-        source_ids=source_ids,
-        relation_kinds=relation_kinds,
-        macro_policy=macro_policy,
-    )
     calls = [
         (str(r[0]), str(r[10]) or _scope_key(str(r[1]), r[2])) for r in rows if r[0]
     ]
@@ -322,15 +334,8 @@ def refresh_facets(
     library_id: int,
     version_id: int,
     *,
-    include_ambiguous: bool = False,
-    include_unconfirmed: bool = False,
-    resolve_kinds: list[str] | tuple[str, ...] | None = None,
-    min_args: int | None = None,
-    max_args: int | None = None,
+    rows: list,
     profile_id: int,
-    source_ids: list[int] | tuple[int, ...] | None = None,
-    relation_kinds: list[str] | tuple[str, ...] | None = None,
-    macro_policy: str = "exclude",
     facet_topn: int | None = None,
     candidate_budget: int | None = None,
     min_gain: float | None = None,
@@ -347,18 +352,6 @@ def refresh_facets(
     )
     if not _table_ready(conn, "feature_facets"):
         return 0
-    rows = _load_kept_calls(
-        conn,
-        version_id,
-        include_ambiguous=include_ambiguous,
-        include_unconfirmed=include_unconfirmed,
-        resolve_kinds=resolve_kinds,
-        min_args=min_args,
-        max_args=max_args,
-        source_ids=source_ids,
-        relation_kinds=relation_kinds,
-        macro_policy=macro_policy,
-    )
     if not rows:
         conn.execute(
             "DELETE FROM feature_facets WHERE version_id=? AND profile_id=?",
@@ -425,37 +418,18 @@ def refresh_clusters(
     library_id: int,
     version_id: int,
     *,
-    include_ambiguous: bool = False,
-    include_unconfirmed: bool = False,
+    rows: list,
     threshold: float | None = None,
     min_size: int | None = None,
-    resolve_kinds: list[str] | tuple[str, ...] | None = None,
-    min_args: int | None = None,
-    max_args: int | None = None,
     profile_id: int,
-    source_ids: list[int] | tuple[int, ...] | None = None,
-    relation_kinds: list[str] | tuple[str, ...] | None = None,
-    macro_policy: str = "exclude",
 ) -> int:
-    """Rebuild API clusters in bulk; returns the cluster count."""
+    """Rebuild API clusters from one shared call set."""
     from libref.mining import build_scope_sets as _scope_sets
     from libref.mining import scope_key as _scope_key
     from libref.mining.cluster import cluster_apis as _cluster_fn
 
     threshold, min_size = _cluster_defaults(threshold, min_size)
 
-    rows = _load_kept_calls(
-        conn,
-        version_id,
-        include_ambiguous=include_ambiguous,
-        include_unconfirmed=include_unconfirmed,
-        resolve_kinds=resolve_kinds,
-        min_args=min_args,
-        max_args=max_args,
-        source_ids=source_ids,
-        relation_kinds=relation_kinds,
-        macro_policy=macro_policy,
-    )
     triplets = [
         (str(r[0]), str(r[10]) or _scope_key(str(r[1]), r[2]), r[2])
         for r in rows
@@ -576,6 +550,8 @@ def mine_patterns(
     macro_policy: str | None = None,
     tenant_id: str = "default",
 ) -> list[dict]:
+    validate_mining_params(minsup, maxlen, minlen, topn=topn)
+
     import json as _json
 
     from libref.mining import PrefixSpan
@@ -619,6 +595,22 @@ def mine_patterns(
         relation_kinds=relation_kinds,
         macro_policy=policy,
     )
+
+    def _refresh_derived() -> None:
+        refresh_feature_tree(
+            conn, library_id, version_id, rows=rows, profile_id=profile_id
+        )
+        refresh_clusters(
+            conn,
+            library_id,
+            version_id,
+            rows=rows,
+            threshold=cluster_threshold,
+            min_size=cluster_min_size,
+            profile_id=profile_id,
+        )
+        refresh_facets(conn, library_id, version_id, rows=rows, profile_id=profile_id)
+
     if not rows:
         _clear_derived(conn, version_id, profile_id)
         conn.commit()
@@ -657,50 +649,7 @@ def mine_patterns(
 
     def _empty() -> list[dict]:
         _clear_derived(conn, version_id, profile_id)
-        refresh_feature_tree(
-            conn,
-            library_id,
-            version_id,
-            include_ambiguous=include_ambiguous,
-            include_unconfirmed=include_unconfirmed,
-            resolve_kinds=resolve_kinds,
-            min_args=min_args,
-            max_args=max_args,
-            profile_id=profile_id,
-            source_ids=source_ids,
-            relation_kinds=relation_kinds,
-            macro_policy=policy,
-        )
-        refresh_clusters(
-            conn,
-            library_id,
-            version_id,
-            include_ambiguous=include_ambiguous,
-            include_unconfirmed=include_unconfirmed,
-            threshold=cluster_threshold,
-            min_size=cluster_min_size,
-            resolve_kinds=resolve_kinds,
-            min_args=min_args,
-            max_args=max_args,
-            profile_id=profile_id,
-            source_ids=source_ids,
-            relation_kinds=relation_kinds,
-            macro_policy=policy,
-        )
-        refresh_facets(
-            conn,
-            library_id,
-            version_id,
-            include_ambiguous=include_ambiguous,
-            include_unconfirmed=include_unconfirmed,
-            resolve_kinds=resolve_kinds,
-            min_args=min_args,
-            max_args=max_args,
-            profile_id=profile_id,
-            source_ids=source_ids,
-            relation_kinds=relation_kinds,
-            macro_policy=policy,
-        )
+        _refresh_derived()
         conn.commit()
         _refresh_doc_derived(conn, library, version, profile, tenant_id, ecosystem)
         return []
@@ -743,50 +692,7 @@ def mine_patterns(
         _delete_not_in(
             conn, "pattern_labels", version_id, profile_id, "pattern", wanted
         )
-    refresh_feature_tree(
-        conn,
-        library_id,
-        version_id,
-        include_ambiguous=include_ambiguous,
-        include_unconfirmed=include_unconfirmed,
-        resolve_kinds=resolve_kinds,
-        min_args=min_args,
-        max_args=max_args,
-        profile_id=profile_id,
-        source_ids=source_ids,
-        relation_kinds=relation_kinds,
-        macro_policy=policy,
-    )
-    refresh_clusters(
-        conn,
-        library_id,
-        version_id,
-        include_ambiguous=include_ambiguous,
-        include_unconfirmed=include_unconfirmed,
-        threshold=cluster_threshold,
-        min_size=cluster_min_size,
-        resolve_kinds=resolve_kinds,
-        min_args=min_args,
-        max_args=max_args,
-        profile_id=profile_id,
-        source_ids=source_ids,
-        relation_kinds=relation_kinds,
-        macro_policy=policy,
-    )
-    refresh_facets(
-        conn,
-        library_id,
-        version_id,
-        include_ambiguous=include_ambiguous,
-        include_unconfirmed=include_unconfirmed,
-        resolve_kinds=resolve_kinds,
-        min_args=min_args,
-        max_args=max_args,
-        profile_id=profile_id,
-        source_ids=source_ids,
-        relation_kinds=relation_kinds,
-        macro_policy=policy,
-    )
+    _refresh_derived()
     conn.commit()
     _refresh_doc_derived(conn, library, version, profile, tenant_id, ecosystem)
     results.sort(key=lambda r: (-r["support"], r["pattern"]))
@@ -815,6 +721,7 @@ def mine_job_params(
     macro_policy: str | None = None,
 ) -> dict[str, Any]:
     """Build mining job params, symmetric with scrape job params, ensuring replayability."""
+    validate_mining_params(minsup, maxlen, minlen, topn=topn)
     return {
         "library": library,
         "version": version,
@@ -1021,6 +928,17 @@ async def induce_labels(
     wanted_apis = sorted(
         {a for entry in patterns for a in (entry.get("pattern") or []) if a}
     )
+    try:
+        siblings_by_api = reader.related_apis_batch(
+            wanted_apis,
+            library,
+            version,
+            ecosystem,
+            limit=4,
+            include_ambiguous=include_ambiguous,
+        )
+    except Exception:  # noqa: BLE001 -- siblings are advisory for prompts
+        siblings_by_api = {a: [] for a in wanted_apis}
     prefetched: dict[str, list[dict[str, Any]]] = {a: [] for a in wanted_apis}
     if wanted_apis:
         from libref.services.registry.libraries import mining_version_ids
@@ -1106,18 +1024,7 @@ async def induce_labels(
                         "count": shape.get("count", 0),
                     }
                 )
-            try:
-                api_related = reader.related_apis(
-                    api,
-                    library,
-                    version,
-                    ecosystem,
-                    limit=4,
-                    include_ambiguous=include_ambiguous,
-                )
-            except Exception:  # noqa: BLE001 -- siblings are advisory for prompts
-                api_related = []
-            for rel in api_related:
+            for rel in siblings_by_api.get(api, []):
                 text = str(rel.get("api") or "")
                 if text and text not in siblings:
                     siblings.append(text)
@@ -1271,6 +1178,17 @@ async def induce_cluster_labels(
     groups = reader.api_clusters(
         library, version, ecosystem, limit=max(1, want_topn), profile=profile
     )
+    try:
+        siblings_by_api = reader.related_apis_batch(
+            {str(g.get("representative") or "") for g in groups},
+            library,
+            version,
+            ecosystem,
+            limit=4,
+            include_ambiguous=include_ambiguous,
+        )
+    except Exception:  # noqa: BLE001 -- siblings are advisory for prompts
+        siblings_by_api = {}
     entity_rows = conn.execute(
         "SELECT qualified_name FROM api_entities WHERE version_id=?", (version_id,)
     ).fetchall()
@@ -1296,18 +1214,7 @@ async def induce_cluster_labels(
             group.get("representative") or (members[0] if members else "")
         )
         siblings: list[str] = []
-        try:
-            sibling_rows = reader.related_apis(
-                representative,
-                library,
-                version,
-                ecosystem,
-                limit=4,
-                include_ambiguous=include_ambiguous,
-            )
-        except Exception:  # noqa: BLE001 -- siblings are advisory for prompts
-            sibling_rows = []
-        for rel in sibling_rows:
+        for rel in siblings_by_api.get(representative, []):
             text = str(rel.get("api") or "")
             if text and text not in siblings and text not in members:
                 siblings.append(text)

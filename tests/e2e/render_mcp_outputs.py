@@ -160,12 +160,7 @@ def seed_review_db(
     """Seed deterministic docs, source, registry, and governance rows for rendering."""
     from libref.chunking import Chunk
     from libref.services.code.mining_read import MiningReadService
-    from libref.services.code.mining_refresh import (
-        induce_labels,
-        mine_patterns,
-        refresh_clusters,
-        refresh_feature_tree,
-    )
+    from libref.services.code.mining_refresh import induce_labels, mine_patterns
     from libref.services.infra.jobs import JobManager
     from libref.services.registry.libraries import LibraryService
     from libref.services.registry.resolver import write_cache
@@ -222,26 +217,9 @@ def seed_review_db(
         conn,
         "demo",
         "0.1",
-        minsup=1,
-        minlen=1,
+        minsup=2,
+        minlen=2,
         profile="implementation",
-    )
-    from libref.services.code.usage_sources import resolve_profile
-
-    profile = resolve_profile(conn, version_id=demo_version_id, name="implementation")
-    refresh_feature_tree(
-        conn,
-        demo_id,
-        demo_version_id,
-        profile_id=int(profile["id"]),
-        source_ids=profile["source_ids"],
-    )
-    refresh_clusters(
-        conn,
-        demo_id,
-        demo_version_id,
-        profile_id=int(profile["id"]),
-        source_ids=profile["source_ids"],
     )
     asyncio.run(
         induce_labels(

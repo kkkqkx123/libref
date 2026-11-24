@@ -46,6 +46,7 @@ _PRESERVE_TAGS = (
     "br",
     "hr",
 )
+_RICH_TAGS = frozenset({"img", "pre", "code", "table"})
 # Suspected client-side rendering markers: static fetch yields no content and a hit counts as a skip, not a failure
 _JS_MARKERS = (
     'id="root"',
@@ -566,6 +567,17 @@ def _densest_container(tree: HTMLParser):
     return best
 
 
+def _has_rich_subtree(node) -> bool:
+    """Check one subtree for content that keeps otherwise empty ancestors."""
+    stack = list(_element_children(node))
+    while stack:
+        child = stack.pop()
+        if str(child.tag or "").lower() in _RICH_TAGS:
+            return True
+        stack.extend(_element_children(child))
+    return False
+
+
 def _prune_empty_nodes(root) -> None:
     """Two-pass pruning: collect empty leaf nodes first, then delete them together, avoiding skipped nodes from structural changes during traversal."""
     doomed = []
@@ -577,11 +589,7 @@ def _prune_empty_nodes(root) -> None:
             continue
         if node.text(strip=True):
             continue
-        try:
-            rich = bool(node.css("img,pre,code,table"))
-        except Exception:  # noqa: BLE001 — selector failure counts as no rich content
-            rich = False
-        if rich:
+        if _has_rich_subtree(node):
             continue
         if not _element_children(node):
             doomed.append(node)

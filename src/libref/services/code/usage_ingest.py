@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Iterable
+from typing import Any
 
 from libref.astminer.code_blocks import dedupe_snippets, suffix_for_language
 from libref.astminer.config import config_for_suffix
@@ -21,15 +22,35 @@ def doc_source_key(version_id: int, url: str) -> str:
 
 
 def target_declarations(
-    conn, version_id: int, *, entity_version_id: int | None = None
+    conn,
+    version_id: int,
+    *,
+    entity_version_id: int | None = None,
+    names: set[str] | list[str] | tuple[str, ...] | None = None,
+    prefixes: tuple[str, ...] | list[str] | None = None,
 ) -> list[ApiDeclRecord]:
-    """Load target API facts; usage sources never define the target surface."""
-    rows = conn.execute(
+    """Load target API facts narrowed to names or prefixes when supplied."""
+    sql = (
         "SELECT qualified_name, kind, file, line_start, line_end, params,"
         " param_types, return_type, bases, parent, signature, has_doc"
-        " FROM api_entities WHERE version_id=?",
-        (int(entity_version_id or version_id),),
-    ).fetchall()
+        " FROM api_entities WHERE version_id=?"
+    )
+    params: list[Any] = [int(entity_version_id or version_id)]
+    wanted = sorted({str(name) for name in (names or []) if str(name).strip()})
+    heads = tuple(str(value) for value in (prefixes or ()) if str(value).strip())
+    if wanted:
+        marks = ",".join("?" for _ in wanted)
+        sql += f" AND qualified_name IN ({marks})"
+        params.extend(wanted)
+    elif heads:
+        escaped = [
+            head.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            for head in heads
+        ]
+        predicate = "qualified_name LIKE ? ESCAPE '\\'"
+        sql += " AND (" + " OR ".join([predicate] * len(escaped)) + ")"
+        params.extend(escaped)
+    rows = conn.execute(sql, tuple(params)).fetchall()
     out: list[ApiDeclRecord] = []
     for row in rows:
         out.append(
@@ -131,25 +152,24 @@ def ingest_snippets(
     entity_version_id = catalog.entity_source_version_id(
         version_id, tenant_id=tenant_id
     )
+    filt = target_filter or {}
+    explicit_names = {str(v) for v in filt.get("names", []) if str(v).strip()}
+    prefixes = tuple(str(v) for v in filt.get("prefixes", []) if str(v).strip())
     target_decls = target_declarations(
-        conn, version_id, entity_version_id=entity_version_id
+        conn,
+        version_id,
+        entity_version_id=entity_version_id,
+        names=explicit_names or None,
+        prefixes=None if explicit_names else prefixes,
     )
     target_names = {decl.qualified_name for decl in target_decls}
-    filt = target_filter or {}
     source_status = source_target_status(
         source_role,
         filt.get("declared_library_version"),
         version,
         version_required=bool(filt.get("version_required")),
     )
-    explicit_names = {str(v) for v in filt.get("names", []) if str(v).strip()}
-    prefixes = tuple(str(v) for v in filt.get("prefixes", []) if str(v).strip())
-    if explicit_names:
-        effective_names = explicit_names
-    elif prefixes:
-        effective_names = {name for name in target_names if name.startswith(prefixes)}
-    else:
-        effective_names = target_names
+    effective_names = explicit_names or target_names
     wanted: set[str] = set()
     calls = 0
     parsed = 0

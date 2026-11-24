@@ -124,8 +124,8 @@ def test_insight_rows_with_data(tmp_path, monkeypatch) -> None:
             conn.execute(
                 "INSERT INTO call_instances(call_uid, callee_name, args, repo,"
                 " caller_file, line_start, line_end, confidence, library_id, version_id,"
-                " source_id, sample_id, in_target_api)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " source_id, sample_id, scope, in_target_api)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     uid,
                     callee,
@@ -139,6 +139,7 @@ def test_insight_rows_with_data(tmp_path, monkeypatch) -> None:
                     1,
                     source_id,
                     "src/a.py::f",
+                    "src/a.py\0f",
                     1,
                 ),
             )

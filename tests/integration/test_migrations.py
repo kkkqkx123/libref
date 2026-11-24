@@ -66,3 +66,10 @@ def test_failed_migration_rolls_back(tmp_path, monkeypatch) -> None:
     assert applied_versions(c) == {x.version for x in m.MIGRATIONS} - {bad_version}
     assert "broken" not in _user_tables(c)
     c.close()
+
+
+def test_call_scope_column_is_persisted(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(call_instances)")}
+    assert "scope" in columns
+    indexes = {row[1] for row in conn.execute("PRAGMA index_list(call_instances)")}
+    assert "idx_call_instances_scope_key" in indexes

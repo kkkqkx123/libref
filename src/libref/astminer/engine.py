@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import bisect
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -74,6 +75,13 @@ def _compiled_queries(cfg: LanguageConfig) -> dict[str, Query]:
     }
     _compiled[key] = compiled
     return compiled
+
+
+def warm_configs(configs: Iterable[LanguageConfig]) -> None:
+    """Prepare parsers and queries for the languages a worker task actually uses."""
+    for cfg in configs:
+        get_parser(cfg)
+        _compiled_queries(cfg)
 
 
 def node_text(node, source: bytes) -> str:

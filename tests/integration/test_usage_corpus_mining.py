@@ -7,9 +7,9 @@ import pytest
 from libref.astminer.code_blocks import fenced_blocks, rust_doc_blocks
 from libref.astminer.models import CodeSnippet
 from libref.services.code.code_ingest import index_repo
-from libref.services.code.mining_refresh import mine_patterns
+from libref.services.code.mining_refresh import _load_kept_calls, mine_patterns
 from libref.services.code.usage_ingest import ingest_snippets
-from tests.conftest import copy_mini_repo
+from tests.conftest import copy_mini_repo, index_symbol_repo
 
 pytestmark = pytest.mark.integration
 
@@ -174,17 +174,24 @@ def test_macro_calls_need_explicit_relation_filter(conn):
     macro = {name: (kind, conf) for name, kind, conf in rows if kind == "macro"}
     assert "rte_eth_rx_burst" in macro
     assert all(conf != "EXTRACTED" for _kind, conf in macro.values())
-    default = mine_patterns(conn, "demo", "0.1", minsup=1, include_ambiguous=True)
-    assert all("rte_wrap" not in pattern for pattern in [r["pattern"] for r in default])
-    included = mine_patterns(
-        conn,
-        "demo",
-        "0.1",
-        minsup=1,
-        include_ambiguous=True,
-        relation_kinds=["direct", "macro"],
+    from libref.services.code.usage_sources import resolve_profile
+    from libref.services.registry.libraries import LibraryService
+
+    version_id = LibraryService(conn).ensure_library_version("demo", "0.1")[1]
+    sources = resolve_profile(conn, version_id=version_id, name="usage")["source_ids"]
+    default = _load_kept_calls(
+        conn, version_id, include_ambiguous=True, source_ids=sources
     )
-    assert any("rte_wrap" in r["pattern"] for r in included)
+    assert all(str(row[0]) != "rte_wrap" for row in default)
+    included = _load_kept_calls(
+        conn,
+        version_id,
+        include_ambiguous=True,
+        source_ids=sources,
+        relation_kinds=["direct", "macro"],
+        macro_policy="review_only",
+    )
+    assert any(str(row[0]) == "rte_wrap" for row in included)
 
 
 def test_snippet_evidence_points_back_to_host(conn):
@@ -526,3 +533,47 @@ def test_usage_source_resolves_against_persisted_target_declarations(conn, tmp_p
     assert row[0] == "d.helper"
     assert row[1] != "unresolved"
     assert row[2] == "resolved_target"
+
+
+def test_target_declarations_push_down_prefixes_and_names(conn, tmp_path):
+    from libref.services.code.usage_ingest import target_declarations
+    from libref.services.registry.libraries import LibraryService
+
+    index_symbol_repo(conn, tmp_path)
+    version_id = LibraryService(conn).ensure_library_version("demo", "0.1")[1]
+    full = target_declarations(conn, version_id)
+    by_prefix = target_declarations(conn, version_id, prefixes=("pkg.core.",))
+    by_name = target_declarations(conn, version_id, names={"pkg.core.Service.create"})
+    assert {item.qualified_name for item in by_prefix} == {
+        item.qualified_name
+        for item in full
+        if item.qualified_name.startswith("pkg.core.")
+    }
+    assert [item.qualified_name for item in by_name] == ["pkg.core.Service.create"]
+    captured: list[str] = []
+    conn.set_trace_callback(captured.append)
+    try:
+        target_declarations(conn, version_id, prefixes=("pkg.core.",))
+    finally:
+        conn.set_trace_callback(None)
+    assert any("LIKE" in sql and "ESCAPE" in sql for sql in captured)
+
+
+def test_usage_repo_skips_code_search_index(conn, tmp_path):
+    repo = copy_mini_repo(tmp_path)
+    index_repo(conn, "demo", "0.1", str(repo), repos_dir=tmp_path / "repos")
+    counts = index_repo(
+        conn,
+        "demo",
+        "0.1",
+        str(repo),
+        repos_dir=tmp_path / "repos-usage",
+        source_role="reference_project",
+        target_filter={"prefixes": ["np."]},
+    )
+    assert counts["calls"] >= 2
+    assert counts["source_chunks"] == 0
+    assert counts["vector_failed"] == 0
+    assert not conn.execute(
+        "SELECT 1 FROM documents WHERE metadata LIKE '%reference_project%' LIMIT 1"
+    ).fetchall()
