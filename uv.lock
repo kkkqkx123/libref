@@ -9,6 +9,7 @@ resolution-markers = [
 [manifest]
 members = [
     "libref",
+    "librefctl",
     "tree-sitter-groovy",
     "tree-sitter-kotlin",
 ]
@@ -685,6 +686,7 @@ postgres = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "librefctl" },
     { name = "mypy" },
     { name = "numpy" },
     { name = "pytest" },
@@ -728,12 +730,24 @@ provides-extras = ["browser", "postgres"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "librefctl", editable = "packages/librefctl" },
     { name = "mypy", specifier = ">=1.11" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "pytest", specifier = ">=8" },
     { name = "ruff", specifier = ">=0.17,<0.18" },
     { name = "types-jsonschema", specifier = ">=4.26.0.20261006" },
 ]
+
+[[package]]
+name = "librefctl"
+version = "0.1.0"
+source = { editable = "packages/librefctl" }
+dependencies = [
+    { name = "httpx" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "httpx", specifier = ">=0.27" }]
 
 [[package]]
 name = "librt"

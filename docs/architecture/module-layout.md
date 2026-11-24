@@ -136,7 +136,7 @@ libref/
 │   ├── mcp_server/             # ── MCP 出口 ──
 │   │   ├── __init__.py
 │   │   ├── server.py           # [P1] FastMCP 实例与工具注册（只调 services/）
-│   │   └── auth.py             # [P3] HTTP 传输令牌鉴权
+│   │   └── contract.py         # MCP 参数与错误信封
 │   │
 │   ├── web/                    # ── Web 出口 ──
 │   │   ├── __init__.py
@@ -145,14 +145,16 @@ libref/
 │   ├── text/                   # 文本归一与片段构造（分块预算、BM25、引用片段）
 │   ├── observe.py              # 日志装配
 │   │
-│   └── cli/                    # [P1] argparse 入口包（只调 services/）
-│       ├── parsers.py          # 参数定义
-│       ├── common.py           # 设置/连接/范围装配
-│       ├── docs_commands.py    # 文档命令
-│       ├── code_commands.py    # 源码命令
-│       ├── registry_commands.py # 注册表与发现命令
-│       ├── request_commands.py # 索引申请命令（本地与远端同一路径）
-│       └── ops_commands.py     # 运维命令
+│   └── cli/                    # 服务端本机运维入口（只调 services/）
+│       ├── parsers.py          # 启动与运维参数定义
+│       ├── common.py           # 设置/连接/错误装配
+│       └── ops_commands.py     # 启动、迁移、维护、角色与本机任务
+├── packages/                   # 独立发行的调用方工具
+│   └── librefctl/              # HTTP-only CLI 客户端（只依赖 httpx）
+│       ├── commands.py         # 命令表与远端路由映射
+│       ├── transport.py        # 单一 HTTP 传输与错误适配
+│       ├── output.py           # 单一 JSON 输出封装
+│       └── app.py              # 参数解析、分发与等待
 ├── webui/                      # [P3] 前端独立工程（npm/Vite + Vue 3 + Element Plus，不进 pyproject）
 └── tests/
     ├── conftest.py
@@ -176,10 +178,12 @@ chunking ├→ db ←─ store ←─ services ←─ {cli, mcp_server, web}
 astminer ┘   ↑       ↑
 mining ──────┘       llm（传输叶，只依赖 httpx；store 经函数注入消费，services 经构造器装配）
               └→ 向量后端（store/vec_store 唯一触达点：Qdrant 服务或本地 simvec 引擎）
+
+librefctl ──HTTP──→ web ──→ services
 ```
 
-1. **单向依赖**：`db` 是唯一被共享的 SQL 底层；`services/` 是唯一编排层；三个出口模块（`cli/mcp_server/web`）**禁止**绕过 services 直接调 store/crawler/mining。
-2. **出口模块零业务逻辑**：MCP 工具函数、FastAPI 路由、CLI 命令只做参数解析 + services 调用 + 结果格式化，保证人机行为一致（docs-mcp-server 模式）。
+1. **单向依赖**：`db` 是唯一被共享的 SQL 底层；`services/` 是唯一编排层；服务端三个出口模块（`cli/mcp_server/web`）**禁止**绕过 services 直接调 store/crawler/mining。
+2. **出口模块零业务逻辑**：MCP 工具函数、FastAPI 路由、本机 CLI 命令只做参数解析 + services 调用 + 结果格式化，保证人机行为一致（docs-mcp-server 模式）。`librefctl` 是调用方出口，只经 HTTP 调 Web API，不导入 `libref` 包。
 3. **mining 纯内存算法**：不 import db/store，输入为纯 Python 数据（`list[list[int]]`），落库由 services 编排——保持算法可单测、可离线批跑。
 4. **astminer 与 crawler 互不依赖**：两条分支仅通过 db 汇合；SourceCode 类网页由 crawler 按 MIME 转投 astminer 的调用点经 services 编排。
 5. **跨包边界的 schema 均为 pydantic 模型**：抽取记录、调用实例、MCP 参数、REST 响应共用 `db/schema` 的定义派生，杜绝字段漂移。

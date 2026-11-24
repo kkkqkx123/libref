@@ -8,7 +8,7 @@
 
 | 阶段 | 基础镜像 | 主要输入 | 产物 |
 |---|---|---|---|
-| `builder` | `ghcr.io/astral-sh/uv:python3.14-bookworm-slim` | `src/`、`vendor/`、`pyproject.toml`、`uv.lock` | `/app/.venv` |
+| `builder` | `ghcr.io/astral-sh/uv:python3.14-bookworm-slim` | `src/`、`vendor/`、`packages/`、`pyproject.toml`、`uv.lock` | `/app/.venv` |
 | `frontend` | `node:22-bookworm-slim` | `webui/` | `/webui/dist` |
 | `simvec` | `rust:1-bookworm` | `crates/` | `/usr/local/lib/libsimvec.so` |
 | `runtime` | `python:3.14-slim-bookworm` | 以上三阶段产物 | 可运行镜像 |

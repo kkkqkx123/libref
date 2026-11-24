@@ -43,12 +43,13 @@ libref/
 │   ├── services/             # 业务工具层（MCP/Web/CLI 三出口共用）
 │   ├── mcp_server/           # MCP 工具定义与传输
 │   ├── web/                  # FastAPI 路由
-│   └── cli.py
+│   └── cli/                  # 服务端本机启动与运维
+├── packages/librefctl/       # 独立发行的 HTTP-only 客户端
 ├── webui/                    # 前端独立工程（npm，不进 pyproject）
 └── tests/
 ```
 
-三出口（CLI / MCP / Web）**只调 `services/` 一层**——照搬 docs-mcp-server 的"业务工具类共用"模式，保证人机查询结果一致。
+服务端三出口（本机 CLI / MCP / Web）**只调 `services/` 一层**——照搬 docs-mcp-server 的"业务工具类共用"模式，保证人机查询结果一致。`librefctl` 是调用方出口，只经 HTTP 调 Web API。
 
 ---
 

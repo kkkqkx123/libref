@@ -193,7 +193,7 @@
 | material_limit | 整数（≥1） | 1500 | LIBREF_MATERIAL_LIMIT | 单材料上限 |
 | answer_total_budget | 整数（≥1） | 6000 | LIBREF_ANSWER_TOTAL_BUDGET | 回答材料总预算（硬上限），按排序分配，超出部分整条丢弃并以省略标记告知模型 |
 
-## 服务暴露（[mcp]、[mcp.auth]、[auth]、[client]、[web]）
+## 服务暴露（[mcp]、[mcp.auth]、[auth]、[web]）
 
 | 字段 | 类型 | 默认 | 环境变量 | 影响 |
 |---|---|---|---|---|
@@ -209,8 +209,6 @@
 | bootstrap_admin_key | 密钥/空 | 空 | LIBREF_BOOTSTRAP_ADMIN_KEY | 首次引导平台管理员，明文不落文件 |
 | api_key_default_ttl_hours | 正数 | 168 | LIBREF_API_KEY_DEFAULT_TTL_HOURS | 未指定过期时间的 Key 默认有效期 |
 | api_key_max_ttl_hours | 正数 | 8760 | LIBREF_API_KEY_MAX_TTL_HOURS | Key 最大有效期，默认有效期不得超过此值 |
-| base_url | 字符串/空 | 空 | LIBREF_BASE_URL | 远程模式服务端地址 |
-| client_api_key | 密钥/空 | 空 | LIBREF_CLIENT_API_KEY | 远程模式 Bearer Key，只走环境 |
 | instance_id | 字符串 | libref-1 | LIBREF_INSTANCE_ID | DB 认领与版本锁的进程标识 |
 | web_host | 字符串 | 127.0.0.1 | LIBREF_WEB_HOST | Web 监听地址 |
 | web_port | 整数（1–65535） | 8001 | LIBREF_WEB_PORT | Web 监听端口 |

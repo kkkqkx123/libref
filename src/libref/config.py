@@ -272,10 +272,8 @@ class LibrefSettings(BaseSettings):
     auth_mode: Literal["dev", "enforced"] = "enforced"
     dev_principal: str = "dev-operator"
     bootstrap_admin_key: str | None = None
-    client_api_key: str | None = None
     api_key_default_ttl_hours: float = Field(default=168.0, gt=0)
     api_key_max_ttl_hours: float = Field(default=8760.0, gt=0)
-    base_url: str | None = None
     allowed_hosts: Annotated[
         list[str] | None, NoDecode, BeforeValidator(_split_tool_names)
     ] = None
@@ -419,7 +417,6 @@ SECRET_FIELDS = frozenset(
         "chat_api_key",
         "discovery_github_token",
         "bootstrap_admin_key",
-        "client_api_key",
         "postgres_url",
         "qdrant_api_key",
     }
@@ -650,7 +647,6 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "quota_index_requests_per_hour",
         }
     ),
-    "client": frozenset({"base_url", "client_api_key"}),
     "web": frozenset({"web_host", "web_port", "web_spa_enabled", "web_spa_dir"}),
     "retention": frozenset(
         {

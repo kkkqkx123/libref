@@ -1,4 +1,4 @@
-"""Command-line exit: only argument parsing plus service calls plus result printing."""
+"""Server-local command-line exit: startup and maintenance only."""
 
 from __future__ import annotations
 

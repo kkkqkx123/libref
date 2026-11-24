@@ -30,6 +30,81 @@ def cmd_init_db(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_smoke(args: argparse.Namespace) -> int:
+    """Exercise the ingest chain against a temporary local site."""
+    import threading
+    from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+
+    from libref.services.docs.ingest import IngestService
+
+    pages = {
+        "/sitemap.xml": (
+            (
+                '<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                "<url><loc>PLACE/a.html</loc></url><url><loc>PLACE/b.md</loc></url></urlset>"
+            ),
+            "application/xml",
+        ),
+        "/a.html": (
+            (
+                "<html><head><title>A</title></head><body><main><h1>Guide</h1>"
+                "<p>smoke install libref here</p></main></body></html>"
+            ),
+            "text/html",
+        ),
+        "/b.md": ("# Guide\n\nsmoke markdown body\n", "text/markdown"),
+    }
+
+    class Handler(SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            body, ctype = pages.get(self.path, (None, None))
+            if body is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            data = body.replace(
+                "PLACE", f"http://127.0.0.1:{self.server.server_port}"
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def do_HEAD(self):
+            body, ctype = pages.get(self.path, (None, None))
+            if body is None:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.end_headers()
+
+    settings = _load_settings(args)
+    conn = _connect(settings)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        counts = IngestService(settings, conn).scrape_docs(
+            "smoke", "1.0", f"{base}/sitemap.xml"
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        conn.close()
+    for outcome, n in counts.items():
+        print(f"{outcome}: {n}")
+    ok = counts.get("stored", 0) >= 1
+    print("smoke: ok" if ok else "smoke: empty")
+    return 0 if ok else 1
+
+
 def cmd_reembed(args: argparse.Namespace) -> int:
     settings = _load_settings(args)
     conn = _connect(settings)
@@ -170,62 +245,10 @@ def cmd_review(args: argparse.Namespace) -> int:
     return 0
 
 
-def _remote_job_show(args: argparse.Namespace, settings) -> int:
-    import json as _json2
-
-    import httpx as _httpx2
-
-    from libref.cli.remote import auth_headers as _ah2
-    from libref.cli.remote import base_url_for as _buf2
-
-    base = _buf2(args, settings)
-    try:
-        with _httpx2.Client(timeout=30.0) as _c:
-            if getattr(args, "job_id", None) is not None and not getattr(
-                args, "list", False
-            ):
-                _r = _c.get(f"{base}/jobs/{int(args.job_id)}", headers=_ah2(settings))
-                _r.raise_for_status()
-                out = _r.json()
-                if "error" in out and "id" not in out:
-                    import sys as _sys
-
-                    print(f"(unknown job: {args.job_id})", file=_sys.stderr)
-                    return 1
-                print(
-                    f"job {out.get('id')} {out.get('status')}"
-                    + (f" error={out.get('error')}" if out.get("error") else "")
-                )
-                if out.get("result"):
-                    print(
-                        f"result: {_json2.dumps(out.get('result'), ensure_ascii=False)[:2000]}"
-                    )
-                return 0
-            _r = _c.get(
-                f"{base}/jobs",
-                params={"limit": int(getattr(args, "limit", 20) or 20)},
-                headers=_ah2(settings),
-            )
-            _r.raise_for_status()
-            out = _r.json()
-            for job in out.get("jobs") or []:
-                print(
-                    f"{job.get('id')} {job.get('kind')} {job.get('status')} {job.get('finished_at') or ''}"
-                )
-            return 0
-    except Exception as exc:
-        raise as_error(exc) from exc
-
-
 def cmd_job_show(args: argparse.Namespace) -> int:
     import json as _json
 
-    _st2 = _load_settings(args)
-    from libref.cli.remote import is_remote as _is_remote2
-
-    if _is_remote2(args, _st2):
-        return _remote_job_show(args, _st2)
-    conn = _connect(_st2)
+    conn = _connect(_load_settings(args))
     try:
         mgr = JobManager(conn)
         if getattr(args, "list", False) or getattr(args, "job_id", None) is None:
@@ -704,36 +727,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
             pass
 
 
-def _remote_job_cancel(args: argparse.Namespace, settings) -> int:
-    import httpx as _httpx3
-
-    from libref.cli.remote import auth_headers as _ah3
-    from libref.cli.remote import base_url_for as _buf3
-
-    base = _buf3(args, settings)
-    try:
-        with _httpx3.Client(timeout=30.0) as _c:
-            _r = _c.post(
-                f"{base}/jobs/{int(args.job_id)}/cancel", headers=_ah3(settings)
-            )
-            _r.raise_for_status()
-    except Exception as exc:
-        raise as_error(exc) from exc
-    print("ok")
-    return 0
-
-
 def cmd_job_cancel(args: argparse.Namespace) -> int:
     import sys as _sys4
 
-    _st3 = _load_settings(args)
-    from libref.cli.remote import is_remote as _is_remote3
-
-    if _is_remote3(args, _st3):
-        return _remote_job_cancel(args, _st3)
     from libref.services.infra.jobs import JobManager as _JM
 
-    conn = _connect(_st3)
+    conn = _connect(_load_settings(args))
     try:
         try:
             _JM(conn).cancel(int(args.job_id))

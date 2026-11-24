@@ -170,7 +170,7 @@ def next_actions_for(
 
     query = (name or "").strip()
     scoped = ecosystem in SUPPORTED_ECOSYSTEMS
-    discover_cli = f'libref discover "{query}"'
+    discover_cli = f'librefctl discover "{query}"'
     arguments: dict = {"query": query}
     if scoped:
         discover_cli += f" --ecosystem {ecosystem}"
@@ -200,7 +200,7 @@ def next_actions_for(
             {
                 "kind": "tool",
                 "mcp_tool": "github_search",
-                "cli": f'libref search-github "{query}"',
+                "cli": f'librefctl search-github "{query}"',
                 "arguments": {"query": query},
                 "purpose": "hosted search for clonable repositories; results are unverified, confirm then use an explicit source",
             }
@@ -209,9 +209,8 @@ def next_actions_for(
             {
                 "kind": "manual",
                 "detail": f"search the web for the official source repository of {query} "
-                "(or run libref search-github / MCP github_search), "
-                "then rerun with an explicit source "
-                "(libref index-repo <library> <version> <url-or-local-path>), "
+                "(or run librefctl search-github / MCP github_search), "
+                "then submit a remote source with librefctl request submit --kind repo, "
                 "or add a repo_url entry to the registry overrides file",
             }
         )
@@ -220,7 +219,7 @@ def next_actions_for(
             {
                 "kind": "tool",
                 "mcp_tool": "web_search",
-                "cli": f'libref search-web "{query}"',
+                "cli": f'librefctl search-web "{query}"',
                 "arguments": {"query": query},
                 "purpose": "keyless web search for docs or repos; results are unverified, confirm then use an explicit address",
             }
@@ -229,9 +228,8 @@ def next_actions_for(
             {
                 "kind": "manual",
                 "detail": f"search the web for the official documentation of {query} "
-                "(or run libref search-web / MCP web_search), "
-                "then rerun with an explicit address "
-                "(libref ingest <library> <version> <url>), "
+                "(or run librefctl search-web / MCP web_search), "
+                "then submit the address with librefctl request submit --kind docs, "
                 "or add a docs_url entry to the registry overrides file",
             }
         )

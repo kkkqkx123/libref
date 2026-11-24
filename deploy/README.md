@@ -38,7 +38,7 @@ cp deploy/libref.toml.example libref.toml
 
 1. 复制 `env.prod.example` 为 `.env`，设置 `LIBREF_AUTH_MODE=enforced`。
 2. 首次启动前用 `openssl rand -hex 32` 生成 `LIBREF_BOOTSTRAP_ADMIN_KEY`；服务启动时幂等创建首个平台管理员主体与其 API Key，解决「空库无管理员」的死锁。之后凭据签发/吊销全部走 `POST /admin/keys`。
-3. 把签发给 CLI 或外部 AI 助手的 Key 填入 `LIBREF_CLIENT_API_KEY`，`LIBREF_BASE_URL` 指向服务地址；CLI 用 `--remote` 时每个请求带 `Authorization: Bearer <key>`。
+3. 把签发给 `librefctl` 或外部 AI 助手的 Key 填入调用方环境的 `LIBREF_CLIENT_API_KEY`，`LIBREF_BASE_URL` 指向服务地址；`librefctl` 每个请求带 `Authorization: Bearer <key>`。
 4. 非回环部署必须设置 `LIBREF_ALLOWED_HOSTS` / `LIBREF_ALLOWED_ORIGINS`。前者供 MCP 传输层做 DNS rebinding 保护；后者同时用于鉴权来源精确匹配与 CORS，禁止通配符和带路径的来源。浏览器客户端还需放行 `Mcp-*` 请求头并暴露 `Mcp-Session-Id`。
 5. 外部流量经反向代理终止 TLS，服务本身只绑回环或私有网络。
 

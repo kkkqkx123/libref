@@ -11,7 +11,7 @@
 | 鉴权模式 | `[auth] auth_mode` / `LIBREF_AUTH_MODE` | `enforced` | `enforced` 下每个非公开请求必须带 Bearer API Key；`dev` 必须显式开启且只许回环监听 |
 | 开发主体名 | `[auth] dev_principal` / `LIBREF_DEV_PRINCIPAL` | `dev-operator` | `dev` 模式下注入的固定平台主体，不校验 Key |
 | 引导 Key | `[auth] bootstrap_admin_key` / `LIBREF_BOOTSTRAP_ADMIN_KEY` | 空 | 仅环境变量；首次启动创建平台管理员，之后按已有主体校验 |
-| 客户端 Key | `[client] client_api_key` / `LIBREF_CLIENT_API_KEY` | 空 | CLI `--remote` 的 Bearer 凭据，仅环境变量 |
+| 客户端 Key | `LIBREF_CLIENT_API_KEY` | 空 | `librefctl` 的 Bearer 凭据，仅环境变量；不再属于服务端配置 |
 | Key 默认有效期 | `[auth] api_key_default_ttl_hours` | 168 小时 | 签发时不指定过期时间则套用 |
 | Key 最大有效期 | `[auth] api_key_max_ttl_hours` | 8760 小时 | 过期时间不得超过该上限；默认有效期也不得超过上限 |
 | 允许来源 | `[auth] allowed_origins` / `LIBREF_ALLOWED_ORIGINS` | 空 | 浏览器 Origin 精确匹配；禁止 `*`、`path`、`query`，无 Origin 的非浏览器请求放行 |

@@ -37,7 +37,7 @@
 ## 常用操作
 
 - 初始化：`libref init-db`。
-- 抓取与索引：`libref ingest`、`libref index-repo`，异步形态经任务队列执行。
+- 抓取与索引：调用方用 `librefctl ingest-docs` 提交抓取，用 `librefctl request submit --kind repo|docs` 提交索引申请；异步作业经任务队列执行，服务端本机只做运维。
 - 重灌向量：`libref reembed`，对账语义为版本内向量点数等于文档表计数（全文小块除外）。
 - 审核：`libref review list|approve|conflict|reopen`，非法转移拒绝。
 - 删除与清理：`libref purge` 整版删除并记日志，`libref deletions --prune` 按保留期清理。

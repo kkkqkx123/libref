@@ -1,33 +1,10 @@
-"""Argument parsing for every subcommand."""
+"""Argument parser for the server-local operations CLI."""
 
 from __future__ import annotations
 
 import argparse
 
-from libref.cli.code_commands import (
-    cmd_api_insight,
-    cmd_call_insight,
-    cmd_import_insight,
-    cmd_index_repo,
-    cmd_induce_labels,
-    cmd_mine,
-    cmd_mining_health,
-    cmd_pattern_insight,
-    cmd_repo_deps,
-    cmd_symbol_insight,
-)
 from libref.cli.common import _config_parent
-from libref.cli.docs_commands import (
-    cmd_answer,
-    cmd_doc_features,
-    cmd_doc_insight,
-    cmd_dump_chunks,
-    cmd_ingest,
-    cmd_read,
-    cmd_refresh,
-    cmd_search,
-    cmd_smoke,
-)
 from libref.cli.ops_commands import (
     cmd_config_show,
     cmd_deletions,
@@ -44,24 +21,16 @@ from libref.cli.ops_commands import (
     cmd_role_split,
     cmd_serve,
     cmd_serve_mcp,
+    cmd_smoke,
     cmd_vectors_optimize,
     cmd_vectors_status,
 )
-from libref.cli.registry_commands import (
-    cmd_catalog,
-    cmd_discover,
-    cmd_resolve,
-    cmd_search_github,
-    cmd_search_web,
-)
-from libref.cli.request_commands import cmd_request
-from libref.crawler.registry import REGISTRY_MIRRORS
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="libref",
-        description="libref documentation knowledge base",
+        description="libref server startup and local maintenance",
         parents=[_config_parent],
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -72,363 +41,28 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[_config_parent],
     ).set_defaults(func=cmd_init_db)
 
-    p_ingest = sub.add_parser(
-        "ingest",
-        help="Crawl a documentation site and store it",
-        parents=[_config_parent],
-    )
-    p_ingest.add_argument(
-        "library",
-        nargs="?",
-        help="Library name in explicit form, package name in resolved form",
-    )
-    p_ingest.add_argument(
-        "version",
-        nargs="?",
-        default=None,
-        help="Required in explicit form; defaults to the stable version in resolved form",
-    )
-    p_ingest.add_argument(
-        "start_url",
-        nargs="?",
-        default=None,
-        help="Required in explicit form; mutually exclusive with --ecosystem",
-    )
-    p_ingest.add_argument(
-        "--ecosystem",
-        default=None,
-        help="Resolve by name: pypi|npm|maven|go|crates|nuget; Java coordinates look like group:artifact",
-    )
-    p_ingest.add_argument(
-        "--include-prerelease",
-        action="store_true",
-        help="Resolve to the newest version including prereleases",
-    )
-    p_ingest.add_argument(
-        "--offline",
-        action="store_true",
-        help="Read cache only; do not touch the network",
-    )
-    p_ingest.add_argument(
-        "--registry-mirror",
-        default=None,
-        help=f"Registry mirror preset ({', '.join(sorted(REGISTRY_MIRRORS))}); defaults to the config value",
-    )
-    p_ingest.add_argument("--max-pages", type=int, default=None)
-    p_ingest.add_argument(
-        "--url",
-        action="append",
-        default=None,
-        help="Explicit single-page target; repeatable, still scope-filtered",
-    )
-    p_ingest.add_argument(
-        "--fresh",
-        action="store_true",
-        help="Discard the resume cursor and run the full target list",
-    )
-    p_ingest.add_argument(
-        "--prefilter",
-        action="store_true",
-        help="Prefilter URLs with a liveness HEAD check",
-    )
-    p_ingest.add_argument(
-        "--async",
-        dest="run_async",
-        action="store_true",
-        help="Run via the jobs queue (submit -> in-process worker consumes -> results written back to the jobs table)",
-    )
-    p_ingest.add_argument(
-        "--allow-cross-site", action="store_true", help="Allow crawling across sites"
-    )
-    p_ingest.add_argument(
-        "--allow-subdomains", action="store_true", help="Allow same-domain subdomains"
-    )
-    p_ingest.add_argument(
-        "--path-prefix",
-        action="append",
-        default=None,
-        help="Accept only paths under this prefix; repeatable",
-    )
-    p_ingest.add_argument(
-        "--path-suffix",
-        action="append",
-        default=None,
-        help="Accept only paths with this suffix; repeatable",
-    )
-    p_ingest.add_argument(
-        "--include-pattern",
-        action="append",
-        default=None,
-        help="Regex allowlist; repeatable",
-    )
-    p_ingest.add_argument(
-        "--exclude-pattern",
-        action="append",
-        default=None,
-        help="Regex denylist; repeatable",
-    )
-    p_ingest.add_argument(
-        "--max-depth",
-        type=int,
-        default=None,
-        help="Maximum depth relative to the start URL",
-    )
-    p_ingest.add_argument(
-        "--render-js",
-        action="store_true",
-        help="Fall back to the browser for pages that look JS-rendered",
-    )
-    p_ingest.add_argument(
-        "--render-wait-for",
-        default=None,
-        help="CSS selector the browser waits for before returning HTML",
-    )
-    p_ingest.add_argument("--render-timeout-ms", type=int, default=None)
-    p_ingest.add_argument(
-        "--follow-links",
-        action="store_true",
-        help="Follow in-page links breadth-first within scope budget",
-    )
-    p_ingest.add_argument(
-        "--crawl-query",
-        default=None,
-        help="Rank crawl targets by URL relevance to this query",
-    )
-    p_ingest.add_argument("--score-threshold", type=float, default=None)
-    p_ingest.add_argument(
-        "--bypass-cache",
-        action="store_true",
-        help="Skip conditional headers and refetch without cache revalidation",
-    )
-    p_ingest.set_defaults(func=cmd_ingest)
-
-    p_refresh = sub.add_parser(
-        "refresh",
-        help="Refresh a version's docs and store them",
-        parents=[_config_parent],
-    )
-    p_refresh.add_argument("library")
-    p_refresh.add_argument("version")
-    p_refresh.add_argument("start_url")
-    p_refresh.add_argument("--ecosystem", default=None)
-    p_refresh.add_argument("--max-pages", type=int, default=None)
-    p_refresh.add_argument(
-        "--url",
-        action="append",
-        default=None,
-        help="Explicit single-page target; repeatable, still scope-filtered",
-    )
-    p_refresh.add_argument(
-        "--fresh",
-        action="store_true",
-        help="Discard the resume cursor and run the full target list",
-    )
-    p_refresh.add_argument("--prefilter", action="store_true")
-    p_refresh.add_argument(
-        "--allow-cross-site", action="store_true", help="Allow crawling across sites"
-    )
-    p_refresh.add_argument(
-        "--allow-subdomains",
-        action="store_true",
-        help="Allow same-domain subdomains",
-    )
-    p_refresh.add_argument(
-        "--path-prefix",
-        action="append",
-        default=None,
-        help="Accept only paths under this prefix; repeatable",
-    )
-    p_refresh.add_argument(
-        "--path-suffix",
-        action="append",
-        default=None,
-        help="Accept only paths with this suffix; repeatable",
-    )
-    p_refresh.add_argument(
-        "--include-pattern",
-        action="append",
-        default=None,
-        help="Regex allowlist; repeatable",
-    )
-    p_refresh.add_argument(
-        "--exclude-pattern",
-        action="append",
-        default=None,
-        help="Regex denylist; repeatable",
-    )
-    p_refresh.add_argument(
-        "--max-depth",
-        type=int,
-        default=None,
-        help="Maximum depth relative to the start URL",
-    )
-    p_refresh.add_argument("--render-js", action="store_true")
-    p_refresh.add_argument("--render-wait-for", default=None)
-    p_refresh.add_argument("--render-timeout-ms", type=int, default=None)
-    p_refresh.add_argument("--follow-links", action="store_true")
-    p_refresh.add_argument("--crawl-query", default=None)
-    p_refresh.add_argument("--score-threshold", type=float, default=None)
-    p_refresh.add_argument(
-        "--bypass-cache",
-        action="store_true",
-        help="Skip conditional headers and refetch without cache revalidation",
-    )
-    p_refresh.add_argument(
-        "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
-    )
-    p_refresh.set_defaults(func=cmd_refresh)
-
     sub.add_parser(
         "smoke-local",
-        help="Local smoke test: full chain against a temporary HTTP site",
+        help="Run the local discovery-to-storage smoke test",
         parents=[_config_parent],
     ).set_defaults(func=cmd_smoke)
 
-    p_search = sub.add_parser(
-        "search", help="Preset retrieval", parents=[_config_parent]
-    )
-    p_search.add_argument("query")
-    p_search.add_argument("--library", default=None)
-    p_search.add_argument("--version", default=None)
-    p_search.add_argument("--ecosystem", default=None)
-    p_search.add_argument("--limit", type=int, default=8)
-    p_search.add_argument(
-        "--preset",
-        default="balanced",
-        choices=["precise", "balanced", "thorough"],
-        help="precise for exact full-text, balanced fused recall, thorough with window",
-    )
-    p_search.add_argument(
-        "--expand-window",
-        action="store_true",
-        help="Local debug override for the configured window switch",
-    )
-    p_search.add_argument(
-        "--window-radius",
-        type=int,
-        default=None,
-        help="Local debug override for the configured window radius",
-    )
-    p_search.add_argument("--block-type", default=None)
-    p_search.add_argument("--exclude-deprecated", action="store_true")
-    p_search.add_argument("--aligned-only", action="store_true")
-    p_search.add_argument(
-        "--suggest",
-        action="store_true",
-        help="Suggest unindexed libraries from registries when local hits are empty",
-    )
-    p_search.add_argument(
-        "--include-prerelease",
-        action="store_true",
-        help="Include prerelease versions when ranking suggestion candidates",
-    )
-    p_search.set_defaults(func=cmd_search)
-
-    p_discover = sub.add_parser(
-        "discover",
-        help="Fuzzy discovery across registries (pypi/npm/maven/go/crates/nuget; language aliases accepted)",
-        parents=[_config_parent],
-    )
-    p_discover.add_argument("query")
-    p_discover.add_argument("--ecosystem", default=None)
-    p_discover.add_argument("--limit", type=int, default=10)
-    p_discover.add_argument(
-        "--include-prerelease",
-        action="store_true",
-        help="Include prerelease versions when ranking candidates",
-    )
-    p_discover.set_defaults(func=cmd_discover)
-
-    p_search_web = sub.add_parser(
-        "search-web",
-        help="Explicit web search for library docs or repos; results are unverified",
-        parents=[_config_parent],
-    )
-    p_search_web.add_argument("query")
-    p_search_web.add_argument("--limit", type=int, default=10)
-    p_search_web.set_defaults(func=cmd_search_web)
-
-    p_search_github = sub.add_parser(
-        "search-github",
-        help="Explicit hosted search for repos; results are unverified",
-        parents=[_config_parent],
-    )
-    p_search_github.add_argument("query")
-    p_search_github.add_argument("--limit", type=int, default=10)
-    p_search_github.set_defaults(func=cmd_search_github)
-
-    p_answer = sub.add_parser(
-        "answer",
-        help="Preset retrieval plus grounded answer generation",
-        parents=[_config_parent],
-    )
-    p_answer.add_argument("query")
-    p_answer.add_argument("--library", default=None)
-    p_answer.add_argument("--version", default=None)
-    p_answer.add_argument("--ecosystem", default=None)
-    p_answer.add_argument("--limit", type=int, default=5)
-    p_answer.add_argument(
-        "--preset",
-        default="balanced",
-        choices=["precise", "balanced", "thorough"],
-        help="precise for exact full-text, balanced fused recall, thorough with window",
-    )
-    p_answer.add_argument(
-        "--expand-window",
-        action="store_true",
-        help="Local debug override for the configured window switch",
-    )
-    p_answer.add_argument(
-        "--window-radius",
-        type=int,
-        default=None,
-        help="Local debug override for the configured window radius",
-    )
-    p_answer.add_argument("--block-type", default=None)
-    p_answer.add_argument("--exclude-deprecated", action="store_true")
-    p_answer.add_argument("--aligned-only", action="store_true")
-    p_answer.add_argument(
-        "--material-limit",
-        type=int,
-        default=None,
-        help="Local debug override for the configured material limit",
-    )
-    p_answer.set_defaults(func=cmd_answer)
-
-    p_read = sub.add_parser(
-        "read", help="Read a document by URL", parents=[_config_parent]
-    )
-    p_read.add_argument("url")
-    p_read.add_argument(
-        "--mode",
-        default="page",
-        choices=["page", "window", "section"],
-        help="page for full content, window for neighbors, section for whole group",
-    )
-    p_read.add_argument("--sort-order", type=int, default=None)
-    p_read.add_argument("--radius", type=int, default=1)
-    p_read.add_argument("--source-group-id", default=None)
-    p_read.add_argument("--library", default=None)
-    p_read.add_argument("--version", default=None)
-    p_read.add_argument("--ecosystem", default=None)
-    p_read.set_defaults(func=cmd_read)
-
-    p_mcp = sub.add_parser(
+    p_serve_mcp = sub.add_parser(
         "serve-mcp",
         help="Start the MCP server over stdio",
         parents=[_config_parent],
     )
-    p_mcp.add_argument(
+    p_serve_mcp.add_argument(
         "--enabled-tools",
         default=None,
-        help="Comma-separated tool allowlist; defaults to the config value (all tools when unset)",
+        help="Comma-separated tool allowlist; defaults to the config value",
     )
-    p_mcp.add_argument(
+    p_serve_mcp.add_argument(
         "--disabled-tools",
         default=None,
         help="Comma-separated tool denylist; defaults to the config value",
     )
-    p_mcp.set_defaults(func=cmd_serve_mcp)
+    p_serve_mcp.set_defaults(func=cmd_serve_mcp)
 
     p_serve = sub.add_parser(
         "serve",
@@ -454,537 +88,57 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_serve.set_defaults(func=cmd_serve)
 
-    p_repo = sub.add_parser(
-        "index-repo",
-        help="Index a source repo and persist call instances",
-        parents=[_config_parent],
-    )
-    p_repo.add_argument(
-        "library", help="Library name in explicit form, package name in resolved form"
-    )
-    p_repo.add_argument(
-        "version",
-        nargs="?",
-        default=None,
-        help="Required in explicit form; defaults to the stable version in resolved form",
-    )
-    p_repo.add_argument(
-        "source",
-        nargs="?",
-        default=None,
-        help="Remote URL or local path in explicit form; resolved by name by default",
-    )
-    p_repo.add_argument(
-        "--ecosystem",
-        default=None,
-        help="Resolve by name: pypi|npm|maven|go|crates|nuget; mutually exclusive with source",
-    )
-    p_repo.add_argument(
-        "--include-prerelease",
-        action="store_true",
-        help="Resolve to the newest version including prereleases",
-    )
-    p_repo.add_argument(
-        "--offline",
-        action="store_true",
-        help="Read cache only; do not touch the network",
-    )
-    p_repo.add_argument(
-        "--registry-mirror",
-        default=None,
-        help="Registry mirror preset; defaults to the config value",
-    )
-    p_repo.add_argument(
-        "--update",
-        action="store_true",
-        help="Pull updates when the repo already exists",
-    )
-    p_repo.add_argument(
-        "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
-    )
-    p_repo.add_argument(
-        "--subdir",
-        default=None,
-        help="Index only files under this repository-relative directory",
-    )
-    p_repo.add_argument(
-        "--only-file",
-        action="append",
-        default=None,
-        help="Index only this repository-relative file; repeatable",
-    )
-    p_repo.add_argument(
-        "--exclude-pattern",
-        action="append",
-        default=None,
-        help="Exclude repository-relative paths matching this regex; repeatable",
-    )
-    p_repo.add_argument("--max-files", type=int, default=None)
-    p_repo.add_argument(
-        "--source-role",
-        choices=[
-            "official_example",
-            "doc_snippet",
-            "readme",
-            "test",
-            "reference_project",
-            "implementation",
-        ],
-        default="implementation",
-    )
-    p_repo.add_argument("--target-prefix", action="append", default=None)
-    p_repo.add_argument("--target-name", action="append", default=None)
-    p_repo.add_argument(
-        "--fresh",
-        action="store_true",
-        help="Discard the resume cursor and run the full file list",
-    )
-    p_repo.set_defaults(func=cmd_index_repo)
+    for name, command, help_text in (
+        (
+            "reembed",
+            cmd_reembed,
+            "Re-embed a version's vectors from the source of truth",
+        ),
+        ("reconcile", cmd_reconcile, "Repair a version's vectors by set difference"),
+    ):
+        p = sub.add_parser(name, help=help_text, parents=[_config_parent])
+        p.add_argument("library")
+        p.add_argument("version")
+        p.add_argument("--ecosystem", default=None)
+        p.set_defaults(func=command)
 
-    p_deps = sub.add_parser(
-        "repo-deps",
-        help="List manifest-declared dependencies",
-        parents=[_config_parent],
-    )
-    p_deps.add_argument("library")
-    p_deps.add_argument("version")
-    p_deps.add_argument("--ecosystem", default=None)
-    p_deps.add_argument("--dep-ecosystem", default=None)
-    p_deps.set_defaults(func=cmd_repo_deps)
+    for name, command, help_text in (
+        ("fts-rebuild", cmd_fts_rebuild, "Rebuild the full-text index"),
+        ("fts-check", cmd_fts_check, "Check full-text index consistency"),
+    ):
+        sub.add_parser(name, help=help_text, parents=[_config_parent]).set_defaults(
+            func=command
+        )
 
-    p_mine = sub.add_parser(
-        "mine", help="Mine closed call-sequence patterns", parents=[_config_parent]
-    )
-    p_mine.add_argument("library")
-    p_mine.add_argument("version")
-    p_mine.add_argument(
-        "--ecosystem",
-        default=None,
-        help="Ecosystem of the library; by default resolved across ecosystems",
-    )
-    p_mine.add_argument("--minsup", type=int, default=2)
-    p_mine.add_argument(
-        "--topn",
-        type=int,
-        default=None,
-        help="Explicit pruning: keep only fully qualified names ranked in the top N by call count",
-    )
-    p_mine.add_argument(
-        "--include-ambiguous",
-        action="store_true",
-        help="Include pending calls in sequences (by default only explicit and inferred ones are used)",
-    )
-    p_mine.add_argument("--maxlen", type=int, default=10)
-    p_mine.add_argument("--minlen", type=int, default=2)
-    p_mine.add_argument("--cluster-threshold", type=float, default=None)
-    p_mine.add_argument("--cluster-min-size", type=int, default=None)
-    p_mine.add_argument("--resolve-kinds", default=None)
-    p_mine.add_argument("--min-args", type=int, default=None)
-    p_mine.add_argument("--max-args", type=int, default=None)
-    p_mine.add_argument("--profile", default=None)
-    p_mine.add_argument(
-        "--macro-policy",
-        choices=["exclude", "review_only", "approved_only"],
-        default=None,
-        help="Macro call policy; named review profiles default to review_only",
-    )
-    p_mine.add_argument(
-        "--source-role",
-        action="append",
-        default=None,
-        help="Restrict mining to these source roles",
-    )
-    p_mine.add_argument(
-        "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
-    )
-    p_mine.set_defaults(func=cmd_mine)
-
-    p_catalog = sub.add_parser(
-        "catalog", help="Browse libraries and versions", parents=[_config_parent]
-    )
-    p_catalog.add_argument("library", nargs="?", default=None)
-    p_catalog.add_argument("--ecosystem", default=None)
-    p_catalog.set_defaults(func=cmd_catalog)
-
-    p_induce = sub.add_parser(
-        "induce-labels",
-        help="Induce pattern labels with chat",
-        parents=[_config_parent],
-    )
-    p_induce.add_argument("library")
-    p_induce.add_argument("version")
-    p_induce.add_argument("--ecosystem", default=None)
-    p_induce.add_argument("--topn", type=int, default=None)
-    p_induce.add_argument("--profile", default=None)
-    p_induce.add_argument(
-        "--macro-policy",
-        choices=["exclude", "review_only", "approved_only"],
-        default=None,
-    )
-    p_induce.add_argument(
-        "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
-    )
-    p_induce.set_defaults(func=cmd_induce_labels)
-
-    p_api = sub.add_parser(
-        "api-insight", help="API usage views", parents=[_config_parent]
-    )
-    p_api.add_argument("view", choices=["usage", "related", "args", "common"])
-    p_api.add_argument("--api", default=None)
-    p_api.add_argument("--apis", default=None)
-    p_api.add_argument("--library", default=None)
-    p_api.add_argument("--version", default=None)
-    p_api.add_argument("--ecosystem", default=None)
-    p_api.add_argument("--limit", type=int, default=None)
-    p_api.set_defaults(func=cmd_api_insight)
-
-    p_pattern = sub.add_parser(
-        "pattern-insight", help="Sequence and structure views", parents=[_config_parent]
-    )
-    p_pattern.add_argument(
-        "view",
-        choices=[
-            "patterns",
-            "evidence",
-            "tree",
-            "clusters",
-            "health",
-            "labels",
-            "snippets",
-            "facets",
-            "feature_summary",
-            "cluster_labels",
-            "drift",
-        ],
-    )
-    p_pattern.add_argument(
-        "--pattern",
-        default=None,
-        help="Comma-separated sequence for evidence view",
-    )
-    p_pattern.add_argument(
-        "--containing",
-        default=None,
-        help="Comma-separated APIs that must all be present",
-    )
-    p_pattern.add_argument("--prefix", default=None)
-    p_pattern.add_argument("--facet", default=None)
-    p_pattern.add_argument("--compare-profile", default=None)
-    p_pattern.add_argument("--library", default=None)
-    p_pattern.add_argument("--version", default=None)
-    p_pattern.add_argument("--ecosystem", default=None)
-    p_pattern.add_argument("--limit", type=int, default=None)
-    p_pattern.add_argument("--per-file-limit", type=int, default=None)
-    p_pattern.add_argument("--profile", default=None)
-    p_pattern.add_argument("--dedup", action="store_true", help="Enable evidence dedup")
-    p_pattern.add_argument(
-        "--no-dedup", action="store_true", help="Disable evidence dedup"
-    )
-    p_pattern.set_defaults(func=cmd_pattern_insight)
-
-    p_doc_insight = sub.add_parser(
-        "doc-insight", help="Document feature views", parents=[_config_parent]
-    )
-    p_doc_insight.add_argument(
-        "view", choices=["features", "links", "coverage", "consistency"]
-    )
-    p_doc_insight.add_argument("--library", required=True)
-    p_doc_insight.add_argument("--version", required=True)
-    p_doc_insight.add_argument("--ecosystem", default=None)
-    p_doc_insight.add_argument("--profile", default=None)
-    p_doc_insight.add_argument("--facet", default=None)
-    p_doc_insight.add_argument("--api", default=None)
-    p_doc_insight.add_argument("--pattern", default=None)
-    p_doc_insight.add_argument("--verdict", default=None)
-    p_doc_insight.add_argument("--block-type", default=None)
-    p_doc_insight.add_argument("--limit", type=int, default=50)
-    p_doc_insight.set_defaults(func=cmd_doc_insight)
-
-    p_doc_features = sub.add_parser(
-        "doc-features",
-        help="Rebuild document-derived features",
-        parents=[_config_parent],
-    )
-    doc_feature_sub = p_doc_features.add_subparsers(
-        dest="doc_feature_command", required=True
-    )
-    p_doc_refresh = doc_feature_sub.add_parser(
-        "refresh", help="Rebuild one derivation scope"
-    )
-    p_doc_refresh.add_argument("--library", required=True)
-    p_doc_refresh.add_argument("--version", required=True)
-    p_doc_refresh.add_argument("--ecosystem", default=None)
-    p_doc_refresh.add_argument("--profile", default=None)
-    p_doc_refresh.add_argument(
-        "--async", dest="run_async", action="store_true", help="Run via the jobs queue"
-    )
-    p_doc_refresh.add_argument(
-        "--scope",
-        choices=[
-            "structure",
-            "links",
-            "sources",
-            "coverage",
-            "consistency",
-            "derived",
-            "all",
-        ],
-        default="all",
-    )
-    p_doc_features.set_defaults(func=cmd_doc_features)
-
-    p_symbol = sub.add_parser(
-        "symbol-insight", help="Symbol detail views", parents=[_config_parent]
-    )
-    p_symbol.add_argument("view", choices=["detail", "file", "children", "signature"])
-    p_symbol.add_argument("--api", default=None)
-    p_symbol.add_argument("--apis", default=None)
-    p_symbol.add_argument("--library", default=None)
-    p_symbol.add_argument("--version", default=None)
-    p_symbol.add_argument("--ecosystem", default=None)
-    p_symbol.add_argument("--limit", type=int, default=None)
-    p_symbol.add_argument("--offset", type=int, default=0)
-    p_symbol.set_defaults(func=cmd_symbol_insight)
-
-    p_call = sub.add_parser(
-        "call-insight", help="Bidirectional call views", parents=[_config_parent]
-    )
-    p_call.add_argument("view", choices=["callee", "caller", "file"])
-    p_call.add_argument("--api", default=None)
-    p_call.add_argument("--library", default=None)
-    p_call.add_argument("--version", default=None)
-    p_call.add_argument("--ecosystem", default=None)
-    p_call.add_argument("--limit", type=int, default=None)
-    p_call.add_argument("--offset", type=int, default=0)
-    p_call.add_argument("--include-ambiguous", action="store_true")
-    p_call.add_argument("--resolve-kinds", default=None)
-    p_call.add_argument("--relation-kinds", default=None)
-    p_call.add_argument("--min-args", type=int, default=None)
-    p_call.add_argument("--max-args", type=int, default=None)
-    p_call.set_defaults(func=cmd_call_insight)
-
-    p_import = sub.add_parser(
-        "import-insight", help="Import edge views", parents=[_config_parent]
-    )
-    p_import.add_argument("view", choices=["importers", "imports"])
-    p_import.add_argument("--api", default=None)
-    p_import.add_argument("--library", default=None)
-    p_import.add_argument("--version", default=None)
-    p_import.add_argument("--ecosystem", default=None)
-    p_import.add_argument("--limit", type=int, default=None)
-    p_import.add_argument("--offset", type=int, default=0)
-    p_import.set_defaults(func=cmd_import_insight)
-
-    p_health = sub.add_parser(
-        "mining-health",
-        help="Reuse and diversity health signals",
-        parents=[_config_parent],
-    )
-    p_health.add_argument("--library", default=None)
-    p_health.add_argument("--version", default=None)
-    p_health.add_argument("--ecosystem", default=None)
-    p_health.set_defaults(func=cmd_mining_health)
-
-    p_resolve = sub.add_parser(
-        "resolve", help="Resolve a package address", parents=[_config_parent]
-    )
-    p_resolve.add_argument("name")
-    p_resolve.add_argument("--ecosystem", default=None)
-    p_resolve.add_argument("--version", default=None)
-    p_resolve.add_argument(
-        "--target",
-        default="docs",
-        choices=["docs", "repo"],
-    )
-    p_resolve.add_argument(
-        "--include-prerelease",
-        action="store_true",
-        help="Resolve to the newest version including prereleases",
-    )
-    p_resolve.set_defaults(func=cmd_resolve)
-
-    p_probe_docs = sub.add_parser(
-        "probe-docs",
-        help="Probe a documentation site structure without storing",
-        parents=[_config_parent],
-    )
-    p_probe_docs.add_argument("start_url")
-    p_probe_docs.add_argument("--sample-limit", type=int, default=None)
-    p_probe_docs.add_argument(
-        "--fetch-sample-limit",
-        type=int,
-        default=None,
-        help="Sample pages to fetch for title and content type; 0 disables",
-    )
-    p_probe_docs.add_argument("--max-pages", type=int, default=None)
-    p_probe_docs.add_argument(
-        "--prefilter",
-        action="store_true",
-        help="Prefilter URLs with a liveness HEAD check",
-    )
-    p_probe_docs.add_argument(
-        "--follow-links",
-        action="store_true",
-        help="Report that in-page link following would expand the ingest set",
-    )
-    p_probe_docs.add_argument(
-        "--allow-cross-site", action="store_true", help="Allow crawling across sites"
-    )
-    p_probe_docs.add_argument(
-        "--allow-subdomains", action="store_true", help="Allow same-domain subdomains"
-    )
-    p_probe_docs.add_argument(
-        "--path-prefix",
-        action="append",
-        default=None,
-        help="Accept only paths under this prefix; repeatable",
-    )
-    p_probe_docs.add_argument(
-        "--path-suffix",
-        action="append",
-        default=None,
-        help="Accept only paths with this suffix; repeatable",
-    )
-    p_probe_docs.add_argument(
-        "--include-pattern",
-        action="append",
-        default=None,
-        help="Regex allowlist; repeatable",
-    )
-    p_probe_docs.add_argument(
-        "--exclude-pattern",
-        action="append",
-        default=None,
-        help="Regex denylist; repeatable",
-    )
-    p_probe_docs.add_argument("--url", action="append", default=None)
-    p_probe_docs.add_argument("--max-depth", type=int, default=None)
-    p_probe_docs.add_argument("--crawl-query", default=None)
-    p_probe_docs.add_argument("--score-threshold", type=float, default=None)
-    from libref.cli.docs_commands import cmd_probe_docs
-
-    p_probe_docs.set_defaults(func=cmd_probe_docs)
-
-    p_probe_repo = sub.add_parser(
-        "probe-repo",
-        help="Probe a repository structure without parsing",
-        parents=[_config_parent],
-    )
-    p_probe_repo.add_argument("source", help="Remote URL or local path")
-    p_probe_repo.add_argument("--subdir", default=None)
-    p_probe_repo.add_argument(
-        "--only-file",
-        action="append",
-        default=None,
-        help="Probe only this repository-relative file; repeatable",
-    )
-    p_probe_repo.add_argument(
-        "--exclude-pattern",
-        action="append",
-        default=None,
-        help="Exclude repository-relative paths matching this regex; repeatable",
-    )
-    p_probe_repo.add_argument("--tree-depth", type=int, default=None)
-    p_probe_repo.add_argument("--samples-per-dir", type=int, default=None)
-    p_probe_repo.add_argument("--max-files", type=int, default=None)
-    p_probe_repo.add_argument("--sample-limit", type=int, default=None)
-    from libref.cli.code_commands import cmd_probe_repo
-
-    p_probe_repo.set_defaults(func=cmd_probe_repo)
-
-    p_link_stats = sub.add_parser(
-        "link-stats",
-        help="Reference counts over stored document link edges",
-        parents=[_config_parent],
-    )
-    p_link_stats.add_argument("library")
-    p_link_stats.add_argument("version")
-    p_link_stats.add_argument("--ecosystem", default=None)
-    p_link_stats.add_argument(
-        "--url", default=None, help="Single page address for per-page stats"
-    )
-    p_link_stats.add_argument("--limit", type=int, default=20)
-    from libref.cli.docs_commands import cmd_link_stats
-
-    p_link_stats.set_defaults(func=cmd_link_stats)
-
-    p_dump = sub.add_parser(
-        "dump-chunks",
-        help="Preview chunking: line ranges, byte offsets, and headings per file",
-        parents=[_config_parent],
-    )
-    group = p_dump.add_mutually_exclusive_group(required=True)
-    group.add_argument("--markdown", default=None, help="Markdown document path")
-    group.add_argument("--source", default=None, help="Source file path")
-    p_dump.add_argument(
-        "--url", default=None, help="URL annotation for document chunks"
-    )
-    p_dump.set_defaults(func=cmd_dump_chunks)
-
-    p_reembed = sub.add_parser(
-        "reembed",
-        help="Fully re-embed a version's vectors from the source of truth",
-        parents=[_config_parent],
-    )
-    p_reembed.add_argument("library")
-    p_reembed.add_argument("version")
-    p_reembed.add_argument("--ecosystem", default=None)
-    p_reembed.set_defaults(func=cmd_reembed)
-
-    p_reconcile = sub.add_parser(
-        "reconcile",
-        help="Repair a version's vectors from the source of truth by set difference",
-        parents=[_config_parent],
-    )
-    p_reconcile.add_argument("library")
-    p_reconcile.add_argument("version")
-    p_reconcile.add_argument("--ecosystem", default=None)
-    p_reconcile.set_defaults(func=cmd_reconcile)
-
-    p_fts_rebuild = sub.add_parser(
-        "fts-rebuild",
-        help="Rebuild the full-text index from the source tables",
-        parents=[_config_parent],
-    )
-    p_fts_rebuild.set_defaults(func=cmd_fts_rebuild)
-
-    p_fts_check = sub.add_parser(
-        "fts-check",
-        help="Check full-text index row counts and triggers",
-        parents=[_config_parent],
-    )
-    p_fts_check.set_defaults(func=cmd_fts_check)
-
-    p_vectors_status = sub.add_parser(
-        "vectors-status",
-        help="Report vector index health: profile, reachability, points, filter indexes",
-        parents=[_config_parent],
-    )
-    p_vectors_status.set_defaults(func=cmd_vectors_status)
-
-    p_vectors_optimize = sub.add_parser(
-        "vectors-optimize",
-        help="Publish pending index maintenance now instead of waiting for the background pass",
-        parents=[_config_parent],
-    )
-    p_vectors_optimize.set_defaults(func=cmd_vectors_optimize)
+    for name, command, help_text in (
+        (
+            "vectors-status",
+            cmd_vectors_status,
+            "Report vector index health",
+        ),
+        (
+            "vectors-optimize",
+            cmd_vectors_optimize,
+            "Publish pending vector index maintenance",
+        ),
+    ):
+        sub.add_parser(name, help=help_text, parents=[_config_parent]).set_defaults(
+            func=command
+        )
 
     p_review = sub.add_parser(
-        "review", help="Review pending call instances", parents=[_config_parent]
+        "review", help="Review pending call instances locally", parents=[_config_parent]
     )
     review_sub = p_review.add_subparsers(dest="review_action", required=True)
     review_sub.add_parser("list", help="List pending items").add_argument(
-        "--limit",
-        type=int,
-        default=50,
+        "--limit", type=int, default=50
     )
-    for _name in ("approve", "conflict", "reopen"):
-        _p = review_sub.add_parser(_name)
-        _p.add_argument("entity_id", type=int)
+    for name in ("approve", "conflict", "reopen"):
+        review_sub.add_parser(name).add_argument("entity_id", type=int)
     p_review.set_defaults(func=cmd_review)
 
     p_job = sub.add_parser(
-        "job-show", help="Inspect job audit outcomes", parents=[_config_parent]
+        "job-show", help="Inspect local job audit outcomes", parents=[_config_parent]
     )
     p_job.add_argument("job_id", type=int, nargs="?", default=None)
     p_job.add_argument("--list", action="store_true", help="List recent jobs")
@@ -993,7 +147,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_job.set_defaults(func=cmd_job_show)
 
     p_cancel = sub.add_parser(
-        "job-cancel", help="Request cancellation of a job", parents=[_config_parent]
+        "job-cancel", help="Cancel a local job", parents=[_config_parent]
     )
     p_cancel.add_argument("job_id", type=int)
     p_cancel.set_defaults(func=cmd_job_cancel)
@@ -1019,18 +173,9 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[_config_parent],
     )
     p_del.add_argument("--limit", type=int, default=50)
-    p_del.add_argument("--full", action="store_true", help="Print full details")
-    p_del.add_argument(
-        "--prune",
-        action="store_true",
-        help="Prune expired records per the retention period",
-    )
-    p_del.add_argument(
-        "--ttl-days",
-        type=float,
-        default=None,
-        help="Defaults to the config value deletion_log_ttl_days",
-    )
+    p_del.add_argument("--full", action="store_true")
+    p_del.add_argument("--prune", action="store_true")
+    p_del.add_argument("--ttl-days", type=float, default=None)
     p_del.set_defaults(func=cmd_deletions)
 
     p_role_audit = sub.add_parser(
@@ -1039,9 +184,7 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[_config_parent],
     )
     p_role_audit.add_argument(
-        "--strict",
-        action="store_true",
-        help="Exit non-zero when conflicts exist (suitable for CI gates)",
+        "--strict", action="store_true", help="Exit non-zero when conflicts exist"
     )
     p_role_audit.set_defaults(func=cmd_role_audit)
 
@@ -1050,104 +193,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Move a principal's extra roles onto new principals",
         parents=[_config_parent],
     )
-    p_role_split.add_argument(
-        "--principal", type=int, required=True, help="Principal id to split"
-    )
-    p_role_split.add_argument(
-        "--keep",
-        required=True,
-        help="Role that stays on the principal; every other role moves",
-    )
-    p_role_split.add_argument(
-        "--name",
-        default=None,
-        help="Name for the new principals (default: <name>-split)",
-    )
-    p_role_split.add_argument(
-        "--dry-run", action="store_true", help="Print the plan without writing"
-    )
+    p_role_split.add_argument("--principal", type=int, required=True)
+    p_role_split.add_argument("--keep", required=True)
+    p_role_split.add_argument("--name", default=None)
+    p_role_split.add_argument("--dry-run", action="store_true")
     p_role_split.set_defaults(func=cmd_role_split)
 
-    p_request = sub.add_parser(
-        "request",
-        help="Submit, review, and wait on index requests",
-        parents=[_config_parent],
-    )
-    request_sub = p_request.add_subparsers(dest="request_action", required=True)
-    p_submit = request_sub.add_parser(
-        "submit",
-        help="Submit a repository or documentation index request",
-        parents=[_config_parent],
-    )
-    p_submit.add_argument("--kind", choices=["repo", "docs"], required=True)
-    p_submit.add_argument("--library", required=True)
-    p_submit.add_argument("--version", default=None)
-    p_submit.add_argument("--ecosystem", default=None)
-    p_submit.add_argument("--source", default=None, help="HTTP(S) Git URL")
-    p_submit.add_argument("--start-url", default=None)
-    p_submit.add_argument("--max-pages", type=int, default=None)
-    p_submit.add_argument("--scope", default=None, help="JSON scope object for docs")
-    p_submit.add_argument("--subdir", default=None)
-    p_submit.add_argument("--only-file", action="append", default=None)
-    p_submit.add_argument("--exclude-pattern", action="append", default=None)
-    p_submit.add_argument("--max-files", type=int, default=None)
-    p_submit.add_argument(
-        "--source-role",
-        choices=[
-            "official_example",
-            "doc_snippet",
-            "readme",
-            "test",
-            "reference_project",
-            "implementation",
-        ],
-        default=None,
-    )
-    p_submit.add_argument("--target-prefix", action="append", default=None)
-    p_submit.add_argument("--target-name", action="append", default=None)
-    for flag in (
-        "prefilter",
-        "update",
-        "fresh",
-        "include-prerelease",
-    ):
-        p_submit.add_argument(f"--{flag}", action="store_true")
-
-    p_list = request_sub.add_parser(
-        "list", help="List your index requests", parents=[_config_parent]
-    )
-    p_list.add_argument("--status", default=None)
-    p_list.add_argument(
-        "--pending", action="store_true", help="Show the approval queue"
-    )
-    p_list.add_argument("--limit", type=int, default=50)
-
-    p_show = request_sub.add_parser(
-        "show", help="Show one index request", parents=[_config_parent]
-    )
-    p_show.add_argument("request_id", type=int)
-
-    p_approve = request_sub.add_parser(
-        "approve", help="Approve a pending request", parents=[_config_parent]
-    )
-    p_approve.add_argument("request_id", type=int)
-
-    p_reject = request_sub.add_parser(
-        "reject", help="Reject a pending request", parents=[_config_parent]
-    )
-    p_reject.add_argument("request_id", type=int)
-    p_reject.add_argument("--reason", required=True)
-
-    p_cancel = request_sub.add_parser(
-        "cancel", help="Cancel your pending request", parents=[_config_parent]
-    )
-    p_cancel.add_argument("request_id", type=int)
-
-    p_wait = request_sub.add_parser(
-        "wait", help="Wait for a terminal request state", parents=[_config_parent]
-    )
-    p_wait.add_argument("request_id", type=int)
-    p_wait.add_argument("--timeout", type=float, default=300.0)
-
-    p_request.set_defaults(func=cmd_request)
     return parser

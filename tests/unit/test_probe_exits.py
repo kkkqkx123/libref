@@ -1,73 +1,59 @@
-"""Probe exit passthrough: CLI flags reach services with the same names and meanings."""
+"""Client probe flags reach the server with the same names and meanings."""
 
 from __future__ import annotations
 
 import pytest
-
-from libref.cli.common import _scope_from_args
-from libref.cli.parsers import build_parser
+from librefctl.app import build_parser
 
 pytestmark = pytest.mark.unit
 
 
-def test_probe_docs_cli_flags() -> None:
+def test_doc_probe_flags() -> None:
     args = build_parser().parse_args(
         [
-            "probe-docs",
+            "doc-probe",
             "https://d.example/",
+            "--sample-limit",
+            "7",
+            "--fetch-sample-limit",
+            "3",
             "--max-pages",
             "10",
             "--prefilter",
-            "--follow-links",
-            "--crawl-query",
-            "guide",
-            "--score-threshold",
-            "0.5",
-            "--sample-limit",
-            "7",
         ]
     )
+    assert args.start_url == "https://d.example/"
+    assert args.sample_limit == 7
+    assert args.fetch_sample_limit == 3
     assert args.max_pages == 10
     assert args.prefilter is True
-    assert args.sample_limit == 7
-    scope = _scope_from_args(args)
-    assert scope["follow_links"] is True
-    assert scope["crawl_query"] == "guide"
-    assert scope["score_threshold"] == 0.5
 
 
-def test_probe_repo_cli_only_file() -> None:
-    args = build_parser().parse_args(
-        ["probe-repo", "/tmp/x", "--only-file", "a.py", "--only-file", "b.py"]
-    )
-    assert args.only_file == ["a.py", "b.py"]
-    assert args.subdir is None
-
-
-def test_probe_repo_exclude_and_tree_depth_cli() -> None:
+def test_repo_probe_repeated_filters() -> None:
     args = build_parser().parse_args(
         [
-            "probe-repo",
-            "/tmp/x",
+            "repo-probe",
+            "https://github.com/org/repo.git",
+            "--only-file",
+            "a.py",
+            "--only-file",
+            "b.py",
             "--exclude-pattern",
             r"(^|/)tests/",
             "--tree-depth",
             "3",
+            "--samples-per-dir",
+            "2",
         ]
     )
-    assert args.exclude_pattern == [r"(^|/)tests/"]
+    assert args.source == "https://github.com/org/repo.git"
+    assert args.only_files == ["a.py", "b.py"]
+    assert args.exclude_patterns == [r"(^|/)tests/"]
     assert args.tree_depth == 3
-    sampled = build_parser().parse_args(
-        ["probe-repo", "/tmp/x", "--samples-per-dir", "2"]
-    )
-    assert sampled.samples_per_dir == 2
-    indexed = build_parser().parse_args(
-        ["index-repo", "demo", "0.1", "/tmp/x", "--exclude-pattern", "^vendor/"]
-    )
-    assert indexed.exclude_pattern == ["^vendor/"]
+    assert args.samples_per_dir == 2
 
 
-def test_link_stats_cli() -> None:
+def test_link_stats_flags() -> None:
     args = build_parser().parse_args(["link-stats", "docs", "1.0", "--limit", "5"])
     assert (args.library, args.version, args.limit, args.url) == (
         "docs",

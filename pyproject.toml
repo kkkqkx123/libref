@@ -76,16 +76,19 @@ src = ["src", "tests"]
 
 [tool.uv.workspace]
 members = [
+    "packages/librefctl",
     "vendor/tree-sitter-groovy",
     "vendor/tree-sitter-kotlin",
 ]
 
 [tool.uv.sources]
+librefctl = { workspace = true, editable = true }
 tree-sitter-groovy = { workspace = true, editable = true }
 tree-sitter-kotlin = { workspace = true, editable = true }
 
 [dependency-groups]
 dev = [
+    "librefctl",
     "mypy>=1.11",
     "numpy>=2.5.4",
     "pytest>=8",

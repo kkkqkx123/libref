@@ -9,11 +9,12 @@ RUN apt-get update \
 WORKDIR /app
 
 # Install locked dependencies into a project venv; --frozen refuses lock drift.
-# vendor/ holds the uv workspace members (tree-sitter-groovy, tree-sitter-kotlin)
-# and must exist before sync; sync compiles their grammar extensions in place.
+# vendor/ holds the grammar workspace members and packages/ the HTTP client;
+# both must exist before sync even when the server image skips dev dependencies.
 COPY pyproject.toml uv.lock .python-version README.md ./
 COPY src ./src
 COPY vendor ./vendor
+COPY packages ./packages
 # Non-editable install keeps the runtime venv self-contained.
 RUN uv sync --frozen --no-dev --no-editable --compile-bytecode
 

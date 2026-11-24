@@ -288,9 +288,9 @@ def test_next_actions_for_docs_and_repo() -> None:
     assert docs[0]["kind"] == "tool"
     assert docs[0]["mcp_tool"] == "library_search"
     assert "discover" in docs[0]["cli"]
-    assert docs[-1]["kind"] == "manual" and "ingest" in docs[-1]["detail"]
+    assert docs[-1]["kind"] == "manual" and "request submit" in docs[-1]["detail"]
     repo = next_actions_for("go", "github.com/acme/demo", "repo", "no_docs")
-    assert "index-repo" in repo[-1]["detail"]
+    assert "request submit" in repo[-1]["detail"]
     retry = next_actions_for(None, "demo", "docs", "retryable")
     assert "--ecosystem" not in retry[0]["cli"]
     assert any(a["kind"] == "manual" and "retry" in a["detail"] for a in retry)
@@ -314,7 +314,7 @@ def test_registry_failure_renders_guidance() -> None:
     assert error is not None
     text = render_error(error)
     assert text.startswith("not_found: ")
-    assert "libref discover" in text
+    assert "librefctl discover" in text
 
 
 DDG_FIXTURE = (
