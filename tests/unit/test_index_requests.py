@@ -10,13 +10,13 @@ import pytest
 from libref.services.infra import quota
 from libref.services.infra.auth import ROLE_SCOPES, Principal
 from libref.services.infra.jobs import JobManager
-from libref.services.ops import index_requests as index_request_module
 from libref.services.ops.index_requests import (
     IndexRequestError,
     IndexRequestService,
     QuotaDenied,
     build_index_request_runner,
 )
+from libref.services.ops.index_requests import lifecycle as index_request_lifecycle
 from tests.conftest import make_settings
 
 pytestmark = pytest.mark.unit
@@ -267,7 +267,7 @@ def test_approval_revalidates_target(conn, monkeypatch, tmp_path) -> None:
     def _blocked(source: str, settings: object) -> str:
         raise IndexRequestError("target no longer allowed")
 
-    monkeypatch.setattr(index_request_module, "_validate_repo_source", _blocked)
+    monkeypatch.setattr(index_request_lifecycle, "_validate_repo_source", _blocked)
     with pytest.raises(IndexRequestError, match="no longer allowed"):
         svc.approve(item["id"], approver)
     assert svc.get(item["id"], actor)["status"] == "pending"

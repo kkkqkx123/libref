@@ -12,6 +12,7 @@ from libref.astminer import cache as ast_cache
 from libref.astminer import config as ast_config
 from libref.astminer import engine as ast_engine
 from libref.astminer import resolution as ast_resolution
+from libref.astminer.resolution import imports as ast_resolution_imports
 
 pytestmark = pytest.mark.integration
 
@@ -392,7 +393,7 @@ def test_reexport_closure_expands_package_alias(monkeypatch, tmp_path):
         "pkg/__init__.py": {"start": "pkg.core.start"},
         "a.py": {"start": "pkg.start"},
     }
-    ast_resolution._close_reexports(mapping)
+    ast_resolution_imports._close_reexports(mapping)
     assert mapping["a.py"]["start"] == "pkg.core.start"
 
 

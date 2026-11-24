@@ -132,10 +132,10 @@ def test_api_args_view_carries_facet_tags(conn, tmp_path):
 
 
 def test_health_sample_reports_population(conn, tmp_path, monkeypatch):
-    from libref.services.code import mining_read
+    from libref.services.code.mining_read import health as mining_health_module
 
     svc = _seed_demo(conn, tmp_path)
-    monkeypatch.setattr(mining_read, "INSIGHT_ROWS", 1)
+    monkeypatch.setattr(mining_health_module, "INSIGHT_ROWS", 1)
     health = svc.mining_health("demo", "0.1", profile="implementation")
     assert health["sampling"]["patterns"]["population"] >= 1
     assert health["sampling"]["patterns"]["sample"] <= 1

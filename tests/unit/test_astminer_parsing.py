@@ -14,6 +14,7 @@ import pytest
 from libref.astminer import config as ast_config
 from libref.astminer import engine as ast_engine
 from libref.astminer import resolution as ast_resolution
+from libref.astminer.resolution import helpers as ast_resolution_helpers
 
 FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "parsing"
 
@@ -284,10 +285,10 @@ def test_groovy_qualified_extends_base(monkeypatch, tmp_path):
 
 
 def test_jvm_stdlib_targets_are_recognized(monkeypatch, tmp_path):
-    assert ast_resolution._is_stdlib_target("kotlin.collections.listOf")
-    assert ast_resolution._is_stdlib_target("kotlinx.coroutines.launch")
-    assert ast_resolution._is_stdlib_target("groovy.lang.Closure.call")
-    assert ast_resolution._is_stdlib_target(
+    assert ast_resolution_helpers._is_stdlib_target("kotlin.collections.listOf")
+    assert ast_resolution_helpers._is_stdlib_target("kotlinx.coroutines.launch")
+    assert ast_resolution_helpers._is_stdlib_target("groovy.lang.Closure.call")
+    assert ast_resolution_helpers._is_stdlib_target(
         "org.codehaus.groovy.runtime.DefaultGroovyMethods.plus"
     )
 
@@ -385,14 +386,15 @@ def test_java_explicit_constructor_invocation_skipped(monkeypatch, tmp_path):
 def test_warm_configs_prepares_only_requested_languages():
     from libref.astminer import config as ast_config
     from libref.astminer import engine as ast_engine
+    from libref.astminer import parse as ast_parse
 
-    ast_engine._parsers.clear()
-    ast_engine._compiled.clear()
+    ast_parse._parsers.clear()
+    ast_parse._compiled.clear()
     try:
         ast_engine.warm_configs([ast_config.PYTHON_CONFIG])
-        assert "python" in ast_engine._parsers
-        assert any(key.startswith("python\x00") for key in ast_engine._compiled)
-        assert "java" not in ast_engine._parsers
+        assert "python" in ast_parse._parsers
+        assert any(key.startswith("python\x00") for key in ast_parse._compiled)
+        assert "java" not in ast_parse._parsers
     finally:
-        ast_engine._parsers.clear()
-        ast_engine._compiled.clear()
+        ast_parse._parsers.clear()
+        ast_parse._compiled.clear()

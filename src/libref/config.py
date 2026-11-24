@@ -1,20 +1,15 @@
-"""App config: environment variables and sectioned file as two sources; secrets only via environment variables.
-
-Load priority: explicit CLI overrides beat environment variables (including local file injection), environment variables beat the config file, and the config file beats built-in defaults. The effective snapshot is frozen once generated, read-only.
-"""
+"""Application settings model and effective-configuration helpers."""
 
 from __future__ import annotations
 
-import hashlib
 import json
-import tomllib
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Annotated, Any, Literal
-from urllib.parse import urlsplit, urlunsplit
+from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, Field, ValidationError, model_validator
+from pydantic import BeforeValidator, Field, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+from libref.config_defaults import PATH_FIELDS
 
 
 class ConfigError(Exception):
@@ -409,18 +404,6 @@ class LibrefSettings(BaseSettings):
         return self
 
 
-SECRET_FIELDS = frozenset(
-    {
-        "embedding_api_key",
-        "chat_api_key",
-        "discovery_github_token",
-        "bootstrap_admin_key",
-        "postgres_url",
-        "qdrant_api_key",
-    }
-)
-
-
 def setting_or_default(settings: LibrefSettings | None, name: str):
     """Resolve from the settings-class default when no settings object exists, avoiding hand-written fallback literals in business code."""
     if settings is not None:
@@ -428,410 +411,24 @@ def setting_or_default(settings: LibrefSettings | None, name: str):
     return LibrefSettings.model_fields[name].default
 
 
-CONFIG_FILE_NAME = "libref.toml"
-
-SECTION_FIELDS: dict[str, frozenset[str]] = {
-    "server": frozenset(
-        {"db_path", "heartbeat_timeout", "instance_id", "deployment_id"}
-    ),
-    "crawler": frozenset(
-        {
-            "fetch_concurrency",
-            "request_timeout",
-            "fetch_max_retries",
-            "fetch_max_bytes",
-            "crawl_delay_default",
-            "robots_cache_ttl_days",
-            "user_agent",
-            "http_proxy",
-            "no_proxy",
-            "render_js_default",
-            "render_wait_for",
-            "render_timeout_ms",
-            "seeder_cache_ttl_hours",
-            "follow_links_default",
-            "ingest_clean_cache_cap",
-            "ingest_batch_pages",
-            "index_batch_files",
-            "usage_mining_enabled",
-            "doc_code_mining_enabled",
-            "stdlib_filter_enabled",
-            "stdlib_table_version",
-            "probe_sample_limit",
-            "probe_cache_ttl_hours",
-            "probe_fetch_sample_limit",
-            "probe_fetch_timeout",
-        }
-    ),
-    "storage": frozenset(
-        {
-            "qdrant_url",
-            "vector_collection",
-            "qdrant_timeout",
-            "vector_backend",
-            "simvec_dir",
-            "simvec_lib",
-            "vector_distance",
-            "vector_write_batch",
-            "qdrant_api_key",
-            "qdrant_https",
-            "qdrant_search_hnsw_ef",
-            "qdrant_search_exact",
-            "simvec_index",
-            "simvec_hnsw_m",
-            "simvec_hnsw_ef_construct",
-            "simvec_full_scan_threshold",
-            "simvec_hnsw_ef_search",
-            "simvec_max_indexing_threads",
-            "vector_max_points",
-            "qdrant_grpc",
-            "qdrant_grpc_port",
-            "qdrant_prefix",
-            "qdrant_pool_size",
-            "qdrant_on_disk_vectors",
-            "qdrant_on_disk_payload",
-            "qdrant_shard_number",
-            "qdrant_replication_factor",
-            "qdrant_write_consistency_factor",
-            "qdrant_hnsw_m",
-            "qdrant_hnsw_ef_construct",
-            "qdrant_full_scan_threshold",
-            "qdrant_memmap_threshold_kb",
-            "qdrant_indexing_threshold_kb",
-            "metadata_backend",
-            "fulltext_backend",
-            "postgres_url",
-            "postgres_pool_size",
-            "postgres_timeout",
-        }
-    ),
-    "chunking": frozenset(
-        {
-            "chunk_embed_max_tokens",
-            "chunk_embed_overlap_tokens",
-            "chunk_embed_min_tokens",
-            "chunk_bm25_max_terms",
-            "chunk_bm25_overlap_terms",
-            "chunk_bm25_min_terms",
-            "chunk_reserve_ratio",
-        }
-    ),
-    "embeddings": frozenset(
-        {
-            "embedding_model",
-            "embedding_dim",
-            "embedding_api_base",
-            "embedding_api_key",
-            "embed_batch",
-        }
-    ),
-    "rerank": frozenset(
-        {
-            "rerank_model",
-            "rerank_enabled",
-            "rerank_candidate_limit",
-            "rerank_top_n",
-            "rerank_truncate",
-        }
-    ),
-    "retrieval": frozenset(
-        {
-            "rrf_k",
-            "rrf_w_fts",
-            "rrf_w_vec",
-            "freq_alpha",
-            "cluster_alpha",
-            "facet_alpha",
-            "doc_feature_alpha",
-            "cluster_threshold",
-            "cluster_min_size",
-            "facet_topn",
-            "facet_candidate_budget",
-            "facet_min_gain",
-            "guard_enabled",
-            "drift_topn",
-            "evidence_per_file_limit",
-            "evidence_dedup",
-            "induction_enabled",
-            "induction_topn",
-            "induction_batch",
-            "induction_prompt_version",
-            "retriever_window_radius",
-            "retriever_expand_window",
-            "candidate_multiplier",
-            "assemble_multiplier",
-            "assemble_min",
-            "retrieval_max_versions",
-            "snippet_radius",
-            "snippet_cap",
-            "window_preview_cap",
-            "fts_w_content",
-            "fts_w_title",
-            "fts_w_url",
-            "fts_w_path",
-            "answer_strong_threshold",
-            "answer_weak_threshold",
-        }
-    ),
-    "doc_features": frozenset(
-        {
-            "doc_feature_enabled",
-            "doc_feature_candidate_budget",
-            "doc_feature_terms_per_facet",
-            "doc_feature_min_confidence",
-            "doc_feature_enabled_facets",
-            "doc_consistency_min_support",
-            "doc_consistency_llm_enabled",
-            "doc_consistency_batch",
-        }
-    ),
-    "registry": frozenset(
-        {
-            "registry_cache_ttl_days",
-            "registry_offline",
-            "registry_allow_private",
-            "registry_mirror",
-            "registry_bases",
-            "registry_overrides_file",
-            "registry_override_ttl_days",
-        }
-    ),
-    "discovery": frozenset(
-        {
-            "discovery_enabled",
-            "discovery_topn",
-            "discovery_cache_ttl_days",
-            "discovery_offline",
-        }
-    ),
-    "chat": frozenset(
-        {
-            "chat_model",
-            "chat_enabled",
-            "chat_api_base",
-            "chat_api_key",
-            "chat_timeout",
-            "chat_enable_thinking",
-            "material_limit",
-            "answer_total_budget",
-        }
-    ),
-    "mcp": frozenset(
-        {
-            "mcp_path",
-            "mcp_enabled_tools",
-            "mcp_disabled_tools",
-        }
-    ),
-    "auth": frozenset(
-        {
-            "auth_mode",
-            "dev_principal",
-            "allowed_hosts",
-            "allowed_origins",
-            "bootstrap_admin_key",
-            "api_key_default_ttl_hours",
-            "api_key_max_ttl_hours",
-        }
-    ),
-    "quota": frozenset(
-        {
-            "quota_enabled",
-            "quota_http_requests_per_hour",
-            "quota_llm_tokens_per_day",
-            "quota_job_submissions_per_hour",
-            "quota_index_requests_per_hour",
-        }
-    ),
-    "web": frozenset({"web_host", "web_port", "web_spa_enabled", "web_spa_dir"}),
-    "retention": frozenset(
-        {
-            "snapshot_enabled",
-            "snapshot_dir",
-            "snapshot_quota_mb",
-            "repos_dir",
-            "repos_quota_mb",
-            "deletion_log_ttl_days",
-        }
-    ),
-    "logging": frozenset({"log_level", "log_file", "log_format"}),
+_LOADER_NAMES = {
+    "resolve_config_file",
+    "load_settings",
+    "redacted_dict",
+    "settings_fingerprint",
 }
 
-RESERVED_SECTIONS: frozenset[str] = frozenset()
 
-PATH_FIELDS = frozenset(
-    {
-        "db_path",
-        "registry_overrides_file",
-        "snapshot_dir",
-        "repos_dir",
-        "log_file",
-        "simvec_dir",
-        "web_spa_dir",
-    }
-)
+def __getattr__(name: str):
+    if name not in _LOADER_NAMES:
+        raise AttributeError(name)
+    from libref import config_loader
 
-MASKED_VALUE = "***"
-
-URL_FIELDS = frozenset({"qdrant_url"})
-"""URL settings whose embedded credentials must never reach logs or fingerprints."""
+    return getattr(config_loader, name)
 
 
-def _mask_url_credentials(value: str) -> str:
-    """Replace the password (or whole userinfo) of a URL, keeping scheme, host and path readable."""
-    parts = urlsplit(value)
-    if parts.username is None and parts.password is None:
-        return value
-    host = parts.hostname or ""
-    if parts.port is not None:
-        host = f"{host}:{parts.port}"
-    auth = f"{parts.username}:{MASKED_VALUE}@" if parts.password else f"{MASKED_VALUE}@"
-    return urlunsplit(
-        (parts.scheme, auth + host, parts.path, parts.query, parts.fragment)
-    )
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | _LOADER_NAMES)
 
 
-def resolve_config_file(explicit: str | Path | None = None) -> Path | None:
-    """Locate the config file by explicit arg, current directory, then user config dir; None if not found."""
-    if explicit is not None:
-        candidate = Path(explicit)
-        if not candidate.is_file():
-            raise ConfigError(f"config file not found: {candidate}")
-        return candidate
-    local = Path.cwd() / CONFIG_FILE_NAME
-    if local.is_file():
-        return local
-    home_config = Path.home() / ".config" / "libref" / CONFIG_FILE_NAME
-    if home_config.is_file():
-        return home_config
-    return None
-
-
-def _flatten_document(path: Path, document: Mapping[str, Any]) -> dict[str, Any]:
-    """Flatten a sectioned document into a field dict; unknown section or key names raise immediately."""
-    fields = set(LibrefSettings.model_fields)
-    flat: dict[str, Any] = {}
-    for name, value in document.items():
-        if isinstance(value, dict) and name in SECTION_FIELDS:
-            allowed = SECTION_FIELDS[name]
-            for key, item in value.items():
-                nested = f"{name}.{key}"
-                if isinstance(item, dict) and nested in SECTION_FIELDS:
-                    for sub, sub_item in item.items():
-                        if sub not in SECTION_FIELDS[nested]:
-                            raise ConfigError(
-                                f"unknown config key '{nested}.{sub}' in {path}"
-                            )
-                        _reject_secret(path, sub)
-                        flat[sub] = sub_item
-                    continue
-                if key not in allowed:
-                    raise ConfigError(f"unknown config key '{name}.{key}' in {path}")
-                _reject_secret(path, key)
-                flat[key] = item
-        elif isinstance(value, dict) and name in RESERVED_SECTIONS:
-            if value:
-                raise ConfigError(
-                    f"config section [{name}] in {path} is reserved and must stay empty"
-                )
-        elif name in fields:
-            _reject_secret(path, name)
-            flat[name] = value
-        elif isinstance(value, dict):
-            raise ConfigError(f"unknown config section [{name}] in {path}")
-        else:
-            raise ConfigError(f"unknown config key '{name}' in {path}")
-    return flat
-
-
-def _reject_secret(path: Path, key: str) -> None:
-    if key in SECRET_FIELDS:
-        raise ConfigError(
-            f"config key '{key}' in {path} must come from the environment, not the file"
-        )
-
-
-def _resolve_relative_paths(values: dict[str, Any], base_dir: Path) -> dict[str, Any]:
-    """Resolve relative paths in the file against the config file's directory; absolute paths stay unchanged."""
-    resolved = dict(values)
-    for key in PATH_FIELDS & set(values):
-        value = values[key]
-        if value is None:
-            continue
-        candidate = Path(str(value)).expanduser()
-        if not candidate.is_absolute():
-            candidate = base_dir / candidate
-        resolved[key] = str(candidate)
-    return resolved
-
-
-def _env_covered_fields() -> set[str]:
-    """Fields already provided by env vars or local injected files; same-named file fields yield to them."""
-    from pydantic_settings.sources import DotEnvSettingsSource, EnvSettingsSource
-
-    fields = set(LibrefSettings.model_fields)
-    covered: set[str] = set()
-    for source in (
-        EnvSettingsSource(LibrefSettings),
-        DotEnvSettingsSource(LibrefSettings),
-    ):
-        for name in source.env_vars:
-            if name.startswith("libref_") and name[7:] in fields:
-                covered.add(name[7:])
-    return covered
-
-
-def load_settings(
-    config: str | Path | None = None,
-    overrides: Mapping[str, Any] | None = None,
-) -> LibrefSettings:
-    """Unified load entry: locate file, merge three sources, validate, return a frozen snapshot."""
-    path = resolve_config_file(config)
-    file_values: dict[str, Any] = {}
-    if path is not None:
-        try:
-            with open(path, "rb") as handle:
-                document = tomllib.load(handle)
-        except tomllib.TOMLDecodeError as exc:
-            raise ConfigError(f"config file is not valid TOML: {path}: {exc}") from exc
-        except OSError as exc:
-            raise ConfigError(f"config file is not readable: {path}: {exc}") from exc
-        if not isinstance(document, dict):
-            raise ConfigError(f"config file must hold tables: {path}")
-        file_values = _resolve_relative_paths(
-            _flatten_document(path, document), path.parent
-        )
-        covered = _env_covered_fields()
-        file_values = {k: v for k, v in file_values.items() if k not in covered}
-    merged: dict[str, Any] = dict(file_values)
-    for key, value in dict(overrides or {}).items():
-        if key not in LibrefSettings.model_fields:
-            raise ConfigError(f"unknown config override '{key}'")
-        merged[key] = value
-    try:
-        return LibrefSettings(**merged)
-    except ValidationError as exc:
-        origin = f"config file {path}" if path is not None else "environment (LIBREF_*)"
-        raise ConfigError(f"invalid configuration from {origin}: {exc}") from exc
-
-
-def redacted_dict(settings: LibrefSettings) -> dict[str, Any]:
-    """Redacted effective snapshot: secrets masked when set, paths as strings, directly serializable."""
-    dumped = settings.model_dump()
-    for key in SECRET_FIELDS:
-        if dumped.get(key):
-            dumped[key] = MASKED_VALUE
-    for key in URL_FIELDS:
-        value = dumped.get(key)
-        if isinstance(value, str):
-            dumped[key] = _mask_url_credentials(value)
-    for key, value in dumped.items():
-        if isinstance(value, Path):
-            dumped[key] = str(value)
-    return dumped
-
-
-def settings_fingerprint(settings: LibrefSettings) -> str:
-    """Digest of the effective snapshot; stable for identical content, differs on any field change."""
-    canonical = json.dumps(redacted_dict(settings), sort_keys=True, ensure_ascii=False)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+__all__ = ["ConfigError", "LibrefSettings", "setting_or_default"]

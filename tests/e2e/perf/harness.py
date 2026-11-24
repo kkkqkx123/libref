@@ -371,8 +371,10 @@ def case_ast(cfg: dict[str, Any], ctx: dict[str, Any]) -> list[dict[str, Any]]:
         cold_samples: list[float] = []
         cold_value: Any = None
         for _ in range(int(cfg["repeats"])):
-            ast_engine._parsers.clear()
-            ast_engine._compiled.clear()
+            from libref.astminer import parse as ast_parse
+
+            ast_parse._parsers.clear()
+            ast_parse._compiled.clear()
             started = time.perf_counter()
             cold_value = run()
             cold_samples.append((time.perf_counter() - started) * 1000)
