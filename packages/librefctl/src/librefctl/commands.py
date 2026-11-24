@@ -650,6 +650,59 @@ COMMANDS: tuple[Command, ...] = (
         "Resolve feedback",
         (path("feedback_id", "feedback_id", kind="int"),),
     ),
+    Command(
+        "admin principal list",
+        "GET",
+        "/admin/principals",
+        "List principals (requires admin:keys)",
+        (query("tenant_id", "--tenant-id"),),
+    ),
+    Command(
+        "admin key list",
+        "GET",
+        "/admin/keys",
+        "List key metadata (requires admin:keys)",
+        (query("tenant_id", "--tenant-id"),),
+    ),
+    Command(
+        "admin key issue",
+        "POST",
+        "/admin/keys",
+        "Create a principal and issue a key (requires admin:keys)",
+        (
+            body("name", "--name", required=True),
+            body("kind", "--kind"),
+            body("tenant_id", "--tenant-id"),
+            body("roles", "--role", action="append"),
+            body("scopes", "--scope", action="append"),
+            body("expires_at", "--expires-at"),
+        ),
+    ),
+    Command(
+        "admin key attach",
+        "POST",
+        "/admin/principals/{principal_id}/keys",
+        "Issue another key for a principal (requires admin:keys)",
+        (
+            path("principal_id", "principal_id", kind="int"),
+            body("scopes", "--scope", action="append"),
+            body("expires_at", "--expires-at"),
+        ),
+    ),
+    Command(
+        "admin key revoke",
+        "DELETE",
+        "/admin/keys/{key_id}",
+        "Revoke one key (requires admin:keys)",
+        (path("key_id", "key_id", kind="int"),),
+    ),
+    Command(
+        "admin key revoke-all",
+        "DELETE",
+        "/admin/principals/{principal_id}/keys",
+        "Revoke all keys of a principal (requires admin:keys)",
+        (path("principal_id", "principal_id", kind="int"),),
+    ),
 )
 
 BY_NAME = {command.name: command for command in COMMANDS}

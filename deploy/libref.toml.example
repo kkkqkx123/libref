@@ -12,9 +12,6 @@ dev_principal = "dev-operator"
 allowed_hosts = ["libref.internal"]
 allowed_origins = ["https://libref.internal"]
 
-[client]
-base_url = "https://libref.internal"
-
 [mcp]
 # mcp_path is the mount path of the MCP Streamable HTTP app.
 # mcp_host / mcp_port are retired: the combined app listens once on [web].

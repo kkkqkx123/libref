@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import time
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import quote
 
 from librefctl.commands import COMMANDS, Command, Param, parse_json
@@ -16,6 +16,14 @@ _TERMINAL = {
     "request": frozenset({"done", "failed", "rejected", "cancelled"}),
     "job": frozenset({"done", "failed"}),
 }
+
+
+class _JsonArgumentParser(argparse.ArgumentParser):
+    """Keep usage failures inside the same JSON error envelope."""
+
+    def error(self, message: str) -> NoReturn:
+        emit(failure(ClientError("invalid_argument", message)))
+        raise SystemExit(2)
 
 
 def _type(value_type: str):
@@ -47,10 +55,15 @@ def _add_param(parser: argparse.ArgumentParser, param: Param) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = _JsonArgumentParser(
         prog="librefctl",
         description="HTTP-only client for a running libref server",
     )
+    try:
+        timeout_default = float(os.environ.get("LIBREF_CLIENT_TIMEOUT", "30"))
+    except ValueError:
+        parser.error("LIBREF_CLIENT_TIMEOUT must be a number")
+        raise AssertionError("unreachable")  # pragma: no cover
     parser.add_argument(
         "--base-url",
         default=os.environ.get("LIBREF_BASE_URL", "http://127.0.0.1:8001"),
@@ -64,7 +77,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--request-timeout",
         type=float,
-        default=float(os.environ.get("LIBREF_CLIENT_TIMEOUT", "30")),
+        default=timeout_default,
         help="Per-request timeout in seconds",
     )
     parser.add_argument("--pretty", action="store_true", help="Indent the JSON output")
@@ -118,8 +131,15 @@ def _collect(
 
 
 def _request_body(command: Command, payload: dict[str, Any], local: dict[str, Any]):
+    target_filter = payload.get("target_filter")
+    if target_filter is not None and not isinstance(target_filter, dict):
+        raise ClientError(
+            "invalid_argument",
+            "target_filter must be a JSON object",
+            field="target_filter",
+        )
     if local.get("target_prefix") or local.get("target_name"):
-        target = dict(payload.get("target_filter") or {})
+        target = dict(target_filter or {})
         if local.get("target_prefix"):
             target["prefixes"] = local["target_prefix"]
         if local.get("target_name"):
@@ -170,7 +190,10 @@ def dispatch(client: Client, args: argparse.Namespace) -> tuple[Any, dict[str, A
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    try:
+        args = build_parser().parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 0)
     client = Client(args.base_url, args.api_key, args.request_timeout)
     try:
         data, meta = dispatch(client, args)

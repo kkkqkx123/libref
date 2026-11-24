@@ -23,7 +23,7 @@ from libref.services.infra.auth import (
 )
 from libref.services.infra.jobs import JobManager
 from libref.services.infra.tenant import GLOBAL_TENANT
-from libref.services.infra.timestamps import epoch_utc, iso_utc
+from libref.services.infra.timestamps import epoch_utc
 from libref.services.ops.review import ReviewService
 from libref.services.registry.libraries import LibraryService
 from libref.web.api import (
@@ -59,6 +59,7 @@ from libref.web.api import (
     JobDetail,
     JobListResponse,
     JobQuery,
+    KeyAttach,
     KeyCreate,
     LibraryResponse,
     LinkStatsQuery,
@@ -1906,44 +1907,25 @@ def build_web_app(
         return envelope([dict(row) for row in rows])
 
     @app.get("/admin/keys", response_model=ApiKeyResponse)
-    def admin_keys_list(request: Request, principal=Depends(_guard)) -> dict[str, Any]:
+    def admin_keys_list(
+        request: Request,
+        tenant_id: str | None = None,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
         _need(principal, "admin:keys")
-        from libref.services.infra.auth import PLATFORM_SCOPE
+        from libref.services.infra.auth import list_api_keys
         from libref.services.ops.audit import write_audit
 
-        global_view = PLATFORM_SCOPE in set(getattr(principal, "scopes", set()))
-        sql = (
-            "SELECT k.id, k.principal_id, k.key_prefix, k.scopes, k.expires_at,"
-            " k.revoked_at, k.last_used_at, k.created_at FROM api_keys k"
-        )
-        params: tuple = ()
-        if not global_view:
-            sql += " JOIN principals p ON p.id=k.principal_id WHERE p.tenant_id=?"
-            params = (_tenant_of(principal),)
-        sql += " ORDER BY k.id"
-        rows = conn.execute(sql, params).fetchall()
+        items = list_api_keys(conn, viewer=principal, tenant_id=tenant_id)
         write_audit(
             conn,
             tenant_id=_tenant_of(principal),
             principal_id=_principal_id(principal),
             action="keys.list",
-            target=str(len(rows)),
+            target=str(len(items)),
             request_id=str(getattr(request.state, "request_id", "")),
         )
-        items = [
-            {
-                "id": int(r[0]),
-                "principal_id": r[1],
-                "key_prefix": str(r[2]),
-                "scopes": _scope_list(r[3]),
-                "expires_at": iso_utc(r[4]),
-                "revoked_at": iso_utc(r[5]),
-                "last_used_at": iso_utc(r[6]),
-                "created_at": iso_utc(r[7]),
-            }
-            for r in rows
-        ]
-        return envelope(items)
+        return envelope([dict(row) for row in items])
 
     @app.post("/admin/keys", response_model=IssuedKey)
     def admin_keys_create(
@@ -1988,6 +1970,41 @@ def build_web_app(
             action=action,
             target=str(key_id),
             request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
+        )
+        return {"id": key_id, "key": raw, "prefix": raw[:12]}
+
+    @app.post("/admin/principals/{principal_id}/keys", response_model=IssuedKey)
+    def admin_principal_key_create(
+        principal_id: int,
+        body: KeyAttach,
+        request: Request,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        _need(principal, "admin:keys")
+        from libref.services.infra.auth import issue_api_key, principal_tenant
+        from libref.services.ops.audit import write_audit
+
+        tenant = principal_tenant(conn, principal_id)
+        if tenant is None:
+            raise ApiRejection(404, "not_found", f"unknown principal: {principal_id}")
+        try:
+            key_id, raw = issue_api_key(
+                conn,
+                caller=principal,
+                settings=_eff_settings(request),
+                principal_id=principal_id,
+                scopes=list(body.scopes),
+                expires_at=epoch_utc(body.expires_at),
+            )
+        except ValueError as exc:
+            raise ApiRejection(400, "invalid_argument", str(exc)) from exc
+        write_audit(
+            conn,
+            tenant_id=tenant,
+            principal_id=_principal_id(principal),
+            action="keys.issue",
+            target=str(key_id),
+            request_id=str(getattr(request.state, "request_id", "")),
         )
         return {"id": key_id, "key": raw, "prefix": raw[:12]}
 

@@ -10,9 +10,10 @@ uv run python tests/e2e/probe-discovery/fetch_probe_discovery.py --only httpx-co
 uv run python tests/e2e/probe-discovery/fetch_probe_discovery.py --skip-network
 ```
 
-脚本直接调用 `libref.cli.main`，保存的文本与用户所见一致，不另起解析路径。
-离线探查用例复用 `bench` 归档源码包，无需联网；探查文档与发现用例需真实网络，
-失败记为环境不可用，不算回归。
+脚本按能力选择生产入口：本机仓库探查调用服务端本机 `libref local probe-repo`；
+文档探查与发现用例调用 `librefctl`，经 MockTransport 访问进程内 Web 应用，
+保存的文本就是客户端输出。离线探查用例复用 `bench` 归档源码包，无需联网；
+探查文档与发现用例需真实网络，失败记为环境不可用，不算回归。
 
 ## 用例
 
@@ -26,7 +27,7 @@ uv run python tests/e2e/probe-discovery/fetch_probe_discovery.py --skip-network
 
 ## 核查
 
-* `*.stdout.txt`：命令行原始输出，不二次排版。探查为单行 `JSON`，发现为 `suggestions` 加逐行 `JSON`。离线探查的 `source` 为归档解包的临时目录，每次运行变化，只看其余字段。
+* `*.stdout.txt`：命令行原始输出，不二次排版。本机探查为服务返回的单行 `JSON`；HTTP 用例为客户端信封，服务端响应原样放在 `data` 中。离线探查的 `source` 为归档解包的临时目录，每次运行变化，只看其余字段。
 * `*.meta.txt`：执行参数、退出码、耗时与标准错误，供判断环境不可用还是回归。
 * `SUMMARY.txt`：各用例一行摘要，核查时逐项对照。
 

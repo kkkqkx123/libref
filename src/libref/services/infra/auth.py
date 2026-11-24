@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 from libref.db.contract import MetadataSession
 from libref.services.infra.tenant import GLOBAL_TENANT, owner_tenant
+from libref.services.infra.timestamps import iso_utc
 
 PLATFORM_ROLE = "platform_admin"
 PLATFORM_SCOPE = "platform:admin"
@@ -240,6 +241,11 @@ def _system_caller() -> Principal:
         roles=[PLATFORM_ROLE],
         scopes=set(ROLE_SCOPES[PLATFORM_ROLE]),
     )
+
+
+def system_caller() -> Principal:
+    """Platform-level caller for trusted administration on the server host."""
+    return _system_caller()
 
 
 def scopes_for_roles(roles: list[str]) -> set[str]:
@@ -501,6 +507,56 @@ class PrincipalSummary(TypedDict):
     roles: list[str]
     scopes: list[str]
     conflicting: list[list[str]]
+
+
+class ApiKeySummary(TypedDict):
+    """Read-only key row for the admin view; never carries key material."""
+
+    id: int
+    principal_id: int
+    key_prefix: str
+    scopes: list[str]
+    expires_at: str | None
+    revoked_at: str | None
+    last_used_at: str | None
+    created_at: str | None
+
+
+def list_api_keys(
+    conn: MetadataSession, *, viewer: Principal, tenant_id: str | None = None
+) -> list[ApiKeySummary]:
+    """List keys visible to a viewer, optionally narrowed to one tenant."""
+    wanted = (tenant_id or "").strip() or None
+    if PLATFORM_SCOPE in viewer.scopes:
+        filter_tenant = wanted
+    else:
+        if wanted and wanted != viewer.tenant_id:
+            raise ValueError("caller cannot administer target tenant")
+        filter_tenant = viewer.tenant_id
+    sql = (
+        "SELECT k.id, k.principal_id, k.key_prefix, k.scopes, k.expires_at,"
+        " k.revoked_at, k.last_used_at, k.created_at FROM api_keys k"
+        " JOIN principals p ON p.id=k.principal_id"
+    )
+    params: tuple = ()
+    if filter_tenant:
+        sql += " WHERE p.tenant_id=?"
+        params = (filter_tenant,)
+    sql += " ORDER BY k.id"
+    rows = conn.execute(sql, params).fetchall()
+    return [
+        {
+            "id": int(r[0]),
+            "principal_id": int(r[1]),
+            "key_prefix": str(r[2]),
+            "scopes": _parse_json_list(str(r[3])),
+            "expires_at": iso_utc(r[4]),
+            "revoked_at": iso_utc(r[5]),
+            "last_used_at": iso_utc(r[6]),
+            "created_at": iso_utc(r[7]),
+        }
+        for r in rows
+    ]
 
 
 def list_principals(

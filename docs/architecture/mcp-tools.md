@@ -81,4 +81,4 @@
 
 ## 8. 与服务层的对应
 
-出口到服务为一一对应，不存在出口直连存储：分支逻辑只在服务层实现一次，三出口直接调用统一入口。检索对应 `SearchService.search_with_mode`，阅读对应 `PageService.read_doc`，目录对应 `LibraryService.catalog`，发现对应 `DiscoveryService`，探查对应 `probe_docs_async/probe_repo`，依赖与链接统计对应 `list_repo_dependencies` 与链接服务，源码洞察对应 `MiningReadService` 各视角，审核对应 `ReviewService.apply`，反馈对应 `FeedbackService.submit`，任务与申请对应 `JobManager.show` 和 `IndexRequestService`，解析对应 `resolver.resolve`。CLI 的 `probe-docs/probe-repo` 与 Web 的 `/doc-probe`、`/repo-probe` 为同一探查语义的换皮。新增过滤或排序语义时改服务层，出口只做参数透传。
+出口到服务为一一对应，不存在出口直连存储：分支逻辑只在服务层实现一次，服务端三出口直接调用统一入口。检索对应 `SearchService.search_with_mode`，阅读对应 `PageService.read_doc`，目录对应 `LibraryService.catalog`，发现对应 `DiscoveryService`，探查对应 `probe_docs_async/probe_repo`，依赖与链接统计对应 `list_repo_dependencies` 与链接服务，源码洞察对应 `MiningReadService` 各视角，审核对应 `ReviewService.apply`，反馈对应 `FeedbackService.submit`，任务与申请对应 `JobManager.show` 和 `IndexRequestService`，解析对应 `resolver.resolve`。服务端本机 CLI 的 `local probe-repo` 与 Web 的 `/repo-probe` 为同一探查语义的换皮；文档探查只由 Web 的 `/doc-probe` 与 `librefctl doc-probe` 提供。`librefctl` 只经 Web 路由调用，并拒绝本机路径。新增过滤或排序语义时改服务层，出口只做参数透传。

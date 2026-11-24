@@ -106,8 +106,8 @@ ssh devs "export PATH=\$HOME/.local/bin:\$PATH && cd /data/kkkqkx/libref/repo \
 常用验证命令（均在 `repo/` 内、导出 PATH 后执行）：
 
 ```bash
-uv run ruff check src tests
-uv run mypy src
+uv run ruff check src tests packages/librefctl/src
+uv run mypy src packages/librefctl/src
 uv run pytest -m unit -q
 uv run pytest -m integration -q
 uv run pytest -q          # 全量；e2e 默认跳过，requires_qdrant / requires_simvec 需现场自备服务或产物

@@ -10,7 +10,7 @@ Podman 使用独立入口 `deploy/podman/deploy.sh`，本目录的 Docker 配置
 |---|---|
 | `env.dev.example` | dev 模式：无鉴权、只绑回环 |
 | `env.prod.example` | enforced 模式：每请求需 Bearer API Key |
-| `libref.toml.example` | 非密钥配置文件示例（`[auth]` / `[client]` / `[server]` / `[mcp]` / `[web]` / `[logging]`） |
+| `libref.toml.example` | 非密钥配置文件示例（`[auth]` / `[server]` / `[mcp]` / `[web]` / `[logging]`） |
 | `compose.yml` | 示例编排：libref + Qdrant，数据走命名卷，libref 只绑回环 |
 | `nginx.conf.example` | 反向代理示例：TLS 终止、请求体上限、MCP 长连接头 |
 | `nginx.static.conf.example` | 可选静态示例：nginx 发 `/assets/` 与 `/`，其余路径代理到后端 |
@@ -31,7 +31,7 @@ cp deploy/libref.toml.example libref.toml
 
 1. 复制 `env.dev.example` 为 `.env`，设置 `LIBREF_AUTH_MODE=dev`。
 2. 保持 `LIBREF_WEB_HOST=127.0.0.1`。服务启动时会校验：dev 模式 + 非回环监听直接拒绝启动，避免无鉴权服务暴露到网络。
-3. 中间件注入固定 `Principal`（`LIBREF_DEV_PRINCIPAL`），不校验 API Key；CLI remote 调用也无需 `LIBREF_CLIENT_API_KEY`。
+3. 中间件注入固定 `Principal`（`LIBREF_DEV_PRINCIPAL`），不校验 API Key；`librefctl` 调用无需 `LIBREF_CLIENT_API_KEY`。
 4. 仅供本地开发，**不得用于生产**。
 
 ## enforced 模式

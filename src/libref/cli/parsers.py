@@ -5,6 +5,21 @@ from __future__ import annotations
 import argparse
 
 from libref.cli.common import _config_parent
+from libref.cli.key_commands import (
+    cmd_key_attach,
+    cmd_key_issue,
+    cmd_key_list,
+    cmd_key_revoke,
+    cmd_key_revoke_all,
+    cmd_principal_list,
+)
+from libref.cli.local_commands import (
+    cmd_doc_features,
+    cmd_index_repo,
+    cmd_induce_labels,
+    cmd_mine,
+    cmd_probe_repo,
+)
 from libref.cli.ops_commands import (
     cmd_config_show,
     cmd_deletions,
@@ -46,6 +61,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the local discovery-to-storage smoke test",
         parents=[_config_parent],
     ).set_defaults(func=cmd_smoke)
+
+    p_local = sub.add_parser(
+        "local",
+        help="Direct host-path indexing, probing and mining",
+        parents=[_config_parent],
+    )
+    _add_local_commands(p_local.add_subparsers(dest="local_command", required=True))
+    _add_key_commands(sub)
 
     p_serve_mcp = sub.add_parser(
         "serve-mcp",
@@ -200,3 +223,174 @@ def build_parser() -> argparse.ArgumentParser:
     p_role_split.set_defaults(func=cmd_role_split)
 
     return parser
+
+
+def _add_local_commands(sub: argparse._SubParsersAction) -> None:
+    source_roles = (
+        "official_example",
+        "doc_snippet",
+        "readme",
+        "test",
+        "reference_project",
+        "implementation",
+    )
+
+    p_index = sub.add_parser(
+        "index-repo",
+        help="Index a repository from a host path",
+        parents=[_config_parent],
+    )
+    p_index.add_argument("library")
+    p_index.add_argument("version")
+    p_index.add_argument(
+        "source", help="Host path; remote sources use librefctl request submit"
+    )
+    p_index.add_argument("--ecosystem", default=None)
+    p_index.add_argument("--update", action="store_true")
+    p_index.add_argument("--fresh", action="store_true")
+    p_index.add_argument("--subdir", default=None)
+    p_index.add_argument("--only-file", action="append", default=None)
+    p_index.add_argument("--exclude-pattern", action="append", default=None)
+    p_index.add_argument("--max-files", type=int, default=None)
+    p_index.add_argument(
+        "--source-role", choices=source_roles, default="implementation"
+    )
+    p_index.add_argument("--target-prefix", action="append", default=None)
+    p_index.add_argument("--target-name", action="append", default=None)
+    p_index.set_defaults(func=cmd_index_repo)
+
+    p_probe_repo = sub.add_parser(
+        "probe-repo",
+        help="Inspect a local or remote repository without storing it",
+        parents=[_config_parent],
+    )
+    p_probe_repo.add_argument("source", help="Host path or explicit HTTP(S) address")
+    p_probe_repo.add_argument("--subdir", default=None)
+    p_probe_repo.add_argument("--only-file", action="append", default=None)
+    p_probe_repo.add_argument("--exclude-pattern", action="append", default=None)
+    p_probe_repo.add_argument("--max-files", type=int, default=None)
+    p_probe_repo.add_argument("--sample-limit", type=int, default=None)
+    p_probe_repo.add_argument("--tree-depth", type=int, default=None)
+    p_probe_repo.add_argument("--samples-per-dir", type=int, default=None)
+    p_probe_repo.set_defaults(func=cmd_probe_repo)
+
+    p_mine = sub.add_parser(
+        "mine",
+        help="Mine call-sequence patterns directly from stored evidence",
+        parents=[_config_parent],
+    )
+    p_mine.add_argument("library")
+    p_mine.add_argument("version")
+    p_mine.add_argument("--ecosystem", default=None)
+    p_mine.add_argument("--minsup", type=int, default=None)
+    p_mine.add_argument("--topn", type=int, default=None)
+    p_mine.add_argument("--maxlen", type=int, default=None)
+    p_mine.add_argument("--minlen", type=int, default=None)
+    p_mine.add_argument("--include-ambiguous", action="store_true")
+    p_mine.add_argument("--cluster-threshold", type=float, default=None)
+    p_mine.add_argument("--cluster-min-size", type=int, default=None)
+    p_mine.add_argument("--resolve-kind", action="append", default=None)
+    p_mine.add_argument("--min-args", type=int, default=None)
+    p_mine.add_argument("--max-args", type=int, default=None)
+    p_mine.add_argument("--profile", default=None)
+    p_mine.add_argument("--source-role", action="append", default=None)
+    p_mine.add_argument(
+        "--macro-policy",
+        choices=("exclude", "review_only", "approved_only"),
+        default=None,
+    )
+    p_mine.set_defaults(func=cmd_mine)
+
+    p_induce = sub.add_parser(
+        "induce-labels",
+        help="Induce pattern labels directly with the local chat endpoint",
+        parents=[_config_parent],
+    )
+    p_induce.add_argument("library")
+    p_induce.add_argument("version")
+    p_induce.add_argument("--ecosystem", default=None)
+    p_induce.add_argument("--topn", type=int, default=None)
+    p_induce.add_argument("--include-ambiguous", action="store_true")
+    p_induce.add_argument("--profile", default=None)
+    p_induce.add_argument(
+        "--macro-policy",
+        choices=("exclude", "review_only", "approved_only"),
+        default=None,
+    )
+    p_induce.set_defaults(func=cmd_induce_labels)
+
+    p_features = sub.add_parser(
+        "doc-features",
+        help="Rebuild document-derived features for a stored version",
+        parents=[_config_parent],
+    )
+    feature_sub = p_features.add_subparsers(dest="doc_feature_command", required=True)
+    p_refresh = feature_sub.add_parser("refresh", help="Rebuild one derivation scope")
+    p_refresh.add_argument("--library", required=True)
+    p_refresh.add_argument("--version", required=True)
+    p_refresh.add_argument("--ecosystem", default=None)
+    p_refresh.add_argument("--profile", default=None)
+    p_refresh.add_argument(
+        "--scope",
+        choices=(
+            "structure",
+            "links",
+            "sources",
+            "coverage",
+            "consistency",
+            "derived",
+            "all",
+        ),
+        default="all",
+    )
+    p_features.set_defaults(func=cmd_doc_features)
+
+
+def _add_key_commands(sub: argparse._SubParsersAction) -> None:
+    from libref.services.infra.auth import KNOWN_SCOPES, ROLE_SCOPES
+
+    p_principal = sub.add_parser(
+        "principal",
+        help="List local principals",
+        parents=[_config_parent],
+    )
+    principal_sub = p_principal.add_subparsers(dest="principal_action", required=True)
+    p_principal_list = principal_sub.add_parser("list", help="List principals")
+    p_principal_list.add_argument("--tenant", default=None)
+    p_principal.set_defaults(func=cmd_principal_list)
+
+    p_key = sub.add_parser(
+        "key",
+        help="Manage local API keys",
+        parents=[_config_parent],
+    )
+    key_sub = p_key.add_subparsers(dest="key_action", required=True)
+
+    p_list = key_sub.add_parser("list", help="List key metadata")
+    p_list.add_argument("--tenant", default=None)
+    p_list.set_defaults(func=cmd_key_list)
+
+    p_issue = key_sub.add_parser("issue", help="Create a principal and issue a key")
+    p_issue.add_argument("--name", required=True)
+    p_issue.add_argument("--kind", default="human")
+    p_issue.add_argument("--tenant", default="default")
+    p_issue.add_argument("--role", action="append", choices=sorted(ROLE_SCOPES))
+    p_issue.add_argument("--scope", action="append", choices=sorted(KNOWN_SCOPES))
+    p_issue.add_argument("--expires-at", default=None, help="ISO 8601 instant")
+    p_issue.set_defaults(func=cmd_key_issue)
+
+    p_attach = key_sub.add_parser("attach", help="Issue another key for a principal")
+    p_attach.add_argument("principal_id", type=int)
+    p_attach.add_argument("--scope", action="append", choices=sorted(KNOWN_SCOPES))
+    p_attach.add_argument("--expires-at", default=None, help="ISO 8601 instant")
+    p_attach.set_defaults(func=cmd_key_attach)
+
+    p_revoke = key_sub.add_parser("revoke", help="Revoke one key")
+    p_revoke.add_argument("key_id", type=int)
+    p_revoke.set_defaults(func=cmd_key_revoke)
+
+    p_revoke_all = key_sub.add_parser(
+        "revoke-all", help="Revoke all keys of a principal"
+    )
+    p_revoke_all.add_argument("principal_id", type=int)
+    p_revoke_all.set_defaults(func=cmd_key_revoke_all)

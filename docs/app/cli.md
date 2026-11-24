@@ -25,6 +25,29 @@
 * `role-audit`：巡检角色互斥，逐行列出冲突主体并给出可执行的 `--keep` 选项；`--json` 输出结构化清单，`--strict` 存在冲突时返回 1。
 * `role-split`：`--principal` 与 `--keep` 必填，`--name` 覆盖新主体命名，`--dry-run` 只打印计划，`--json` 输出结构化结果。执行时把非保留角色装箱到最少量新主体，每个新主体签发一把 key 并只回显一次明文；主体不存在、无冲突或 `--keep` 不在其角色中返回 2。
 
+## 本机数据与挖掘
+
+这些命令收在 `local` 子命令组，只在服务端主机使用，直接打开本机数据库与文件系统；需要远程调用同类能力时使用 `librefctl`，不要在服务端 CLI 上叠加远端路径。文档探查统一走 `librefctl doc-probe`，服务端不再提供入口。
+
+* `local index-repo library version source`：`source` 只接受本机路径；远端仓库必须由调用方经 `librefctl request submit` 申请并审批。按服务层默认参数直接入库，支持 `--subdir`、`--only-file`、`--exclude-pattern`、`--max-files`、`--source-role`、`--target-prefix`、`--target-name`、`--update`、`--fresh`。
+* `local probe-repo source`：只读探查本机路径或远端仓库的目录形状，不解析文件、不落库；过滤选项与 `index-repo` 同名。
+* `local mine library version`：直接调用挖掘服务；`--resolve-kind`、`--source-role` 可重复，`--cluster-threshold`、`--cluster-min-size`、`--macro-policy` 与服务层同名。
+* `local induce-labels library version`：直接调用标签归纳，使用本机配置的 chat 端点。
+* `local doc-features refresh --library --version`：重建一个版本的派生特征，`--scope` 指定单一视角或 `all`。
+
+## 主体与密钥
+
+本机命令以平台级系统调用者执行，复用服务层校验并写入 `cli.*` 审计；明文 key 只在签发命令的 stdout 出现一次。
+
+* `principal list [--tenant TENANT]`：列出主体、角色、scope 与冲突标记。
+* `key list [--tenant TENANT]`：列出 key 元数据，不含明文。
+* `key issue --name NAME [--kind KIND] [--tenant TENANT] [--role ROLE]... [--scope SCOPE]... [--expires-at ISO]`：创建主体并签发 key。
+* `key attach PRINCIPAL_ID [--scope SCOPE]... [--expires-at ISO]`：给既有主体追加 key。
+* `key revoke KEY_ID`：撤销单把 key。
+* `key revoke-all PRINCIPAL_ID`：撤销主体全部有效 key。
+
+`--json` 输出结构化结果，签发结果中含一次性明文 `key`。角色变更仍由 `role-split` 或 Web 管理路由负责。
+
 ## 配置
 
 服务端配置定义见同目录 `config.md`。客户端地址与凭据不属于服务端配置：凭据只经环境变量注入，`config-show` 打印脱敏快照。

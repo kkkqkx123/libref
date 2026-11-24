@@ -59,6 +59,8 @@
 
 拆分的落点是**主体**而不是"人"：原主体的旧 key 仍然有效，权限按新角色收窄，不会当场断线。浏览器侧可在 `GET /admin/principals` 看到冲突清单，修复仍走上面的 CLI——拆分必须由人指定保留哪个角色，并把新明文交到承接人手里。
 
+主体与 key 的日常管理另有两组入口：`libref principal list` 与 `libref key list/issue/attach/revoke/revoke-all` 在服务端本机以平台级系统调用者执行，写入 `cli.*` 审计；`librefctl admin key ...` 经 Web API 执行，仍要求调用方持有 `admin:keys`。后者供云部署运维自动化使用，operator key 不得注入 skill 运行环境。
+
 约束的边界是"一个主体"，不是"一个人"：同一人持有两个主体即可绕过，完整的职责分离需要外部身份源绑定自然人，当前不在实现范围内。
 
 ## 4. 角色操作矩阵
@@ -101,7 +103,7 @@
 | `GET /feedback` | `feedback:read` 看本租户，`feedback:read:own` 只看本人 |
 | `POST /feedback/{id}/resolve` | `feedback:resolve` |
 | `POST /jobs`、`POST /jobs/{id}/cancel` | `jobs:write` |
-| `GET /admin/keys`、`POST /admin/keys`、`DELETE /admin/keys/{id}`、`DELETE /admin/principals/{id}/keys` | `admin:keys` |
+| `GET /admin/keys`、`POST /admin/keys`、`POST /admin/principals/{id}/keys`、`DELETE /admin/keys/{id}`、`DELETE /admin/principals/{id}/keys` | `admin:keys` |
 | `GET /admin/principals` | `admin:keys`，只读，带角色冲突标记 |
 | `GET /admin/quota/policies`、`PUT /admin/quota/policies` | `admin:config` |
 | `POST /admin/config/refresh` | `admin:config` |

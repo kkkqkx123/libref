@@ -391,3 +391,31 @@ def test_enforced_mode_api_key_auth(tmp_path, monkeypatch) -> None:
         )
     finally:
         conn.close()
+
+
+def test_admin_key_attach_uses_existing_principal(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    conn = _open(tmp_path)
+    try:
+        client = _client(conn, monkeypatch, tmp_path)
+        created = client.post(
+            "/admin/keys",
+            json={"name": "attach-target", "roles": ["developer"]},
+        )
+        assert created.status_code == 200
+        principals = client.get("/admin/principals").json()["items"]
+        target = next(p for p in principals if p["name"] == "attach-target")
+
+        attached = client.post(
+            f"/admin/principals/{target['id']}/keys", json={"scopes": ["read"]}
+        )
+        assert attached.status_code == 200
+        assert attached.json()["key"].startswith("libref_")
+        assert (
+            client.post(
+                "/admin/principals/9999/keys", json={"scopes": ["read"]}
+            ).status_code
+            == 404
+        )
+    finally:
+        conn.close()

@@ -49,7 +49,7 @@
 | probe_fetch_sample_limit | 整数（≥0） | 5 | LIBREF_PROBE_FETCH_SAMPLE_LIMIT | 探查拉取标题与类型的页数，0 表示禁用 |
 | probe_fetch_timeout | 浮点（>0） | 10.0 | LIBREF_PROBE_FETCH_TIMEOUT | 探查单页超时，秒 |
 
-相关命令：`ingest/refresh/probe-docs/probe-repo/smoke-local`。
+相关命令：`libref smoke-local`、`libref local probe-repo` 与 `librefctl ingest-docs/doc-probe`。
 
 ## 存储（[storage]）
 
@@ -168,7 +168,7 @@
 | registry_overrides_file | 路径/空 | 空 | LIBREF_REGISTRY_OVERRIDES_FILE | 外部地址覆盖文件 |
 | registry_override_ttl_days | 浮点（≥0） | 180.0 | LIBREF_REGISTRY_OVERRIDE_TTL_DAYS | 覆盖有效期，天 |
 
-相关命令：`ingest/index-repo/resolve/discover` 与 MCP/Web 的同名工具。
+相关命令：`libref local index-repo` 与 `librefctl resolve/discover` 及 MCP/Web 的同名工具。
 
 ## 发现（[discovery]）
 

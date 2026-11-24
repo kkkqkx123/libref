@@ -54,7 +54,16 @@ def test_server_parser_keeps_only_local_operations() -> None:
     parser = build_parser()
     commands = parser._subparsers._group_actions[0].choices
     assert {"serve", "serve-mcp", "init-db", "role-audit", "fts-check"} <= set(commands)
-    assert not {"search", "answer", "ingest", "index-repo", "request"} & set(commands)
+    local = commands["local"]._subparsers._group_actions[0].choices
+    assert {
+        "index-repo",
+        "probe-repo",
+        "mine",
+        "induce-labels",
+        "doc-features",
+    } <= set(local)
+    assert "probe-docs" not in local
+    assert not {"search", "answer", "ingest", "request", "feedback"} & set(commands)
 
 
 def test_unavailable_factory_keeps_outage_on_tier_one() -> None:

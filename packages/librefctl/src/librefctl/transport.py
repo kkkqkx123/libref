@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -99,7 +100,10 @@ def _failure(status: int, data: Any) -> ClientError:
     code = data.get("error")
     if isinstance(code, str) and code:
         if isinstance(detail, dict):
-            detail = detail.get("detail")
+            nested = detail.get("detail")
+            detail = (
+                nested if nested is not None else json.dumps(detail, ensure_ascii=False)
+            )
         message = str(detail or f"the server rejected the request with status {status}")
         request_id = data.get("request_id")
         return ClientError(

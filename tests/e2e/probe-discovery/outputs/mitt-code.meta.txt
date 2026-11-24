@@ -1,4 +1,4 @@
-argv: librefctl repo-probe /tmp/tmpgirmq6u2/mitt-code --subdir src --tree-depth 2 --samples-per-dir 2 --sample-limit 20
+argv: libref local probe-repo /tmp/tmpgirmq6u2/mitt-code --subdir src --tree-depth 2 --samples-per-dir 2 --sample-limit 20
 exit: 0
 elapsed: 0.0s
 stderr:

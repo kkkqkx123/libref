@@ -151,7 +151,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### GET /admin/keys
 
-列出凭据，需 `admin:keys`。普通管理员只看本租户，平台管理员可看全部；密钥明文不回显，列举动作记审计。
+列出凭据，需 `admin:keys`。普通管理员只看本租户，平台管理员可看全部，`tenant_id` 可显式过滤；密钥明文不回显，列举动作记审计。
 
 ### GET /admin/principals
 
@@ -159,7 +159,11 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### POST /admin/keys
 
-签发凭据，需 `admin:keys`。主体租户与 Key scope 都不得超过调用者权限，Key scope 也不得超过目标主体的角色 scope；非空 Key scope 会收窄角色权限，留空表示继承角色全部 scope。`developer` / `kb_admin` / `sys_admin` 三者互斥，同一主体只能持有其中一个（平台角色豁免）；未知角色、越权角色与冲突组合都返回请求错误。明文仅返回一次，默认有效期与最大有效期由 `[auth]` 控制。
+创建主体并签发凭据，需 `admin:keys`。主体租户与 Key scope 都不得超过调用者权限，Key scope 也不得超过目标主体的角色 scope；非空 Key scope 会收窄角色权限，留空表示继承角色全部 scope。`developer` / `kb_admin` / `sys_admin` 三者互斥，同一主体只能持有其中一个（平台角色豁免）；未知角色、越权角色与冲突组合都返回请求错误。明文仅返回一次，默认有效期与最大有效期由 `[auth]` 控制。
+
+### POST /admin/principals/{principal_id}/keys
+
+给既有主体追加凭据，需 `admin:keys`。请求体只有 `scopes` 与 `expires_at`，沿用与签发相同的 scope 收窄与有效期约束；主体不可见时返回未找到，明文仅返回一次。批量轮换优先使用此接口，避免重复创建主体。
 
 ### DELETE /admin/keys/{key_id}
 

@@ -353,6 +353,11 @@ class KeyCreate(BaseModel):
     expires_at: IsoDateTime | None = None
 
 
+class KeyAttach(BaseModel):
+    scopes: list[str] = Field(default_factory=list)
+    expires_at: IsoDateTime | None = None
+
+
 class QuotaPolicyUpsert(BaseModel):
     resource: str = Field(min_length=1)
     limit_value: int = Field(ge=0)

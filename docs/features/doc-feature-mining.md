@@ -26,7 +26,7 @@
 
 - 文档抓取成功后重建 `structure` 与 `links`，并把关联实体写回 `documents.metadata.entities`；只有名单变化时才更新元数据，避免无谓触发 FTS。
 - 模式挖掘成功后重建当前档案的 `coverage` 与 `consistency`。
-- `libref doc-features refresh` 可独立重跑指定范围，任务名为 `derive_doc_features`，恢复语义与既有任务一致。
+- `libref local doc-features refresh` 可独立重跑指定范围，任务名为 `derive_doc_features`，恢复语义与既有任务一致。
 - 任一上游为空时清空对应派生范围；失败只计数告警，不推翻真源。
 
 ## 检索与出口

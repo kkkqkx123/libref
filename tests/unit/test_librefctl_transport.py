@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from argparse import Namespace
+from typing import Any
 
 import httpx
 import pytest
+
 from librefctl import app
+from librefctl.app import _collect, _request_body, build_parser
 from librefctl.commands import BY_NAME
 from librefctl.output import exit_code, failure, success
 from librefctl.transport import Client, ClientError
@@ -130,6 +134,117 @@ def test_wait_polls_until_terminal(monkeypatch) -> None:
         client.close()
     assert data == {"status": "done"}
     assert meta == {"waited": True, "status": "done", "attempts": 2}
+
+
+def test_usage_error_is_a_json_envelope(capsys) -> None:
+    code = app.main(["search"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "invalid_argument"
+
+
+def test_invalid_timeout_environment_is_a_usage_error(monkeypatch, capsys) -> None:
+    monkeypatch.setenv("LIBREF_CLIENT_TIMEOUT", "not-a-number")
+    code = app.main(["health"])
+    payload = json.loads(capsys.readouterr().out)
+    assert code == 2
+    assert "LIBREF_CLIENT_TIMEOUT" in payload["error"]["message"]
+
+
+def test_non_object_target_filter_is_rejected() -> None:
+    command = BY_NAME["request submit"]
+    with pytest.raises(ClientError) as raised:
+        _request_body(command, {"target_filter": []}, {})
+    assert raised.value.field == "target_filter"
+
+
+def test_dedup_flag_is_tri_state() -> None:
+    parser = build_parser()
+    unset = parser.parse_args(["pattern-insight", "patterns"])
+    enabled = parser.parse_args(["pattern-insight", "patterns", "--dedup"])
+    disabled = parser.parse_args(["pattern-insight", "patterns", "--no-dedup"])
+    assert (unset.dedup, enabled.dedup, disabled.dedup) == (None, True, False)
+    assert _collect(BY_NAME["pattern-insight"], enabled)[1]["dedup"] is True
+    assert _collect(BY_NAME["pattern-insight"], disabled)[1]["dedup"] is False
+
+
+def test_json_object_argument_is_parsed() -> None:
+    args = build_parser().parse_args(
+        ["doc-probe", "https://d.example/", "--scope", '{"path_prefixes":["/a"]}']
+    )
+    assert args.scope == {"path_prefixes": ["/a"]}
+
+
+def test_quota_dict_detail_keeps_readable_information() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={
+                "error": "quota_exceeded",
+                "detail": {"resource": "jobs", "reset_at": "2026-01-01T00:00:00Z"},
+                "request_id": "req-9",
+            },
+        )
+
+    client = _client(handler)
+    try:
+        with pytest.raises(ClientError) as raised:
+            client.call("POST", "/jobs")
+    finally:
+        client.close()
+    assert "jobs" in raised.value.message
+    assert raised.value.request_id == "req-9"
+
+
+def test_admin_key_issue_maps_repeated_flags_to_lists() -> None:
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(200, json={"id": 1, "key": "secret", "prefix": "libref_"})
+
+    args = build_parser().parse_args(
+        [
+            "admin",
+            "key",
+            "issue",
+            "--name",
+            "operator",
+            "--role",
+            "developer",
+            "--role",
+            "kb_admin",
+            "--scope",
+            "read",
+        ]
+    )
+    client = _client(handler)
+    try:
+        app.dispatch(client, args)
+    finally:
+        client.close()
+    assert seen["body"] == {
+        "name": "operator",
+        "roles": ["developer", "kb_admin"],
+        "scopes": ["read"],
+    }
+
+
+def test_admin_key_attach_uses_principal_path() -> None:
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json={"id": 2, "key": "secret"})
+
+    args = build_parser().parse_args(["admin", "key", "attach", "7", "--scope", "read"])
+    client = _client(handler)
+    try:
+        app.dispatch(client, args)
+    finally:
+        client.close()
+    assert seen["url"] == "http://server/admin/principals/7/keys"
 
 
 def test_wait_times_out_on_non_terminal_state() -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+
 from librefctl.app import build_parser
 
 pytestmark = pytest.mark.unit
