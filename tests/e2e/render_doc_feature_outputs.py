@@ -21,6 +21,7 @@ if str(HERE.parents[1]) not in sys.path:
     # Direct execution keeps the same import root as the module invocation.
     sys.path.insert(0, str(HERE.parents[1]))
 FIXTURES = HERE / "fixtures" / "doc_features"
+DRIFT_SAMPLES = FIXTURES / "drift_samples.json"
 DEFAULT_OUT = HERE / "outputs" / "doc_features"
 REPORT_NAMES = (
     "01-cases.txt",
@@ -32,6 +33,7 @@ REPORT_NAMES = (
     "07-ranking.txt",
     "08-metrics.txt",
     "09-drift.txt",
+    "10-drift-review.txt",
     "SUMMARY.txt",
 )
 
@@ -55,6 +57,41 @@ def load_questions() -> dict[str, list[dict[str, Any]]]:
 
 def _dump(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def _drift_review_lines() -> tuple[str, dict[str, Any]]:
+    """Human-labeled drift samples; the report observes, never gates."""
+    samples = json.loads(DRIFT_SAMPLES.read_text(encoding="utf-8")).get("samples", [])
+    auto = [row for row in samples if row.get("auto_verdict") == "drift"]
+    false_positive = [row for row in auto if row.get("human_verdict") != "drift"]
+    stats = {
+        "samples": len(samples),
+        "auto_drift": len(auto),
+        "false_positive": len(false_positive),
+        "false_positive_rate": (len(false_positive) / len(auto) if auto else 0.0),
+        "measurable": bool(auto),
+    }
+    lines = [
+        "# Human-reviewed drift samples",
+        "",
+        f"- samples: {stats['samples']}",
+        f"- auto drift: {stats['auto_drift']}",
+        f"- false positive: {stats['false_positive']}",
+        f"- false positive rate: {stats['false_positive_rate']:.3f}",
+        "",
+    ]
+    for row in samples:
+        lines.append(
+            f"- {row.get('corpus', '-')} {row.get('url', '-')} "
+            f"auto={row.get('auto_verdict', '-')} "
+            f"human={row.get('human_verdict', '-')} "
+            f"reason={row.get('reason', '-')}"
+        )
+    if not samples:
+        lines.append("(no human-labeled samples)")
+    if not stats["measurable"]:
+        lines.append("Not measurable until an automatic drift sample is labeled.")
+    return "\n".join(lines), stats
 
 
 def _write(out_dir: Path, name: str, body: str) -> None:
@@ -513,7 +550,7 @@ def _metrics(
             continue
         have = set().union(*(linked_entities.get(doc, set()) for doc in docs))
         want = {str(name) for name in question.get("expected_entities", [])}
-        alignment.append(have == want)
+        alignment.append(want <= have)
         expected_type = question.get("expected_facets", {}).get("block_type")
         if expected_type:
             block_match.append(
@@ -704,10 +741,13 @@ def render(out_dir: Path) -> dict[str, Any]:
                 for row in drift
             ] or ["(no changes)"]
             _write(out_dir, "09-drift.txt", "\n".join(drift_lines))
+            drift_review_text, drift_review = _drift_review_lines()
+            _write(out_dir, "10-drift-review.txt", drift_review_text)
             summaries = [
                 f"Generated: {_stamp()}",
                 f"Derivation counts: {_dump(counts)}",
                 f"Reports: {len(REPORT_NAMES) - 1}",
+                f"Drift review: {_dump(drift_review)}",
                 (
                     f"Anchor resolution (offline corpus): "
                     f"{'PASS' if not unresolved.get('demo') else 'FAIL: ' + _dump(unresolved['demo'])}"
@@ -729,7 +769,12 @@ def render(out_dir: Path) -> dict[str, Any]:
                 "  - " + ", ".join(k for k, v in checks.items() if not v),
             ]
             _write(out_dir, "SUMMARY.txt", "\n".join(summaries))
-            return {"counts": counts, "invariants": checks, "metrics": values}
+            return {
+                "counts": counts,
+                "invariants": checks,
+                "metrics": values,
+                "drift_review": drift_review,
+            }
         finally:
             conn.close()
 

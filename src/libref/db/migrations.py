@@ -15,6 +15,7 @@ from libref.db.schema import (
     DISCOVERY_CACHE_SQL,
     DOC_FEATURE_SQL,
     DOC_LINK_EDGES_SQL,
+    ENTITY_SOURCE_SQL,
     FACET_DERIVED_SQL,
     FEATURE_TREE_CLUSTER_SQL,
     GOVERNANCE_SQL,
@@ -82,6 +83,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(29, "feature-facets", FACET_DERIVED_SQL),
     Migration(30, "cluster-labels", CLUSTER_LABEL_SQL),
     Migration(31, "doc-feature-facets", DOC_FEATURE_SQL),
+    Migration(32, "entity-source-bindings", ENTITY_SOURCE_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

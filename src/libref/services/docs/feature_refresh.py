@@ -28,6 +28,17 @@ from libref.mining.doc_alignment import (
     pattern_hash,
 )
 
+
+def _json_list(raw) -> list[str]:
+    if not raw:
+        return []
+    try:
+        value = json.loads(str(raw))
+    except TypeError, ValueError:
+        return []
+    return [str(item) for item in value] if isinstance(value, list) else []
+
+
 SCOPES = (
     "structure",
     "links",
@@ -491,6 +502,9 @@ def refresh_doc_features(
         library_id, version_id = catalog.ensure_library_version(
             library, version, ecosystem
         )
+    entity_version_id = catalog.entity_source_version_id(
+        version_id, tenant_id=tenant_id
+    )
     try:
         for table in ("doc_consistency", "doc_pattern_coverage"):
             if table in needed_tables:
@@ -507,13 +521,23 @@ def refresh_doc_features(
         calls = _load_snippet_calls(conn, version_id, tenant_id)
         mapped, snippet_symbols = _map_calls_to_documents(blocks, calls)
 
+        entity_rows = conn.execute(
+            "SELECT id, qualified_name, params, return_type, signature FROM api_entities"
+            " WHERE version_id=?",
+            (entity_version_id,),
+        ).fetchall()
         entities = [
-            {"id": int(r[0]), "qualified_name": str(r[1] or "")}
-            for r in conn.execute(
-                "SELECT id, qualified_name FROM api_entities WHERE version_id=?",
-                (version_id,),
-            ).fetchall()
+            {"id": int(r[0]), "qualified_name": str(r[1] or "")} for r in entity_rows
         ]
+        entity_signatures = {
+            str(row[1]): {
+                "qualified_name": str(row[1] or ""),
+                "params": [str(item) for item in _json_list(row[2])],
+                "return_type": str(row[3] or ""),
+                "signature": str(row[4] or ""),
+            }
+            for row in entity_rows
+        }
         index = build_api_index(entities)
 
         if "structure" in wanted:
@@ -535,6 +559,7 @@ def refresh_doc_features(
                     _setting(settings, "doc_feature_candidate_budget", 200)
                 ),
                 snippet_symbols=snippet_symbols,
+                entity_signatures=entity_signatures,
             )
             counts["features"] = _write_features(
                 conn, library_id, version_id, result.rows, tenant_id

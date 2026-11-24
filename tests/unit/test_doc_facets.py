@@ -63,3 +63,52 @@ def test_fence_codes_are_whitespace_insensitive():
         "y = 2",
     ]
     assert set(DOC_FACETS) >= {FACET_BLOCK_TYPE, FACET_DEPRECATED}
+
+
+def test_param_and_return_facets_are_structured() -> None:
+    block = DocBlock(
+        document_id=4,
+        content=(
+            "## Parameters\n\n"
+            "| Parameter | Type |\n|---|---|\n| timeout | int |\n\n"
+            "## Returns\n\n"
+            "`Response` object\n"
+        ),
+        path="Client / Connect",
+    )
+    result = aggregate_doc_facets(
+        [block], enabled_facets=["param_names", "return_hint"]
+    )
+    values = {row.facet: row.value["details"]["value"] for row in result.rows}
+    assert values["param_names"]["names"] == ["timeout"]
+    assert values["param_names"]["source"] == "table"
+    assert values["return_hint"] == {
+        "present": True,
+        "type": "Response",
+        "source": "heading",
+    }
+
+
+def test_signature_facts_override_prose_keywords() -> None:
+    block = DocBlock(
+        document_id=5,
+        content="Connect a client with options and settings.\n",
+        path="Client",
+    )
+    result = aggregate_doc_facets(
+        [block],
+        enabled_facets=["param_names", "return_hint"],
+        snippet_symbols={5: ["demo.Client.connect"]},
+        entity_signatures={
+            "demo.Client.connect": {
+                "qualified_name": "demo.Client.connect",
+                "params": ["timeout", "retries"],
+                "return_type": "Response",
+                "signature": "",
+            }
+        },
+    )
+    values = {row.facet: row.value["details"]["value"] for row in result.rows}
+    assert values["param_names"]["names"] == ["timeout", "retries"]
+    assert values["param_names"]["source"] == "signature"
+    assert values["return_hint"]["source"] == "signature"

@@ -1,0 +1,148 @@
+{
+  "samples": [
+    {
+      "corpus": "httpx/docs",
+      "url": "https://www.python-httpx.org/compatibility/",
+      "heading": "Requests Compatibility Guide / Request Content",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文明确说明 data=<text/byte content> 会触发弃用警告并将在 1.0 移除，属于真实 API 漂移。"
+    },
+    {
+      "corpus": "httpx/docs",
+      "url": "https://www.python-httpx.org/contributing/",
+      "heading": "Contributing / Releasing",
+      "auto_verdict": "drift",
+      "human_verdict": "not_drift",
+      "reason": "deprecated 出现在 changelog 分类说明中，是维护流程术语，不是该页描述的 API 弃用。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/middleware/adaptor",
+      "heading": "Examples / 8. Copying context values onto `fasthttp.RequestCtx` (`CopyContextToFiberContext`)",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文说明 CopyContextToFiberContext 在代码中已标记 deprecated，并给出迁移建议。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/middleware/proxy",
+      "heading": "Security / SSRF protection",
+      "auto_verdict": "drift",
+      "human_verdict": "not_drift",
+      "reason": "deprecated 修饰 IPv6 site-local 特殊地址段，不涉及 Fiber API 的弃用或移除。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/middleware/proxy",
+      "heading": "Security / TLS minimum version",
+      "auto_verdict": "drift",
+      "human_verdict": "not_drift",
+      "reason": "正文说明避免使用已弃用的 TLS 版本，描述的是安全基线，不是库 API 漂移。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/middleware/redirect",
+      "heading": "Config",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "表格标明 Rules 字段已弃用并应改用 RuleList，是字段级 API 漂移。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/middleware/rewrite",
+      "heading": "Config",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "表格标明 Rules 字段已弃用并应改用 RuleList，是字段级 API 漂移。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/whats_new",
+      "heading": "🗺 Router / Constraint System",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文说明 TypeConstraint、Constraint.ID 与 Constraint.RegexCompiler 被保留但已弃用。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/whats_new",
+      "heading": "🧬 Middlewares / Cache",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文说明 Store 与 Key 选项已移除，改用 Storage 与 KeyGenerator。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/whats_new",
+      "heading": "🧬 Middlewares / Logger",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文说明 TagHeader 常量已移除，改用 TagReqHeader。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/whats_new",
+      "heading": "🧬 Middlewares / Limiter",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文说明 Duration、Store、Key 已弃用并移除，改用新字段。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/whats_new",
+      "heading": "📋 Migration guide / 🧬 Middlewares / Cache",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "迁移指南明确列出 Store 与 Key 字段弃用及替代字段。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/whats_new",
+      "heading": "📋 Migration guide / 🧬 Middlewares / Redirect",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "迁移指南明确说明 Rules map 被 RuleList 取代。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/whats_new",
+      "heading": "📋 Migration guide / 🧬 Middlewares / CSRF",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "迁移指南明确说明 KeyLookup 字段被移除。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/whats_new",
+      "heading": "📋 Migration guide / 🧬 Middlewares / Rewrite",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "迁移指南明确说明 Rules map 被 RuleList 取代。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/whats_new",
+      "heading": "📋 Migration guide / 🧬 Middlewares / Session",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "迁移指南明确说明 KeyLookup 选项弃用并给出 extractors 替代。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/whats_new",
+      "heading": "🧬 Middlewares / Proxy",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "迁移指南说明 WithTlsConfig 方法已移除，改用 TLSConfig 字段。"
+    },
+    {
+      "corpus": "fiber/docs",
+      "url": "https://docs.gofiber.io/middleware/redirect",
+      "heading": "Rule order",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文说明旧 Rules map 已被 RuleList 取代，属于真实行为与字段漂移。"
+    }
+  ]
+}

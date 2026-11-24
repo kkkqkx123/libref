@@ -868,3 +868,16 @@ ALTER TABLE api_entities ADD COLUMN macro_body_signature TEXT NOT NULL DEFAULT '
 CREATE INDEX IF NOT EXISTS idx_call_instances_macro_host
   ON call_instances(version_id, macro_host);
 """
+
+# ── Explicit entity source per document version ──
+ENTITY_SOURCE_SQL = """
+CREATE TABLE IF NOT EXISTS entity_source_bindings(
+  doc_version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  source_version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY(doc_version_id, tenant_id)
+);
+CREATE INDEX IF NOT EXISTS idx_entity_source_bindings_source
+  ON entity_source_bindings(source_version_id);
+"""

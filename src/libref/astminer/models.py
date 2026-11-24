@@ -48,6 +48,7 @@ class CodeSnippet(BaseModel):
     origin_end_byte: int = 0
     origin_start_line: int = 0
     origin_end_line: int = 0
+    import_context: str = ""
 
 
 class ApiDeclRecord(BaseModel):

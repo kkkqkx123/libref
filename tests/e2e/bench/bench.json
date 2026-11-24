@@ -11,8 +11,9 @@
       "crawl_delay": 0.2,
       "note": "第三方文档站（httpx 官方文档）：sitemap 发现 23 页，含标题层级、代码围栏、表格与跨页链接；站点不声明任何版本（无版本路径、canonical 指向首页、无版本元数据），因此文档版本记为 unversioned；与源码分支是同一个库，构成真实的库知识库场景",
       "doc_version": "unversioned",
+      "entity_source": "httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016",
       "corpus_lang": "en",
-      "max_build_ms": 8000
+      "max_build_ms": 24000
     },
     {
       "project": "httpx",
@@ -27,7 +28,7 @@
         "python"
       ],
       "max_files": 40,
-      "max_build_ms": 4000
+      "max_build_ms": 15000
     },
     {
       "project": "zod",
@@ -40,8 +41,9 @@
       "crawl_delay": 0.2,
       "note": "Official documentation site discovered through llms.txt (no sitemap): the entry links every section by anchor, so the crawl collapses to 17 pages. TypeScript code fences and tables dominate the body; the site states no version (no version path segment, no canonical, no version metadata), so doc_version is unversioned",
       "doc_version": "unversioned",
+      "entity_source": "zod/code-v4.6.7",
       "corpus_lang": "en",
-      "max_build_ms": 90000
+      "max_build_ms": 270000
     },
     {
       "project": "zod",
@@ -62,7 +64,7 @@
         "(^|/)v3/"
       ],
       "max_files": 150,
-      "max_build_ms": 17000
+      "max_build_ms": 51000
     },
     {
       "project": "jsoup",
@@ -75,11 +77,12 @@
       "crawl_delay": 0.2,
       "note": "Official site discovered through sitemap, narrowed to the cookbook: the rest of the sitemap is release notes and a Javadoc tree that only answers with a redirect stub. No version path segment and the canonical URL is the root, so doc_version is unversioned",
       "doc_version": "unversioned",
+      "entity_source": "jsoup/code-jsoup-1.24.1",
       "path_prefixes": [
         "/cookbook/"
       ],
       "corpus_lang": "en",
-      "max_build_ms": 2000
+      "max_build_ms": 15000
     },
     {
       "project": "jsoup",
@@ -94,7 +97,7 @@
         "java"
       ],
       "max_files": 140,
-      "max_build_ms": 33000
+      "max_build_ms": 99000
     },
     {
       "project": "fiber",
@@ -107,6 +110,7 @@
       "crawl_delay": 0.2,
       "note": "Official Docusaurus site discovered through sitemap: the sitemap also lists blog posts and the v1.x / v2.x / next streams, so the prefixes keep the current stream only. The page metadata states docsearch:version=v3.x, which is the version evidence recorded",
       "doc_version": "v3.x",
+      "entity_source": "fiber/code-v3.7.0",
       "path_prefixes": [
         "/api/",
         "/middleware/",
@@ -117,7 +121,7 @@
         "/partials/"
       ],
       "corpus_lang": "en",
-      "max_build_ms": 900000
+      "max_build_ms": 2700000
     },
     {
       "project": "fiber",
@@ -135,7 +139,7 @@
         "_test\\.go$"
       ],
       "max_files": 280,
-      "max_build_ms": 45000
+      "max_build_ms": 180000
     },
     {
       "project": "vue",
@@ -148,9 +152,10 @@
       "crawl_delay": 0.2,
       "note": "Vue 中文文档站（cn.vuejs.org）：llms.txt 发现 96 个 .md 章节页，按目录顺序抓取上限内的 60 页；站点不声明版本（路径无版本段、canonical 指向自身、无版本元数据时记 unversioned，由获取期取证决定）；中文语料，CJK 分词与跨语言 en->zh 方向的判定载体",
       "doc_version": "unversioned",
+      "entity_source": "vue/code-v3.5.45",
       "corpus_lang": "cjk",
       "tier": "main",
-      "max_build_ms": 30000
+      "max_build_ms": 90000
     },
     {
       "project": "vue",
@@ -171,7 +176,7 @@
       ],
       "tier": "main",
       "max_files": 90,
-      "max_build_ms": 10000
+      "max_build_ms": 30000
     },
     {
       "project": "pydantic",
@@ -184,12 +189,13 @@
       "crawl_delay": 0.2,
       "note": "第二套站点生成器（MkDocs Material）：围栏与表格交替密集，分块不变量的压力例；Python 第二个中库；sitemap 含多版本，path_prefixes 只收 latest 流",
       "doc_version": "latest",
+      "entity_source": "pydantic/code-v2.14.3",
       "path_prefixes": [
         "/docs/validation/latest/"
       ],
       "corpus_lang": "en",
       "tier": "main",
-      "max_build_ms": 60000
+      "max_build_ms": 180000
     },
     {
       "project": "pydantic",
@@ -209,7 +215,7 @@
       ],
       "tier": "main",
       "max_files": 130,
-      "max_build_ms": 20000
+      "max_build_ms": 60000
     },
     {
       "project": "FluentValidation",
@@ -222,6 +228,7 @@
       "crawl_delay": 0.2,
       "note": "Read the Docs 多版本站：sitemap 只列落地页，其余靠站内跟随链接发现；path_prefixes 把 12.x 稳定流与其他版本隔开，exclude_patterns 挡掉与渲染页重复的原始 Markdown 副本",
       "doc_version": "latest",
+      "entity_source": "FluentValidation/code-12.2.0",
       "path_prefixes": [
         "/en/latest/"
       ],
@@ -230,7 +237,7 @@
       ],
       "corpus_lang": "en",
       "tier": "main",
-      "max_build_ms": 60000,
+      "max_build_ms": 180000,
       "follow_links": true,
       "extra_urls": [
         "https://docs.fluentvalidation.net/en/latest/installation.html",
@@ -259,7 +266,7 @@
       ],
       "tier": "main",
       "max_files": 180,
-      "max_build_ms": 20000
+      "max_build_ms": 60000
     },
     {
       "project": "Rocket",
@@ -272,12 +279,13 @@
       "crawl_delay": 0.2,
       "note": "版本化指南站：sitemap 含 v0.3/v0.4/v0.5/master 四条流，path_prefixes 只收 v0.5；过程宏与属性宏的调用形态在指南里有名",
       "doc_version": "v0.5",
+      "entity_source": "Rocket/code-v0.5.2",
       "path_prefixes": [
         "/guide/v0.5/"
       ],
       "corpus_lang": "en",
       "tier": "main",
-      "max_build_ms": 60000
+      "max_build_ms": 180000
     },
     {
       "project": "Rocket",
@@ -296,7 +304,7 @@
       ],
       "tier": "main",
       "max_files": 140,
-      "max_build_ms": 20000
+      "max_build_ms": 60000
     },
     {
       "project": "gradle",
@@ -309,12 +317,13 @@
       "crawl_delay": 0.2,
       "note": "用户手册流（current）：.md 与 .html 同页双形态，path_prefixes 只收 userguide；llms.txt 声明 Kotlin DSL 优先",
       "doc_version": "current",
+      "entity_source": "gradle/code-v9.9.1",
       "path_prefixes": [
         "/current/userguide/"
       ],
       "corpus_lang": "en",
       "tier": "main",
-      "max_build_ms": 90000
+      "max_build_ms": 270000
     },
     {
       "project": "gradle",
@@ -337,7 +346,7 @@
       ],
       "tier": "main",
       "max_files": 1500,
-      "max_build_ms": 180000
+      "max_build_ms": 540000
     },
     {
       "project": "boltons",
@@ -357,7 +366,7 @@
       ],
       "tier": "pool",
       "max_files": 80,
-      "max_build_ms": 20000
+      "max_build_ms": 60000
     },
     {
       "project": "mitt",
@@ -373,7 +382,7 @@
       ],
       "tier": "pool",
       "max_files": 20,
-      "max_build_ms": 10000
+      "max_build_ms": 30000
     },
     {
       "project": "gson",
@@ -389,7 +398,7 @@
       ],
       "tier": "pool",
       "max_files": 400,
-      "max_build_ms": 60000
+      "max_build_ms": 180000
     },
     {
       "project": "mysql",
@@ -408,7 +417,7 @@
       ],
       "tier": "pool",
       "max_files": 60,
-      "max_build_ms": 20000
+      "max_build_ms": 60000
     },
     {
       "project": "once_cell",
@@ -427,7 +436,7 @@
       ],
       "tier": "pool",
       "max_files": 20,
-      "max_build_ms": 10000
+      "max_build_ms": 30000
     },
     {
       "project": "Dapper",
@@ -443,7 +452,7 @@
       ],
       "tier": "pool",
       "max_files": 80,
-      "max_build_ms": 30000
+      "max_build_ms": 90000
     }
   ]
 }

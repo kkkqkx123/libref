@@ -38,6 +38,16 @@ CREATE TABLE IF NOT EXISTS versions(
   UNIQUE(library_id, version)
 );
 
+CREATE TABLE IF NOT EXISTS entity_source_bindings(
+  doc_version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  source_version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  created_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
+  PRIMARY KEY(doc_version_id, tenant_id)
+);
+CREATE INDEX IF NOT EXISTS idx_entity_source_bindings_source
+  ON entity_source_bindings(source_version_id);
+
 CREATE TABLE IF NOT EXISTS registry_cache(
   ecosystem TEXT NOT NULL,
   name TEXT NOT NULL,

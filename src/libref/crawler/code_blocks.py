@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from selectolax.lexbor import LexborHTMLParser
 
-from libref.astminer.code_blocks import canonical_language
+from libref.astminer.code_blocks import canonical_language, import_context_from_text
 from libref.astminer.models import CodeSnippet
 
 
@@ -71,6 +71,9 @@ def html_code_blocks(
                 origin_end_byte=end_byte,
                 origin_start_line=start_line,
                 origin_end_line=end_line,
+                import_context=(
+                    import_context_from_text(html[:found]) if found >= 0 else ""
+                ),
             )
         )
     return out

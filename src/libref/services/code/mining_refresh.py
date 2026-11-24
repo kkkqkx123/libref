@@ -531,6 +531,26 @@ def _refresh_doc_derived(
         import logging
 
         logging.getLogger(__name__).warning("document coverage refresh failed: %s", exc)
+    from libref.services.registry.libraries import LibraryService, mining_version_ids
+
+    catalog = LibraryService(conn)
+    version_ids = mining_version_ids(
+        conn, library, version, ecosystem or "custom", tenant_id=tenant_id
+    )
+    if not version_ids:
+        return
+    source_version_id = int(version_ids[0])
+    for bound in catalog.bound_doc_versions(source_version_id, tenant_id=tenant_id):
+        if int(bound["version_id"]) == source_version_id:
+            continue
+        _refresh_doc_derived(
+            conn,
+            str(bound["library"]),
+            str(bound["version"]),
+            None,
+            tenant_id,
+            str(bound["ecosystem"]),
+        )
 
 
 def mine_patterns(

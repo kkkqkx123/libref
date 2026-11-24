@@ -226,6 +226,102 @@ def _terms(content: str, limit: int) -> list[str]:
     return [term for term, _ in counts.most_common(limit)]
 
 
+_PARAM_HEADER_RE = re.compile(r"param|argument|参数|^name$", re.IGNORECASE)
+_RETURN_HEADING_RE = re.compile(
+    r"^#{1,6}\s+.*(?:return|returns|返回值|返回)", re.IGNORECASE
+)
+
+
+def _clean_cell(text: str) -> str:
+    return str(text or "").strip().strip("`*").strip()
+
+
+def _param_table_names(content: str) -> list[str]:
+    lines = content.splitlines()
+    out: list[str] = []
+    active = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped.startswith("|") or not stripped.endswith("|"):
+            if active and out:
+                break
+            active = False
+            continue
+        cells = [_clean_cell(cell) for cell in stripped.strip("|").split("|")]
+        if not active:
+            if cells and _PARAM_HEADER_RE.search(cells[0]):
+                active = True
+            continue
+        if not cells or set(cells[0]) <= {"-", ":", " "}:
+            continue
+        name = cells[0].split()[0] if cells[0] else ""
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def _return_hint(content: str, return_type: str = "") -> dict[str, Any]:
+    if return_type:
+        return {"present": True, "type": return_type, "source": "signature"}
+    lines = content.splitlines()
+    for index, line in enumerate(lines):
+        if _RETURN_HEADING_RE.match(line.strip()):
+            for candidate in lines[index + 1 : index + 5]:
+                raw = candidate.strip()
+                if not raw:
+                    continue
+                match = re.search(r"`([^`]+)`", raw)
+                value = match.group(1) if match else _clean_cell(raw).split()[0]
+                return {"present": True, "type": value, "source": "heading"}
+            return {"present": True, "type": "", "source": "heading"}
+    return {"present": False, "type": "", "source": "none"}
+
+
+def _signature_for(
+    symbols: list[str], entity_signatures: dict[str, dict[str, Any]]
+) -> dict[str, Any] | None:
+    for symbol in symbols:
+        if symbol in entity_signatures:
+            return entity_signatures[symbol]
+    for symbol in symbols:
+        short = str(symbol or "").rsplit(".", 1)[-1]
+        for name, signature in entity_signatures.items():
+            if name.rsplit(".", 1)[-1] == short:
+                return signature
+    return None
+
+
+def _structured_params(
+    content: str,
+    symbols: list[str],
+    entity_signatures: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    signature = _signature_for(symbols, entity_signatures)
+    names = list(signature.get("params") or []) if signature else []
+    source = "signature" if names else "none"
+    if not names:
+        names = _param_table_names(content)
+        source = "table" if names else "none"
+    value = {
+        "names": names,
+        "source": source,
+        "entity": str(signature.get("qualified_name") or "") if signature else "",
+    }
+    return {"kind": "params", "details": {"value": value}}
+
+
+def _structured_return(
+    content: str,
+    symbols: list[str],
+    entity_signatures: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    signature = _signature_for(symbols, entity_signatures)
+    value = _return_hint(
+        content, str(signature.get("return_type") or "") if signature else ""
+    )
+    return {"kind": "returns", "details": {"value": value}}
+
+
 def _field_terms(content: str, words: tuple[str, ...], limit: int) -> list[str]:
     lines = content.splitlines()
     picked: list[str] = []
@@ -250,11 +346,13 @@ def aggregate_doc_facets(
     terms_per_facet: int = 20,
     candidate_budget: int = 200,
     snippet_symbols: dict[int, list[str]] | None = None,
+    entity_signatures: dict[str, dict[str, Any]] | None = None,
 ) -> DocFacetResult:
     """Build document facets in a fixed order, dropping whole facets over budget."""
     enabled = [name for name in (enabled_facets or DOC_FACETS) if name in DOC_FACETS]
     result = DocFacetResult()
     symbols = snippet_symbols or {}
+    signatures = entity_signatures or {}
     priority = {name: index for index, name in enumerate(DOC_FACETS)}
     for block in blocks:
         content = str(block.content or "")
@@ -299,18 +397,12 @@ def aggregate_doc_facets(
                     ]
                 },
             },
-            FACET_PARAM_NAMES: {
-                "kind": "params",
-                "details": {
-                    "value": _field_terms(content, _PARAM_WORDS, terms_per_facet)
-                },
-            },
-            FACET_RETURN_HINT: {
-                "kind": "returns",
-                "details": {
-                    "value": _field_terms(content, _RETURN_WORDS, terms_per_facet)
-                },
-            },
+            FACET_PARAM_NAMES: _structured_params(
+                content, symbols.get(block.document_id, []), signatures
+            ),
+            FACET_RETURN_HINT: _structured_return(
+                content, symbols.get(block.document_id, []), signatures
+            ),
             FACET_TERM_CANDIDATES: {
                 "kind": "terms",
                 "details": {"value": _terms(content, terms_per_facet)},
@@ -319,7 +411,13 @@ def aggregate_doc_facets(
         kept: list[str] = []
         for name in sorted(enabled, key=lambda item: priority[item]):
             value = candidates[name]
-            empty = value["details"].get("value") in ("", [], False, 0)
+            raw_value = value["details"].get("value")
+            empty = raw_value in ("", [], False, 0) or (
+                isinstance(raw_value, dict)
+                and name in (FACET_PARAM_NAMES, FACET_RETURN_HINT)
+                and not raw_value.get("names")
+                and not raw_value.get("present")
+            )
             if empty and name not in (
                 FACET_BLOCK_TYPE,
                 FACET_HEADING_DEPTH,

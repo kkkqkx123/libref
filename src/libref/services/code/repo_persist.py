@@ -133,7 +133,13 @@ def _persist_entities(
 
 
 def _upsert_calls(
-    conn, library_id: int, version_id: int, resolved, commit_sha: str = ""
+    conn,
+    library_id: int,
+    version_id: int,
+    resolved,
+    commit_sha: str = "",
+    *,
+    entity_version_id: int | None = None,
 ) -> tuple[int, set[str]]:
     """Upsert one batch of call instances without sweeping; returns count and identity set."""
     import json as _uid_json
@@ -145,7 +151,7 @@ def _upsert_calls(
         for r in conn.execute(
             "SELECT qualified_name || '|' || kind, id FROM api_entities"
             " WHERE version_id=?",
-            (version_id,),
+            (int(entity_version_id or version_id),),
         )
     }
     kinds = ("function", "method", "class", "interface", "enum", "constructor")

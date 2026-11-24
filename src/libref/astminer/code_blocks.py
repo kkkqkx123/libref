@@ -30,6 +30,7 @@ _LANGUAGE_ALIASES = {
     "cc": "cpp",
     "c++": "cpp",
 }
+_IMPORT_LINE_RE = re.compile(r"^\s*(?:import|from|using|use)\b")
 _SKIP_TAGS = {
     "compile_fail",
     "ignore",
@@ -41,6 +42,16 @@ _SKIP_TAGS = {
     "output",
     "diff",
 }
+
+
+def import_context_from_text(text: str) -> str:
+    """Import-like lines that can give a doc snippet resolvable aliases."""
+    lines = [
+        line.strip()
+        for line in str(text or "").splitlines()
+        if _IMPORT_LINE_RE.match(line)
+    ]
+    return "\n".join(lines[-32:])
 
 
 def canonical_language(tag: str) -> str:
@@ -155,6 +166,7 @@ def fenced_blocks(
                 origin_end_byte=end_byte,
                 origin_start_line=start_line,
                 origin_end_line=end_line,
+                import_context=import_context_from_text("\n".join(lines[:index])),
             )
         )
     return out

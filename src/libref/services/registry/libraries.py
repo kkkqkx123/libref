@@ -300,6 +300,80 @@ class LibraryService:
         self._conn.commit()
         return library_id, int(row[0])
 
+    def bind_entity_source(
+        self,
+        library: str,
+        version: str,
+        source_version: str,
+        *,
+        ecosystem: str | None = None,
+        source_ecosystem: str | None = None,
+        tenant_id: str = "default",
+    ) -> tuple[int, int]:
+        """Bind a document version to the source version that owns its API entities."""
+        from libref.services.infra.tenant import normalize_tenant
+
+        tenant = normalize_tenant(tenant_id)
+        eco = ecosystem or "custom"
+        source_eco = source_ecosystem or eco
+        library_id, version_id = self.ensure_library_version(
+            library, version, eco, tenant_id=tenant
+        )
+        source_library_id, source_version_id = self.ensure_library_version(
+            library, source_version, source_eco, tenant_id=tenant
+        )
+        if source_library_id != library_id:
+            raise ValueError("entity source must belong to the same library")
+        self._conn.execute(
+            "INSERT INTO entity_source_bindings(doc_version_id, source_version_id, tenant_id)"
+            " VALUES(?, ?, ?) ON CONFLICT(doc_version_id, tenant_id) DO UPDATE SET"
+            " source_version_id=excluded.source_version_id,"
+            " created_at=datetime('now')",
+            (version_id, source_version_id, tenant),
+        )
+        self._conn.commit()
+        return version_id, source_version_id
+
+    def entity_source_version_id(
+        self, version_id: int, *, tenant_id: str = "default"
+    ) -> int:
+        """Resolve the explicit entity source, or the version itself when it owns entities."""
+        from libref.services.infra.tenant import normalize_tenant
+
+        tenant = normalize_tenant(tenant_id)
+        row = self._conn.execute(
+            "SELECT source_version_id FROM entity_source_bindings"
+            " WHERE doc_version_id=? AND tenant_id=?",
+            (int(version_id), tenant),
+        ).fetchone()
+        return int(row[0]) if row is not None else int(version_id)
+
+    def bound_doc_versions(
+        self, source_version_id: int, *, tenant_id: str = "default"
+    ) -> list[dict[str, Any]]:
+        """Document versions explicitly bound to one source version."""
+        from libref.services.infra.tenant import normalize_tenant
+
+        tenant = normalize_tenant(tenant_id)
+        rows = self._conn.execute(
+            "SELECT l.name, v.version, l.ecosystem, b.doc_version_id"
+            " FROM entity_source_bindings b"
+            " JOIN versions v ON v.id=b.doc_version_id"
+            " JOIN libraries l ON l.id=v.library_id"
+            " WHERE b.source_version_id=? AND b.tenant_id=?"
+            " ORDER BY l.name, v.version",
+            (int(source_version_id), tenant),
+        ).fetchall()
+        return [
+            {
+                "library": str(row[0]),
+                "version": str(row[1]),
+                "ecosystem": str(row[2]),
+                "version_id": int(row[3]),
+            }
+            for row in rows
+        ]
+
     def catalog(
         self,
         library: str | None = None,

@@ -202,6 +202,51 @@ def test_mine_patterns_does_not_add_library_or_version(conn):
     assert [row[0] for row in ecosystems] == ["pypi"]
 
 
+def test_entity_source_binding_resolves_snippets_without_copying_entities(conn):
+    from libref.astminer.models import CodeSnippet
+    from libref.services.code.usage_ingest import ingest_snippets
+
+    catalog = LibraryService(conn)
+    _library_id, source_id = catalog.ensure_library_version("bound", "1.0", "go")
+    cursor = conn.execute(
+        "INSERT INTO api_entities(entity_uid, library_id, version_id, qualified_name, kind)"
+        " VALUES('bound-source', ?, ?, 'example.com.demo.Client.Connect', 'method')",
+        (_library_id, source_id),
+    )
+    entity_id = int(cursor.lastrowid)
+    _library_id, doc_id = catalog.ensure_library_version("bound", "docs", "go")
+    catalog.bind_entity_source("bound", "docs", "1.0", ecosystem="go")
+    assert catalog.entity_source_version_id(doc_id) == source_id
+    snippet = CodeSnippet(
+        sample_id="doc#1",
+        language="go",
+        code="demo.Client.Connect()",
+        import_context='import "example.com/demo"',
+    )
+    ingest_snippets(
+        conn,
+        "bound",
+        "docs",
+        [snippet],
+        source_key="doc:bound",
+        ecosystem="go",
+        target_filter={"prefixes": ["example.com.demo"]},
+    )
+    row = conn.execute(
+        "SELECT callee_entity_id, callee_name FROM call_instances WHERE version_id=?",
+        (doc_id,),
+    ).fetchone()
+    assert row is not None
+    assert int(row[0]) == entity_id
+    assert row[1] == "example.com.demo.Client.Connect"
+    assert (
+        conn.execute(
+            "SELECT count(*) FROM api_entities WHERE version_id=?", (doc_id,)
+        ).fetchone()[0]
+        == 0
+    )
+
+
 def test_alignment_bonus_weights_evidence(conn):
     from libref.store.retriever import ALIGNMENT_BONUS, _doc_feature_bonuses
 

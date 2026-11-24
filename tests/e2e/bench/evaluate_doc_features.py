@@ -30,6 +30,7 @@ if str(HERE.parents[2]) not in sys.path:
 DATA = HERE / "data"
 OUTPUT = HERE / "outputs" / "retrieval-bench" / "doc-features"
 QUESTIONS = HERE.parent / "fixtures" / "doc_features" / "questions.json"
+DRIFT_SAMPLES = HERE.parent / "fixtures" / "doc_features" / "drift_samples.json"
 K = 5
 
 
@@ -58,28 +59,32 @@ def _version_id(conn, info: dict[str, Any]) -> int:
     return int(row[0])
 
 
-def _seed_entities(conn, docs_version: int, code_version: int) -> int:
-    """Give the documentation version the target declarations mined from its code branch."""
-    existing = conn.execute(
-        "SELECT count(*) FROM api_entities WHERE version_id=?", (docs_version,)
-    ).fetchone()[0]
-    if existing:
-        return int(existing)
-    rows = conn.execute(
-        "SELECT entity_uid, library_id, qualified_name, kind, file, line_start,"
-        " line_end, params, param_types, return_type, bases, parent, signature, has_doc"
-        " FROM api_entities WHERE version_id=?",
-        (code_version,),
-    ).fetchall()
-    for row in rows:
-        conn.execute(
-            "INSERT INTO api_entities(entity_uid, library_id, version_id, qualified_name,"
-            " kind, file, line_start, line_end, params, param_types, return_type, bases,"
-            " parent, signature, has_doc) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (f"docs:{row[0]}", row[1], docs_version, *row[2:]),
-        )
-    conn.commit()
-    return len(rows)
+def _bind_entity_source(conn, entry: dict, info: dict) -> str:
+    """Bind one docs version to the code version that owns its API declarations."""
+    from libref.services.registry.libraries import LibraryService
+    from tests.e2e.bench import archive as bench_archive
+
+    source_ref = str(entry.get("entity_source") or "")
+    if not source_ref:
+        raise RuntimeError(f"{entry['project']}/docs has no entity_source")
+    source = next(
+        (
+            item
+            for item in bench_archive.select([])
+            if bench_archive.fixture_id(item) == source_ref
+        ),
+        None,
+    )
+    if source is None or source.get("kind") != "code":
+        raise RuntimeError(f"{source_ref} is not a source fixture")
+    LibraryService(conn).bind_entity_source(
+        str(info["library"]),
+        str(info["version"]),
+        str(source["version"]),
+        ecosystem=str(info["ecosystem"]),
+        source_ecosystem=str(source["ecosystem"]),
+    )
+    return source_ref
 
 
 def _ingest_code_blocks(
@@ -144,7 +149,10 @@ def _ingest_code_blocks(
 
 
 def _resolve_anchor(conn, question: dict, version_id: int) -> list[str]:
+    from libref.services.registry.libraries import LibraryService
+
     problems: list[str] = []
+    entity_version_id = LibraryService(conn).entity_source_version_id(version_id)
     for url in question.get("targets", []):
         paths = [
             str(row[0] or "")
@@ -164,7 +172,7 @@ def _resolve_anchor(conn, question: dict, version_id: int) -> list[str]:
         if (
             conn.execute(
                 "SELECT 1 FROM api_entities WHERE qualified_name=? AND version_id=? LIMIT 1",
-                (str(name), version_id),
+                (str(name), entity_version_id),
             ).fetchone()
             is None
         ):
@@ -207,7 +215,8 @@ def _score_entry(conn, question: dict, version_id: int) -> dict[str, Any]:
         "anchor_problems": _resolve_anchor(conn, question, version_id),
         "entities_expected": sorted(want),
         "entities_found": sorted(links),
-        "entity_match": links == want,
+        "entities_extra": sorted(links - want),
+        "entity_match": want <= links,
         "block_type_expected": expected_type,
         "block_type_match": not expected_type
         or any(
@@ -333,18 +342,7 @@ def _evaluate_fixture(
 
     name = f"{entry['project']}/{entry['kind']}"
     version_id = _version_id(conn, info)
-    code = next(
-        (
-            item
-            for item in conn.execute(
-                "SELECT v.id FROM versions v JOIN libraries l ON l.id=v.library_id"
-                " WHERE l.name=? AND l.ecosystem=? AND v.version!=? AND v.id!=?",
-                (info["library"], info["ecosystem"], info["version"], version_id),
-            ).fetchall()
-        ),
-        None,
-    )
-    entities = _seed_entities(conn, version_id, int(code[0])) if code else 0
+    entity_source = _bind_entity_source(conn, entry, info)
     sourced = _ingest_code_blocks(conn, entry, info, version_id, settings)
     mine_patterns(
         conn,
@@ -374,7 +372,7 @@ def _evaluate_fixture(
         "name": name,
         "revision": str(info.get("revision") or ""),
         "source": str(info.get("source") or ""),
-        "entities_seeded": entities,
+        "entity_source": entity_source,
         "snippet_counts": sourced,
         "derivation": counts,
         "questions": entries,
@@ -398,13 +396,20 @@ def _evaluate_fixture(
 def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -> Path:
     from datetime import UTC, datetime
 
+    samples = json.loads(DRIFT_SAMPLES.read_text(encoding="utf-8")).get("samples", [])
+    auto_drift = [row for row in samples if row.get("auto_verdict") == "drift"]
+    false_positive = [row for row in auto_drift if row.get("human_verdict") != "drift"]
     lines = [
         "# 文档特征冻结归档评测",
         "",
         f"- 生成时间：{datetime.now(UTC).isoformat(timespec='seconds')}",
         f"- 评测权重：doc_feature_alpha={alpha:g}（关闭列为 0，开启列仅切换该权重）",
         "- 报告只记录观测值，不写门禁；归档修订变化后需重新标定下限。",
-        "- 当前题目只人工确认目标实体，不是整块全量实体清单；集合相等仅作观察，不写门禁。",
+        "- 当前题目只人工确认目标实体，不是整块全量实体清单；子集命中仅作观察，不写门禁。",
+        (
+            f"- 漂移抽检：样本 {len(samples)}，自动 drift {len(auto_drift)}，"
+            f"误报 {len(false_positive)}；未标满样本前不计算误报率门禁。"
+        ),
         "",
     ]
     for item in results:
@@ -413,7 +418,7 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             "",
             f"- 归档修订：{item['revision']}",
             f"- 获取地址：{item['source']}",
-            f"- 复制实体：{item['entities_seeded']}；代码块：{_dump(item['snippet_counts'])}",
+            f"- 实体来源：{item['entity_source']}；代码块：{_dump(item['snippet_counts'])}",
             f"- 派生计数：{_dump(item['derivation'])}",
             "",
             "| 题目 | 来源 | 锚点 | 实体对齐 | 块类型 | 判定 | 排名 off/on |",
@@ -436,7 +441,7 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             "",
             (
                 f"- 实体对齐：{sum(1 for row in entries if row['entity_match'])}/{len(entries)}"
-                f"（期望与落库边集合相等）"
+                f"（期望实体子集命中）"
             ),
             f"- 块类型一致：{sum(1 for row in entries if row['block_type_match'])}/{len(entries)}",
             f"- 判定一致：{sum(1 for row in entries if row['verdict_match'])}/{len(entries)}",

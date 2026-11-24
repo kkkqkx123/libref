@@ -20,13 +20,15 @@ def doc_source_key(version_id: int, url: str) -> str:
     return f"doc:{int(version_id)}:{url}"
 
 
-def target_declarations(conn, version_id: int) -> list[ApiDeclRecord]:
+def target_declarations(
+    conn, version_id: int, *, entity_version_id: int | None = None
+) -> list[ApiDeclRecord]:
     """Load target API facts; usage sources never define the target surface."""
     rows = conn.execute(
         "SELECT qualified_name, kind, file, line_start, line_end, params,"
         " param_types, return_type, bases, parent, signature, has_doc"
         " FROM api_entities WHERE version_id=?",
-        (version_id,),
+        (int(entity_version_id or version_id),),
     ).fetchall()
     out: list[ApiDeclRecord] = []
     for row in rows:
@@ -126,7 +128,12 @@ def ingest_snippets(
         weight=weight,
         tenant_id=tenant_id,
     )
-    target_decls = target_declarations(conn, version_id)
+    entity_version_id = catalog.entity_source_version_id(
+        version_id, tenant_id=tenant_id
+    )
+    target_decls = target_declarations(
+        conn, version_id, entity_version_id=entity_version_id
+    )
     target_names = {decl.qualified_name for decl in target_decls}
     filt = target_filter or {}
     source_status = source_target_status(
@@ -155,11 +162,19 @@ def ingest_snippets(
         decls, aliases, raw = ast_engine.extract_file(
             path, cfg, snippet.code.encode("utf-8")
         )
+        context_aliases: list[tuple[str, str, str | None]] = []
+        if snippet.import_context:
+            context_path = _synthetic_path(
+                source_key, f"{snippet.sample_id}-context", suffix
+            )
+            _context_decls, context_aliases, _context_raw = ast_engine.extract_file(
+                context_path, cfg, snippet.import_context.encode("utf-8")
+            )
         parsed += 1
         merged = target_decls + decls
         resolved = ast_resolution.resolve_calls(
             merged,
-            {path: aliases},
+            {path: list(aliases) + list(context_aliases)},
             raw,
             source_key,
             commit_sha,
@@ -178,7 +193,14 @@ def ingest_snippets(
             stdlib_table_version=str(getattr(settings, "stdlib_table_version", "1")),
         )
         resolved = _relocate_snippet_calls(resolved, snippet)
-        count, ids = _upsert_calls(conn, library_id, version_id, resolved, commit_sha)
+        count, ids = _upsert_calls(
+            conn,
+            library_id,
+            version_id,
+            resolved,
+            commit_sha,
+            entity_version_id=entity_version_id,
+        )
         calls += count
         wanted.update(ids)
     swept = _sweep_calls(conn, version_id, wanted, source_id=source_id)
