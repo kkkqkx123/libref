@@ -31,6 +31,7 @@
                   <el-dropdown-item command="/insights/api">{{ messages.nav.apiInsight }}</el-dropdown-item>
                   <el-dropdown-item command="/insights/calls">{{ messages.nav.calls }}</el-dropdown-item>
                   <el-dropdown-item command="/insights/patterns">{{ messages.nav.patterns }}</el-dropdown-item>
+                  <el-dropdown-item command="/insights/doc">{{ messages.nav.docInsight }}</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>

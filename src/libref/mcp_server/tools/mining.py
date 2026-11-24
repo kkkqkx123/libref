@@ -125,6 +125,7 @@ def register(mcp, ctx, wrap) -> dict[str, object]:
         pattern: str | None = None,
         verdict: str | None = None,
         block_type: str | None = None,
+        document_id: int | None = None,
         limit: int = 50,
     ) -> dict[str, Any]:
         """Document insight: block facets, API alignment, pattern coverage, and verdicts."""
@@ -144,6 +145,7 @@ def register(mcp, ctx, wrap) -> dict[str, object]:
                         pattern=pattern,
                         verdict=verdict,
                         block_type=block_type,
+                        document_id=document_id,
                         limit=limit,
                         tenant_id=_tenant(_principal()),
                     )

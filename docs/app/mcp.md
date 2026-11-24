@@ -119,7 +119,7 @@ MCP 出口面向模型，共二十八个工具。实现在 `src/libref/mcp_serve
 
 ### doc_insight
 
-文档派生视角：`features` / `links` / `coverage` / `consistency`。`library/version` 必填，`ecosystem` 可选，`profile`、`facet`、`api`、`pattern`、`verdict`、`block_type` 与 `limit` 按视图过滤。
+文档派生视角：`features` / `links` / `coverage` / `consistency`。`library/version` 必填，`ecosystem` 可选，`profile`、`facet`、`api`、`pattern`、`verdict`、`block_type`、`document_id` 与 `limit` 按视图过滤；`links` 行附带命中的特征树节点路径。
 
 ## 治理
 

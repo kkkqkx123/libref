@@ -30,7 +30,7 @@ beforeEach(() => {
     id: 1, name: 'tester', kind: 'human', tenant_id: 'default', roles: [], scopes: ['read'],
   };
   apiMock.mockReset();
-  apiMock.mockImplementation((url: string) =>
+  apiMock.mockImplementation((url: string, options?: { params?: { view?: string } }) =>
     Promise.resolve(
       url === '/catalog'
         ? { data: { items: [], kind: 'libraries' }, requestId: 'r1' }
@@ -39,11 +39,25 @@ beforeEach(() => {
               data: {
                 url: 'https://example.com/docs', title: 'Docs', path: '/docs',
                 library: 'lib', version: '1.0', content: 'body', chunks: 0,
-                chunk_details: [], docs: [],
+                chunk_details: [{ id: 7, chunk_index: 0, total_chunks: 1, span_kind: 'document_range', length: 4 }],
+                docs: [],
               },
               requestId: 'r1',
             }
-          : { data: {}, requestId: 'r1' },
+          : url === '/doc-insight'
+            ? {
+                data: {
+                  items:
+                    (options?.params?.view === 'links'
+                      ? [{ document_id: 7, api: 'demo.Client.connect', feature_nodes: ['demo', 'demo.Client'] }]
+                      : [{ document_id: 7, pattern: ['demo.Client.connect'], covered_kind: 'example_code' }]),
+                  degraded: false,
+                  count: 1,
+                  view: options?.params?.view,
+                },
+                requestId: 'r1',
+              }
+            : { data: {}, requestId: 'r1' },
     ),
   );
 });
@@ -56,5 +70,19 @@ describe('ReaderView smoke', () => {
     const params = calls[calls.length - 1][1]?.params;
     expect(params.url).toBe('https://example.com/docs');
     expect(params.mode).toBe('page');
+  });
+
+  it('loads derived insight by block id and shows it beside the source', async () => {
+    const wrapper = await mountView();
+    const calls = apiMock.mock.calls.filter((call) => call[0] === '/doc-insight');
+    expect(calls.length).toBe(2);
+    expect(calls.every((call) => call[1]?.params?.document_id === 7)).toBe(true);
+    expect(calls.map((call) => call[1]?.params?.view).sort()).toEqual([
+      'coverage',
+      'links',
+    ]);
+    const text = wrapper.text();
+    expect(text).toContain('demo.Client.connect');
+    expect(text).toContain('demo.Client');
   });
 });

@@ -627,6 +627,23 @@ CREATE INDEX IF NOT EXISTS idx_doc_consistency_lookup
   ON doc_consistency(profile_id, version_id, verdict);
 """
 
+# ── Document blocks attached to mined feature-tree nodes through aligned entities ──
+DOC_FEATURE_NODE_LINKS_SQL = """
+CREATE TABLE IF NOT EXISTS doc_feature_node_links(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id INTEGER NOT NULL,
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  api_entity_id INTEGER NOT NULL REFERENCES api_entities(id) ON DELETE CASCADE,
+  node_path TEXT NOT NULL,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, version_id, document_id, api_entity_id, node_path)
+);
+CREATE INDEX IF NOT EXISTS idx_doc_feature_node_links_lookup
+  ON doc_feature_node_links(profile_id, version_id, document_id);
+"""
+
 # ── Ingest progress cursors: one row per version and kind, resume offset plus list fingerprint ──
 PROGRESS_SQL = """
 CREATE TABLE IF NOT EXISTS ingest_progress(

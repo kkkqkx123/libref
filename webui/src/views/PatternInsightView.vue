@@ -179,7 +179,7 @@ async function load(): Promise<void> {
         dedup: dedup.value,
       },
     });
-    rows.value = data.items;
+    rows.value = data.items as PatternInsightRow[];
     loaded.value = true;
   } catch (err) {
     error.value = err instanceof ApiError ? err.message : messages.value.common.queryFailed;

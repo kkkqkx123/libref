@@ -3,6 +3,40 @@
     {"id": 1, "qualified_name": "demo.Client.connect"},
     {"id": 2, "qualified_name": "demo.Client.close"}
   ],
+  "feature_nodes": [
+    {
+      "path": "demo",
+      "parent": "",
+      "depth": 1,
+      "kind": "package",
+      "calls": 2,
+      "scopes": 1
+    },
+    {
+      "path": "demo.Client",
+      "parent": "demo",
+      "depth": 2,
+      "kind": "class",
+      "calls": 2,
+      "scopes": 1
+    },
+    {
+      "path": "demo.Client.connect",
+      "parent": "demo.Client",
+      "depth": 3,
+      "kind": "function",
+      "calls": 1,
+      "scopes": 1
+    },
+    {
+      "path": "demo.Client.close",
+      "parent": "demo.Client",
+      "depth": 3,
+      "kind": "function",
+      "calls": 1,
+      "scopes": 1
+    }
+  ],
   "blocks": [
     {
       "document_id": 1,
@@ -44,6 +78,38 @@
   "expected_links": [
     {"document_id": 1, "api_entity_id": 1, "match_kind": "symbol"},
     {"document_id": 1, "api_entity_id": 2, "match_kind": "symbol"}
+  ],
+  "expected_feature_nodes": [
+    {
+      "document_id": 1,
+      "api_entity_id": 1,
+      "node_path": "demo"
+    },
+    {
+      "document_id": 1,
+      "api_entity_id": 1,
+      "node_path": "demo.Client"
+    },
+    {
+      "document_id": 1,
+      "api_entity_id": 1,
+      "node_path": "demo.Client.connect"
+    },
+    {
+      "document_id": 1,
+      "api_entity_id": 2,
+      "node_path": "demo"
+    },
+    {
+      "document_id": 1,
+      "api_entity_id": 2,
+      "node_path": "demo.Client"
+    },
+    {
+      "document_id": 1,
+      "api_entity_id": 2,
+      "node_path": "demo.Client.close"
+    }
   ],
   "patterns": [
     {"pattern": ["demo.Client.connect", "demo.Client.close"], "support": 3}

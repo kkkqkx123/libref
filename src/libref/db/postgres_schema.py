@@ -486,6 +486,21 @@ CREATE TABLE IF NOT EXISTS doc_consistency(
 CREATE INDEX IF NOT EXISTS idx_doc_consistency_lookup
   ON doc_consistency(profile_id, version_id, verdict);
 
+CREATE TABLE IF NOT EXISTS doc_feature_node_links(
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  library_id BIGINT NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  profile_id BIGINT NOT NULL,
+  document_id BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  api_entity_id BIGINT NOT NULL REFERENCES api_entities(id) ON DELETE CASCADE,
+  node_path TEXT NOT NULL,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(profile_id, version_id, document_id, api_entity_id, node_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_feature_node_links_lookup
+  ON doc_feature_node_links(profile_id, version_id, document_id);
+
 CREATE TABLE IF NOT EXISTS ingest_progress(
   version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,

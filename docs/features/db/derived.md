@@ -1,6 +1,6 @@
 # 派生库表：序列模式、特征树、聚类、形态、语义标签与文档特征
 
-十表均为按挖掘档案重建的派生数据，真源是调用实例；档案绑定版本、语料源集合与参数。同一版本可并存多个档案，
+十一表均为按挖掘档案重建的派生数据，真源是调用实例；档案绑定版本、语料源集合与参数。同一版本可并存多个档案，
 审核冲突的行不进入构建。标签另依赖模型输出，
 缺表时读取返回空，不抛错。
 
@@ -270,7 +270,8 @@ calls=excluded.calls, scopes=excluded.scopes;
 |---|---|---|
 | doc_features | (version_id, document_id, facet) | 块结构与内容特征，value 为 `kind` 与 `details` 的 JSON |
 | doc_api_links | (version_id, document_id, api_entity_id) | 对齐边，match_kind 为 symbol / signature / name_fuzzy |
+| doc_feature_node_links | (profile_id, version_id, document_id, api_entity_id, node_path) | 对齐实体命中的特征树节点及父链 |
 | doc_pattern_coverage | (profile_id, document_id, pattern_hash, covered_kind) | 模式覆盖，pattern 保存序列原文 |
 | doc_consistency | (profile_id, document_id, facet, model, prompt_version) | 一致性判定与可选模型归纳 |
 
-前两表按版本重建，后两表按档案重建。写入沿用批量幂等加集合差清理，并按同一版本清除后重灌；文档块实体名单由对齐边回写。详细语义见 `docs/features/doc-feature-mining.md`。
+前三表按版本重建，后三表按档案重建；特征树关联从对齐边与 `feature_nodes` 派生，`links` 视图按块返回命中的节点路径。写入沿用批量幂等加集合差清理，并按同一版本清除后重灌；文档块实体名单由对齐边回写。详细语义见 `docs/features/doc-feature-mining.md`。

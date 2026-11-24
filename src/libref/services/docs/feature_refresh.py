@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import re
 from collections import defaultdict
 from typing import Any
@@ -25,8 +26,11 @@ from libref.mining.doc_alignment import (
     build_api_index,
     compare_consistency,
     cover_patterns,
+    link_feature_nodes,
     pattern_hash,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _json_list(raw) -> list[str]:
@@ -386,6 +390,73 @@ def _write_coverage(
     return len(data)
 
 
+def _write_feature_node_links(
+    conn,
+    library_id: int,
+    version_id: int,
+    profile_id: int,
+    rows: list[dict],
+    tenant_id: str,
+) -> int:
+    from libref.services.infra.tenant import normalize_tenant
+
+    stmt = (
+        "INSERT INTO doc_feature_node_links(library_id, version_id, profile_id,"
+        " document_id, api_entity_id, node_path, tenant_id)"
+        " VALUES(?,?,?,?,?,?,?) ON CONFLICT(profile_id, version_id, document_id,"
+        " api_entity_id, node_path) DO NOTHING"
+    )
+    data = [
+        (
+            library_id,
+            version_id,
+            profile_id,
+            int(row["document_id"]),
+            int(row["api_entity_id"]),
+            str(row["node_path"]),
+            normalize_tenant(tenant_id),
+        )
+        for row in rows
+    ]
+    if data:
+        conn.executemany(stmt, data)
+    live = {
+        (int(r["document_id"]), int(r["api_entity_id"]), str(r["node_path"]))
+        for r in rows
+    }
+    existing = {
+        (int(r[0]), int(r[1]), str(r[2]))
+        for r in conn.execute(
+            "SELECT document_id, api_entity_id, node_path FROM doc_feature_node_links"
+            " WHERE version_id=? AND profile_id=?",
+            (version_id, profile_id),
+        ).fetchall()
+    }
+    stale = existing - live
+    for start in range(0, len(stale), _BATCH):
+        batch = list(stale)[start : start + _BATCH]
+        conn.executemany(
+            "DELETE FROM doc_feature_node_links WHERE version_id=? AND profile_id=?"
+            " AND document_id=? AND api_entity_id=? AND node_path=?",
+            [(version_id, profile_id, *row) for row in batch],
+        )
+    return len(data)
+
+
+def _resolve_chat(settings, chat):
+    if chat is not None:
+        return chat
+    if not bool(_setting(settings, "doc_consistency_llm_enabled", False)):
+        return None
+    try:
+        from libref.services.infra.vectors import build_gateway
+
+        return build_gateway(settings).chat_fn()
+    except Exception:  # noqa: BLE001 -- a missing model keeps deterministic verdicts
+        logger.warning("document consistency gateway unavailable")
+        return None
+
+
 def _write_consistency(
     conn,
     library_id: int,
@@ -395,7 +466,7 @@ def _write_consistency(
     tenant_id: str,
     settings,
     chat,
-) -> int:
+) -> tuple[int, int]:
     from libref.services.infra.tenant import normalize_tenant
 
     batch_size = int(getattr(settings, "doc_consistency_batch", 8) or 8)
@@ -405,6 +476,7 @@ def _write_consistency(
         (version_id, profile_id),
     )
     notes: dict[int, str] = {}
+    failed = 0
     if bool(getattr(settings, "doc_consistency_llm_enabled", False)) and callable(chat):
         drift = [row for row in rows if row["verdict"] == "drift"][:batch_size]
         for row in drift:
@@ -422,9 +494,14 @@ def _write_consistency(
                 result = chat(messages)
                 if inspect.isawaitable(result):
                     result = asyncio.run(result)
-                notes[int(row["document_id"])] = str(result).strip()[:500]
-            except Exception:  # noqa: BLE001, S112 — model output is advisory only
-                continue
+                note = str(result).strip()[:500]
+                if not note:
+                    failed += 1
+                    continue
+                notes[int(row["document_id"])] = note
+            except Exception as exc:  # noqa: BLE001 — model output is advisory only
+                failed += 1
+                logger.warning("document consistency induction failed: %s", exc)
     stmt = (
         "INSERT INTO doc_consistency(library_id, version_id, profile_id, document_id, facet,"
         " verdict, note, evidence_hash, model, prompt_version, tenant_id)"
@@ -450,7 +527,7 @@ def _write_consistency(
     ]
     if data:
         conn.executemany(stmt, data)
-    return len(data)
+    return len(data), failed
 
 
 def refresh_doc_features(
@@ -477,7 +554,9 @@ def refresh_doc_features(
         "entities_updated": 0,
         "coverage": 0,
         "consistency": 0,
+        "nodes": 0,
         "dropped": 0,
+        "consistency_notes_failed": 0,
     }
     if not bool(_setting(settings, "doc_feature_enabled", True)):
         return counts
@@ -491,7 +570,13 @@ def refresh_doc_features(
         wanted = {scope}
     needed_tables = ["doc_features", "doc_api_links"]
     if "coverage" in wanted or "consistency" in wanted:
-        needed_tables.extend(["doc_pattern_coverage", "doc_consistency"])
+        needed_tables.extend(
+            [
+                "doc_pattern_coverage",
+                "doc_consistency",
+                "doc_feature_node_links",
+            ]
+        )
     if any(not _table_ready(conn, name) for name in needed_tables):
         return counts
 
@@ -506,7 +591,11 @@ def refresh_doc_features(
         version_id, tenant_id=tenant_id
     )
     try:
-        for table in ("doc_consistency", "doc_pattern_coverage"):
+        for table in (
+            "doc_consistency",
+            "doc_pattern_coverage",
+            "doc_feature_node_links",
+        ):
             if table in needed_tables:
                 conn.execute(f"DELETE FROM {table} WHERE version_id=?", (version_id,))
         if "links" in wanted:
@@ -599,6 +688,33 @@ def refresh_doc_features(
                 tenant_id=tenant_id,
             )
             profile_id = int(resolved["id"])
+            links = [
+                {"document_id": r[0], "api_entity_id": r[1]}
+                for r in conn.execute(
+                    "SELECT document_id, api_entity_id FROM doc_api_links"
+                    " WHERE version_id=?",
+                    (version_id,),
+                ).fetchall()
+            ]
+            entity_names = {
+                int(row[0]): str(row[1])
+                for row in conn.execute(
+                    "SELECT id, qualified_name FROM api_entities WHERE version_id=?",
+                    (entity_version_id,),
+                ).fetchall()
+            }
+            node_rows = conn.execute(
+                "SELECT path, parent FROM feature_nodes WHERE version_id=? AND profile_id=?",
+                (version_id, profile_id),
+            ).fetchall()
+            node_links = link_feature_nodes(
+                links,
+                entity_names,
+                [{"path": row[0], "parent": row[1]} for row in node_rows],
+            )
+            counts["nodes"] = _write_feature_node_links(
+                conn, library_id, version_id, profile_id, node_links, tenant_id
+            )
             patterns = [
                 {
                     "pattern": json.loads(row[0]) if row[0] else [],
@@ -621,20 +737,10 @@ def refresh_doc_features(
                     conn, library_id, version_id, profile_id, coverage, tenant_id
                 )
             if "consistency" in wanted:
-                links = [
-                    {
-                        "document_id": r[0],
-                        "api_entity_id": r[1],
-                    }
-                    for r in conn.execute(
-                        "SELECT document_id, api_entity_id FROM doc_api_links WHERE version_id=?",
-                        (version_id,),
-                    ).fetchall()
-                ]
                 verdicts = compare_consistency(
                     enriched, links, coverage, min_support=min_support
                 )
-                counts["consistency"] = _write_consistency(
+                written, failed = _write_consistency(
                     conn,
                     library_id,
                     version_id,
@@ -642,8 +748,10 @@ def refresh_doc_features(
                     verdicts,
                     tenant_id,
                     settings,
-                    chat,
+                    _resolve_chat(settings, chat),
                 )
+                counts["consistency"] = written
+                counts["consistency_notes_failed"] = failed
         conn.commit()
         return counts
     except BaseException:

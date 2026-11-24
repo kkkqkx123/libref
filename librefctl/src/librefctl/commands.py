@@ -311,6 +311,7 @@ COMMANDS: tuple[Command, ...] = (
             query("pattern", "--pattern"),
             query("verdict", "--verdict"),
             query("block_type", "--block-type"),
+            query("document_id", "--document-id", kind="int"),
             query("limit", "--limit", kind="int"),
         ),
     ),

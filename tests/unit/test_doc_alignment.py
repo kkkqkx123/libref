@@ -10,6 +10,7 @@ from libref.mining.doc_alignment import (
     build_api_index,
     compare_consistency,
     cover_patterns,
+    link_feature_nodes,
     pattern_hash,
 )
 
@@ -51,6 +52,33 @@ def test_ambiguous_short_name_is_dropped():
         min_confidence=0.4,
     )
     assert links == []
+
+
+def test_feature_node_links_follow_golden_parent_chains():
+    data = _golden()
+    names = {row["id"]: row["qualified_name"] for row in data["entities"]}
+    links = [
+        {"document_id": row["document_id"], "api_entity_id": row["api_entity_id"]}
+        for row in data["expected_links"]
+    ]
+    rows = link_feature_nodes(links, names, data["feature_nodes"])
+    actual = {
+        (row["document_id"], row["api_entity_id"], row["node_path"]) for row in rows
+    }
+    expected = {
+        (row["document_id"], row["api_entity_id"], row["node_path"])
+        for row in data["expected_feature_nodes"]
+    }
+    assert actual == expected
+
+
+def test_feature_node_links_skip_names_absent_from_tree():
+    rows = link_feature_nodes(
+        [{"document_id": 1, "api_entity_id": 8}],
+        {8: "demo.Client.missing"},
+        [{"path": "demo", "parent": ""}],
+    )
+    assert rows == []
 
 
 def test_sequence_coverage_and_drift():

@@ -58,6 +58,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Readyz */
+        get: operations["readyz_readyz_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/catalog": {
         parameters: {
             query?: never;
@@ -197,6 +214,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/doc-insight": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Doc Insight */
+        get: operations["doc_insight_doc_insight_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/symbol-insight": {
         parameters: {
             query?: never;
@@ -240,6 +274,23 @@ export interface paths {
         };
         /** Import Insight */
         get: operations["import_insight_import_insight_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mining-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Mining Health */
+        get: operations["mining_health_mining_health_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -540,40 +591,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/mining-health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Mining Health */
-        get: operations["mining_health_mining_health_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/readyz": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Readyz */
-        get: operations["readyz_readyz_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/feedback": {
         parameters: {
             query?: never;
@@ -664,6 +681,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/principals/{principal_id}/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Admin Principal Key Create */
+        post: operations["admin_principal_key_create_admin_principals__principal_id__keys_post"];
+        /** Admin Principal Keys Revoke */
+        delete: operations["admin_principal_keys_revoke_admin_principals__principal_id__keys_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/keys/{key_id}": {
         parameters: {
             query?: never;
@@ -676,23 +711,6 @@ export interface paths {
         post?: never;
         /** Admin Keys Revoke */
         delete: operations["admin_keys_revoke_admin_keys__key_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/principals/{principal_id}/keys": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Admin Principal Keys Revoke */
-        delete: operations["admin_principal_keys_revoke_admin_principals__principal_id__keys_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -803,6 +821,12 @@ export interface components {
             args: components["schemas"]["JsonValue-Output"];
             /** Count */
             count: number;
+            /** Facet */
+            facet?: string | null;
+            /** Facet Calls */
+            facet_calls?: number | null;
+            /** Facet Scopes */
+            facet_scopes?: number | null;
         };
         /** ApiKeyResponse */
         ApiKeyResponse: {
@@ -934,6 +958,29 @@ export interface components {
             /** Sort Order */
             sort_order?: number | null;
         };
+        /** ClusterLabelRow */
+        ClusterLabelRow: {
+            /** Cluster Key */
+            cluster_key: string;
+            /** Members */
+            members: string[];
+            /** Model */
+            model: string | null;
+            /** Prompt Version */
+            prompt_version: string | null;
+            /** Name */
+            name: string | null;
+            /** Summary */
+            summary: string | null;
+            /** Category Path */
+            category_path: string[];
+            /** Workflow */
+            workflow: string | null;
+            /** Related Apis */
+            related_apis: string[];
+            /** Source Note */
+            source_note: string | null;
+        };
         /** ClusterRow */
         ClusterRow: {
             /** Members */
@@ -1010,6 +1057,22 @@ export interface components {
             /** Count */
             count: number;
         };
+        /** DocInsightResponse */
+        DocInsightResponse: {
+            /** Items */
+            items: {
+                [key: string]: components["schemas"]["JsonValue-Output"];
+            }[];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @enum {string}
+             */
+            view: "features" | "links" | "coverage" | "consistency";
+        };
         /** DocProbeRequest */
         DocProbeRequest: {
             /** Start Url */
@@ -1067,6 +1130,27 @@ export interface components {
                 [key: string]: string;
             };
         };
+        /** DriftRow */
+        DriftRow: {
+            /** Kind */
+            kind: string;
+            /** Pattern */
+            pattern?: string[] | null;
+            /** Facet */
+            facet?: string | null;
+            /** Value */
+            value?: string | null;
+            /** Support Before */
+            support_before?: number | null;
+            /** Support After */
+            support_after?: number | null;
+            /** Calls Before */
+            calls_before?: number | null;
+            /** Calls After */
+            calls_after?: number | null;
+            /** Delta */
+            delta?: number | null;
+        };
         /** EvidenceCall */
         EvidenceCall: {
             /** Callee */
@@ -1109,6 +1193,17 @@ export interface components {
             /** Caller Params */
             caller_params?: components["schemas"]["JsonValue-Output"][] | null;
         };
+        /** FacetRow */
+        FacetRow: {
+            /** Facet */
+            facet: string;
+            /** Value */
+            value: string;
+            /** Calls */
+            calls: number;
+            /** Scopes */
+            scopes: number;
+        };
         /** FeatureNodeRow */
         FeatureNodeRow: {
             /** Path */
@@ -1119,6 +1214,21 @@ export interface components {
             calls: number;
             /** Scopes */
             scopes: number;
+        };
+        /** FeatureSummaryRow */
+        FeatureSummaryRow: {
+            /** Facets */
+            facets: {
+                [key: string]: components["schemas"]["JsonValue-Output"];
+            };
+            /** Patterns */
+            patterns: number;
+            /** Total Support */
+            total_support: number;
+            /** Reusability */
+            reusability: number;
+            /** Diversity */
+            diversity: number;
         };
         /** FeedbackCreate */
         FeedbackCreate: {
@@ -1497,7 +1607,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "scrape_docs" | "index_repo" | "mine_patterns" | "induce_labels";
+            kind: "scrape_docs" | "index_repo" | "mine_patterns" | "induce_labels" | "derive_doc_features";
             /**
              * Status
              * @enum {string}
@@ -1514,6 +1624,13 @@ export interface components {
         "JsonValue-Output": boolean | number | string | components["schemas"]["JsonValue-Output"][] | {
             [key: string]: components["schemas"]["JsonValue-Output"];
         } | null;
+        /** KeyAttach */
+        KeyAttach: {
+            /** Scopes */
+            scopes?: string[];
+            /** Expires At */
+            expires_at?: string | null;
+        };
         /** KeyCreate */
         KeyCreate: {
             /** Name */
@@ -1747,6 +1864,34 @@ export interface components {
              */
             view: "clusters";
         };
+        /** PatternClusterLabelInsightResponse */
+        PatternClusterLabelInsightResponse: {
+            /** Items */
+            items: components["schemas"]["ClusterLabelRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "cluster_labels";
+        };
+        /** PatternDriftInsightResponse */
+        PatternDriftInsightResponse: {
+            /** Items */
+            items: components["schemas"]["DriftRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "drift";
+        };
         /** PatternEvidenceInsightResponse */
         PatternEvidenceInsightResponse: {
             /** Items */
@@ -1760,6 +1905,34 @@ export interface components {
              * @constant
              */
             view: "evidence";
+        };
+        /** PatternFacetInsightResponse */
+        PatternFacetInsightResponse: {
+            /** Items */
+            items: components["schemas"]["FacetRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "facets";
+        };
+        /** PatternFeatureSummaryInsightResponse */
+        PatternFeatureSummaryInsightResponse: {
+            /** Items */
+            items: components["schemas"]["FeatureSummaryRow"][];
+            /** Degraded */
+            degraded: boolean;
+            /** Count */
+            count: number;
+            /**
+             * View
+             * @constant
+             */
+            view: "feature_summary";
         };
         /** PatternHealthInsightResponse */
         PatternHealthInsightResponse: {
@@ -1801,6 +1974,10 @@ export interface components {
             caller_link_rate: number;
             /** Signature Missing Rate */
             signature_missing_rate: number;
+            /** Facet Counts */
+            facet_counts?: {
+                [key: string]: number;
+            } | null;
         };
         /** PatternLabelInsightResponse */
         PatternLabelInsightResponse: {
@@ -2295,6 +2472,11 @@ export interface components {
              * @default 0
              */
             answerability: number;
+            /**
+             * Cross Lingual
+             * @default false
+             */
+            cross_lingual: boolean;
             /** Suggestions */
             suggestions?: components["schemas"]["DiscoveryCandidate"][];
             /** Suggest Error */
@@ -2591,6 +2773,35 @@ export interface operations {
             };
         };
     };
+    readyz_readyz_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadyResponse"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     catalog_route_catalog_get: {
         parameters: {
             query?: {
@@ -2643,6 +2854,9 @@ export interface operations {
                 preset?: "precise" | "balanced" | "thorough";
                 suggest?: boolean;
                 include_prerelease?: boolean;
+                block_type?: string | null;
+                exclude_deprecated?: boolean;
+                aligned_only?: boolean;
             };
             header?: never;
             path?: never;
@@ -2907,7 +3121,7 @@ export interface operations {
     pattern_insight_pattern_insight_get: {
         parameters: {
             query: {
-                view: "patterns" | "evidence" | "tree" | "clusters" | "health" | "labels" | "snippets";
+                view: "patterns" | "evidence" | "tree" | "clusters" | "health" | "labels" | "snippets" | "facets" | "feature_summary" | "cluster_labels" | "drift";
                 pattern?: string[] | null;
                 containing?: string[] | null;
                 prefix?: string | null;
@@ -2918,6 +3132,8 @@ export interface operations {
                 per_file_limit?: number | null;
                 dedup?: boolean | null;
                 profile?: string | null;
+                facet?: string | null;
+                compare_profile?: string | null;
             };
             header?: never;
             path?: never;
@@ -2931,7 +3147,58 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PatternListInsightResponse"] | components["schemas"]["PatternEvidenceInsightResponse"] | components["schemas"]["PatternTreeInsightResponse"] | components["schemas"]["PatternClusterInsightResponse"] | components["schemas"]["PatternHealthInsightResponse"] | components["schemas"]["PatternLabelInsightResponse"] | components["schemas"]["PatternSnippetInsightResponse"];
+                    "application/json": components["schemas"]["PatternListInsightResponse"] | components["schemas"]["PatternEvidenceInsightResponse"] | components["schemas"]["PatternTreeInsightResponse"] | components["schemas"]["PatternClusterInsightResponse"] | components["schemas"]["PatternHealthInsightResponse"] | components["schemas"]["PatternLabelInsightResponse"] | components["schemas"]["PatternSnippetInsightResponse"] | components["schemas"]["PatternFacetInsightResponse"] | components["schemas"]["PatternFeatureSummaryInsightResponse"] | components["schemas"]["PatternClusterLabelInsightResponse"] | components["schemas"]["PatternDriftInsightResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    doc_insight_doc_insight_get: {
+        parameters: {
+            query: {
+                view: "features" | "links" | "coverage" | "consistency";
+                library: string;
+                version: string;
+                ecosystem?: string | null;
+                profile?: string | null;
+                facet?: string | null;
+                api?: string | null;
+                pattern?: string | null;
+                verdict?: string | null;
+                block_type?: string | null;
+                document_id?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocInsightResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3076,6 +3343,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportInsightResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    mining_health_mining_health_get: {
+        parameters: {
+            query?: {
+                library?: string | null;
+                version?: string | null;
+                ecosystem?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MiningHealthResponse"];
                 };
             };
             /** @description Validation Error */
@@ -3930,77 +4239,6 @@ export interface operations {
             };
         };
     };
-    mining_health_mining_health_get: {
-        parameters: {
-            query?: {
-                library?: string | null;
-                version?: string | null;
-                ecosystem?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MiningHealthResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-            /** @description Rejection */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
-    readyz_readyz_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReadyResponse"];
-                };
-            };
-            /** @description Rejection */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
-        };
-    };
     feedback_list_feedback_get: {
         parameters: {
             query?: {
@@ -4206,7 +4444,9 @@ export interface operations {
     };
     admin_keys_list_admin_keys_get: {
         parameters: {
-            query?: never;
+            query?: {
+                tenant_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -4220,6 +4460,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiKeyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
             /** @description Rejection */
@@ -4275,16 +4524,20 @@ export interface operations {
             };
         };
     };
-    admin_keys_revoke_admin_keys__key_id__delete: {
+    admin_principal_key_create_admin_principals__principal_id__keys_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                key_id: number;
+                principal_id: number;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KeyAttach"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -4292,7 +4545,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OkResponse"];
+                    "application/json": components["schemas"]["IssuedKey"];
                 };
             };
             /** @description Validation Error */
@@ -4333,6 +4586,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RevokedKeys"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    admin_keys_revoke_admin_keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
                 };
             };
             /** @description Validation Error */

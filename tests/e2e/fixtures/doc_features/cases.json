@@ -8,6 +8,56 @@
     {"qualified_name": "demo.Client.close", "kind": "function"},
     {"qualified_name": "demo.Other.connect", "kind": "function"}
   ],
+  "feature_nodes": [
+    {
+      "path": "demo",
+      "parent": "",
+      "depth": 1,
+      "kind": "package",
+      "calls": 2,
+      "scopes": 1
+    },
+    {
+      "path": "demo.Client",
+      "parent": "demo",
+      "depth": 2,
+      "kind": "class",
+      "calls": 2,
+      "scopes": 1
+    },
+    {
+      "path": "demo.Client.connect",
+      "parent": "demo.Client",
+      "depth": 3,
+      "kind": "function",
+      "calls": 1,
+      "scopes": 1
+    },
+    {
+      "path": "demo.Client.close",
+      "parent": "demo.Client",
+      "depth": 3,
+      "kind": "function",
+      "calls": 1,
+      "scopes": 1
+    },
+    {
+      "path": "demo.Other.connect",
+      "parent": "demo.Other",
+      "depth": 3,
+      "kind": "function",
+      "calls": 0,
+      "scopes": 0
+    },
+    {
+      "path": "demo.Other",
+      "parent": "demo",
+      "depth": 2,
+      "kind": "class",
+      "calls": 0,
+      "scopes": 0
+    }
+  ],
   "patterns": [
     {"pattern": ["demo.Client.connect", "demo.Client.close"], "support": 3},
     {"pattern": ["demo.Client.close", "demo.Client.connect"], "support": 2}
@@ -63,6 +113,13 @@
   "expect": {
     "pages": 6,
     "links_at_least": 4,
+    "feature_nodes_at_least": 15,
+    "feature_node_paths": [
+      "demo",
+      "demo.Client",
+      "demo.Client.connect",
+      "demo.Client.close"
+    ],
     "covered_patterns": ["demo.Client.connect -> demo.Client.close"],
     "verdicts": ["match", "drift", "unknown"],
     "dropped_ambiguous_short_name": true

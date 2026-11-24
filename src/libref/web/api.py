@@ -123,6 +123,7 @@ class DocInsightQuery(BaseModel):
     pattern: str | None = None
     verdict: str | None = None
     block_type: str | None = None
+    document_id: int | None = Field(default=None, ge=1)
     limit: int = Field(default=50, ge=1, le=500)
 
 

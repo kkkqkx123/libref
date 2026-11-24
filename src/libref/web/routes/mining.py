@@ -170,6 +170,7 @@ def register(app, ctx) -> None:
         pattern: str | None = None,
         verdict: str | None = None,
         block_type: str | None = None,
+        document_id: int | None = None,
         limit: int = 50,
         principal=Depends(_guard),
     ) -> dict[str, Any]:
@@ -184,6 +185,7 @@ def register(app, ctx) -> None:
             pattern=pattern,
             verdict=verdict,
             block_type=block_type,
+            document_id=document_id,
             limit=limit,
         )
         _need(principal, "read")
@@ -203,6 +205,7 @@ def register(app, ctx) -> None:
                         pattern=params.pattern,
                         verdict=params.verdict,
                         block_type=params.block_type,
+                        document_id=params.document_id,
                         limit=params.limit,
                         tenant_id=_tenant_of(principal),
                     ),

@@ -23,10 +23,13 @@ def test_doc_feature_outputs(tmp_path) -> None:
         summary["counts"][key] > 0 for key in ("features", "links", "consistency")
     )
     assert summary["counts"]["coverage"] > 0
+    assert summary["counts"]["nodes"] > 0
     assert summary["metrics"]["questions"] > 0
+    assert summary["metrics"]["feature_node_accuracy"] == 1.0
     assert set(summary["metrics"]["filters"]) == {
         "examples_only",
         "exclude_deprecated",
         "aligned_only",
     }
     assert "Invariants:" in (out_dir / "SUMMARY.txt").read_text(encoding="utf-8")
+    assert "nodes:" in (out_dir / "03-links.txt").read_text(encoding="utf-8")

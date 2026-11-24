@@ -227,6 +227,47 @@ def cover_patterns(
     return out
 
 
+def link_feature_nodes(
+    links: list[dict[str, Any]],
+    entity_names: dict[int, str],
+    nodes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach aligned entities to feature-tree nodes and their parent chains."""
+    parents: dict[str, str] = {}
+    for node in nodes:
+        path = str(node.get("path") or "")
+        if path:
+            parents[path] = str(node.get("parent") or "")
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[int, int, str]] = set()
+    for link in links:
+        document_id = int(link["document_id"])
+        entity_id = int(link["api_entity_id"])
+        path = str(entity_names.get(entity_id) or "")
+        visited: set[str] = set()
+        while path and path in parents and path not in visited:
+            key = (document_id, entity_id, path)
+            if key not in seen:
+                rows.append(
+                    {
+                        "document_id": document_id,
+                        "api_entity_id": entity_id,
+                        "node_path": path,
+                    }
+                )
+                seen.add(key)
+            visited.add(path)
+            path = parents[path]
+    rows.sort(
+        key=lambda row: (
+            row["document_id"],
+            row["api_entity_id"],
+            row["node_path"],
+        )
+    )
+    return rows
+
+
 def consistency_evidence_hash(parts: list[Any]) -> str:
     """Fingerprint of the deterministic inputs behind one consistency verdict."""
     raw = json.dumps(parts, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

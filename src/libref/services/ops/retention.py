@@ -189,6 +189,7 @@ def _purge_inner(
     for table in (
         "doc_consistency",
         "doc_pattern_coverage",
+        "doc_feature_node_links",
         "doc_api_links",
         "doc_features",
         "seq_patterns",

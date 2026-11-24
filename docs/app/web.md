@@ -228,4 +228,4 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 * 写入：抓取并发与超时、范围、分块、嵌入与向量后端各键，`snapshot_*` 快照与 `repos_dir/repos_quota_mb` 配额。
 * 日志：`log_level/log_file/log_format`。
 
-文档派生：`GET /doc-insight` 提供 `features` / `links` / `coverage` / `consistency` 四视图；`GET /search` 支持 `block_type`、`exclude_deprecated`、`aligned_only` 过滤。
+文档派生：`GET /doc-insight` 提供 `features` / `links` / `coverage` / `consistency` 四视图，支持 `document_id` 块级过滤，`links` 行附带特征树节点路径；`GET /search` 支持 `block_type`、`exclude_deprecated`、`aligned_only` 过滤。网页侧提供文档洞察页，搜索页提供三类派生过滤控件，阅读页按块展示对齐实体、覆盖模式与特征树节点。

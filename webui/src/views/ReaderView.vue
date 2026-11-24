@@ -60,6 +60,10 @@
         <p class="libref-muted">{{ page.library }} {{ page.version }} {{ page.path }}</p>
         <pre class="libref-reader-body">{{ page.content }}</pre>
       </div>
+      <div v-if="docInsightEntries.length > 0" class="libref-card">
+        <h4>{{ messages.reader.docFeatures }}</h4>
+        <KeyValue :entries="docInsightEntries" />
+      </div>
       <div v-if="(page.chunk_details?.length || 0) > 0" class="libref-card">
         <h4>{{ messages.reader.chunkLocatorCount(page.chunks || 0) }}</h4>
         <RowTable :rows="page.chunk_details || []" :columns="LOCATOR_COLUMNS" />
@@ -78,7 +82,8 @@ import { ElButton, ElForm, ElFormItem, ElInput, ElInputNumber, ElRadioButton, El
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
-import type { PageRow, ReadResponse } from '../api/types';
+import { field, type DocInsightRow, type PageRow, type ReadResponse } from '../api/types';
+import KeyValue, { type KeyValueEntry } from '../components/common/KeyValue.vue';
 import ScopeFilter from '../components/business/ScopeFilter.vue';
 import EmptyState from '../components/common/EmptyState.vue';
 import ErrorState from '../components/common/ErrorState.vue';
@@ -123,6 +128,87 @@ const page = ref<ReadResponse | null>(null);
 // Candidates only appear on a 404 with a pinned library + version: without one the
 // inventory would be an arbitrary slice of the whole catalogue.
 const candidates = ref<PageRow[]>([]);
+const docInsight = ref<{ entities: string[]; patterns: string[]; nodes: string[] }>({
+  entities: [],
+  patterns: [],
+  nodes: [],
+});
+
+const docInsightEntries = computed<KeyValueEntry[]>(() => {
+  const entries: KeyValueEntry[] = [];
+  if (docInsight.value.entities.length > 0) {
+    entries.push({
+      label: messages.value.reader.alignedEntities,
+      value: docInsight.value.entities.join(', '),
+    });
+  }
+  if (docInsight.value.patterns.length > 0) {
+    entries.push({
+      label: messages.value.reader.coveredPatterns,
+      value: docInsight.value.patterns.join(', '),
+    });
+  }
+  if (docInsight.value.nodes.length > 0) {
+    entries.push({
+      label: messages.value.reader.featureNodes,
+      value: docInsight.value.nodes.join(', '),
+    });
+  }
+  return entries;
+});
+
+function stringsOf(row: DocInsightRow, key: string): string[] {
+  const value = field(row, key);
+  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
+}
+
+async function loadDocInsight(data: ReadResponse): Promise<void> {
+  docInsight.value = { entities: [], patterns: [], nodes: [] };
+  const scope = scopeParams();
+  const library = String(data.library || scope.library || '');
+  const version = String(data.version || scope.version || '');
+  const ids = [...(data.chunk_details || []), ...(data.docs || [])]
+    .map((chunk) => chunk.id)
+    .filter((id): id is number => typeof id === 'number' && id > 0);
+  if (!library || !version || ids.length === 0) return;
+  try {
+    const unique = [...new Set(ids)].slice(0, 8);
+    const responses = await Promise.all(
+      unique.flatMap((documentId) =>
+        (['links', 'coverage'] as const).map((view) =>
+          api('/doc-insight', {
+            params: {
+              view,
+              library,
+              version,
+              ecosystem: typeof scope.ecosystem === 'string' ? scope.ecosystem : undefined,
+              document_id: documentId,
+              limit: 50,
+            },
+          }),
+        ),
+      ),
+    );
+    const entities = new Set<string>();
+    const patterns = new Set<string>();
+    const nodes = new Set<string>();
+    for (const response of responses) {
+      for (const row of response.data.items) {
+        for (const entity of stringsOf(row, 'api')) entities.add(entity);
+        for (const pattern of stringsOf(row, 'pattern')) patterns.add(pattern);
+        for (const node of stringsOf(row, 'feature_nodes')) nodes.add(node);
+      }
+    }
+    docInsight.value = {
+      entities: [...entities].sort(),
+      patterns: [...patterns].sort(),
+      nodes: [...nodes].sort(),
+    };
+  } catch {
+    // Derived insight is optional; the reader keeps showing the source text.
+    docInsight.value = { entities: [], patterns: [], nodes: [] };
+  }
+}
 
 function pathOf(value: string): string {
   try {
@@ -232,6 +318,7 @@ async function load(): Promise<void> {
       },
     });
     page.value = data;
+    void loadDocInsight(data);
   } catch (err) {
     if (err instanceof ApiError && err.status === 404) {
       notFound.value = true;

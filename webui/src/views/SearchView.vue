@@ -13,8 +13,15 @@
         </template>
       </el-input>
       <ScopeFilter show-preset />
-      <el-checkbox v-model="suggest">{{ messages.search.suggest }}</el-checkbox>
-      <el-checkbox v-model="scopeStore.includePrerelease">{{ messages.common.includePrerelease }}</el-checkbox>
+      <div class="libref-search-filters">
+        <el-select v-model="blockType" clearable :placeholder="messages.search.anyBlockType" class="libref-w-180">
+          <el-option v-for="item in BLOCK_TYPES" :key="item" :label="item" :value="item" />
+        </el-select>
+        <el-checkbox v-model="excludeDeprecated">{{ messages.search.excludeDeprecated }}</el-checkbox>
+        <el-checkbox v-model="alignedOnly">{{ messages.search.alignedOnly }}</el-checkbox>
+        <el-checkbox v-model="suggest">{{ messages.search.suggest }}</el-checkbox>
+        <el-checkbox v-model="scopeStore.includePrerelease">{{ messages.common.includePrerelease }}</el-checkbox>
+      </div>
     </div>
     <LoadingPanel v-if="loading" />
     <ErrorState v-else-if="error" :message="error" :request-id="requestId" @retry="search" />
@@ -37,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { ElButton, ElCheckbox, ElInput } from 'element-plus';
+import { ElButton, ElCheckbox, ElInput, ElOption, ElSelect } from 'element-plus';
 import { ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, ApiError } from '../api/client';
@@ -53,6 +60,8 @@ import { messages } from '../i18n';
 import RowTable from '../components/common/RowTable.vue';
 import { scopeParams, scopeStore, type SearchPreset } from '../stores/scope';
 import { applyScopeFromQuery, readBool, readNumber, readString, scopeSnapshot, useQuerySync } from '../utils/query';
+
+const BLOCK_TYPES = ['narrative', 'example', 'params', 'warning', 'changelog'] as const;
 
 // Suggestions are discovery candidates; the table shows the triage fields only.
 const SUGGESTION_COLUMNS: readonly ColumnKey<DiscoveryCandidate>[] = [
@@ -78,6 +87,9 @@ if (route.query.include_prerelease !== undefined) {
 }
 
 const query = ref(readString(route.query.query));
+const blockType = ref(readString(route.query.block_type));
+const excludeDeprecated = ref(readBool(route.query.exclude_deprecated, false));
+const alignedOnly = ref(readBool(route.query.aligned_only, false));
 const suggest = ref(readBool(route.query.suggest, false));
 const loading = ref(false);
 const searched = ref(false);
@@ -89,6 +101,9 @@ async function search(): Promise<void> {
   if (!query.value.trim()) return;
   sync({
     query: query.value.trim(),
+    block_type: blockType.value || undefined,
+    exclude_deprecated: excludeDeprecated.value,
+    aligned_only: alignedOnly.value,
     suggest: suggest.value,
     preset: scopeStore.preset,
     limit: scopeStore.limit,
@@ -104,6 +119,9 @@ async function search(): Promise<void> {
         ...scopeParams(),
         limit: scopeStore.limit,
         preset: scopeStore.preset,
+        block_type: blockType.value || undefined,
+        exclude_deprecated: excludeDeprecated.value,
+        aligned_only: alignedOnly.value,
         suggest: suggest.value,
         include_prerelease: scopeStore.includePrerelease,
       },
@@ -143,3 +161,13 @@ function openAnswer(item: SearchItem): void {
 
 if (query.value) void search();
 </script>
+
+<style scoped>
+.libref-search-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+</style>

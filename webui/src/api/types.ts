@@ -28,6 +28,7 @@ export type PatternInsightRow =
 export type SymbolInsightRow = Schema<'SymbolRow'> | Schema<'SignatureRow'>;
 export type CallInsightRow = Schema<'CallRow'>;
 export type ImportInsightRow = Schema<'ImportEdgeRow'>;
+export type DocInsightRow = JsonRow;
 export type InsightRow =
   | ApiInsightRow
   | PatternInsightRow

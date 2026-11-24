@@ -17,7 +17,7 @@ async function mountView() {
     history: createMemoryHistory(),
     routes: [{ path: '/search', component: { template: '<div />' } }],
   });
-  await router.push('/search');
+  await router.push('/search?block_type=example');
   await router.isReady();
   const wrapper = mount(SearchView, { global: { plugins: [router] } });
   await flushPromises();
@@ -44,10 +44,13 @@ beforeEach(() => {
 });
 
 describe('SearchView smoke', () => {
-  it('issues a search with the query and the prerelease flag', async () => {
+  it('issues a search with the query, prerelease flag, and document filters', async () => {
     scopeStore.includePrerelease = true;
     const wrapper = await mountView();
     await wrapper.find('input').setValue('requests');
+    const checks = wrapper.findAll('input[type=checkbox]');
+    await checks[0].setValue(true);
+    await checks[1].setValue(true);
     await wrapper.find('button').trigger('click');
     await flushPromises();
 
@@ -56,5 +59,8 @@ describe('SearchView smoke', () => {
     const params = calls[calls.length - 1][1]?.params;
     expect(params.query).toBe('requests');
     expect(params.include_prerelease).toBe(true);
+    expect(params.exclude_deprecated).toBe(true);
+    expect(params.aligned_only).toBe(true);
+    expect(params.block_type).toBe('example');
   });
 });

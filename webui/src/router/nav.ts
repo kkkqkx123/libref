@@ -100,6 +100,15 @@ export const NAV_ROUTES: NavRoute[] = [
   },
   {
     route: {
+      path: '/insights/doc',
+      component: () => import('../views/DocInsightView.vue'),
+    },
+    titleKey: 'docInsight',
+    scopes: ['read'],
+    group: 'insights',
+  },
+  {
+    route: {
       path: '/ingest',
       component: () => import('../views/IngestWizardView.vue'),
     },

@@ -10,6 +10,12 @@
       "query": "which example connects a client and then closes the session",
       "targets": ["https://docs.example/demo/quickstart"],
       "expected_entities": ["demo.Client.connect", "demo.Client.close"],
+      "expected_feature_nodes": [
+        "demo",
+        "demo.Client",
+        "demo.Client.connect",
+        "demo.Client.close"
+      ],
       "expected_facets": {"block_type": "example", "heading": "Examples"},
       "expected_verdict": "match",
       "grades": {"strong": 2, "general": 1, "miss": 0}
@@ -24,6 +30,7 @@
       "query": "timeout parameter and return value of client connect",
       "targets": ["https://docs.example/demo/api"],
       "expected_entities": ["demo.Client.connect"],
+      "expected_feature_nodes": ["demo", "demo.Client", "demo.Client.connect"],
       "expected_facets": {"block_type": "params", "return_hint": true},
       "expected_verdict": "unknown",
       "grades": {"strong": 2, "general": 1, "miss": 0}
@@ -38,6 +45,7 @@
       "query": "which client method is deprecated and no longer supported",
       "targets": ["https://docs.example/demo/deprecated"],
       "expected_entities": ["demo.Client.close"],
+      "expected_feature_nodes": ["demo", "demo.Client", "demo.Client.close"],
       "expected_facets": {"block_type": "narrative", "deprecated": true},
       "expected_verdict": "drift",
       "grades": {"strong": 2, "general": 1, "miss": 0}
@@ -52,6 +60,7 @@
       "query": "what changed for client connect in the latest release",
       "targets": ["https://docs.example/demo/changelog"],
       "expected_entities": ["demo.Client.connect"],
+      "expected_feature_nodes": ["demo", "demo.Client", "demo.Client.connect"],
       "expected_facets": {"block_type": "changelog"},
       "expected_verdict": "unknown",
       "grades": {"strong": 2, "general": 1, "miss": 0}
@@ -66,6 +75,7 @@
       "query": "the short name connect without a package qualifier",
       "targets": ["https://docs.example/demo/ambiguous"],
       "expected_entities": [],
+      "expected_feature_nodes": [],
       "expected_facets": {"block_type": "narrative"},
       "expected_verdict": "unknown",
       "grades": {"strong": 2, "general": 1, "miss": 0}
@@ -80,6 +90,7 @@
       "query": "general conventions unrelated to any tracked API",
       "targets": ["https://docs.example/demo/notes"],
       "expected_entities": [],
+      "expected_feature_nodes": [],
       "expected_facets": {"block_type": "narrative"},
       "expected_verdict": "unknown",
       "grades": {"strong": 2, "general": 1, "miss": 0}

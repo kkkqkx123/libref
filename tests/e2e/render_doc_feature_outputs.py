@@ -139,6 +139,32 @@ def _seed_patterns(conn, version_id: int, cases: dict) -> None:
     conn.commit()
 
 
+def _seed_feature_nodes(conn, version_id: int, cases: dict) -> None:
+    from libref.services.code.usage_sources import resolve_profile
+
+    profile = resolve_profile(conn, version_id=version_id, tenant_id="default")
+    library_id = conn.execute(
+        "SELECT library_id FROM versions WHERE id=?", (version_id,)
+    ).fetchone()[0]
+    for row in cases.get("feature_nodes", []):
+        conn.execute(
+            "INSERT INTO feature_nodes(library_id, version_id, profile_id, path, parent,"
+            " depth, kind, calls, scopes) VALUES(?,?,?,?,?,?,?,?,?)",
+            (
+                library_id,
+                version_id,
+                profile["id"],
+                str(row["path"]),
+                str(row.get("parent") or ""),
+                int(row["depth"]),
+                str(row.get("kind") or "function"),
+                int(row.get("calls", 0)),
+                int(row.get("scopes", 0)),
+            ),
+        )
+    conn.commit()
+
+
 def _seed_version(
     conn,
     settings,
@@ -217,6 +243,7 @@ def _seed_version(
                 settings=settings,
             )
     _seed_patterns(conn, version_id, cases)
+    _seed_feature_nodes(conn, version_id, cases)
     return library_id, version_id, doc_ids
 
 
@@ -239,6 +266,11 @@ def _case_lines(cases: dict) -> str:
     lines += ["", "Entities:"]
     lines += [
         f"- {item['qualified_name']} ({item['kind']})" for item in cases["entities"]
+    ]
+    lines += ["", "Feature nodes:"]
+    lines += [
+        f"- {item['path']} parent={item.get('parent', '') or '-'}"
+        for item in cases.get("feature_nodes", [])
     ]
     lines += ["", "Patterns:"]
     lines += [
@@ -287,6 +319,7 @@ def _link_lines(insight, version_id: int) -> tuple[str, list[dict[str, Any]]]:
             f"- document_id={row['document_id']} api={row['api']} "
             f"kind={row['match_kind']} confidence={row['confidence']:.2f}"
         )
+        lines.append(f"  nodes: {_dump(row.get('feature_nodes', []))}")
         lines.append(f"  evidence: {_dump(row['evidence'])}")
     if not rows:
         lines.append("(no links)")
@@ -540,9 +573,15 @@ def _metrics(
         (int(row["document_id"]), str(row["facet"])): str(row["verdict"])
         for row in consistency
     }
+    node_paths: dict[int, set[str]] = {}
+    for row in links:
+        node_paths.setdefault(int(row["document_id"]), set()).update(
+            str(path) for path in row.get("feature_nodes") or []
+        )
     alignment = []
     block_match = []
     drift_mismatch = []
+    node_match = []
     for question in questions:
         targets = [str(url) for url in question.get("targets", [])]
         docs = [doc_ids[url] for url in targets if url in doc_ids]
@@ -551,6 +590,10 @@ def _metrics(
         have = set().union(*(linked_entities.get(doc, set()) for doc in docs))
         want = {str(name) for name in question.get("expected_entities", [])}
         alignment.append(want <= have)
+        if "expected_feature_nodes" in question:
+            have_nodes = set().union(*(node_paths.get(doc, set()) for doc in docs))
+            want_nodes = {str(path) for path in question["expected_feature_nodes"]}
+            node_match.append(have_nodes == want_nodes)
         expected_type = question.get("expected_facets", {}).get("block_type")
         if expected_type:
             block_match.append(
@@ -576,6 +619,7 @@ def _metrics(
     values = {
         "questions": len(questions),
         "entity_alignment_accuracy": sum(alignment) / max(1, len(alignment)),
+        "feature_node_accuracy": sum(node_match) / max(1, len(node_match)),
         "block_type_consistency": sum(block_match) / max(1, len(block_match)),
         "coverage_recall": recall,
         "drift_mismatch_rate": sum(drift_mismatch) / max(1, len(drift_mismatch)),
@@ -620,9 +664,19 @@ def _invariants(
     values: dict,
 ) -> dict[str, bool]:
     want = cases["expect"]
+    observed_nodes = {
+        str(path) for row in links for path in row.get("feature_nodes") or []
+    }
     return {
         "page_count": len(pages) == int(want["pages"]),
         "links_present": len(links) >= int(want["links_at_least"]),
+        "feature_nodes_present": sum(
+            len(row.get("feature_nodes") or []) for row in links
+        )
+        >= int(want.get("feature_nodes_at_least", 0)),
+        "feature_node_paths_present": set(want.get("feature_node_paths", [])).issubset(
+            observed_nodes
+        ),
         "coverage_present": any(
             name in {" -> ".join(row["pattern"]) for row in coverage}
             for name in want["covered_patterns"]

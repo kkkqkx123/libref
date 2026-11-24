@@ -82,6 +82,7 @@ class DocInsightService:
         pattern: str | None = None,
         verdict: str | None = None,
         block_type: str | None = None,
+        document_id: int | None = None,
         limit: int = 50,
         tenant_id: str = "default",
     ) -> list[dict[str, Any]]:
@@ -95,10 +96,14 @@ class DocInsightService:
         )
         if view == "features":
             return self.features(
-                version_id, facet=facet, block_type=block_type, limit=limit
+                version_id,
+                facet=facet,
+                block_type=block_type,
+                document_id=document_id,
+                limit=limit,
             )
         if view == "links":
-            return self.links(version_id, api=api, limit=limit)
+            return self.links(version_id, api=api, document_id=document_id, limit=limit)
         if view == "coverage":
             return self.coverage(
                 version_id,
@@ -106,6 +111,7 @@ class DocInsightService:
                 profile=profile,
                 tenant_id=tenant_id,
                 pattern=pattern,
+                document_id=document_id,
                 limit=limit,
             )
         return self.consistency(
@@ -115,6 +121,7 @@ class DocInsightService:
             tenant_id=tenant_id,
             facet=facet,
             verdict=verdict,
+            document_id=document_id,
             limit=limit,
         )
 
@@ -124,12 +131,16 @@ class DocInsightService:
         *,
         facet: str | None = None,
         block_type: str | None = None,
+        document_id: int | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         if not self._table_ready(self._conn, "doc_features"):
             return []
         sql = "SELECT document_id, facet, value FROM doc_features WHERE version_id=?"
         params: list[Any] = [version_id]
+        if document_id is not None:
+            sql += " AND document_id=?"
+            params.append(document_id)
         if facet:
             sql += " AND facet=?"
             params.append(facet)
@@ -155,22 +166,44 @@ class DocInsightService:
         return out
 
     def links(
-        self, version_id: int, *, api: str | None = None, limit: int = 50
+        self,
+        version_id: int,
+        *,
+        api: str | None = None,
+        document_id: int | None = None,
+        limit: int = 50,
     ) -> list[dict[str, Any]]:
         if not self._table_ready(self._conn, "doc_api_links"):
             return []
         sql = (
-            "SELECT l.document_id, ae.qualified_name, l.match_kind, l.confidence,"
-            " l.evidence FROM doc_api_links l"
+            "SELECT l.document_id, l.api_entity_id, ae.qualified_name,"
+            " l.match_kind, l.confidence, l.evidence FROM doc_api_links l"
             " JOIN api_entities ae ON ae.id=l.api_entity_id WHERE l.version_id=?"
         )
         params: list[Any] = [version_id]
+        if document_id is not None:
+            sql += " AND l.document_id=?"
+            params.append(document_id)
         if api:
             sql += " AND ae.qualified_name=?"
             params.append(api)
         sql += " ORDER BY l.document_id, ae.qualified_name"
+        nodes: dict[tuple[int, int], set[str]] = {}
+        if self._table_ready(self._conn, "doc_feature_node_links"):
+            node_sql = (
+                "SELECT document_id, api_entity_id, node_path"
+                " FROM doc_feature_node_links WHERE version_id=?"
+            )
+            node_params: list[Any] = [version_id]
+            if document_id is not None:
+                node_sql += " AND document_id=?"
+                node_params.append(document_id)
+            for doc_id, entity_id, path in self._conn.execute(
+                node_sql, node_params
+            ).fetchall():
+                nodes.setdefault((int(doc_id), int(entity_id)), set()).add(str(path))
         out: list[dict[str, Any]] = []
-        for doc_id, name, kind, confidence, raw in self._conn.execute(
+        for doc_id, entity_id, name, kind, confidence, raw in self._conn.execute(
             sql, params
         ).fetchall():
             try:
@@ -184,6 +217,9 @@ class DocInsightService:
                     "match_kind": str(kind),
                     "confidence": float(confidence),
                     "evidence": evidence,
+                    "feature_nodes": sorted(
+                        nodes.get((int(doc_id), int(entity_id)), set())
+                    ),
                 }
             )
             if len(out) >= limit:
@@ -198,6 +234,7 @@ class DocInsightService:
         profile: str | None = None,
         tenant_id: str = "default",
         pattern: str | None = None,
+        document_id: int | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         if not self._table_ready(self._conn, "doc_pattern_coverage"):
@@ -209,6 +246,9 @@ class DocInsightService:
             " FROM doc_pattern_coverage WHERE version_id=? AND profile_id=?"
         )
         params: list[Any] = [version_id, profile_id]
+        if document_id is not None:
+            sql += " AND document_id=?"
+            params.append(document_id)
         if pattern:
             sql += " AND pattern_hash=?"
             params.append(pattern)
@@ -243,6 +283,7 @@ class DocInsightService:
         tenant_id: str = "default",
         facet: str | None = None,
         verdict: str | None = None,
+        document_id: int | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
         if not self._table_ready(self._conn, "doc_consistency"):
@@ -255,6 +296,9 @@ class DocInsightService:
             " WHERE version_id=? AND profile_id=?"
         )
         params: list[Any] = [version_id, profile_id]
+        if document_id is not None:
+            sql += " AND document_id=?"
+            params.append(document_id)
         if facet:
             sql += " AND facet=?"
             params.append(facet)

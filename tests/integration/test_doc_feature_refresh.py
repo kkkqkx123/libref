@@ -84,6 +84,18 @@ def _seed(conn, ecosystem="custom"):
             3,
         ),
     )
+    for path, parent, depth in (
+        ("demo", "", 1),
+        ("demo.Client", "demo", 2),
+        ("demo.Client.connect", "demo.Client", 3),
+        ("demo.Client.close", "demo.Client", 3),
+    ):
+        conn.execute(
+            "INSERT INTO feature_nodes(library_id, version_id, profile_id, path,"
+            " parent, depth, kind, calls, scopes)"
+            " VALUES(?,?,?,?,?,?,'function',2,1)",
+            (library_id, version_id, profile["id"], path, parent, depth),
+        )
     conn.commit()
     return library_id, version_id, doc_id
 
@@ -97,6 +109,7 @@ def test_refresh_backfills_entities_and_is_idempotent(conn, monkeypatch, tmp_pat
     assert first["entities_updated"] == 1
     assert first["coverage"] == 1
     assert first["consistency"] == 1
+    assert first["nodes"] == 6
 
     links = conn.execute(
         "SELECT ae.qualified_name FROM doc_api_links l"
@@ -121,7 +134,14 @@ def test_refresh_backfills_entities_and_is_idempotent(conn, monkeypatch, tmp_pat
         (version_id,),
     ).fetchall()
     second = refresh_doc_features(conn, "demo", "1.0", settings=settings)
-    for key in ("features", "links", "coverage", "consistency", "dropped"):
+    for key in (
+        "features",
+        "links",
+        "coverage",
+        "consistency",
+        "nodes",
+        "dropped",
+    ):
         assert second[key] == first[key]
     assert second["entities_updated"] == 0
     after = conn.execute(
@@ -137,7 +157,11 @@ def test_insight_views_and_filters(conn, monkeypatch, tmp_path):
     refresh_doc_features(conn, "demo", "1.0", settings=settings)
     svc = DocInsightService(conn, settings)
     assert svc.insight("demo", "1.0", view="features", limit=100)
-    assert len(svc.insight("demo", "1.0", view="links", limit=100)) == 2
+    links = svc.insight("demo", "1.0", view="links", limit=100)
+    assert len(links) == 2
+    assert all(row["feature_nodes"][0] == "demo" for row in links)
+    assert len(svc.insight("demo", "1.0", view="links", document_id=doc_id)) == 2
+    assert svc.insight("demo", "1.0", view="links", document_id=doc_id + 999) == []
     assert svc.insight("demo", "1.0", view="coverage", limit=100)
     verdicts = svc.insight("demo", "1.0", view="consistency", limit=100)
     assert verdicts and all(row["note"] == "" for row in verdicts)
@@ -295,6 +319,57 @@ def test_alignment_bonus_weights_evidence(conn):
         (weak_id,),
     )
     assert bonus() == pytest.approx(0.1)
+
+
+def test_consistency_gateway_failure_is_counted(conn, monkeypatch, tmp_path):
+    from libref.services.infra import vectors
+
+    _library_id, version_id, doc_id = _seed(conn)
+    conn.execute(
+        "UPDATE documents SET content=content||'\nDeprecated.' WHERE id=?", (doc_id,)
+    )
+
+    def failing(messages):
+        raise RuntimeError("offline model")
+
+    class Gateway:
+        def chat_fn(self):
+            return failing
+
+    monkeypatch.setattr(vectors, "build_gateway", lambda settings: Gateway())
+    settings = make_settings(monkeypatch, tmp_path, doc_consistency_llm_enabled=True)
+    counts = refresh_doc_features(conn, "demo", "1.0", settings=settings)
+    assert counts["consistency_notes_failed"] >= 1
+    verdicts = conn.execute(
+        "SELECT facet, verdict, note FROM doc_consistency WHERE version_id=?",
+        (version_id,),
+    ).fetchall()
+    assert ("deprecated_usage", "drift", "") in verdicts
+
+
+def test_consistency_gateway_note_is_written(conn, monkeypatch, tmp_path):
+    from libref.services.infra import vectors
+
+    _library_id, version_id, doc_id = _seed(conn)
+    conn.execute(
+        "UPDATE documents SET content=content||'\nDeprecated.' WHERE id=?", (doc_id,)
+    )
+
+    class Gateway:
+        def chat_fn(self):
+            return lambda messages: "Retire the deprecated call."
+
+    monkeypatch.setattr(vectors, "build_gateway", lambda settings: Gateway())
+    settings = make_settings(monkeypatch, tmp_path, doc_consistency_llm_enabled=True)
+    refresh_doc_features(conn, "demo", "1.0", settings=settings)
+    row = conn.execute(
+        "SELECT note, model, prompt_version FROM doc_consistency"
+        " WHERE version_id=? AND facet='deprecated_usage'",
+        (version_id,),
+    ).fetchone()
+    assert row[0] == "Retire the deprecated call."
+    assert row[1] == "model"
+    assert row[2] == "v1"
 
 
 def test_job_kind_is_registered(conn, monkeypatch, tmp_path):
