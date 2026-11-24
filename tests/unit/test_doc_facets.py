@@ -89,6 +89,21 @@ def test_param_and_return_facets_are_structured() -> None:
     }
 
 
+def test_return_hint_skips_empty_markdown_cells() -> None:
+    block = DocBlock(
+        document_id=6,
+        content="## Returns\n\n|---|---|\n| Response | object |\n",
+        path="Client",
+    )
+    result = aggregate_doc_facets([block], enabled_facets=["return_hint"])
+    values = {row.facet: row.value["details"]["value"] for row in result.rows}
+    assert values["return_hint"] == {
+        "present": True,
+        "type": "Response",
+        "source": "heading",
+    }
+
+
 def test_signature_facts_override_prose_keywords() -> None:
     block = DocBlock(
         document_id=5,

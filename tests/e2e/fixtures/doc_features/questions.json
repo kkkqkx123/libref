@@ -8,17 +8,29 @@
       "split": "test",
       "query_lang": "en",
       "query": "which example connects a client and then closes the session",
-      "targets": ["https://docs.example/demo/quickstart"],
-      "expected_entities": ["demo.Client.connect", "demo.Client.close"],
+      "targets": [
+        "https://docs.example/demo/quickstart"
+      ],
+      "expected_entities": [
+        "demo.Client.connect",
+        "demo.Client.close"
+      ],
       "expected_feature_nodes": [
         "demo",
         "demo.Client",
         "demo.Client.connect",
         "demo.Client.close"
       ],
-      "expected_facets": {"block_type": "example", "heading": "Examples"},
+      "expected_facets": {
+        "block_type": "example",
+        "heading": "Examples"
+      },
       "expected_verdict": "match",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "L2",
@@ -28,12 +40,27 @@
       "split": "test",
       "query_lang": "en",
       "query": "timeout parameter and return value of client connect",
-      "targets": ["https://docs.example/demo/api"],
-      "expected_entities": ["demo.Client.connect"],
-      "expected_feature_nodes": ["demo", "demo.Client", "demo.Client.connect"],
-      "expected_facets": {"block_type": "params", "return_hint": true},
+      "targets": [
+        "https://docs.example/demo/api"
+      ],
+      "expected_entities": [
+        "demo.Client.connect"
+      ],
+      "expected_feature_nodes": [
+        "demo",
+        "demo.Client",
+        "demo.Client.connect"
+      ],
+      "expected_facets": {
+        "block_type": "params",
+        "return_hint": true
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "L3",
@@ -43,12 +70,27 @@
       "split": "test",
       "query_lang": "en",
       "query": "which client method is deprecated and no longer supported",
-      "targets": ["https://docs.example/demo/deprecated"],
-      "expected_entities": ["demo.Client.close"],
-      "expected_feature_nodes": ["demo", "demo.Client", "demo.Client.close"],
-      "expected_facets": {"block_type": "narrative", "deprecated": true},
+      "targets": [
+        "https://docs.example/demo/deprecated"
+      ],
+      "expected_entities": [
+        "demo.Client.close"
+      ],
+      "expected_feature_nodes": [
+        "demo",
+        "demo.Client",
+        "demo.Client.close"
+      ],
+      "expected_facets": {
+        "block_type": "narrative",
+        "deprecated": true
+      },
       "expected_verdict": "drift",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "L4",
@@ -58,12 +100,26 @@
       "split": "dev",
       "query_lang": "en",
       "query": "what changed for client connect in the latest release",
-      "targets": ["https://docs.example/demo/changelog"],
-      "expected_entities": ["demo.Client.connect"],
-      "expected_feature_nodes": ["demo", "demo.Client", "demo.Client.connect"],
-      "expected_facets": {"block_type": "changelog"},
+      "targets": [
+        "https://docs.example/demo/changelog"
+      ],
+      "expected_entities": [
+        "demo.Client.connect"
+      ],
+      "expected_feature_nodes": [
+        "demo",
+        "demo.Client",
+        "demo.Client.connect"
+      ],
+      "expected_facets": {
+        "block_type": "changelog"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "L5",
@@ -73,12 +129,20 @@
       "split": "dev",
       "query_lang": "en",
       "query": "the short name connect without a package qualifier",
-      "targets": ["https://docs.example/demo/ambiguous"],
+      "targets": [
+        "https://docs.example/demo/ambiguous"
+      ],
       "expected_entities": [],
       "expected_feature_nodes": [],
-      "expected_facets": {"block_type": "narrative"},
+      "expected_facets": {
+        "block_type": "narrative"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "L6",
@@ -88,12 +152,20 @@
       "split": "test",
       "query_lang": "en",
       "query": "general conventions unrelated to any tracked API",
-      "targets": ["https://docs.example/demo/notes"],
+      "targets": [
+        "https://docs.example/demo/notes"
+      ],
       "expected_entities": [],
       "expected_feature_nodes": [],
-      "expected_facets": {"block_type": "narrative"},
+      "expected_facets": {
+        "block_type": "narrative"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     }
   ],
   "httpx/docs": [
@@ -105,11 +177,21 @@
       "split": "test",
       "query_lang": "en",
       "query": "Timeout object with connect read write pool values",
-      "targets": ["https://www.python-httpx.org/advanced/timeouts/"],
-      "expected_entities": ["httpx._config.Timeout"],
-      "expected_facets": {"heading": "Fine tuning"},
+      "targets": [
+        "https://www.python-httpx.org/advanced/timeouts/"
+      ],
+      "expected_entities": [
+        "httpx._config.Timeout"
+      ],
+      "expected_facets": {
+        "heading": "Fine tuning"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "FH2",
@@ -119,11 +201,93 @@
       "split": "test",
       "query_lang": "en",
       "query": "ASGITransport configuration for calling into an ASGI app",
-      "targets": ["https://www.python-httpx.org/advanced/transports/"],
-      "expected_entities": ["httpx._transports.asgi.ASGITransport"],
-      "expected_facets": {"heading": "ASGI Transport"},
+      "targets": [
+        "https://www.python-httpx.org/advanced/transports/"
+      ],
+      "expected_entities": [
+        "httpx._transports.asgi.ASGITransport"
+      ],
+      "expected_facets": {
+        "heading": "ASGI Transport"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FH4",
+      "source": "docs",
+      "source_ref": "httpx/docs:D23",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "en",
+      "query": "decode the response text with a detected encoding",
+      "targets": [
+        "https://www.python-httpx.org/advanced/text-encodings/"
+      ],
+      "expected_entities": [
+        "httpx._models.Response.text"
+      ],
+      "expected_facets": {
+        "heading": "Using auto-detection"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FH5",
+      "source": "docs",
+      "source_ref": "httpx/docs:D26",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "max connections and keepalive limits",
+      "targets": [
+        "https://www.python-httpx.org/advanced/resource-limits/"
+      ],
+      "expected_entities": [
+        "httpx._config.Limits"
+      ],
+      "expected_facets": {
+        "heading": "Resource Limits"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FH6",
+      "source": "docs",
+      "source_ref": "httpx/docs:D9",
+      "type": "semantic",
+      "split": "test",
+      "query_lang": "en",
+      "query": "trace extension to debug outgoing requests",
+      "targets": [
+        "https://www.python-httpx.org/advanced/extensions/"
+      ],
+      "expected_entities": [
+        "httpx._main.trace"
+      ],
+      "expected_facets": {
+        "heading": "\"trace\""
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     }
   ],
   "jsoup/docs": [
@@ -135,11 +299,21 @@
       "split": "test",
       "query_lang": "en",
       "query": "Jsoup.parse body fragment into elements",
-      "targets": ["https://jsoup.org/cookbook/input/parse-body-fragment"],
-      "expected_entities": ["org.jsoup.Jsoup.parseBodyFragment"],
-      "expected_facets": {"heading": "Parsing a body fragment"},
+      "targets": [
+        "https://jsoup.org/cookbook/input/parse-body-fragment"
+      ],
+      "expected_entities": [
+        "org.jsoup.Jsoup.parseBodyFragment"
+      ],
+      "expected_facets": {
+        "heading": "Parsing a body fragment"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "FJ2",
@@ -149,11 +323,94 @@
       "split": "dev",
       "query_lang": "en",
       "query": "Safelist basic relaxed sanitize untrusted HTML",
-      "targets": ["https://jsoup.org/cookbook/cleaning-html/safelist-sanitizer"],
-      "expected_entities": ["org.jsoup.safety.Safelist"],
-      "expected_facets": {"heading": "Sanitize untrusted HTML"},
+      "targets": [
+        "https://jsoup.org/cookbook/cleaning-html/safelist-sanitizer"
+      ],
+      "expected_entities": [
+        "org.jsoup.safety.Safelist"
+      ],
+      "expected_facets": {
+        "heading": "Sanitize untrusted HTML"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FJ3",
+      "source": "docs",
+      "source_ref": "jsoup/docs:JD2",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "en",
+      "query": "Safelist basic relaxed sanitize untrusted HTML",
+      "targets": [
+        "https://jsoup.org/cookbook/cleaning-html/safelist-sanitizer"
+      ],
+      "expected_entities": [
+        "org.jsoup.safety.Safelist.basic"
+      ],
+      "expected_facets": {
+        "heading": "Sanitize untrusted HTML"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FJ4",
+      "source": "docs",
+      "source_ref": "jsoup/docs:JD12",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "getElementById getElementsByTag navigate with DOM methods",
+      "targets": [
+        "https://jsoup.org/cookbook/extracting-data/dom-navigation"
+      ],
+      "expected_entities": [
+        "org.jsoup.nodes.Element.getElementById",
+        "org.jsoup.nodes.Element.getElementsByTag"
+      ],
+      "expected_facets": {
+        "heading": "Use DOM methods"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FJ5",
+      "source": "docs",
+      "source_ref": "jsoup/docs:JD7",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "Jsoup.connect userAgent timeout cookies execute",
+      "targets": [
+        "https://jsoup.org/cookbook/web/request-session"
+      ],
+      "expected_entities": [
+        "org.jsoup.Connection"
+      ],
+      "expected_facets": {
+        "heading": "request session"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     }
   ],
   "fiber/docs": [
@@ -165,11 +422,93 @@
       "split": "test",
       "query_lang": "en",
       "query": "app.Get app.Post route handlers",
-      "targets": ["https://docs.gofiber.io/api/app"],
-      "expected_entities": ["app.App.Get"],
-      "expected_facets": {"heading": "Route Handlers"},
+      "targets": [
+        "https://docs.gofiber.io/api/app"
+      ],
+      "expected_entities": [
+        "app.App.Get"
+      ],
+      "expected_facets": {
+        "heading": "Route Handlers"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FF2",
+      "source": "docs",
+      "source_ref": "fiber/docs:FD10",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "app.State Set Get MustGet",
+      "targets": [
+        "https://docs.gofiber.io/api/state"
+      ],
+      "expected_entities": [
+        "state.State.MustGet"
+      ],
+      "expected_facets": {
+        "heading": "Methods on State"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FF3",
+      "source": "docs",
+      "source_ref": "fiber/docs:FD6",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "en",
+      "query": "Listen prefork child processes",
+      "targets": [
+        "https://docs.gofiber.io/api/fiber"
+      ],
+      "expected_entities": [
+        "listen.App.Listen"
+      ],
+      "expected_facets": {
+        "heading": "Prefork"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FF4",
+      "source": "docs",
+      "source_ref": "fiber/docs:FD7",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "en",
+      "query": "OnRoute hook registration",
+      "targets": [
+        "https://docs.gofiber.io/api/hooks"
+      ],
+      "expected_entities": [
+        "hooks.Hooks.OnRoute"
+      ],
+      "expected_facets": {
+        "heading": "OnRoute"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     }
   ],
   "zod/docs": [
@@ -181,11 +520,21 @@
       "split": "dev",
       "query_lang": "en",
       "query": "z.prettifyError readable error string",
-      "targets": ["https://zod.dev/error-formatting"],
-      "expected_entities": ["packages.zod.src.v4.core.errors.prettifyError"],
-      "expected_facets": {"heading": "prettifyError"},
+      "targets": [
+        "https://zod.dev/error-formatting"
+      ],
+      "expected_entities": [
+        "packages.zod.src.v4.core.errors.prettifyError"
+      ],
+      "expected_facets": {
+        "heading": "prettifyError"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "FZ2",
@@ -195,11 +544,21 @@
       "split": "test",
       "query_lang": "en",
       "query": "z.fromJSONSchema turn JSON Schema into a Zod schema",
-      "targets": ["https://zod.dev/json-schema"],
-      "expected_entities": ["packages.zod.src.v4.classic.from-json-schema.fromJSONSchema"],
-      "expected_facets": {"heading": "fromJSONSchema"},
+      "targets": [
+        "https://zod.dev/json-schema"
+      ],
+      "expected_entities": [
+        "packages.zod.src.v4.classic.from-json-schema.fromJSONSchema"
+      ],
+      "expected_facets": {
+        "heading": "fromJSONSchema"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "FZ3",
@@ -209,11 +568,93 @@
       "split": "test",
       "query_lang": "en",
       "query": "safeParse returns success and error",
-      "targets": ["https://zod.dev/basics"],
-      "expected_entities": ["packages.zod.src.v4.classic.parse.safeParse"],
-      "expected_facets": {"heading": "Parsing data"},
+      "targets": [
+        "https://zod.dev/basics"
+      ],
+      "expected_entities": [
+        "packages.zod.src.v4.classic.parse.safeParse"
+      ],
+      "expected_facets": {
+        "heading": "Parsing data"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FZ4",
+      "source": "docs",
+      "source_ref": "zod/docs:ZD6",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "en",
+      "query": "z.treeifyError nested error tree",
+      "targets": [
+        "https://zod.dev/error-formatting"
+      ],
+      "expected_entities": [
+        "packages.zod.src.v4.core.errors.treeifyError"
+      ],
+      "expected_facets": {
+        "heading": "treeifyError"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FZ5",
+      "source": "docs",
+      "source_ref": "zod/docs:ZD7",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "z.flattenError formErrors fieldErrors",
+      "targets": [
+        "https://zod.dev/error-formatting"
+      ],
+      "expected_entities": [
+        "packages.zod.src.v4.core.errors.flattenError"
+      ],
+      "expected_facets": {
+        "heading": "flattenError"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FZ6",
+      "source": "docs",
+      "source_ref": "zod/docs:ZD11",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "en",
+      "query": "z.globalRegistry attach metadata by id",
+      "targets": [
+        "https://zod.dev/metadata"
+      ],
+      "expected_entities": [
+        "packages.zod.src.v4.core.registries.globalRegistry"
+      ],
+      "expected_facets": {
+        "heading": "globalRegistry"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     }
   ],
   "pydantic/docs": [
@@ -225,11 +666,26 @@
       "split": "test",
       "query_lang": "en",
       "query": "AliasChoices multiple alias names",
-      "targets": ["https://pydantic.dev/docs/validation/latest/api/pydantic/aliases/index.md"],
-      "expected_entities": ["pydantic.aliases.AliasChoices"],
-      "expected_facets": {"heading": "AliasChoices"},
+      "targets": [
+        "https://pydantic.dev/docs/validation/latest/api/pydantic/aliases/index.md"
+      ],
+      "expected_entities": [
+        "pydantic.aliases.AliasChoices"
+      ],
+      "expected_facets": {
+        "heading": "AliasChoices"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      },
+      "expected_feature_nodes": [
+        "pydantic",
+        "pydantic.aliases",
+        "pydantic.aliases.AliasChoices"
+      ]
     },
     {
       "id": "FP2",
@@ -239,11 +695,26 @@
       "split": "test",
       "query_lang": "en",
       "query": "TypeAdapter parsing data into a type",
-      "targets": ["https://pydantic.dev/docs/validation/latest/concepts/type_adapter/index.md"],
-      "expected_entities": ["pydantic.type_adapter.TypeAdapter"],
-      "expected_facets": {"heading": "Type Adapter"},
+      "targets": [
+        "https://pydantic.dev/docs/validation/latest/concepts/type_adapter/index.md"
+      ],
+      "expected_entities": [
+        "pydantic.type_adapter.TypeAdapter"
+      ],
+      "expected_facets": {
+        "heading": "Type Adapter"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      },
+      "expected_feature_nodes": [
+        "pydantic",
+        "pydantic.type_adapter",
+        "pydantic.type_adapter.TypeAdapter"
+      ]
     },
     {
       "id": "FP3",
@@ -253,11 +724,108 @@
       "split": "dev",
       "query_lang": "en",
       "query": "PlainValidator function validator",
-      "targets": ["https://pydantic.dev/docs/validation/latest/api/pydantic/functional_validators/index.md"],
-      "expected_entities": ["pydantic.functional_validators.PlainValidator"],
-      "expected_facets": {"heading": "PlainValidator"},
+      "targets": [
+        "https://pydantic.dev/docs/validation/latest/api/pydantic/functional_validators/index.md"
+      ],
+      "expected_entities": [
+        "pydantic.functional_validators.PlainValidator"
+      ],
+      "expected_facets": {
+        "heading": "PlainValidator"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      },
+      "expected_feature_nodes": [
+        "pydantic",
+        "pydantic.functional_validators",
+        "pydantic.functional_validators.PlainValidator"
+      ]
+    },
+    {
+      "id": "FP4",
+      "source": "docs",
+      "source_ref": "pydantic/docs:PD13",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "AliasPath nested attribute lookup",
+      "targets": [
+        "https://pydantic.dev/docs/validation/latest/concepts/alias/index.md"
+      ],
+      "expected_entities": [
+        "pydantic.aliases.AliasPath"
+      ],
+      "expected_facets": {
+        "heading": "AliasPath"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      },
+      "expected_feature_nodes": [
+        "pydantic",
+        "pydantic.aliases",
+        "pydantic.aliases.AliasPath"
+      ]
+    },
+    {
+      "id": "FP5",
+      "source": "docs",
+      "source_ref": "pydantic/docs:PD11",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "validate_call decorator function arguments",
+      "targets": [
+        "https://pydantic.dev/docs/validation/latest/concepts/validation_decorator/index.md"
+      ],
+      "expected_entities": [
+        "pydantic.validate_call_decorator.validate_call"
+      ],
+      "expected_facets": {
+        "heading": "Validation Decorator"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      },
+      "expected_feature_nodes": [
+        "pydantic",
+        "pydantic.validate_call_decorator",
+        "pydantic.validate_call_decorator.validate_call"
+      ]
+    },
+    {
+      "id": "FP6",
+      "source": "docs",
+      "source_ref": "pydantic/docs:PD23",
+      "type": "semantic",
+      "split": "test",
+      "query_lang": "en",
+      "query": "custom json_schema_extra dict example",
+      "targets": [
+        "https://pydantic.dev/docs/validation/latest/concepts/json_schema/index.md"
+      ],
+      "expected_entities": [
+        "pydantic.fields.FieldInfo.__init__.json_schema_extra"
+      ],
+      "expected_facets": {
+        "heading": "Using `json_schema_extra` with a `dict`"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     }
   ],
   "FluentValidation/docs": [
@@ -269,11 +837,21 @@
       "split": "dev",
       "query_lang": "en",
       "query": "NotNull validator null check",
-      "targets": ["https://docs.fluentvalidation.net/en/latest/built-in-validators.html"],
-      "expected_entities": ["FluentValidation.Validators.NotNullValidator"],
-      "expected_facets": {"heading": "NotNull Validator"},
+      "targets": [
+        "https://docs.fluentvalidation.net/en/latest/built-in-validators.html"
+      ],
+      "expected_entities": [
+        "FluentValidation.Validators.NotNullValidator"
+      ],
+      "expected_facets": {
+        "heading": "NotNull Validator"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "FFV2",
@@ -283,11 +861,21 @@
       "split": "test",
       "query_lang": "en",
       "query": "Email validator email address",
-      "targets": ["https://docs.fluentvalidation.net/en/latest/built-in-validators.html"],
-      "expected_entities": ["FluentValidation.Validators.EmailValidator"],
-      "expected_facets": {"heading": "Email Validator"},
+      "targets": [
+        "https://docs.fluentvalidation.net/en/latest/built-in-validators.html"
+      ],
+      "expected_entities": [
+        "FluentValidation.Validators.EmailValidator"
+      ],
+      "expected_facets": {
+        "heading": "Email Validator"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "FFV3",
@@ -297,11 +885,93 @@
       "split": "test",
       "query_lang": "en",
       "query": "RuleFor chaining validators",
-      "targets": ["https://docs.fluentvalidation.net/en/latest/start.html"],
-      "expected_entities": ["FluentValidation.AbstractValidator.RuleFor"],
-      "expected_facets": {"heading": "Chaining validators"},
+      "targets": [
+        "https://docs.fluentvalidation.net/en/latest/start.html"
+      ],
+      "expected_entities": [
+        "FluentValidation.AbstractValidator.RuleFor"
+      ],
+      "expected_facets": {
+        "heading": "Chaining validators"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FFV4",
+      "source": "docs",
+      "source_ref": "FluentValidation/docs:FD12",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "en",
+      "query": "PreValidate hook before validation",
+      "targets": [
+        "https://docs.fluentvalidation.net/en/latest/advanced.html"
+      ],
+      "expected_entities": [
+        "FluentValidation.AbstractValidator.PreValidate"
+      ],
+      "expected_facets": {
+        "heading": "PreValidate"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FFV5",
+      "source": "docs",
+      "source_ref": "FluentValidation/docs:FD10",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "en",
+      "query": "severity warning level setting",
+      "targets": [
+        "https://docs.fluentvalidation.net/en/latest/severity.html"
+      ],
+      "expected_entities": [
+        "FluentValidation.Severity.Warning"
+      ],
+      "expected_facets": {
+        "heading": "Setting the Severity Level"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FFV6",
+      "source": "docs",
+      "source_ref": "FluentValidation/docs:FD7",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "WithMessage custom error message",
+      "targets": [
+        "https://docs.fluentvalidation.net/en/latest/localization.html"
+      ],
+      "expected_entities": [
+        "FluentValidation.DefaultValidatorOptions.WithMessage"
+      ],
+      "expected_facets": {
+        "heading": "WithMessage"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     }
   ],
   "Rocket/docs": [
@@ -313,11 +983,21 @@
       "split": "test",
       "query_lang": "en",
       "query": "request guard FromRequest implementation",
-      "targets": ["https://rocket.rs/guide/v0.5/requests/"],
-      "expected_entities": ["core.lib.src.request.from_request.FromRequest"],
-      "expected_facets": {"heading": "Custom Guards"},
+      "targets": [
+        "https://rocket.rs/guide/v0.5/requests/"
+      ],
+      "expected_entities": [
+        "core.lib.src.request.from_request.FromRequest"
+      ],
+      "expected_facets": {
+        "heading": "Custom Guards"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "FR2",
@@ -327,11 +1007,21 @@
       "split": "dev",
       "query_lang": "en",
       "query": "fairing attaching callbacks",
-      "targets": ["https://rocket.rs/guide/v0.5/fairings/"],
-      "expected_entities": ["core.lib.src.fairing.Fairing"],
-      "expected_facets": {"heading": "Attaching"},
+      "targets": [
+        "https://rocket.rs/guide/v0.5/fairings/"
+      ],
+      "expected_entities": [
+        "core.lib.src.fairing.Fairing"
+      ],
+      "expected_facets": {
+        "heading": "Attaching"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "FR3",
@@ -341,11 +1031,93 @@
       "split": "test",
       "query_lang": "en",
       "query": "Responder trait implementation",
-      "targets": ["https://rocket.rs/guide/v0.5/responses/"],
-      "expected_entities": ["core.lib.src.response.responder.Responder"],
-      "expected_facets": {"heading": "Responder"},
+      "targets": [
+        "https://rocket.rs/guide/v0.5/responses/"
+      ],
+      "expected_entities": [
+        "core.lib.src.response.responder.Responder"
+      ],
+      "expected_facets": {
+        "heading": "Responder"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FR4",
+      "source": "docs",
+      "source_ref": "Rocket/docs:RD2",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "en",
+      "query": "route mounting on rocket instance",
+      "targets": [
+        "https://rocket.rs/guide/v0.5/overview/"
+      ],
+      "expected_entities": [
+        "core.lib.src.rkt.Rocket.mount"
+      ],
+      "expected_facets": {
+        "heading": "Mounting"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FR5",
+      "source": "docs",
+      "source_ref": "Rocket/docs:RD3",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "managed state adding retrieving",
+      "targets": [
+        "https://rocket.rs/guide/v0.5/state/"
+      ],
+      "expected_entities": [
+        "core.lib.src.rkt.Rocket.manage"
+      ],
+      "expected_facets": {
+        "heading": "Managed State"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FR6",
+      "source": "docs",
+      "source_ref": "Rocket/docs:RD9",
+      "type": "qualified",
+      "split": "test",
+      "query_lang": "en",
+      "query": "private cookies secret key",
+      "targets": [
+        "https://rocket.rs/guide/v0.5/requests/"
+      ],
+      "expected_entities": [
+        "core.lib.src.cookies.CookieJar.add_private"
+      ],
+      "expected_facets": {
+        "heading": "Private Cookies"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     }
   ],
   "vue/docs": [
@@ -357,11 +1129,28 @@
       "split": "test",
       "query_lang": "zh",
       "query": "watchEffect 自动追踪副作用",
-      "targets": ["https://cn.vuejs.org/api/reactivity-core.md"],
-      "expected_entities": ["packages.runtime-core.src.apiWatch.watchEffect"],
-      "expected_facets": {"heading": "watchEffect()"},
+      "targets": [
+        "https://cn.vuejs.org/api/reactivity-core.md"
+      ],
+      "expected_entities": [
+        "packages.runtime-core.src.apiWatch.watchEffect"
+      ],
+      "expected_facets": {
+        "heading": "watchEffect()"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      },
+      "expected_feature_nodes": [
+        "packages",
+        "packages.runtime-core",
+        "packages.runtime-core.src",
+        "packages.runtime-core.src.apiWatch",
+        "packages.runtime-core.src.apiWatch.watchEffect"
+      ]
     },
     {
       "id": "FVU2",
@@ -371,11 +1160,21 @@
       "split": "dev",
       "query_lang": "zh",
       "query": "provide 向后代组件提供数据",
-      "targets": ["https://cn.vuejs.org/api/composition-api-dependency-injection.md"],
-      "expected_entities": ["packages.runtime-core.src.apiInject.provide"],
-      "expected_facets": {"heading": "provide()"},
+      "targets": [
+        "https://cn.vuejs.org/api/composition-api-dependency-injection.md"
+      ],
+      "expected_entities": [
+        "packages.runtime-core.src.apiInject.provide"
+      ],
+      "expected_facets": {
+        "heading": "provide()"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "FVU3",
@@ -385,11 +1184,114 @@
       "split": "test",
       "query_lang": "zh",
       "query": "inject 在后代组件中注入",
-      "targets": ["https://cn.vuejs.org/api/composition-api-dependency-injection.md"],
-      "expected_entities": ["packages.runtime-core.src.apiInject.inject"],
-      "expected_facets": {"heading": "inject()"},
+      "targets": [
+        "https://cn.vuejs.org/api/composition-api-dependency-injection.md"
+      ],
+      "expected_entities": [
+        "packages.runtime-core.src.apiInject.inject"
+      ],
+      "expected_facets": {
+        "heading": "inject()"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      },
+      "expected_feature_nodes": [
+        "packages",
+        "packages.runtime-core",
+        "packages.runtime-core.src",
+        "packages.runtime-core.src.apiInject",
+        "packages.runtime-core.src.apiInject.inject"
+      ]
+    },
+    {
+      "id": "FVU4",
+      "source": "docs",
+      "source_ref": "vue/docs:VD4",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "zh",
+      "query": "watch 侦听一个数据源",
+      "targets": [
+        "https://cn.vuejs.org/api/reactivity-core.md"
+      ],
+      "expected_entities": [
+        "packages.runtime-core.src.apiWatch.watch"
+      ],
+      "expected_facets": {
+        "heading": "watch()"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      },
+      "expected_feature_nodes": [
+        "packages",
+        "packages.runtime-core",
+        "packages.runtime-core.src",
+        "packages.runtime-core.src.apiWatch",
+        "packages.runtime-core.src.apiWatch.watch"
+      ]
+    },
+    {
+      "id": "FVU5",
+      "source": "docs",
+      "source_ref": "vue/docs:VD8",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "zh",
+      "query": "onMounted 组件挂载后执行回调",
+      "targets": [
+        "https://cn.vuejs.org/api/composition-api-lifecycle.md"
+      ],
+      "expected_entities": [
+        "packages.runtime-core.src.apiLifecycle.onMounted"
+      ],
+      "expected_facets": {
+        "heading": "onMounted()"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FVU6",
+      "source": "docs",
+      "source_ref": "vue/docs:VD10",
+      "type": "qualified",
+      "split": "dev",
+      "query_lang": "zh",
+      "query": "nextTick 等待 DOM 更新完成",
+      "targets": [
+        "https://cn.vuejs.org/api/general.md"
+      ],
+      "expected_entities": [
+        "packages.runtime-core.src.scheduler.nextTick"
+      ],
+      "expected_facets": {
+        "heading": "nextTick()"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      },
+      "expected_feature_nodes": [
+        "packages",
+        "packages.runtime-core",
+        "packages.runtime-core.src",
+        "packages.runtime-core.src.scheduler",
+        "packages.runtime-core.src.scheduler.nextTick"
+      ]
     }
   ],
   "gradle/docs": [
@@ -401,11 +1303,21 @@
       "split": "test",
       "query_lang": "en",
       "query": "task dependencies declaration order",
-      "targets": ["https://docs.gradle.org/current/userguide/task_basics.md"],
-      "expected_entities": ["org.gradle.api.DefaultTask.dependsOn"],
-      "expected_facets": {"heading": "Task dependencies"},
+      "targets": [
+        "https://docs.gradle.org/current/userguide/task_basics.md"
+      ],
+      "expected_entities": [
+        "org.gradle.api.DefaultTask.dependsOn"
+      ],
+      "expected_facets": {
+        "heading": "Task dependencies"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "FG2",
@@ -415,11 +1327,21 @@
       "split": "test",
       "query_lang": "en",
       "query": "declaring dependencies implementation configuration",
-      "targets": ["https://docs.gradle.org/current/userguide/dependency_management_basics.md"],
-      "expected_entities": ["org.gradle.api.internal.project.DefaultProject.dependencies"],
-      "expected_facets": {"heading": "Declaring Your Dependencies"},
+      "targets": [
+        "https://docs.gradle.org/current/userguide/dependency_management_basics.md"
+      ],
+      "expected_entities": [
+        "org.gradle.api.internal.project.DefaultProject.dependencies"
+      ],
+      "expected_facets": {
+        "heading": "Declaring Your Dependencies"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     },
     {
       "id": "FG3",
@@ -429,11 +1351,45 @@
       "split": "dev",
       "query_lang": "en",
       "query": "applying a plugin by id",
-      "targets": ["https://docs.gradle.org/current/userguide/part4_gradle_plugins.md"],
-      "expected_entities": ["org.gradle.api.internal.plugins.DefaultPluginContainer.apply"],
-      "expected_facets": {"heading": "Applying a Plugin"},
+      "targets": [
+        "https://docs.gradle.org/current/userguide/part4_gradle_plugins.md"
+      ],
+      "expected_entities": [
+        "org.gradle.api.internal.plugins.DefaultPluginContainer.apply"
+      ],
+      "expected_facets": {
+        "heading": "Applying a Plugin"
+      },
       "expected_verdict": "unknown",
-      "grades": {"strong": 2, "general": 1, "miss": 0}
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
+    },
+    {
+      "id": "FG4",
+      "source": "docs",
+      "source_ref": "gradle/docs:GD17",
+      "type": "semantic",
+      "split": "test",
+      "query_lang": "en",
+      "query": "finding transitive dependency conflicts",
+      "targets": [
+        "https://docs.gradle.org/current/userguide/part3_gradle_dep_man.md"
+      ],
+      "expected_entities": [
+        "org.gradle.api.internal.artifacts.dependencies.AbstractModuleDependency.transitive"
+      ],
+      "expected_facets": {
+        "heading": "Understanding Transitive Dependencies"
+      },
+      "expected_verdict": "",
+      "grades": {
+        "strong": 2,
+        "general": 1,
+        "miss": 0
+      }
     }
   ]
 }

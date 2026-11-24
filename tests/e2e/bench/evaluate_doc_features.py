@@ -209,6 +209,15 @@ def _score_entry(conn, question: dict, version_id: int) -> dict[str, Any]:
             version_id, _library_id(conn, version_id), limit=1000
         )
     }
+    node_paths: set[str] = set()
+    for doc_id in doc_ids:
+        for row in conn.execute(
+            "SELECT node_path FROM doc_feature_node_links"
+            " WHERE version_id=? AND document_id=?",
+            (version_id, doc_id),
+        ).fetchall():
+            node_paths.add(str(row[0]))
+    want_nodes = {str(path) for path in question.get("expected_feature_nodes", [])}
     return {
         "id": str(question["id"]),
         "source_ref": str(question.get("source_ref") or ""),
@@ -227,6 +236,9 @@ def _score_entry(conn, question: dict, version_id: int) -> dict[str, Any]:
         or any(
             verdicts.get(doc_id) == question["expected_verdict"] for doc_id in doc_ids
         ),
+        "nodes_expected": sorted(want_nodes),
+        "nodes_found": sorted(node_paths),
+        "node_match": not want_nodes or want_nodes <= node_paths,
     }
 
 
@@ -421,8 +433,8 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             f"- 实体来源：{item['entity_source']}；代码块：{_dump(item['snippet_counts'])}",
             f"- 派生计数：{_dump(item['derivation'])}",
             "",
-            "| 题目 | 来源 | 锚点 | 实体对齐 | 块类型 | 判定 | 排名 off/on |",
-            "|---|---|---|---|---|---|---|",
+            "| 题目 | 来源 | 锚点 | 实体对齐 | 树节点 | 块类型 | 判定 | 排名 off/on |",
+            "|---|---|---|---|---|---|---|---|",
         ]
         by_id = {str(row["id"]): row for rows in questions.values() for row in rows}
         for row in item["questions"]:
@@ -431,6 +443,7 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             lines.append(
                 f"| {row['id']} | {source} | {'OK' if not row['anchor_problems'] else _dump(row['anchor_problems'])} "
                 f"| {'OK' if row['entity_match'] else _dump([row['entities_expected'], row['entities_found']])} "
+                f"| {'OK' if row['node_match'] else _dump([row['nodes_expected'], row['nodes_found']])} "
                 f"| {'OK' if row['block_type_match'] else row['block_type_expected']} "
                 f"| {'OK' if row['verdict_match'] else row['verdict_expected']} "
                 f"| {rank.get('off', 0)}/{rank.get('on', 0)} |"
@@ -443,6 +456,7 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
                 f"- 实体对齐：{sum(1 for row in entries if row['entity_match'])}/{len(entries)}"
                 f"（期望实体子集命中）"
             ),
+            f"- 树节点一致：{sum(1 for row in entries if row['node_match'])}/{len(entries)}",
             f"- 块类型一致：{sum(1 for row in entries if row['block_type_match'])}/{len(entries)}",
             f"- 判定一致：{sum(1 for row in entries if row['verdict_match'])}/{len(entries)}",
             f"- 覆盖行数：{item['derivation']['coverage']}",
