@@ -83,13 +83,13 @@ def test_file_sections_and_top_level(monkeypatch, tmp_path) -> None:
     conf.write_text(
         "fetch_concurrency = 7\n"
         "[crawler]\nrequest_timeout = 9.5\n"
-        "[mcp]\nmcp_port = 9001\n",
+        "[web]\nweb_port = 9001\n",
         encoding="utf-8",
     )
     s = load_settings(conf)
     assert s.fetch_concurrency == 7
     assert s.request_timeout == 9.5
-    assert s.mcp_port == 9001
+    assert s.web_port == 9001
     assert s.fetch_max_retries == 3
 
 
@@ -133,7 +133,7 @@ def test_missing_explicit_file(monkeypatch, tmp_path) -> None:
 def test_invalid_value_reports_source(monkeypatch, tmp_path) -> None:
     _isolated_env(monkeypatch, tmp_path)
     conf = tmp_path / "libref.toml"
-    conf.write_text("[mcp]\nmcp_port = 99999\n", encoding="utf-8")
+    conf.write_text("[web]\nweb_port = 99999\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="libref.toml"):
         load_settings(conf)
 

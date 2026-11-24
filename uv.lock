@@ -730,7 +730,7 @@ provides-extras = ["browser", "postgres"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "librefctl", editable = "packages/librefctl" },
+    { name = "librefctl", editable = "librefctl" },
     { name = "mypy", specifier = ">=1.11" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "pytest", specifier = ">=8" },
@@ -741,7 +741,7 @@ dev = [
 [[package]]
 name = "librefctl"
 version = "0.1.0"
-source = { editable = "packages/librefctl" }
+source = { editable = "librefctl" }
 dependencies = [
     { name = "httpx" },
 ]

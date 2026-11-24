@@ -392,6 +392,7 @@ class SearchResponse(Envelope[SearchItem]):
     reasons: list[str] = Field(default_factory=list)
     answerable: bool = True
     answerability: float = 0.0
+    cross_lingual: bool = False
     suggestions: list[DiscoveryCandidate] = Field(default_factory=list)
     suggest_error: str | None = None
 

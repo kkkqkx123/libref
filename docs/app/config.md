@@ -7,17 +7,18 @@
 * 优先级：显式参数（命令行选项与调用方覆盖）高于环境变量（含本地文件注入），环境变量高于配置文件，配置文件高于内置默认。快照一旦生成即冻结为只读。
 * 环境变量：字段名前加 `LIBREF_` 前缀，如 `db_path` 对应 `LIBREF_DB_PATH`，另支持同目录 `.env` 文件注入。
 * 配置文件：`libref.toml`，按显式路径、当前目录、用户配置目录顺序查找。分节写法的节名与键名见各表“文件键”列（如 `[retrieval] rrf_k`）；与字段同名的顶层键同样接受。未知节与未知键直接报错。
-* 密钥：`embedding_api_key/chat_api_key/discovery_github_token` 只走环境变量，写入文件即报错。`config-show` 打印脱敏后的有效配置，已设置的密钥显示为掩码。
+* 密钥：`embedding_api_key/chat_api_key/discovery_github_token/bootstrap_admin_key/postgres_url/qdrant_api_key` 只走环境变量，写入文件即报错。`config-show` 打印脱敏后的有效配置，已设置的密钥显示为掩码。
 * 路径：`db_path/registry_overrides_file/snapshot_dir/repos_dir/log_file/simvec_dir` 支持 `~` 展开；文件中为相对路径时相对配置文件所在目录，运行时传入的相对路径相对当前工作目录。
-* 校验：未知覆盖键报错；`log_level` 仅接受 `DEBUG/INFO/WARNING/ERROR`，`log_format` 仅接受 `text/json`；`snippet_cap` 须大于 `snippet_radius`；`rerank_top_n` 不得超过 `rerank_candidate_limit`；`chunk_embed_min_tokens` 不得超过 `chunk_embed_max_tokens`；`chunk_bm25_min_terms` 不得超过 `chunk_bm25_max_terms`。数值字段的上下界见各表。
+* 校验：未知覆盖键报错；`log_level` 仅接受 `DEBUG/INFO/WARNING/ERROR`，`log_format` 仅接受 `text/json`；`snippet_cap` 须大于 `snippet_radius`；`rerank_top_n` 不得超过 `rerank_candidate_limit`；`chunk_embed_min_tokens` 不得超过 `chunk_embed_max_tokens`；`chunk_bm25_min_terms` 不得超过 `chunk_bm25_max_terms`；`answer_weak_threshold` 不得超过 `answer_strong_threshold`；HNSW 构造 ef 不得低于 `max(2*m, 4)`；`qdrant_write_consistency_factor` 不得超过 `qdrant_replication_factor`；选用 `qdrant` 后端时 `qdrant_url` 必填，选用 `postgres` 后端时 `postgres_url` 必填。数值字段的上下界见各表。
 * 指纹：有效快照的哈希用于核对多端配置是否一致，`config-show` 与 Web 健康检查均可查看。
 
 ## 服务与运行（[server]）
 
 | 字段 | 类型 | 默认 | 环境变量 | 影响 |
 |---|---|---|---|---|
-| db_path | 路径 | `~/.local/share/libref/libref.db` | LIBREF_DB_PATH | 全出口共用的 SQLite 真源位置 |
+| db_path | 路径 | `~/.local/share/libref/libref.db` | LIBREF_DB_PATH | 本机控制面 SQLite 位置与派生索引命名依据 |
 | heartbeat_timeout | 浮点（>0） | 600.0 | LIBREF_HEARTBEAT_TIMEOUT | 任务心跳与版本锁的过期阈值，秒 |
+| deployment_id | 字符串 | 空 | LIBREF_DEPLOYMENT_ID | 共享向量服务的部署标识；空时回退到 `instance_id` |
 
 ## 抓取（[crawler]）
 
@@ -56,13 +57,45 @@
 | 字段 | 类型 | 默认 | 环境变量 | 影响 |
 |---|---|---|---|---|
 | qdrant_url | 字符串 | http://localhost:6333 | LIBREF_QDRANT_URL | Qdrant 后端地址，仅 qdrant 模式使用 |
-| vector_collection | 字符串 | libref_chunks | LIBREF_VECTOR_COLLECTION | 向量集合基名，实际按库文件派生隔离 |
+| vector_collection | 字符串 | libref_chunks | LIBREF_VECTOR_COLLECTION | 向量集合基名，实际按库文件与部署标识派生隔离 |
 | qdrant_timeout | 浮点（>0） | 5.0 | LIBREF_QDRANT_TIMEOUT | Qdrant 超时，秒 |
 | vector_backend | 字面量 | simvec | LIBREF_VECTOR_BACKEND | `simvec` 本地引擎或 `qdrant` 远端服务 |
 | simvec_dir | 路径/空 | 空 | LIBREF_SIMVEC_DIR | 本地引擎目录，缺省按库文件派生 |
 | simvec_lib | 字符串/空 | 空 | LIBREF_SIMVEC_LIB | 本地引擎动态库显式路径 |
+| vector_distance | 字面量 | cosine | LIBREF_VECTOR_DISTANCE | 向量距离算法：`cosine/euclid/dot/manhattan` |
+| vector_write_batch | 整数（≥1） | 512 | LIBREF_VECTOR_WRITE_BATCH | 两种后端共用的写入批大小 |
+| vector_max_points | 整数（≥1）/空 | 空 | LIBREF_VECTOR_MAX_POINTS | 派生索引点数硬上限，超限写入失败且不截断真源 |
+| qdrant_api_key | 密钥/空 | 空 | LIBREF_QDRANT_API_KEY | Qdrant API Key，设置时默认启用 HTTPS |
+| qdrant_https | 布尔/空 | 空 | LIBREF_QDRANT_HTTPS | 显式切换 Qdrant HTTPS，空时按 Key 推导 |
+| qdrant_search_hnsw_ef | 整数（≥1）/空 | 空 | LIBREF_QDRANT_SEARCH_HNSW_EF | 远端图搜索束宽，空时沿用服务端默认 |
+| qdrant_search_exact | 布尔 | 关 | LIBREF_QDRANT_SEARCH_EXACT | 远端搜索强制全量比对 |
+| simvec_index | 字面量 | hnsw | LIBREF_SIMVEC_INDEX | 本地引擎索引形态：`hnsw/flat` |
+| simvec_hnsw_m | 整数（≥2） | 16 | LIBREF_SIMVEC_HNSW_M | 本地图索引连接数 |
+| simvec_hnsw_ef_construct | 整数（≥4） | 100 | LIBREF_SIMVEC_HNSW_EF_CONSTRUCT | 本地图索引构造束宽 |
+| simvec_full_scan_threshold | 整数（≥1） | 10000 | LIBREF_SIMVEC_FULL_SCAN_THRESHOLD | 本地精确扫描切到图索引的活跃点数阈值 |
+| simvec_hnsw_ef_search | 整数（≥1） | 40 | LIBREF_SIMVEC_HNSW_EF_SEARCH | 本地图搜索束宽 |
+| simvec_max_indexing_threads | 整数（≥1）/空 | 空 | LIBREF_SIMVEC_MAX_INDEXING_THREADS | 本地索引构建线程上限，空时由引擎决定 |
+| qdrant_grpc | 布尔 | 关 | LIBREF_QDRANT_GRPC | 远端传输切到 gRPC，缺省使用 REST |
+| qdrant_grpc_port | 整数（1–65535） | 6334 | LIBREF_QDRANT_GRPC_PORT | gRPC 端口 |
+| qdrant_prefix | 字符串/空 | 空 | LIBREF_QDRANT_PREFIX | 远端集合名前缀 |
+| qdrant_pool_size | 整数（≥1）/空 | 空 | LIBREF_QDRANT_POOL_SIZE | 远端连接池大小，空时沿用客户端默认 |
+| qdrant_on_disk_vectors | 布尔/空 | 空 | LIBREF_QDRANT_ON_DISK_VECTORS | 集合创建时的向量落盘策略，变更会重建集合 |
+| qdrant_on_disk_payload | 布尔/空 | 空 | LIBREF_QDRANT_ON_DISK_PAYLOAD | 集合创建时的载荷落盘策略，变更会重建集合 |
+| qdrant_shard_number | 整数（≥1）/空 | 空 | LIBREF_QDRANT_SHARD_NUMBER | 集合分片数，变更会重建集合 |
+| qdrant_replication_factor | 整数（≥1）/空 | 空 | LIBREF_QDRANT_REPLICATION_FACTOR | 集合副本数，变更会重建集合 |
+| qdrant_write_consistency_factor | 整数（≥1）/空 | 空 | LIBREF_QDRANT_WRITE_CONSISTENCY_FACTOR | 写入一致性因子，不得超过副本数 |
+| qdrant_hnsw_m | 整数（≥2）/空 | 空 | LIBREF_QDRANT_HNSW_M | 远端图索引连接数，变更会重建集合 |
+| qdrant_hnsw_ef_construct | 整数（≥4）/空 | 空 | LIBREF_QDRANT_HNSW_EF_CONSTRUCT | 远端构造束宽，变更会重建集合 |
+| qdrant_full_scan_threshold | 整数（≥1）/空 | 空 | LIBREF_QDRANT_FULL_SCAN_THRESHOLD | 远端精确扫描阈值，就地重写 |
+| qdrant_memmap_threshold_kb | 整数（≥1）/空 | 空 | LIBREF_QDRANT_MEMMAP_THRESHOLD_KB | 远端段进入 mmap 的阈值，就地重写 |
+| qdrant_indexing_threshold_kb | 整数（≥1）/空 | 空 | LIBREF_QDRANT_INDEXING_THRESHOLD_KB | 远端段开始建索引的阈值，就地重写 |
+| metadata_backend | 字面量 | sqlite | LIBREF_METADATA_BACKEND | 元数据与关系会话后端：`sqlite/postgres` |
+| fulltext_backend | 字面量 | fts5 | LIBREF_FULLTEXT_BACKEND | 全文后端：`fts5/postgres` |
+| postgres_url | 密钥/空 | 空 | LIBREF_POSTGRES_URL | PostgreSQL 连接串，选用 postgres 后端时必填 |
+| postgres_pool_size | 整数（≥1） | 8 | LIBREF_POSTGRES_POOL_SIZE | PostgreSQL 连接池大小 |
+| postgres_timeout | 浮点（>0） | 10.0 | LIBREF_POSTGRES_TIMEOUT | PostgreSQL 语句超时，秒 |
 
-向量是 SQLite 真源的可重建派生索引，无密钥时向量路禁用，纯全文检索。
+向量是 SQLite 真源的可重建派生索引，无密钥时向量路禁用，纯全文检索。集合形态字段（距离、图参数、落盘、分片与副本）变化触发重建，搜索与连接参数就地生效。
 
 ## 分块（[chunking]）
 
@@ -193,13 +226,11 @@
 | material_limit | 整数（≥1） | 1500 | LIBREF_MATERIAL_LIMIT | 单材料上限 |
 | answer_total_budget | 整数（≥1） | 6000 | LIBREF_ANSWER_TOTAL_BUDGET | 回答材料总预算（硬上限），按排序分配，超出部分整条丢弃并以省略标记告知模型 |
 
-## 服务暴露（[mcp]、[mcp.auth]、[auth]、[web]）
+## 服务暴露（[mcp]、[auth]、[web]）
 
 | 字段 | 类型 | 默认 | 环境变量 | 影响 |
 |---|---|---|---|---|
-| mcp_host | 字符串 | 127.0.0.1 | LIBREF_MCP_HOST | MCP 监听地址 |
-| mcp_port | 整数（1–65535） | 8000 | LIBREF_MCP_PORT | MCP 监听端口 |
-| mcp_path | 字符串 | /mcp | LIBREF_MCP_PATH | MCP 端点路径 |
+| mcp_path | 字符串 | /mcp | LIBREF_MCP_PATH | MCP 在组合 Web 监听上的挂载路径 |
 | mcp_enabled_tools | 名单/空 | 空（全量） | LIBREF_MCP_ENABLED_TOOLS | 工具白名单，空数组表示零工具 |
 | mcp_disabled_tools | 名单 | 空 | LIBREF_MCP_DISABLED_TOOLS | 工具黑名单，优先于白名单 |
 | auth_mode | 字面量 | enforced | LIBREF_AUTH_MODE | `dev/enforced`，默认强制鉴权；dev 必须显式开启且只许回环 |

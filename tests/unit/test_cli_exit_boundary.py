@@ -7,6 +7,7 @@ import json
 
 import pytest
 
+from libref.cli import ops_commands
 from libref.cli.common import as_error, report_failure
 from libref.cli.parsers import build_parser
 from libref.errors import (
@@ -70,3 +71,14 @@ def test_unavailable_factory_keeps_outage_on_tier_one() -> None:
     error = unavailable("remote poll timeout")
     assert error.code == "unavailable"
     assert exit_code_for(error.code) == 1
+
+
+def test_stdio_commands_share_one_assembly(monkeypatch) -> None:
+    seen: list[argparse.Namespace] = []
+    monkeypatch.setattr(
+        ops_commands, "_serve_stdio", lambda args: seen.append(args) or 0
+    )
+    args = argparse.Namespace(stdio=True)
+    assert ops_commands.cmd_serve(args) == 0
+    assert ops_commands.cmd_serve_mcp(args) == 0
+    assert seen == [args, args]

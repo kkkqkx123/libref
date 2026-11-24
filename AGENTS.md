@@ -91,9 +91,9 @@ mining ──────┘       llm (transport leaf over httpx; consumed via 
 
 ```bash
 uv run pytest              # full test suite (minimum check before submit)
-uv run ruff check src tests packages/librefctl/src  # lint
-uv run ruff format --check src tests packages/librefctl/src  # format check
-uv run mypy src packages/librefctl/src  # type check
+uv run ruff check src tests librefctl/src  # lint
+uv run ruff format --check src tests librefctl/src  # format check
+uv run mypy src librefctl/src  # type check
 ```
 
 Consolidate verification into as few runs as possible. When filtering long build

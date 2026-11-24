@@ -6,8 +6,8 @@
 
 ## 服务启动
 
-* `serve`：单进程提供 Web 路由与挂载在 `mcp_path` 的 `/mcp`，监听取 `web_host/web_port`，`--host/--port` 可覆盖。`--stdio` 切到标准输入输出；`--enabled-tools/--disabled-tools` 裁剪 MCP 工具。启动校验：dev 模式非回环拒绝，enforced 模式无引导凭据且无主体时拒绝，失败返回 2。
-* `serve-mcp`：只走标准输入输出，供本机 MCP 客户端使用；流式 HTTP 由 `serve` 统一提供。
+* `serve`：单进程提供 Web 路由与挂载在 `mcp_path` 的 `/mcp`，监听取 `web_host/web_port`，`--host/--port` 可覆盖。`--enabled-tools/--disabled-tools` 裁剪 MCP 工具。启动校验：dev 模式非回环拒绝，enforced 模式无引导凭据且无主体时拒绝，失败返回 2。
+* `serve-mcp` 与 `serve --stdio`：同一条标准输入输出组装路径，供本机 MCP 客户端使用；二者共用运行时上下文、启动校验、配置指纹校验和退出排空。流式 HTTP 只由不带 `--stdio` 的 `serve` 提供。
 
 ## 本机运维
 

@@ -149,8 +149,8 @@ libref/
 │       ├── parsers.py          # 启动与运维参数定义
 │       ├── common.py           # 设置/连接/错误装配
 │       └── ops_commands.py     # 启动、迁移、维护、角色与本机任务
-├── packages/                   # 独立发行的调用方工具
-│   └── librefctl/              # HTTP-only CLI 客户端（只依赖 httpx）
+├── librefctl/                  # 独立发行的 HTTP-only CLI 客户端（只依赖 httpx）
+│   └── src/librefctl/
 │       ├── commands.py         # 命令表与远端路由映射
 │       ├── transport.py        # 单一 HTTP 传输与错误适配
 │       ├── output.py           # 单一 JSON 输出封装

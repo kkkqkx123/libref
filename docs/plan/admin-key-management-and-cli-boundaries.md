@@ -73,7 +73,7 @@ Web API 已经暴露 `/admin/keys`、`/admin/principals` 等路由，权限完�
 
 ## 其他架构任务
 
-1. **契约复制漂移**：`librefctl/commands.py` 的路径/参数/枚举、`transport.py:USAGE_CODES`、`app.py:_TERMINAL`、`commands.py:_SOURCE_ROLES` 都与服务端定义重复。增加基于 OpenAPI 的参数级一致性测试和跨包常量对照测试；长期目标是让命令表从 Web schema 生成，而不是手工维护第二份真相。
+1. **契约复制漂移**：`librefctl/src/librefctl/commands.py` 的路径/参数/枚举、`transport.py:USAGE_CODES`、`app.py:_TERMINAL`、`commands.py:_SOURCE_ROLES` 都与服务端定义重复。增加基于 OpenAPI 的参数级一致性测试和跨包常量对照测试；长期目标是让命令表从 Web schema 生成，而不是手工维护第二份真相。
 2. **命令命名冲突**：原 `libref mine` 与 `librefctl mine` 名字相同但语义不同（本机直接执行 vs 提交 job）。服务端本机入口统一收进 `libref local` 子命令组，例如 `libref local mine`、`libref local index-repo`。同步更新文档、测试与探查采集脚本；不做旧名别名。
 3. **进程入口清理**：`src/libref/__init__.py` 顶层导入 `libref.cli.main`，lazy export 注释与实际行为不符；pyproject 入口已指向 `libref.cli:main`，删除多余导出或改成真正的惰性实现。
 4. **快照说明同步**：`tests/e2e/probe-discovery/outputs` 的 HTTP 用例输出已归一为客户端信封；后续若改命令名，必须同步 meta 的 argv 标签，不再保留旧入口标签。
@@ -89,7 +89,7 @@ Web API 已经暴露 `/admin/keys`、`/admin/principals` 等路由，权限完�
 
 ## 验证口径
 
-- 全量 `pytest`、`ruff check`、`ruff format --check`、`mypy` 覆盖 `src`、`tests` 与 `packages/librefctl/src`。
+- 全量 `pytest`、`ruff check`、`ruff format --check`、`mypy` 覆盖 `src`、`tests` 与 `librefctl/src`。
 - 本机密钥管理集成测试覆盖哈希存储、明文回显一次、撤销计数、权限收窄与审计。
 - 客户端 admin 命令用 MockTransport 覆盖成功、422、服务端错误信封、网络失败与签发超时不重试。
 - 命令表与 Web 路由的一致性测试升级为参数级字段对照。

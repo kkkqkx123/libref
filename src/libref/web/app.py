@@ -450,6 +450,7 @@ def build_web_app(
             out["reasons"] = list(status.get("reasons", []) or [])
             out["answerable"] = bool(status["answerable"])
             out["answerability"] = float(status["answerability"])
+            out["cross_lingual"] = bool(status.get("cross_lingual", False))
             if params.suggest and not results:
                 try:
                     from libref.services.registry.discovery import (

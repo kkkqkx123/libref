@@ -483,17 +483,24 @@ def _warn_role_conflicts(conn) -> None:
     )
 
 
-def _prepare_auth(host: str, settings, conn) -> None:
+def _prepare_auth(
+    host: str, settings, conn, *, has_principals: bool | None = None
+) -> None:
     """Bootstrap identity and validate startup; raise on unsafe configuration."""
     from libref.services.infra.auth import check_startup
 
     try:
         _ensure_bootstrap(settings, conn)
+        present = (
+            _startup_auth_state(settings, conn)
+            if has_principals is None
+            else has_principals
+        )
         check_startup(
             host,
             auth_mode=str(getattr(settings, "auth_mode", "enforced") or "enforced"),
             bootstrap_key=getattr(settings, "bootstrap_admin_key", None),
-            has_principals=_startup_auth_state(settings, conn),
+            has_principals=present,
         )
     except Exception as exc:
         raise LibrefError(
@@ -511,16 +518,7 @@ def _use_local_principal(settings) -> None:
 
 def cmd_serve_mcp(args: argparse.Namespace) -> int:
     """Serve MCP over stdio; HTTP MCP is always the combined serve command."""
-    from libref.mcp_server import build_mcp_server
-
-    settings = _load_settings(args, _mcp_tools_overrides(args))
-    conn = _connect(settings, check_same_thread=False)
-    _use_local_principal(settings)
-    mcp = build_mcp_server(conn, settings)
-    _verify_fingerprint(settings, conn)
-    mcp.run("stdio")
-    _drain_and_close(settings, conn)
-    return 0
+    return _serve_stdio(args)
 
 
 def _verify_fingerprint(settings, conn) -> None:
@@ -547,8 +545,29 @@ def _drain_and_close(settings, conn) -> None:
     conn.close()
 
 
+def _serve_stdio(args: argparse.Namespace) -> int:
+    """Assemble the shared stdio MCP runtime for both serving commands."""
+    from libref.mcp_server import build_mcp_server
+    from libref.services.infra.context import build_context
+
+    settings = _load_settings(args, _mcp_tools_overrides(args))
+    conn = _connect(settings, check_same_thread=False)
+    try:
+        _prepare_auth("127.0.0.1", settings, conn, has_principals=True)
+        _verify_fingerprint(settings, conn)
+        ctx = build_context(settings)
+        _use_local_principal(settings)
+        mcp = build_mcp_server(conn, settings, context=ctx)
+        mcp.run("stdio")
+    finally:
+        _drain_and_close(settings, conn)
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Single combined serving: Web routes plus MCP mounted at the same port."""
+    if getattr(args, "stdio", False):
+        return _serve_stdio(args)
     import uvicorn
     from starlette.middleware.cors import CORSMiddleware
     from starlette.routing import Mount
@@ -563,13 +582,6 @@ def cmd_serve(args: argparse.Namespace) -> int:
     try:
         _prepare_auth(host, settings, conn)
         ctx = build_context(settings)
-        if getattr(args, "stdio", False):
-            from libref.mcp_server import build_mcp_server as _build_mcp
-
-            _use_local_principal(settings)
-            mcp = _build_mcp(conn, settings, context=ctx)
-            mcp.run("stdio")
-            return 0
         from libref.mcp_server import build_mcp_server as _build_mcp
         from libref.web import build_web_app as _build_web
 

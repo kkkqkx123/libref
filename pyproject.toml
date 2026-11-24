@@ -64,7 +64,7 @@ markers = [
 # Explicit main config; target-version is inferred from requires-python.
 # Do not set target-version = "py314": ruff 0.6.9 rejects the unknown variant.
 line-length = 88
-src = ["src", "tests", "packages/librefctl/src"]
+src = ["src", "tests", "librefctl/src"]
 
 [tool.ruff.lint.per-file-ignores]
 # 夹具是待解析的源样本，刻意含未定义调用与闲置绑定，不做清理。
@@ -76,7 +76,7 @@ src = ["src", "tests", "packages/librefctl/src"]
 
 [tool.uv.workspace]
 members = [
-    "packages/librefctl",
+    "librefctl",
     "vendor/tree-sitter-groovy",
     "vendor/tree-sitter-kotlin",
 ]

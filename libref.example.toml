@@ -181,9 +181,7 @@ chat_enable_thinking = false
 material_limit = 1500
 
 [mcp]
-# MCP Streamable HTTP 传输：默认只绑本地回环，对外暴露需配令牌
-mcp_host = "127.0.0.1"
-mcp_port = 8000
+# MCP 挂载在组合 Web 监听上，mcp_path 只决定路由路径。
 mcp_path = "/mcp"
 # 工具裁剪：允许名单减去拒绝名单；允许名单缺省为全部可见，拒绝优先。
 # 数组与逗号写法均可，大小写不敏感；未知名启动即报错。

@@ -44,7 +44,7 @@ libref/
 │   ├── mcp_server/           # MCP 工具定义与传输
 │   ├── web/                  # FastAPI 路由
 │   └── cli/                  # 服务端本机启动与运维
-├── packages/librefctl/       # 独立发行的 HTTP-only 客户端
+├── librefctl/                # 独立发行的 HTTP-only 客户端
 ├── webui/                    # 前端独立工程（npm，不进 pyproject）
 └── tests/
 ```

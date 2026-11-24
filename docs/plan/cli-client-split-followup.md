@@ -10,7 +10,7 @@
 2. 部署示例 `deploy/libref.toml.example` 仍含已删除的 `[client]` 配置段，按示例启动会因未知配置段失败；部署说明仍引用旧远端模式。
 3. `tests/e2e/probe-discovery` 采集脚本仍调用已删除的旧命令；快照只改了 argv 标签，内容与当前 CLI/客户端输出形态不一致。
 4. 客户端的用法与配置错误仍可能绕过统一 JSON 错误信封；`target_filter` 等非对象 JSON 参数会触发未包装异常；配额错误的字典型 `detail` 会被压掉。
-5. `packages/librefctl` 未纳入常规 ruff/mypy 检查路径；命令表与 Web 路由的一致性、布尔三态、JSON 参数、客户端与 Web 响应的差分测试尚未覆盖。
+5. `librefctl` 未纳入常规 ruff/mypy 检查路径；命令表与 Web 路由的一致性、布尔三态、JSON 参数、客户端与 Web 响应的差分测试尚未覆盖。
 
 ## 阶段一：恢复服务端本机入口
 
@@ -34,4 +34,4 @@
 
 ## 阶段五：接入验证路径
 
-把 `packages/librefctl` 纳入 lint、format 与类型检查路径，更新开发命令说明。验证以最终测试与静态检查为准；本阶段不新增发行包或版本。
+把 `librefctl` 纳入 lint、format 与类型检查路径，更新开发命令说明。验证以最终测试与静态检查为准；本阶段不新增发行包或版本。

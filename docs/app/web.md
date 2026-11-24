@@ -4,7 +4,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 健康检查无需鉴权，其余路由统一经顶层中间件鉴权：dev 模式注入固定主体，enforced 模式按 API Key 解析主体并按 scope 授权，未授权与缺 scope 分别返回未授权与禁止。列表类查询统一使用条目加总数包络，检索另带降级标记与原因。参数错误返回请求错误，资源缺失返回未找到，审核流转失败按冲突与参数错误区分返回，注册表缺地址按未找到与网关错误区分返回。
 
-错误响应统一为 `{"error": <稳定 code>, "detail": <原文>, "request_id": <编号>}`：`detail` 保持原样供人阅读与旧客户端消费，`error` 是前端据以本地化的标识。已知 code 有 `unauthorized/forbidden/missing_scope/origin_forbidden/not_found/page_not_found/job_not_found/quota_exceeded/review_conflict/invalid_limit/invalid_offset/invalid_scope/unavailable`，未归类的原因回落到 `http_<状态码>`。配额拒绝额外在顶层给 `resource` 与 `reset_at`。
+错误响应统一为 `{"error": <稳定 code>, "detail": <原文>, "request_id": <编号>}`：`detail` 保持原样供人阅读与旧客户端消费，`error` 是前端据以本地化的标识。code 取自统一错误表，常见值有 `unauthorized/forbidden/missing_scope/origin_forbidden/not_found/page_not_found/job_not_found/quota_exceeded/review_conflict/index_request_conflict/invalid_argument/invalid_limit/invalid_offset/invalid_scope/invalid_ecosystem/chat_disabled/upstream_unavailable/unavailable/config_refresh_failed`；框架未标注的 404/405 分别回落到 `not_found` 与 `invalid_argument`，其余回落到 `unavailable`。配额拒绝额外在顶层给 `resource` 与 `reset_at`。
 
 ## 健康与目录
 
@@ -15,6 +15,14 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 ### GET /readyz
 
 就绪探针，检查库可读写、向量与嵌入问答可用性，不鉴权。
+
+### GET /me
+
+返回当前主体的编号、名称、类型、租户、角色与 scope，需通过鉴权。
+
+### GET /metrics
+
+返回进程运行时间、延迟分位与请求、配额拒绝、token 用量等只读计数器，需 `read` scope。
 
 ### GET /catalog
 
@@ -35,7 +43,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 | suggest | 否 | 关 | 空命中时附带注册表建议 |
 | include_prerelease | 否 | 关 | 建议排序含预发布版本 |
 
-返回 `items/count/degraded/reasons/answerable/answerability`，`answerable` 语义与 MCP 检索一致。`suggest` 且空命中时附带 `suggestions`，发现失败附带 `suggest_error`。
+返回 `items/count/degraded/reasons/answerable/answerability/cross_lingual`，字段语义与 MCP 检索一致；`cross_lingual` 标记全文单路因书写系统不匹配而零命中。`suggest` 且空命中时附带 `suggestions`，发现失败附带 `suggest_error`。
 
 ### GET /library-search
 

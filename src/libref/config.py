@@ -257,9 +257,7 @@ class LibrefSettings(BaseSettings):
     chat_enable_thinking: bool = False
     material_limit: int = Field(default=1500, ge=1)
     answer_total_budget: int = Field(default=6000, ge=1)
-    # MCP Streamable HTTP transport: loopback-only by default; exposing externally requires a token.
-    mcp_host: str = "127.0.0.1"
-    mcp_port: int = Field(default=8000, ge=1, le=65535)
+    # MCP is mounted on the combined Web listener; mcp_path selects its route.
     mcp_path: str = "/mcp"
     # Tool visibility: allowlist minus denylist; an unset allowlist means all tools.
     mcp_enabled_tools: Annotated[
@@ -620,8 +618,6 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
     ),
     "mcp": frozenset(
         {
-            "mcp_host",
-            "mcp_port",
             "mcp_path",
             "mcp_enabled_tools",
             "mcp_disabled_tools",

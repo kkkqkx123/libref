@@ -1,6 +1,6 @@
 # CLI 客户端
 
-`librefctl` 是独立的 HTTP 客户端，供 skill、脚本与人工调用方使用。它只发 HTTP 请求，不打开数据库、不读取服务端配置、不调用服务层，也不接受本机路径。所有权限由服务端 scope 判定。发行单元位于 `packages/librefctl/`，可独立于服务端安装。
+`librefctl` 是独立的 HTTP 客户端，供 skill、脚本与人工调用方使用。它只发 HTTP 请求，不打开数据库、不读取服务端配置、不调用服务层，也不接受本机路径。所有权限由服务端 scope 判定。发行单元位于根目录 `librefctl/`，可独立于服务端安装。
 
 ## 连接
 
@@ -41,6 +41,8 @@
 | 反馈 | `feedback submit/list/resolve` | `/feedback` 系列路由 |
 
 参数名与 Web API 字段一致，重复参数用可重复选项传入（如 `--only-file`、`--pattern`、`--resolve-kind`），JSON 对象用 `--scope`、`--target-filter` 传入。`--dedup/--no-dedup` 对应三态布尔。
+
+客户端只覆盖调用方与 operator 的 Web 路由。UI 专属的 `GET /pages`、`GET /metrics`、`GET /readyz`，以及配额策略与配置刷新管理接口不进入命令面，需要时直接调用 Web API；服务端本机资源仍由 `libref` 本机命令管理。
 
 `request wait` 与 `job wait` 按服务端状态轮询到终态，等待状态只存在于客户端本次进程；`--timeout` 默认 300 秒，超时返回 `unavailable`。`request submit --target-prefix/--target-name` 会合并为服务端的 `target_filter`。仓库入库必须走索引申请，不能提交本机路径。
 
