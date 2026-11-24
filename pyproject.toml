@@ -57,6 +57,7 @@ markers = [
     "requires_qdrant: needs localhost Qdrant service",
     "requires_simvec: needs built libsimvec from crates/simvec",
     "requires_binary: needs built libref entrypoint",
+    "performance: opt-in performance benchmarks, default skipped unless LIBREF_RUN_PERF=1",
 ]
 
 [tool.ruff]

@@ -81,3 +81,13 @@ uv run python tests/e2e/generate_doc_feature_questions.py
 ```bash
 LIBREF_RUN_BENCH=1 uv run pytest tests/integration/test_retrieval_bench.py -q
 ```
+
+## 性能基准
+
+`perf/` 是耗时与计数基准目录：纯算法用确定性生成器，索引、挖掘、检索与出口用例复用 `bench/` 的冻结归档，在忽略目录中重建小型数据集。报告、机器本地基线与临时数据集都不入库；脚本、规格与说明进版本库。判据见 `docs/tests/performance-benchmark-design.md`，运行说明见 `perf/README.md`。
+
+```bash
+uv run python -m tests.e2e.perf.run --gear smoke
+uv run python -m tests.e2e.perf.run --gear all --save-baseline
+LIBREF_RUN_PERF=1 uv run pytest tests/e2e/perf/test_performance.py -q
+```

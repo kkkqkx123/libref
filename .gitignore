@@ -53,3 +53,7 @@ tests/e2e/snapshots/
 tests/e2e/bench/fixtures/
 tests/e2e/bench/data/
 tests/e2e/bench/outputs/
+
+# performance benchmark reports and machine-local baselines
+# (only spec, scripts and docs are versioned)
+tests/e2e/perf/outputs/

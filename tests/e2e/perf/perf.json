@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "cases": {
+    "micro.prefixspan": {
+      "gear": "smoke",
+      "seed": 20261124,
+      "sizes": [64, 256, 1024],
+      "sequence_length": 9,
+      "alphabet": [24, 48, 96],
+      "minsup": 2,
+      "minlen": 2,
+      "maxlen": 10,
+      "warmup": 1,
+      "repeats": 7,
+      "scale_upper": 8.0
+    },
+    "micro.chunking": {
+      "gear": "smoke",
+      "copies": [1, 4, 16],
+      "warmup": 1,
+      "repeats": 7,
+      "scale_upper": 8.0
+    },
+    "micro.ast": {
+      "gear": "smoke",
+      "languages": ["python", "java", "go", "rust", "csharp", "javascript", "kotlin", "groovy"],
+      "repeats": 5
+    },
+    "pipeline.index": {
+      "gear": "corpus",
+      "fixtures": [
+        "httpx/docs",
+        "jsoup/docs",
+        "httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016"
+      ],
+      "repeats": 3
+    },
+    "store.fts_scope": {
+      "gear": "corpus",
+      "fixture": "httpx/docs",
+      "queries": 16,
+      "budget": 25,
+      "warmup": 1,
+      "repeats": 7
+    },
+    "store.mining_scan": {
+      "gear": "corpus",
+      "fixture": "httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016",
+      "repeats": 3
+    },
+    "service.retrieval": {
+      "gear": "corpus",
+      "fixture": "httpx/docs",
+      "queries": 12,
+      "warmup": 1,
+      "repeats": 3
+    },
+    "exit.web": {
+      "gear": "exit",
+      "fixture": "httpx/docs",
+      "queries": 8,
+      "warmup": 1,
+      "repeats": 5,
+      "concurrency": [1, 4]
+    }
+  }
+}

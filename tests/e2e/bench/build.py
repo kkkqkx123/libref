@@ -107,22 +107,28 @@ def _index_docs(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
     empty = 0
     cjk_pages = 0
     paths: list[str] = []
+    stages = {"clean": 0.0, "split": 0.0, "store": 0.0, "commit": 0.0}
     for row in bench_archive.iter_pages(_verify_pages(entry, meta)):
         url = row["url"]
         content_type = row["content_type"]
+        started = time.perf_counter()
         markdown = pipeline.clean_with_cache(
             classify_content(content_type, url), row["body"], url
         )
+        stages["clean"] += time.perf_counter() - started
         if not markdown.strip():
             empty += 1
             continue
+        started = time.perf_counter()
         dual = split_markdown_dual(markdown, url, budgets=budgets)
         inputs = build_doc_inputs(
             dual.embedding + dual.bm25, "text/markdown", "markdown"
         )
+        stages["split"] += time.perf_counter() - started
         if not inputs:
             empty += 1
             continue
+        started = time.perf_counter()
         store.store_page(
             version_id,
             library_id,
@@ -131,6 +137,7 @@ def _index_docs(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
             chunks=inputs,
             raw_content=markdown,
         )
+        stages["store"] += time.perf_counter() - started
         pages += 1
         paths.append(urlsplit(url).path or "/")
         if CJK_RUN_RE.search(markdown):
@@ -138,9 +145,12 @@ def _index_docs(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
         chunks += len(inputs)
         for item in inputs:
             lanes[item.chunk_path] = lanes.get(item.chunk_path, 0) + 1
+    started = time.perf_counter()
     conn.commit()
+    stages["commit"] += time.perf_counter() - started
     evidence = meta["content"]["doc_version"]
     return {
+        "stages_ms": {name: int(value * 1000) for name, value in stages.items()},
         "pages": pages,
         "page_paths": paths,
         "cjk_pages": cjk_pages,
@@ -271,8 +281,12 @@ def _index_code(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
     from libref.services.code.mining_refresh import mine_patterns
     from libref.services.registry.libraries import LibraryService
 
+    stages = {"unpack": 0.0, "index": 0.0, "verify": 0.0, "mine": 0.0}
     with tempfile.TemporaryDirectory(prefix="libref-bench-src-") as tmp:
+        started = time.perf_counter()
         source = _source(entry, meta, Path(tmp))
+        stages["unpack"] += time.perf_counter() - started
+        started = time.perf_counter()
         counts = index_repo(
             conn,
             str(entry["library"]),
@@ -282,6 +296,8 @@ def _index_code(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
             ecosystem=str(entry["ecosystem"]),
             settings=settings,
         )
+        stages["index"] += time.perf_counter() - started
+        started = time.perf_counter()
         _check_code(
             bench_archive.fixture_id(entry),
             entry,
@@ -294,10 +310,13 @@ def _index_code(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
             },
             source,
         )
+        stages["verify"] += time.perf_counter() - started
     library = str(entry["library"])
     version = str(entry["version"])
     ecosystem = str(entry["ecosystem"])
+    started = time.perf_counter()
     patterns = mine_patterns(conn, library, version, ecosystem=ecosystem)
+    stages["mine"] += time.perf_counter() - started
     _library_id, version_id = LibraryService(conn).ensure_library_version(
         library, version, ecosystem
     )
@@ -308,6 +327,7 @@ def _index_code(conn, settings, entry: dict[str, Any], meta: dict[str, Any]) -> 
         "SELECT count(*) FROM api_clusters WHERE version_id=?", (version_id,)
     ).fetchone()
     return {
+        "stages_ms": {name: int(value * 1000) for name, value in stages.items()},
         "files": int(counts.get("files", 0)),
         "parsed": int(counts.get("parsed", 0)),
         "entities": int(counts.get("entities", 0)),
