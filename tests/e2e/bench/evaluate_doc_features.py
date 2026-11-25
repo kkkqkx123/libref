@@ -3,8 +3,10 @@
 The archived page bodies are replayed through the production cleaning and snippet
 ingestion paths, then the production document-feature derivation runs on them.
 The report compares the same questions with doc_feature_alpha off and on and
-records alignment, block-type, coverage, drift and ranking observations. Nothing
-here writes gates: a floor needs a deliberate human decision after a full replay.
+records alignment, feature-node, block-type, coverage, drift and ranking
+observations. Expected feature nodes are checked as a subset of the nodes linked
+to the question's target documents. Nothing here writes gates: a floor needs a
+deliberate human decision after a full replay.
 
 Usage:
     uv run python -m tests.e2e.bench.evaluate_doc_features [--data DIR] [--out DIR]
@@ -191,24 +193,30 @@ def _score_entry(conn, question: dict, version_id: int) -> dict[str, Any]:
             (str(url), version_id),
         ).fetchall()
         doc_ids.extend(int(row[0]) for row in rows)
-    links = {
-        str(row["api"])
-        for doc_id in doc_ids
-        for row in insight.links(version_id, limit=1000)
-        if int(row["document_id"]) == doc_id
-    }
-    want = {str(name) for name in question.get("expected_entities", [])}
-    features = {
-        (int(row["document_id"]), str(row["facet"])): row["details"].get("value")
-        for row in insight.features(version_id, limit=1000)
-    }
-    expected_type = str(question.get("expected_facets", {}).get("block_type") or "")
-    verdicts = {
-        int(row["document_id"]): str(row["verdict"])
+    library_id = _library_id(conn, version_id)
+    links: set[str] = set()
+    features: dict[tuple[int, str], object] = {}
+    verdicts: dict[int, str] = {}
+    for doc_id in doc_ids:
+        for row in insight.links(version_id, document_id=doc_id, limit=1000):
+            links.add(str(row["api"]))
+        for row in insight.features(version_id, document_id=doc_id, limit=1000):
+            features[(doc_id, str(row["facet"]))] = row["details"].get("value")
         for row in insight.consistency(
-            version_id, _library_id(conn, version_id), limit=1000
-        )
+            version_id, library_id, document_id=doc_id, limit=1000
+        ):
+            verdicts[doc_id] = str(row["verdict"])
+    want = {str(name) for name in question.get("expected_entities", [])}
+    expected_facets = {
+        str(key): value
+        for key, value in question.get("expected_facets", {}).items()
+        if key != "heading"
     }
+    facet_checks = {
+        key: any(features.get((doc_id, key)) == value for doc_id in doc_ids)
+        for key, value in expected_facets.items()
+    }
+    expected_type = str(expected_facets.get("block_type") or "")
     node_paths: set[str] = set()
     for doc_id in doc_ids:
         for row in conn.execute(
@@ -226,11 +234,12 @@ def _score_entry(conn, question: dict, version_id: int) -> dict[str, Any]:
         "entities_found": sorted(links),
         "entities_extra": sorted(links - want),
         "entity_match": want <= links,
+        "facets_expected": expected_facets,
+        "facet_checks": facet_checks,
+        "facet_match": all(facet_checks.values()),
         "block_type_expected": expected_type,
-        "block_type_match": not expected_type
-        or any(
-            features.get((doc_id, "block_type")) == expected_type for doc_id in doc_ids
-        ),
+        "block_type_match": bool(expected_type)
+        and facet_checks.get("block_type", False),
         "verdict_expected": str(question.get("expected_verdict") or ""),
         "verdict_match": not question.get("expected_verdict")
         or any(
@@ -417,13 +426,24 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
         f"- 生成时间：{datetime.now(UTC).isoformat(timespec='seconds')}",
         f"- 评测权重：doc_feature_alpha={alpha:g}（关闭列为 0，开启列仅切换该权重）",
         "- 报告只记录观测值，不写门禁；归档修订变化后需重新标定下限。",
-        "- 当前题目只人工确认目标实体，不是整块全量实体清单；子集命中仅作观察，不写门禁。",
+        "- 题目标签按目标文档的派生证据核对；一致性只表示标签与派生表相符，语义正确性需独立复核。",
         (
             f"- 漂移抽检：样本 {len(samples)}，自动 drift {len(auto_drift)}，"
             f"误报 {len(false_positive)}；未标满样本前不计算误报率门禁。"
         ),
         "",
     ]
+    all_questions = [row for item in results for row in item["questions"]]
+    node_labeled = sum(1 for row in all_questions if row["nodes_expected"])
+    verdict_labeled = sum(1 for row in all_questions if row["verdict_expected"])
+    lines.extend(
+        [
+            f"- 题目总数：{len(all_questions)}",
+            f"- 树节点标签覆盖：{node_labeled}/{len(all_questions)}",
+            f"- 判定标签覆盖：{verdict_labeled}/{len(all_questions)}",
+            "",
+        ]
+    )
     for item in results:
         lines += [
             f"## {item['name']}",
@@ -433,8 +453,8 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             f"- 实体来源：{item['entity_source']}；代码块：{_dump(item['snippet_counts'])}",
             f"- 派生计数：{_dump(item['derivation'])}",
             "",
-            "| 题目 | 来源 | 锚点 | 实体对齐 | 树节点 | 块类型 | 判定 | 排名 off/on |",
-            "|---|---|---|---|---|---|---|---|",
+            "| 题目 | 来源 | 锚点 | 实体对齐 | 树节点 | 特征一致 | 块类型 | 判定 | 排名 off/on |",
+            "|---|---|---|---|---|---|---|---|---|",
         ]
         by_id = {str(row["id"]): row for rows in questions.values() for row in rows}
         for row in item["questions"]:
@@ -443,7 +463,8 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             lines.append(
                 f"| {row['id']} | {source} | {'OK' if not row['anchor_problems'] else _dump(row['anchor_problems'])} "
                 f"| {'OK' if row['entity_match'] else _dump([row['entities_expected'], row['entities_found']])} "
-                f"| {'OK' if row['node_match'] else _dump([row['nodes_expected'], row['nodes_found']])} "
+                f"| {'unmeasurable' if not row['nodes_expected'] else ('OK' if row['node_match'] else _dump([row['nodes_expected'], row['nodes_found']]))} "
+                f"| {'OK' if row['facet_match'] else _dump([row['facets_expected'], row['facet_checks']])} "
                 f"| {'OK' if row['block_type_match'] else row['block_type_expected']} "
                 f"| {'OK' if row['verdict_match'] else row['verdict_expected']} "
                 f"| {rank.get('off', 0)}/{rank.get('on', 0)} |"
@@ -456,7 +477,8 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
                 f"- 实体对齐：{sum(1 for row in entries if row['entity_match'])}/{len(entries)}"
                 f"（期望实体子集命中）"
             ),
-            f"- 树节点一致：{sum(1 for row in entries if row['node_match'])}/{len(entries)}",
+            f"- 树节点一致：{sum(1 for row in entries if row['nodes_expected'] and row['node_match'])}/{sum(1 for row in entries if row['nodes_expected'])}（有标签题）",
+            f"- 块特征一致：{sum(1 for row in entries if row['facet_match'])}/{len(entries)}",
             f"- 块类型一致：{sum(1 for row in entries if row['block_type_match'])}/{len(entries)}",
             f"- 判定一致：{sum(1 for row in entries if row['verdict_match'])}/{len(entries)}",
             f"- 覆盖行数：{item['derivation']['coverage']}",
@@ -507,7 +529,7 @@ def _dump(value: Any) -> str:
 
 def run(data: Path, out_dir: Path, alpha: float) -> list[dict[str, Any]]:
     """Replay every archived docs fixture that has a frozen judgment set."""
-    from libref.db import open_db
+    from libref.db import apply_migrations, open_db
     from tests.e2e.bench import archive as bench_archive
     from tests.e2e.bench.fakes import bench_settings
 
@@ -520,6 +542,9 @@ def run(data: Path, out_dir: Path, alpha: float) -> list[dict[str, Any]]:
     db_path = data / "bench.db"
     settings = bench_settings(db_path, doc_feature_alpha=0.0)
     conn = open_db(db_path)
+    applied = apply_migrations(conn)
+    if applied:
+        print(f"applied migrations: {', '.join(str(item) for item in applied)}")
     results: list[dict[str, Any]] = []
     try:
         for entry in bench_archive.select([]):

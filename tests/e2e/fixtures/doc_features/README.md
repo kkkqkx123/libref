@@ -7,8 +7,8 @@
 - `cases.json`：库与版本、页面清单、API 实体、特征树节点、社区模式、下一版本覆盖页与可手算期望。
 - `pages/*.md`、`pages/*.html`：固定正文。围栏示例调用同一 API 的两种顺序，参数表与返回值小节、废弃标记、变更日志、歧义短名与无实体页面各占一页。
 - `pages_v11/*.md`：下一版本覆盖页，用于跨版本 facet 与实体变化清单。
-- `questions.json`：人工确认后的判定集，按语料标识分组；离线 `demo` 场景与冻结归档场景共用固定字段。每题带来源、来源判定引用、题目、稳定锚点、期望实体、期望特征树节点、期望块特征、期望判定与分级。期望实体按子集命中评分，额外边单独记录；离线题目按期望节点集合完全相等评分。
-- `drift_samples.json`：人工标注的漂移样本；自动 drift 与人工结论不一致时计入误报统计，样本不足时只报告数量，不写门禁。
+- `questions.json`：按语料标识分组的判定集；离线 `demo` 场景与冻结归档场景共用固定字段。每题带来源、来源引用、题目、稳定锚点、期望实体、期望特征树节点、期望块特征、期望判定与分级。`expected_facets` 记录 `block_type`、`heading_depth`、`length_bucket`、`code_ratio`、`has_table`、`version_marker`、`example_language`、`example_symbols`、`param_names`、`return_hint`、`deprecated` 等可核验标签；标题由锚点解析单独验证。`demo` 现有 12 题，覆盖 6 个页面的正反两种问法。
+- `drift_samples.json`：人工标注的漂移样本；自动 drift 与人工结论不一致时计入误报统计，样本不足时只报告数量，不写门禁。现有 40 条样本，其中 28 条人工 drift、12 条人工 not_drift，覆盖离线夹具与 9 个真实站点归档。
 - `../../fixtures/doc_features/golden.json`：纯算法黄金集，含实体、文档块、片段调用、对齐边、特征树父链、期望节点关联与模式；单元测试无需数据库即可复核。
 
 ## 生成与核查
@@ -37,3 +37,5 @@ uv run python -m tests.e2e.bench.evaluate_doc_features
 ```
 
 评测把归档原始正文中的围栏与 HTML 代码块登记为 `doc_snippet` 语料源，再按文档夹具的 `entity_source` 把文档版本显式绑定到源码版本，然后运行生产派生与读模型。代码块保留页面中的 import/using 上下文，供别名解析使用。报告写到 `tests/e2e/bench/outputs/retrieval-bench/doc-features/`，记录归档修订但不改门禁。缺少语言标记代码块的站点仍可核查规则匹配与检索加权，实体对齐率只作记录。
+
+冻结归档题目由 `materialize_doc_feature_questions.py` 重建：先把每个 `pages.jsonl.gz` 解压到临时目录，再从原始正文的章节片段抽取查询，并与回放后的派生表核对 URL、标题路径、块特征、实体边、节点父链和判定。标题必须在原始正文中定位到章节，不命中就跳过。旧真实站点题目不保留；候选池里的 `ready` 只作探索，不直接进入 `questions.json`。实体名必须同时存在于目标文档的 `doc_api_links` 与正文片段，否则题目退化为语义锚点题并清空 `expected_entities`。判定只在目标文档结论唯一时写入；没有节点父链的题目不写 `expected_feature_nodes`。真实站点现有 270 条题目，每库 30 条、dev/test 各 15 条；同源一致性仍不能替代独立人工语义判定。

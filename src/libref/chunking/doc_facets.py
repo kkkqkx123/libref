@@ -272,7 +272,11 @@ def _return_hint(content: str, return_type: str = "") -> dict[str, Any]:
                     continue
                 match = re.search(r"`([^`]+)`", raw)
                 if match is not None:
-                    return {"present": True, "type": match.group(1), "source": "heading"}
+                    return {
+                        "present": True,
+                        "type": match.group(1),
+                        "source": "heading",
+                    }
                 cleaned = _clean_cell(raw)
                 if cleaned:
                     return {

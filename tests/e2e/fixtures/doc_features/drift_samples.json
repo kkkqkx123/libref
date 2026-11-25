@@ -143,6 +143,182 @@
       "auto_verdict": "drift",
       "human_verdict": "drift",
       "reason": "正文说明旧 Rules map 已被 RuleList 取代，属于真实行为与字段漂移。"
+    },
+    {
+      "corpus": "demo",
+      "url": "https://docs.example/demo/deprecated",
+      "heading": "Deprecated API / Notes",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "离线夹具明确写明 demo.Client.close 已弃用且不再支持，并给出改用新会话的建议。"
+    },
+    {
+      "corpus": "demo",
+      "url": "https://docs.example/demo/changelog",
+      "heading": "Changelog / 1.1",
+      "auto_verdict": "unknown",
+      "human_verdict": "not_drift",
+      "reason": "该块只记录 connect 新增 timeout 参数的版本变化，没有弃用标记。"
+    },
+    {
+      "corpus": "demo",
+      "url": "https://docs.example/demo/api",
+      "heading": "Client API / Parameters",
+      "auto_verdict": "unknown",
+      "human_verdict": "not_drift",
+      "reason": "参数表说明 timeout 可选并列出返回值，不涉及 API 弃用。"
+    },
+    {
+      "corpus": "demo",
+      "url": "https://docs.example/demo/quickstart",
+      "heading": "Quickstart / Examples",
+      "auto_verdict": "match",
+      "human_verdict": "not_drift",
+      "reason": "示例调用顺序与挖掘模式一致，自动判定为 match 而非漂移。"
+    },
+    {
+      "corpus": "demo",
+      "url": "https://docs.example/demo/ambiguous",
+      "heading": "Ambiguous short name / Notes",
+      "auto_verdict": "unknown",
+      "human_verdict": "not_drift",
+      "reason": "短名歧义只导致不建实体边，正文没有声明弃用或语义漂移。"
+    },
+    {
+      "corpus": "demo",
+      "url": "https://docs.example/demo/notes",
+      "heading": "Notes / Misc",
+      "auto_verdict": "unknown",
+      "human_verdict": "not_drift",
+      "reason": "该页是通用约定说明，未命名受跟踪 API，也没有弃用语义。"
+    },
+    {
+      "corpus": "vue/docs",
+      "url": "https://cn.vuejs.org/about/releases.md",
+      "heading": "版本发布 {#releases} / 废弃的特性 {#deprecations}",
+      "auto_verdict": "drift",
+      "human_verdict": "not_drift",
+      "reason": "段落说明通用废弃政策，没有指向该页中某个具体 API 的弃用或移除。"
+    },
+    {
+      "corpus": "vue/docs",
+      "url": "https://cn.vuejs.org/guide/extras/composition-api-faq.md",
+      "heading": "组合式 API 常见问答 {#composition-api-faq} / 与选项式 API 的关系 {#relationship-with-options-api} / 选项式 API 会被废弃吗？ {#will-options-api-be-deprecated}",
+      "auto_verdict": "drift",
+      "human_verdict": "not_drift",
+      "reason": "正文明确回答不会废弃选项式 API，deprecated 命中的是问题标题而非真实 API 漂移。"
+    },
+    {
+      "corpus": "vue/docs",
+      "url": "https://cn.vuejs.org/guide/extras/reactivity-transform.md",
+      "heading": "响应性语法糖 {#reactivity-transform} / 显式启用 {#explicit-opt-in}",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文说明 Vue 3.4 与插件 5.0 已移除响应性语法糖，并给出 Vue Macros 迁移路径。"
+    },
+    {
+      "corpus": "FluentValidation/docs",
+      "url": "https://docs.fluentvalidation.net/en/latest/built-in-validators.html",
+      "heading": "Built-in Validators / Email Validator",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文说明 Net4xRegex 邮箱校验模式已弃用并会产生警告，属于具体调用参数漂移。"
+    },
+    {
+      "corpus": "FluentValidation/docs",
+      "url": "https://docs.fluentvalidation.net/en/latest/cascade.html",
+      "heading": "Setting the Cascade mode / Introduction of RuleLevelCascadeMode and ClassLevelCascadeMode (and removal of CascadeMode)",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文说明 AbstractValidator.CascadeMode 被 RuleLevelCascadeMode 与 ClassLevelCascadeMode 取代。"
+    },
+    {
+      "corpus": "gradle/docs",
+      "url": "https://docs.gradle.org/current/userguide/ant.md",
+      "heading": "Using Ant from Gradle",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "警告块明确 AntBuilder、Project.ant 与 ant.importBuild() 将在 Gradle 10 移除。"
+    },
+    {
+      "corpus": "gradle/docs",
+      "url": "https://docs.gradle.org/current/userguide/declaring_configurations.md",
+      "heading": "Creating Dependency Configurations / Deprecated configurations",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文说明旧配置以非预期角色使用时会触发弃用警告，并需要改用替代配置。"
+    },
+    {
+      "corpus": "gradle/docs",
+      "url": "https://docs.gradle.org/current/userguide/feature_lifecycle.md",
+      "heading": "The Feature Lifecycle / Feature States",
+      "auto_verdict": "drift",
+      "human_verdict": "not_drift",
+      "reason": "该块只是列举 Internal、Incubating、Public、Deprecated 四种生命周期状态，不是具体 API 的弃用声明。"
+    },
+    {
+      "corpus": "zod/docs",
+      "url": "https://zod.dev/error-formatting",
+      "heading": "Formatting errors / `z.formatError()`",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文直接写明 z.formatError 已弃用并要求改用 z.treeifyError。"
+    },
+    {
+      "corpus": "zod/docs",
+      "url": "https://zod.dev/v4/changelog",
+      "heading": "Migration guide / Error customization / `.safe()` no longer accepts floats",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "迁移说明指出 z.number().safe() 在 Zod 3 已弃用并按整数语义处理，属于真实行为漂移。"
+    },
+    {
+      "corpus": "pydantic/docs",
+      "url": "https://pydantic.dev/docs/validation/latest/api/pydantic-core/pydantic_core/index.md",
+      "heading": "pydantic\\_core / to\\_json / Parameters",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "参数说明写明 timedelta_mode 将在 v3 弃用并推荐 temporal_mode，属于参数级漂移。"
+    },
+    {
+      "corpus": "FluentValidation/docs",
+      "url": "https://docs.fluentvalidation.net/en/latest/upgrading-to-10.html",
+      "heading": "10.0 Upgrade Guide / PropertyValidatorContext Deprecated",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "升级指南明确 PropertyValidatorContext 类已弃用，调用方改用 ValidationContext<T>。"
+    },
+    {
+      "corpus": "Rocket/docs",
+      "url": "https://rocket.rs/guide/v0.5/upgrading/",
+      "heading": "Upgrading / Crate Organization / Contrib Deprecation",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文明确 rocket_contrib crate 已弃用，并列出拆分后的替代 crate。"
+    },
+    {
+      "corpus": "gradle/docs",
+      "url": "https://docs.gradle.org/current/userguide/best_practices_dependencies.md",
+      "heading": "Best Practices for Dependencies / Always Declare Attributes on Consumable and Resolvable Configurations / Explanation",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "正文说明按配置名选择变体在 Gradle 8.10 弃用并于 9.0 移除，属于解析行为漂移。"
+    },
+    {
+      "corpus": "vue/docs",
+      "url": "https://cn.vuejs.org/guide/extras/reactivity-transform.md",
+      "heading": "响应性语法糖 {#reactivity-transform}",
+      "auto_verdict": "drift",
+      "human_verdict": "drift",
+      "reason": "顶部警告块说明响应性语法糖已在 3.4 移除，并给出 Vue Macros 迁移路径。"
+    },
+    {
+      "corpus": "gradle/docs",
+      "url": "https://docs.gradle.org/current/userguide/best_practices_general.md",
+      "heading": "General Gradle Best Practices / Use the Latest Minor Version of Gradle / Explanation",
+      "auto_verdict": "drift",
+      "human_verdict": "not_drift",
+      "reason": "正文把 Deprecation warnings 作为升级收益说明，未声明当前页面的具体 API 已弃用。"
     }
   ]
 }

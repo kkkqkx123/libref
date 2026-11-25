@@ -92,7 +92,7 @@ def test_param_and_return_facets_are_structured() -> None:
 def test_return_hint_skips_empty_markdown_cells() -> None:
     block = DocBlock(
         document_id=6,
-        content="## Returns\n\n|---|---|\n| Response | object |\n",
+        content="## Returns\n\n```\nResponse object\n```\n",
         path="Client",
     )
     result = aggregate_doc_facets([block], enabled_facets=["return_hint"])

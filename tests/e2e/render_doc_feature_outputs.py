@@ -561,10 +561,14 @@ def _metrics(
     )
 
     url_by_doc = {doc_id: url for url, doc_id in doc_ids.items()}
-    block_types = {
-        int(row["document_id"]): row["details"].get("value")
+    facet_values = {
+        (int(row["document_id"]), str(row["facet"])): row["details"].get("value")
         for row in features
-        if row["facet"] == "block_type"
+    }
+    block_types = {
+        doc_id: value
+        for (doc_id, facet), value in facet_values.items()
+        if facet == "block_type"
     }
     linked_entities: dict[int, set[str]] = {}
     for row in links:
@@ -580,6 +584,7 @@ def _metrics(
         )
     alignment = []
     block_match = []
+    facet_match = []
     drift_mismatch = []
     node_match = []
     for question in questions:
@@ -594,7 +599,19 @@ def _metrics(
             have_nodes = set().union(*(node_paths.get(doc, set()) for doc in docs))
             want_nodes = {str(path) for path in question["expected_feature_nodes"]}
             node_match.append(have_nodes == want_nodes)
-        expected_type = question.get("expected_facets", {}).get("block_type")
+        expected_facets = {
+            str(key): value
+            for key, value in question.get("expected_facets", {}).items()
+            if key != "heading"
+        }
+        if expected_facets:
+            facet_match.append(
+                all(
+                    any(facet_values.get((doc, key)) == value for doc in docs)
+                    for key, value in expected_facets.items()
+                )
+            )
+        expected_type = expected_facets.get("block_type")
         if expected_type:
             block_match.append(
                 any(block_types.get(doc) == expected_type for doc in docs)
@@ -620,6 +637,7 @@ def _metrics(
         "questions": len(questions),
         "entity_alignment_accuracy": sum(alignment) / max(1, len(alignment)),
         "feature_node_accuracy": sum(node_match) / max(1, len(node_match)),
+        "facet_consistency": sum(facet_match) / max(1, len(facet_match)),
         "block_type_consistency": sum(block_match) / max(1, len(block_match)),
         "coverage_recall": recall,
         "drift_mismatch_rate": sum(drift_mismatch) / max(1, len(drift_mismatch)),
