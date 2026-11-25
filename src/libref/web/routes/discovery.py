@@ -34,6 +34,7 @@ from libref.web.request_context import (
     _read_guard,
     _tenant_of,
     _write_tenant_of,
+    close_rc,
 )
 
 
@@ -94,11 +95,7 @@ def register(app, ctx) -> None:
             )
             return {"id": job_id, "ok": True}
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.post("/doc-probe", response_model=DocProbeResponse)
     async def doc_probe(
@@ -145,11 +142,7 @@ def register(app, ctx) -> None:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             return probe.model_dump()
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.post("/repo-probe", response_model=RepoProbeResponse)
     def repo_probe(
@@ -190,11 +183,7 @@ def register(app, ctx) -> None:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             return probe.model_dump()
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/jobs", response_model=JobListResponse)
     def jobs(
@@ -215,11 +204,7 @@ def register(app, ctx) -> None:
             except LibrefError as exc:
                 raise ApiRejection(404, "job_not_found", exc.message) from exc
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/jobs/{job_id}", response_model=JobDetail)
     def job_detail(
@@ -234,11 +219,7 @@ def register(app, ctx) -> None:
             except LibrefError as exc:
                 raise ApiRejection(404, "job_not_found", exc.message) from exc
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/resolve", response_model=ResolutionResponse)
     async def resolve_route(
@@ -369,11 +350,7 @@ def register(app, ctx) -> None:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             return envelope(rows)
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/link-stats", response_model=PageLinkStats | VersionLinkStats)
     def link_stats(
@@ -434,8 +411,4 @@ def register(app, ctx) -> None:
             except ValueError as exc:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)

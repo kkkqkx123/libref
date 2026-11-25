@@ -61,6 +61,15 @@ def _read_guard(principal=Depends(_guard)):
     _need(principal, "read")
 
 
+def close_rc(rc, should_close: bool) -> None:
+    """Close a request-scoped connection opened by ``req_bundle`` when owned."""
+    if should_close:
+        try:
+            rc.close()
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+
 class WebRequestContext:
     """Builder-owned dependencies shared by every route module."""
 
@@ -206,8 +215,4 @@ class WebRequestContext:
                     },
                 )
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)

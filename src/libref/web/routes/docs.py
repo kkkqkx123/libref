@@ -25,6 +25,7 @@ from libref.web.request_context import (
     _guard,
     _read_guard,
     _tenant_of,
+    close_rc,
 )
 
 
@@ -51,11 +52,7 @@ def register(app, ctx) -> None:
             result["kind"] = "versions" if library else "libraries"
             return result
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/search", response_model=SearchResponse)
     async def search(
@@ -129,11 +126,7 @@ def register(app, ctx) -> None:
                     out["suggest_error"] = f"{exc.kind}: {exc}"
             return out
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/library-search", response_model=DiscoveryResponse)
     async def library_search(
@@ -214,11 +207,7 @@ def register(app, ctx) -> None:
             except ValueError as exc:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/read", response_model=ReadResponse)
     def read(
@@ -264,11 +253,7 @@ def register(app, ctx) -> None:
                 raise ApiRejection(404, "page_not_found", "page not found")
             return page
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/pages", response_model=PageList)
     def pages_route(
@@ -297,8 +282,4 @@ def register(app, ctx) -> None:
                 tenant_id=_tenant_of(principal),
             )
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)

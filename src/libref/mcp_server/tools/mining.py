@@ -10,8 +10,13 @@ from libref.limits import (
 )
 from libref.mcp_server.context import (
     _as_error,
-    _invalid,
     _items,
+)
+from libref.services.code.mining_read.views import (
+    require_api,
+    validate_api_insight,
+    validate_pattern_insight,
+    validate_symbol_insight,
 )
 
 
@@ -31,10 +36,7 @@ def register(mcp, ctx, wrap) -> dict[str, object]:
         limit: int | None = None,
     ) -> dict[str, Any]:
         """API-centric usage: frequency ranking, co-occurring APIs, argument shapes."""
-        if view in ("related", "args") and not api:
-            raise _invalid(f"{view} view requires api")
-        if view == "common" and not api and not apis:
-            raise _invalid("common view requires api or apis")
+        validate_api_insight(view, api, apis)
         require_limit(limit, low=1, high=INSIGHT_ROWS)
         _rca, _bundlea, _sca = _make_bundle()
         try:
@@ -84,8 +86,7 @@ def register(mcp, ctx, wrap) -> dict[str, object]:
         compare_profile: str | None = None,
     ) -> dict[str, Any]:
         """Sequence and structure insight: patterns, evidence, tree, clusters, facets."""
-        if view == "evidence" and not pattern:
-            raise _invalid("evidence view requires a non-empty pattern")
+        validate_pattern_insight(view, pattern)
         require_limit(limit, low=1, high=INSIGHT_ROWS)
         require_limit(per_file_limit, low=1, high=20)
         _rcp, _bundlep, _scp = _make_bundle()
@@ -166,10 +167,7 @@ def register(mcp, ctx, wrap) -> dict[str, object]:
         offset: int = 0,
     ) -> dict[str, Any]:
         """Symbol detail views over version-scoped entities."""
-        if view == "detail" and not api and not apis:
-            raise _invalid("detail view requires api or apis")
-        if view in ("file", "children", "signature") and not api:
-            raise _invalid(f"{view} view requires api")
+        validate_symbol_insight(view, api, apis)
         require_limit(limit, low=1, high=INSIGHT_ROWS)
         _rcs, _bundles, _scs = _make_bundle()
         try:
@@ -207,8 +205,7 @@ def register(mcp, ctx, wrap) -> dict[str, object]:
         max_args: int | None = None,
     ) -> dict[str, Any]:
         """Bidirectional call views with shared mining filters."""
-        if not api:
-            raise _invalid(f"{view} view requires api")
+        require_api(view, api)
         require_limit(limit, low=1, high=INSIGHT_ROWS)
         _rcc, _bundlec, _scc = _make_bundle()
         try:
@@ -245,8 +242,7 @@ def register(mcp, ctx, wrap) -> dict[str, object]:
         offset: int = 0,
     ) -> dict[str, Any]:
         """Import edge views for fan-in and fan-out."""
-        if not api:
-            raise _invalid(f"{view} view requires api")
+        require_api(view, api)
         require_limit(limit, low=1, high=INSIGHT_ROWS)
         _rci, _bundlei, _sci = _make_bundle()
         try:

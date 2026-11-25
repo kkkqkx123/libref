@@ -18,6 +18,7 @@ from libref.web.request_context import (
     _guard,
     _index_request_error,
     _tenant_of,
+    close_rc,
 )
 
 
@@ -48,11 +49,7 @@ def register(app, ctx) -> None:
                     raise _index_request_error(exc) from exc
                 raise
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/index-requests", response_model=IndexRequestResponse)
     def index_request_list(
@@ -79,11 +76,7 @@ def register(app, ctx) -> None:
                 raise
             return envelope(items)
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/index-requests/pending", response_model=IndexRequestResponse)
     def index_request_pending(
@@ -102,11 +95,7 @@ def register(app, ctx) -> None:
             )
             return envelope(items)
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/index-requests/{request_id}", response_model=IndexRequestItem)
     def index_request_show(
@@ -128,11 +117,7 @@ def register(app, ctx) -> None:
                     raise _index_request_error(exc) from exc
                 raise
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.post("/index-requests/{request_id}/cancel", response_model=IndexRequestItem)
     def index_request_cancel(
@@ -157,11 +142,7 @@ def register(app, ctx) -> None:
                     raise _index_request_error(exc) from exc
                 raise
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.post("/index-requests/{request_id}/approve", response_model=IndexRequestItem)
     def index_request_approve(
@@ -186,11 +167,7 @@ def register(app, ctx) -> None:
                     raise _index_request_error(exc) from exc
                 raise
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.post("/index-requests/{request_id}/reject", response_model=IndexRequestItem)
     def index_request_reject(
@@ -217,8 +194,4 @@ def register(app, ctx) -> None:
                     raise _index_request_error(exc) from exc
                 raise
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)

@@ -192,7 +192,7 @@ def register(mcp, ctx, wrap) -> dict[str, object]:
         target: Literal["docs", "repo"] = "docs",
         include_prerelease: bool = False,
     ) -> dict[str, Any]:
-        """Resolve a package address; fetches the registry and refreshes the cache."""
+        """Live network call: resolve a package address against its registry in real time; results reflect the registry, not the stored knowledge base."""
         from libref.crawler.http import build_async_client
 
         if not name.strip():

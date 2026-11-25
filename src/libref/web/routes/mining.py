@@ -6,6 +6,12 @@ from typing import Annotated, Any, Literal
 
 from fastapi import Depends, Query, Request
 
+from libref.services.code.mining_read.views import (
+    require_api,
+    validate_api_insight,
+    validate_pattern_insight,
+    validate_symbol_insight,
+)
 from libref.web.api import (
     ApiInsightQuery,
     ApiInsightResult,
@@ -26,6 +32,7 @@ from libref.web.errors import ApiRejection
 from libref.web.request_context import (
     _guard,
     _tenant_of,
+    close_rc,
 )
 
 
@@ -58,6 +65,7 @@ def register(app, ctx) -> None:
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
+                validate_api_insight(params.view, params.api, params.apis)
                 return insight_envelope(
                     view,
                     bundle["mining"].api_insight(
@@ -74,11 +82,7 @@ def register(app, ctx) -> None:
             except ValueError as exc:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/pattern-insight", response_model=PatternInsightResult)
     def pattern_insight(
@@ -129,6 +133,7 @@ def register(app, ctx) -> None:
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
+                validate_pattern_insight(params.view, params.pattern)
                 return insight_envelope(
                     view,
                     bundle["mining"].pattern_insight(
@@ -151,11 +156,7 @@ def register(app, ctx) -> None:
             except ValueError as exc:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/doc-insight", response_model=DocInsightResult)
     def doc_insight(
@@ -213,11 +214,7 @@ def register(app, ctx) -> None:
             except ValueError as exc:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/symbol-insight", response_model=SymbolInsightResult)
     def symbol_insight(
@@ -246,6 +243,7 @@ def register(app, ctx) -> None:
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
+                validate_symbol_insight(params.view, params.api, params.apis)
                 return insight_envelope(
                     view,
                     bundle["mining"].symbol_insight(
@@ -263,11 +261,7 @@ def register(app, ctx) -> None:
             except ValueError as exc:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/call-insight", response_model=CallInsightResult)
     def call_insight(
@@ -304,6 +298,7 @@ def register(app, ctx) -> None:
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
+                require_api(params.view, params.api)
                 return insight_envelope(
                     view,
                     bundle["mining"].call_insight(
@@ -325,11 +320,7 @@ def register(app, ctx) -> None:
             except ValueError as exc:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/import-insight", response_model=ImportInsightResult)
     def import_insight(
@@ -356,6 +347,7 @@ def register(app, ctx) -> None:
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:
+                require_api(params.view, params.api)
                 return insight_envelope(
                     view,
                     bundle["mining"].import_insight(
@@ -372,11 +364,7 @@ def register(app, ctx) -> None:
             except ValueError as exc:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.get("/mining-health", response_model=MiningHealthResponse)
     def mining_health(
@@ -399,8 +387,4 @@ def register(app, ctx) -> None:
             except ValueError as exc:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)

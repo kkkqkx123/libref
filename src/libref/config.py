@@ -311,6 +311,7 @@ class LibrefSettings(BaseSettings):
     quota_llm_tokens_per_day: int = Field(default=0, ge=0)
     quota_job_submissions_per_hour: int = Field(default=0, ge=0)
     quota_index_requests_per_hour: int = Field(default=0, ge=0)
+    quota_external_calls_per_hour: int = Field(default=0, ge=0)
     # Runtime logging: level and file sink; stderr-only and quiet by default.
     log_level: str = "WARNING"
     log_file: Path | None = None

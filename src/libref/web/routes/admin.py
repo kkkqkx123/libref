@@ -32,6 +32,7 @@ from libref.web.request_context import (
     _principal_id,
     _tenant_of,
     _write_tenant_of,
+    close_rc,
 )
 
 
@@ -236,11 +237,7 @@ def register(app, ctx) -> None:
         try:
             return envelope(quota.list_policies(rc, tenant_id=scope_tenant))
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.put("/admin/quota/policies", response_model=OkResponse)
     def admin_quota_policies_upsert(
@@ -293,11 +290,7 @@ def register(app, ctx) -> None:
             )
             return {"ok": True}
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.post("/admin/config/refresh", response_model=ConfigRefreshResponse)
     def admin_config_refresh(

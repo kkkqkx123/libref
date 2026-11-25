@@ -18,6 +18,7 @@ from libref.web.request_context import (
     _guard,
     _principal_id,
     _tenant_of,
+    close_rc,
 )
 
 
@@ -47,11 +48,7 @@ def register(app, ctx) -> None:
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
             return envelope(items)
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)
 
     @app.post("/review", response_model=OkResponse)
     def review_apply(
@@ -87,8 +84,4 @@ def register(app, ctx) -> None:
             )
             return {"ok": True}
         finally:
-            if should_close:
-                try:
-                    rc.close()
-                except Exception:  # noqa: BLE001, S110
-                    pass
+            close_rc(rc, should_close)

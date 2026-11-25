@@ -120,6 +120,8 @@ _READ_TOOLS = frozenset(
     }
 )
 
+_QUOTA_TOOLS = frozenset({"answer", "web_search", "github_search", "resolve"})
+
 
 class McpContext:
     """Builder-owned dependencies shared by MCP tool groups."""
@@ -287,6 +289,34 @@ class McpContext:
     def read_tools(self) -> frozenset[str]:
         return _READ_TOOLS
 
+    def quota_gate(self, name: str) -> None:
+        """Reject an external-call tool when the caller is over quota."""
+        resolve_settings = self.settings
+        if not bool(getattr(resolve_settings, "quota_enabled", False)):
+            return
+        from libref.services.infra import quota as quota_mod
+
+        principal = self.principal()
+        rc, _bundle, should_close = self.make_bundle()
+        try:
+            decision = quota_mod.enforce(
+                rc,
+                tenant_id=self.tenant(principal),
+                principal_id=getattr(principal, "id", None),
+                resource="external_calls",
+                cost=1,
+                settings=resolve_settings,
+            )
+        finally:
+            self.close(rc, should_close)
+        if decision is not None:
+            raise ToolFailure(
+                "quota_exceeded",
+                "quota exceeded for external calls",
+                hint=f"limit {decision.limit_value} reached; resets at"
+                f" {decision.reset_at}",
+            )
+
     def wrap(self, name: str, func: Any) -> Any:
         _require = self.require
         _principal = self.principal
@@ -298,6 +328,9 @@ class McpContext:
             "review",
             "submit_feedback",
         )
+        # Tools that trigger outbound network or LLM traffic are quota-gated
+        # so MCP callers cannot bypass the limits enforced on the Web exit.
+        quota_gated = name in _QUOTA_TOOLS
 
         if inspect.iscoroutinefunction(func):
 
@@ -305,6 +338,8 @@ class McpContext:
             async def _guarded(*args: Any, **kwargs: Any) -> Any:
                 if check_scope:
                     _require(_principal(), "read")
+                if quota_gated:
+                    self.quota_gate(name)
                 try:
                     return await func(*args, **kwargs)
                 except LibrefError as exc:
@@ -319,6 +354,8 @@ class McpContext:
         def _guarded_sync(*args: Any, **kwargs: Any) -> Any:
             if check_scope:
                 _require(_principal(), "read")
+            if quota_gated:
+                self.quota_gate(name)
             try:
                 return func(*args, **kwargs)
             except LibrefError as exc:

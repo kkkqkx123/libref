@@ -17,6 +17,7 @@ from libref.web.request_context import (
     _principal_id,
     _tenant_of,
     _write_tenant_of,
+    close_rc,
 )
 
 
@@ -51,11 +52,7 @@ def register(app, ctx) -> None:
             target=f"{body.kind}:{job_id}",
             request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
         )
-        if should_close:
-            try:
-                rc.close()
-            except Exception:  # noqa: BLE001, S110
-                pass
+        close_rc(rc, should_close)
         return {"id": job_id, "ok": True}
 
     @app.post("/jobs/{job_id}/cancel", response_model=OkResponse)
@@ -89,9 +86,5 @@ def register(app, ctx) -> None:
             target=str(job_id),
             request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
         )
-        if should_close:
-            try:
-                rc.close()
-            except Exception:  # noqa: BLE001, S110
-                pass
+        close_rc(rc, should_close)
         return {"ok": True}

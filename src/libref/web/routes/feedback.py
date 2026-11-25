@@ -23,6 +23,7 @@ from libref.web.request_context import (
     _principal_id,
     _tenant_of,
     _write_tenant_of,
+    close_rc,
 )
 
 
@@ -62,11 +63,7 @@ def register(app, ctx) -> None:
             target=str(fid),
             request_id=str(getattr(getattr(request, "state", None), "request_id", "")),
         )
-        if should_close:
-            try:
-                rc.close()
-            except Exception:  # noqa: BLE001, S110
-                pass
+        close_rc(rc, should_close)
         return {"id": fid, "ok": True}
 
     @app.get("/feedback", response_model=FeedbackResponse)

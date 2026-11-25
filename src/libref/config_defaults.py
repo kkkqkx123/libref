@@ -226,6 +226,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "quota_llm_tokens_per_day",
             "quota_job_submissions_per_hour",
             "quota_index_requests_per_hour",
+            "quota_external_calls_per_hour",
         }
     ),
     "web": frozenset({"web_host", "web_port", "web_spa_enabled", "web_spa_dir"}),
