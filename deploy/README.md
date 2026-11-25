@@ -4,7 +4,7 @@
 
 服务端口以 `[web]` 的 `web_port`（默认 `8001`）为唯一真相源，`Dockerfile`、`compose.yml`、`nginx.conf.example` 中的端口都与之对齐；改端口时三处随配置一起改。
 
-Podman 使用独立入口 `deploy/podman/deploy.sh`，本目录的 Docker 配置不做 Podman 适配；用法与边界见 `deploy/podman/README.md` 与 `docs/plan/podman-deployment.md`。
+Podman 使用独立入口 `deploy/podman/deploy.sh`，本目录的 Docker 配置不做 Podman 适配；用法与边界见 `deploy/podman/README.md`。
 
 | 文件 | 用途 |
 |---|---|
@@ -18,14 +18,14 @@ Podman 使用独立入口 `deploy/podman/deploy.sh`，本目录的 Docker 配置
 
 ## 命名约束
 
-根 `.gitignore:25-27` 的规则是 `.env` / `.env.*` / `!.env.example`，带点前缀的 `deploy/.env.*.example` 会被忽略、进不了版本库。因此示例文件一律命名为 `env.*.example`（无前导点）。使用时：
+根 `.gitignore` 的规则是 `.env` / `.env.*` / `!.env.example`，带点前缀的 `deploy/.env.*.example` 会被忽略、进不了版本库。因此示例文件一律命名为 `env.*.example`（无前导点）。使用时：
 
 ```bash
 cp deploy/env.dev.example .env          # 或 env.prod.example
 cp deploy/libref.toml.example libref.toml
 ```
 
-`.env` 与 `libref.toml` 都不进版本库（`.gitignore:25-30`）。
+`.env` 与 `libref.toml` 都不进版本库。`libref.toml` 的完整字段模板见仓库根 `libref.example.toml`，本目录的 `libref.toml.example` 只节选部署常用项。
 
 ## dev 模式
 
@@ -69,7 +69,7 @@ cp deploy/libref.toml.example libref.toml
 ## 示例栈启动
 
 1. 在 `deploy/` 下复制 `env.prod.example` 为 `libref.env` 并填入真实密钥（compose 的 `env_file` 指向该文件；根 `.env` 只供本地直接运行时使用）。
-2. 在仓库根执行 `docker compose -f deploy/compose.yml up --build -d`，健康检查轮询 `http://127.0.0.1:8001/health`。
+2. 在仓库根执行 `docker compose -f deploy/compose.yml up --build -d`，健康检查轮询 `http://127.0.0.1:8001/health`。默认向量后端为本地 simvec，不需要 Qdrant；仅当设置 `LIBREF_VECTOR_BACKEND=qdrant` 时，加 `--profile qdrant` 同步启动 Qdrant 服务。
 3. 对公暴露时在宿主机套用 `nginx.conf.example`（改好域名与证书路径），服务本身继续只绑回环。
 
 ## 启动命令

@@ -1,4 +1,5 @@
-# Non-secret configuration example for libref.
+# Non-secret configuration example for libref (deploy-oriented subset).
+# For the full field reference use the repo-root template libref.example.toml.
 # Copy to the project root as libref.toml and adjust values.
 # Secrets (API keys, LLM keys, bootstrap key) must stay in the environment;
 # writing them into this file is rejected at load time.

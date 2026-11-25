@@ -5,7 +5,10 @@
 # The image bundles webui/dist and sets LIBREF_WEB_SPA_DIR; no static volume is needed.
 services:
   libref:
-    build: .
+    # Context is the repo root (the compose file lives in deploy/), where the Dockerfile sits.
+    build:
+      context: ..
+      dockerfile: Dockerfile
     image: libref:latest
     restart: unless-stopped
     env_file:
@@ -21,9 +24,9 @@ services:
       - libref-data:/data
     ports:
       - "127.0.0.1:8001:8001" # loopback only; expose via the reverse proxy
-    depends_on:
-      qdrant:
-        condition: service_healthy
+    # No depends_on: the default simvec backend never touches Qdrant. Start this
+    # service only with LIBREF_VECTOR_BACKEND=qdrant, e.g.
+    #   docker compose -f deploy/compose.yml --profile qdrant up
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health')"]
       interval: 30s
@@ -31,6 +34,7 @@ services:
       retries: 3
 
   qdrant:
+    profiles: ["qdrant"]
     image: qdrant/qdrant:v1.20.1
     restart: unless-stopped
     environment:
