@@ -60,7 +60,7 @@ LIBREF_RUN_E2E=1 uv run pytest tests/e2e/test_usage_mining_real.py -q
 
 ## 文档特征核查
 
-`render_doc_feature_outputs.py` 用版本化夹具在临时库里走通生产文档块派生、实体对齐、模式覆盖、一致性与检索加权，把逐项结果写到 `outputs/doc_features/`；默认离线，说明见 `fixtures/doc_features/README.md`。`generate_doc_feature_questions.py` 只从 bench 判定集产出候选题目，人工确认后的判定存于夹具目录。
+`render_doc_feature_outputs.py` 用版本化夹具在临时库里走通生产文档块派生、实体对齐、模式覆盖、一致性与检索加权，把逐项结果写到 `outputs/doc_features/`；默认离线，说明见 `fixtures/doc_features/README.md`。`generate_doc_feature_questions.py` 只从 bench 判定集产出探索候选，不进入最终判定；冻结归档题目已按 `docs/plan/doc-feature-question-manual-authoring.md` 分项目人工手写定稿。
 
 ```bash
 uv run python tests/e2e/render_doc_feature_outputs.py
