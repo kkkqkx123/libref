@@ -38,4 +38,4 @@ uv run python -m tests.e2e.bench.evaluate_doc_features
 
 评测把归档原始正文中的围栏与 HTML 代码块登记为 `doc_snippet` 语料源，再按文档夹具的 `entity_source` 把文档版本显式绑定到源码版本，然后运行生产派生与读模型。代码块保留页面中的 import/using 上下文，供别名解析使用。报告写到 `tests/e2e/bench/outputs/retrieval-bench/doc-features/`，记录归档修订但不改门禁。缺少语言标记代码块的站点仍可核查规则匹配与检索加权，实体对齐率只作记录。
 
-冻结归档题目改为人工逐题手写，归档物化器已删除。每库先把 `pages.jsonl.gz` 解压到临时目录只读查看，再从回放后的派生表取 URL、标题路径、块特征、实体边、节点父链和判定作为证据清单；题面必须来自同一文档块的原始正文句子，不由规则拼接。实体只在题面点名且目标文档与源码版本都有该符号时写入；判定只在目标文档结论唯一时写入；没有节点父链的题目不写 `expected_feature_nodes`。真实站点 270 条题目已逐题手写定稿，每库 30 条、dev/test 各 15 条；分项目口径与完成状态见 `docs/plan/doc-feature-question-manual-authoring.md`。同源一致性仍不能替代独立人工语义判定。
+冻结归档题目改为人工逐题手写，编写规范见 `docs/spec/doc-feature-judgments.md`，归档物化器已删除。每库先把 `pages.jsonl.gz` 解压到临时目录只读查看，再从回放后的派生表取 URL、标题路径、块特征、实体边、节点父链和判定作为证据清单；题面必须来自同一文档块的原始正文句子，不由规则拼接。实体只在题面点名且目标文档与源码版本都有该符号时写入；判定只在目标文档结论唯一时写入；没有节点父链的题目不写 `expected_feature_nodes`。真实站点 270 条题目已逐题手写定稿，每库 30 条、dev/test 各 15 条；分项目口径与完成状态见 `docs/plan/doc-feature-question-manual-authoring.md`。同源一致性仍不能替代独立人工语义判定。

@@ -1,6 +1,6 @@
 # 文档特征判定集人工手写方案
 
-依据：`docs/plan/doc-feature-manual-audit.md` 的实际核查结论。冻结归档题目的最终真值改为人工逐题手写，不再由归档物化器产出。物化脚本及其单元测试已删除；`tests/e2e/generate_doc_feature_questions.py` 只保留候选探索用途，不进入最终判定集。
+依据：`docs/plan/doc-feature-manual-audit.md` 的实际核查结论，编写口径见 `docs/spec/doc-feature-judgments.md`。冻结归档题目的最终真值改为人工逐题手写，不再由归档物化器产出。物化脚本及其单元测试已删除；`tests/e2e/generate_doc_feature_questions.py` 只保留候选探索用途，不进入最终判定集。
 
 ## 目标与边界
 

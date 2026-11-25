@@ -1,6 +1,6 @@
 # 文档特征题目人工语义核对记录
 
-依据：`tests/e2e/fixtures/doc_features/questions.json`、`tests/e2e/bench/fixtures/*/docs/pages.jsonl.gz`、`tests/e2e/bench/data/bench.db`、`tests/e2e/fixtures/doc_features/drift_samples.json` 与 `docs/plan/doc-feature-question-manual-authoring.md`。本文记录人工对照原始正文与题目后的发现、处置和待完成口径；不把同源一致性写成语义正确率。
+依据：`tests/e2e/fixtures/doc_features/questions.json`、`tests/e2e/bench/fixtures/*/docs/pages.jsonl.gz`、`tests/e2e/bench/data/bench.db`、`tests/e2e/fixtures/doc_features/drift_samples.json` 与 `docs/plan/doc-feature-question-manual-authoring.md`。编写口径以 `docs/spec/doc-feature-judgments.md` 为准。本文记录人工对照原始正文与题目后的发现、处置和待完成口径；不把同源一致性写成语义正确率。
 
 ## 核对方式
 
