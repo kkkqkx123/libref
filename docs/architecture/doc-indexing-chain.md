@@ -6,19 +6,19 @@
 
 ## 1. 入口与编排位置
 
-统一编排在 `services/ingest.py: IngestService`，三个出口只做参数解析与调用：
+统一编排在 `services/docs/ingest.py: IngestService`，三个出口只做参数解析与调用：
 
-- `cli.py` 经同步直调或经 `jobs` 异步驱动。
-- `mcp_server/server.py` 文档工具经 `services/search.py, pages.py`。
-- `web/app.py` 检索与抓取路由经 `services/*`。
+- `cli/` 经同步直调或经 `services/infra/jobs.py` 异步驱动。
+- `mcp_server/server.py` 文档工具经 `services/docs/search.py, pages.py`。
+- `web/app.py` 检索与抓取路由经 `services/docs/*`。
 - 装配收口在 `services/factory.py`，按有无密钥决定返回向量存储与编码函数还是空，空即纯全文路。
 
-任务化在 `services/jobs.py: JobManager`：内存队列提交，同步回写 `jobs` 表，worker 执行后回写，`heartbeat` 按页续写，`recover` 处理 `stale`。
+任务化在 `services/infra/jobs.py: JobManager`：内存队列提交，同步回写 `jobs` 表，worker 执行后回写，`heartbeat` 按页续写，`recover` 处理 `stale`。
 治理表经版本化迁移建表，运行时按需幂等确保。
 同版本串行由数据库版本锁保证，跨进程可见，超时心跳可接管，退出时只释放自有锁。
 
-目录与版本归属唯一写入点在 `services/libraries.py`。
-按名称抓取先走 `services/resolver.py`，查注册表、写缓存、应用覆盖规则后再进入标准抓取。
+目录与版本归属唯一写入点在 `services/registry/libraries.py`。
+按名称抓取先走 `services/registry/resolver.py`，查注册表、写缓存、应用覆盖规则后再进入标准抓取。
 
 ## 2. 发现与抓取
 
@@ -51,7 +51,7 @@ robots 声明的 sitemap 候选、目录逐级回退找 `llms.txt`、站点根�
 全文索引由触发器自动同步。
 缺席清扫只在发现源有效且未截断时执行，并写删除留痕。
 
-向量同步收口在 `services/maintenance.py` 的共享函数，文档与源码两链共用：
+向量同步收口在 `services/ops/maintenance.py` 的共享函数，文档与源码两链共用：
 集合治理、删旧点、回查新增块、跳过全文专用块、组装编码文本、超限截尾计数、批量编码写入。
 失败只计数告警，不推翻真源。
 整版重灌与整版删除分别负责全量回灌与真源向量快照仓库的同步清理。
