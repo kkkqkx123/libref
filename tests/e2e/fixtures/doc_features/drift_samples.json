@@ -4,7 +4,7 @@
       "corpus": "httpx/docs",
       "url": "https://www.python-httpx.org/compatibility/",
       "heading": "Requests Compatibility Guide / Request Content",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "drift",
       "reason": "正文明确说明 data=<text/byte content> 会触发弃用警告并将在 1.0 移除，属于真实 API 漂移。"
     },
@@ -12,7 +12,7 @@
       "corpus": "httpx/docs",
       "url": "https://www.python-httpx.org/contributing/",
       "heading": "Contributing / Releasing",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "not_drift",
       "reason": "deprecated 出现在 changelog 分类说明中，是维护流程术语，不是该页描述的 API 弃用。"
     },
@@ -28,7 +28,7 @@
       "corpus": "fiber/docs",
       "url": "https://docs.gofiber.io/middleware/proxy",
       "heading": "Security / SSRF protection",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "not_drift",
       "reason": "deprecated 修饰 IPv6 site-local 特殊地址段，不涉及 Fiber API 的弃用或移除。"
     },
@@ -36,7 +36,7 @@
       "corpus": "fiber/docs",
       "url": "https://docs.gofiber.io/middleware/proxy",
       "heading": "Security / TLS minimum version",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "not_drift",
       "reason": "正文说明避免使用已弃用的 TLS 版本，描述的是安全基线，不是库 API 漂移。"
     },
@@ -60,7 +60,7 @@
       "corpus": "fiber/docs",
       "url": "https://docs.gofiber.io/whats_new",
       "heading": "🗺 Router / Constraint System",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "drift",
       "reason": "正文说明 TypeConstraint、Constraint.ID 与 Constraint.RegexCompiler 被保留但已弃用。"
     },
@@ -76,7 +76,7 @@
       "corpus": "fiber/docs",
       "url": "https://docs.gofiber.io/whats_new",
       "heading": "🧬 Middlewares / Logger",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "drift",
       "reason": "正文说明 TagHeader 常量已移除，改用 TagReqHeader。"
     },
@@ -132,7 +132,7 @@
       "corpus": "fiber/docs",
       "url": "https://docs.gofiber.io/whats_new",
       "heading": "🧬 Middlewares / Proxy",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "drift",
       "reason": "迁移指南说明 WithTlsConfig 方法已移除，改用 TLSConfig 字段。"
     },
@@ -196,7 +196,7 @@
       "corpus": "vue/docs",
       "url": "https://cn.vuejs.org/about/releases.md",
       "heading": "版本发布 {#releases} / 废弃的特性 {#deprecations}",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "not_drift",
       "reason": "段落说明通用废弃政策，没有指向该页中某个具体 API 的弃用或移除。"
     },
@@ -204,7 +204,7 @@
       "corpus": "vue/docs",
       "url": "https://cn.vuejs.org/guide/extras/composition-api-faq.md",
       "heading": "组合式 API 常见问答 {#composition-api-faq} / 与选项式 API 的关系 {#relationship-with-options-api} / 选项式 API 会被废弃吗？ {#will-options-api-be-deprecated}",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "not_drift",
       "reason": "正文明确回答不会废弃选项式 API，deprecated 命中的是问题标题而非真实 API 漂移。"
     },
@@ -212,7 +212,7 @@
       "corpus": "vue/docs",
       "url": "https://cn.vuejs.org/guide/extras/reactivity-transform.md",
       "heading": "响应性语法糖 {#reactivity-transform} / 显式启用 {#explicit-opt-in}",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "drift",
       "reason": "正文说明 Vue 3.4 与插件 5.0 已移除响应性语法糖，并给出 Vue Macros 迁移路径。"
     },
@@ -244,7 +244,7 @@
       "corpus": "gradle/docs",
       "url": "https://docs.gradle.org/current/userguide/declaring_configurations.md",
       "heading": "Creating Dependency Configurations / Deprecated configurations",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "drift",
       "reason": "正文说明旧配置以非预期角色使用时会触发弃用警告，并需要改用替代配置。"
     },
@@ -252,7 +252,7 @@
       "corpus": "gradle/docs",
       "url": "https://docs.gradle.org/current/userguide/feature_lifecycle.md",
       "heading": "The Feature Lifecycle / Feature States",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "not_drift",
       "reason": "该块只是列举 Internal、Incubating、Public、Deprecated 四种生命周期状态，不是具体 API 的弃用声明。"
     },
@@ -260,7 +260,7 @@
       "corpus": "zod/docs",
       "url": "https://zod.dev/error-formatting",
       "heading": "Formatting errors / `z.formatError()`",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "drift",
       "reason": "正文直接写明 z.formatError 已弃用并要求改用 z.treeifyError。"
     },
@@ -276,7 +276,7 @@
       "corpus": "pydantic/docs",
       "url": "https://pydantic.dev/docs/validation/latest/api/pydantic-core/pydantic_core/index.md",
       "heading": "pydantic\\_core / to\\_json / Parameters",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "drift",
       "reason": "参数说明写明 timedelta_mode 将在 v3 弃用并推荐 temporal_mode，属于参数级漂移。"
     },
@@ -308,7 +308,7 @@
       "corpus": "vue/docs",
       "url": "https://cn.vuejs.org/guide/extras/reactivity-transform.md",
       "heading": "响应性语法糖 {#reactivity-transform}",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "drift",
       "reason": "顶部警告块说明响应性语法糖已在 3.4 移除，并给出 Vue Macros 迁移路径。"
     },
@@ -316,7 +316,7 @@
       "corpus": "gradle/docs",
       "url": "https://docs.gradle.org/current/userguide/best_practices_general.md",
       "heading": "General Gradle Best Practices / Use the Latest Minor Version of Gradle / Explanation",
-      "auto_verdict": "drift",
+      "auto_verdict": "unknown",
       "human_verdict": "not_drift",
       "reason": "正文把 Deprecation warnings 作为升级收益说明，未声明当前页面的具体 API 已弃用。"
     }

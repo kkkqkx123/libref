@@ -582,7 +582,7 @@ CREATE TABLE IF NOT EXISTS doc_api_links(
   version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
   document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
   api_entity_id INTEGER NOT NULL REFERENCES api_entities(id) ON DELETE CASCADE,
-  match_kind TEXT NOT NULL CHECK (match_kind IN ('symbol','signature','name_fuzzy')),
+  match_kind TEXT NOT NULL CHECK (match_kind IN ('symbol','signature','context_symbol','name_fuzzy')),
   confidence REAL NOT NULL,
   evidence JSON NOT NULL DEFAULT '{}',
   tenant_id TEXT NOT NULL DEFAULT 'default',
@@ -962,4 +962,30 @@ CREATE TABLE IF NOT EXISTS entity_source_bindings(
 );
 CREATE INDEX IF NOT EXISTS idx_entity_source_bindings_source
   ON entity_source_bindings(source_version_id);
+"""
+
+# ── Context-scoped document links ──
+DOC_LINK_KIND_SQL = """
+CREATE TABLE doc_api_links_rebuilt(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  library_id INTEGER NOT NULL REFERENCES libraries(id) ON DELETE CASCADE,
+  version_id INTEGER NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  api_entity_id INTEGER NOT NULL REFERENCES api_entities(id) ON DELETE CASCADE,
+  match_kind TEXT NOT NULL CHECK (match_kind IN ('symbol','signature','context_symbol','name_fuzzy')),
+  confidence REAL NOT NULL,
+  evidence JSON NOT NULL DEFAULT '{}',
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(version_id, document_id, api_entity_id)
+);
+INSERT INTO doc_api_links_rebuilt(
+  id, library_id, version_id, document_id, api_entity_id, match_kind,
+  confidence, evidence, tenant_id
+)
+SELECT id, library_id, version_id, document_id, api_entity_id, match_kind,
+  confidence, evidence, tenant_id FROM doc_api_links;
+DROP TABLE doc_api_links;
+ALTER TABLE doc_api_links_rebuilt RENAME TO doc_api_links;
+CREATE INDEX IF NOT EXISTS idx_doc_api_links_entity
+  ON doc_api_links(version_id, api_entity_id);
 """

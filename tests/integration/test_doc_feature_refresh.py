@@ -274,11 +274,7 @@ def test_entity_source_binding_resolves_snippets_without_copying_entities(conn):
 def test_alignment_bonus_weights_evidence(conn):
     from libref.store.retriever import ALIGNMENT_BONUS, _doc_feature_bonuses
 
-    assert ALIGNMENT_BONUS == {
-        "symbol": 0.1,
-        "signature": 0.05,
-        "name_fuzzy": 0.01,
-    }
+    assert ALIGNMENT_BONUS == {"symbol": 0.1, "signature": 0.05}
     library_id, version_id, _doc_id = _seed(conn)
     conn.execute(
         "INSERT INTO pages(version_id, url) VALUES(?, ?)",
@@ -308,7 +304,7 @@ def test_alignment_bonus_weights_evidence(conn):
     def bonus():
         return _doc_feature_bonuses(conn, [version_id])[version_id][weak_id]
 
-    assert bonus() == pytest.approx(0.01)
+    assert bonus() == pytest.approx(0.0)
     conn.execute(
         "UPDATE doc_api_links SET match_kind='signature' WHERE document_id=?",
         (weak_id,),
@@ -326,7 +322,8 @@ def test_consistency_gateway_failure_is_counted(conn, monkeypatch, tmp_path):
 
     _library_id, version_id, doc_id = _seed(conn)
     conn.execute(
-        "UPDATE documents SET content=content||'\nDeprecated.' WHERE id=?", (doc_id,)
+        "UPDATE documents SET content=content||'\ndemo.Client.close is deprecated.' WHERE id=?",
+        (doc_id,),
     )
 
     def failing(messages):
@@ -352,7 +349,8 @@ def test_consistency_gateway_note_is_written(conn, monkeypatch, tmp_path):
 
     _library_id, version_id, doc_id = _seed(conn)
     conn.execute(
-        "UPDATE documents SET content=content||'\nDeprecated.' WHERE id=?", (doc_id,)
+        "UPDATE documents SET content=content||'\ndemo.Client.close is deprecated.' WHERE id=?",
+        (doc_id,),
     )
 
     class Gateway:

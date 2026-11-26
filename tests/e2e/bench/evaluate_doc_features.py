@@ -167,6 +167,14 @@ def _snippet_funnel(
         " WHERE version_id=? AND source_role='doc_snippet'",
         (version_id,),
     ).fetchone()
+    effective = conn.execute(
+        "SELECT count(*) FROM ("
+        " SELECT sample_id FROM call_instances"
+        " WHERE version_id=? AND source_role='doc_snippet'"
+        " AND target_status='resolved_target'"
+        " GROUP BY sample_id HAVING count(*) >= 2)",
+        (version_id,),
+    ).fetchone()
     patterns = conn.execute(
         "SELECT count(*) FROM seq_patterns WHERE version_id=?", (version_id,)
     ).fetchone()
@@ -175,6 +183,7 @@ def _snippet_funnel(
         "calls": int(calls[0] or 0),
         "resolved_target": int(calls[1] or 0),
         "samples": int(calls[2] or 0),
+        "effective_samples": int(effective[0] or 0),
         "patterns": int(patterns[0] or 0) if patterns else 0,
         "coverage": int(coverage),
     }
@@ -229,7 +238,7 @@ def _score_entry(conn, question: dict, version_id: int) -> dict[str, Any]:
     from libref.services.docs.doc_insight import DocInsightService
 
     insight = DocInsightService(conn)
-    doc_ids = []
+    doc_ids: list[int] = []
     for url in question.get("targets", []):
         rows = conn.execute(
             "SELECT id FROM documents WHERE url=? AND version_id=?",
@@ -249,6 +258,19 @@ def _score_entry(conn, question: dict, version_id: int) -> dict[str, Any]:
             version_id, library_id, document_id=doc_id, limit=1000
         ):
             verdicts[doc_id] = str(row["verdict"])
+    strong: set[str] = set()
+    if doc_ids:
+        marks = ",".join("?" for _ in doc_ids)
+        strong = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT ae.qualified_name FROM doc_api_links l"
+                " JOIN api_entities ae ON ae.id=l.api_entity_id"
+                f" WHERE l.version_id=? AND l.document_id IN ({marks})"
+                " AND l.match_kind IN ('symbol', 'signature')",
+                [version_id, *doc_ids],
+            ).fetchall()
+        }
     want = {str(name) for name in question.get("expected_entities", [])}
     expected_facets = {
         str(key): value
@@ -277,7 +299,9 @@ def _score_entry(conn, question: dict, version_id: int) -> dict[str, Any]:
         "entities_expected": sorted(want),
         "entities_found": sorted(links),
         "entities_extra": sorted(links - want),
+        "entities_found_strong": sorted(strong),
         "entity_match": want <= links if want else None,
+        "entity_match_strong": want <= strong if want else None,
         "facets_expected": expected_facets,
         "facet_checks": facet_checks,
         "facet_match": all(facet_checks.values()),
@@ -297,7 +321,7 @@ def _score_entry(conn, question: dict, version_id: int) -> dict[str, Any]:
 
 
 def _match_stats(entries: list[dict[str, Any]], key: str) -> tuple[int, int]:
-    measured = [entry[key] for entry in entries if entry[key] is not None]
+    measured = [entry.get(key) for entry in entries if entry.get(key) is not None]
     return sum(1 for value in measured if value), len(measured)
 
 
@@ -325,12 +349,51 @@ def _grade(item: dict, question: dict) -> int:
     return int((question.get("grades") or {}).get("strong", 2))
 
 
-def _filter_stats(conn, found: list[dict], question: dict) -> dict[str, Any]:
+def _target_doc_ids(conn, question: dict, version_id: int) -> set[int]:
+    heading = str(question.get("expected_facets", {}).get("heading") or "")
+    out: set[int] = set()
+    for url in question.get("targets", []):
+        sql = "SELECT id FROM documents WHERE url=? AND version_id=?"
+        params: list[Any] = [str(url), version_id]
+        if heading:
+            sql += " AND lower(json_extract(metadata, '$.path')) LIKE ?"
+            params.append(f"%{heading.lower()}%")
+        out.update(int(row[0]) for row in conn.execute(sql, params).fetchall())
+    return out
+
+
+def _eligibility(
+    conn, question: dict, version_id: int, target_ids: set[int]
+) -> dict[str, bool]:
+    facets = question.get("expected_facets", {})
+    strong = False
+    if target_ids:
+        marks = ",".join("?" for _ in target_ids)
+        strong = bool(
+            conn.execute(
+                "SELECT 1 FROM doc_api_links"
+                f" WHERE version_id=? AND document_id IN ({marks})"
+                " AND match_kind IN ('symbol', 'signature') LIMIT 1",
+                [version_id, *target_ids],
+            ).fetchone()
+        )
+    return {
+        "examples_only": str(facets.get("block_type") or "") == "example",
+        "exclude_deprecated": not bool(facets.get("deprecated")),
+        "aligned_only": strong,
+    }
+
+
+def _filter_stats(
+    conn, found: list[dict], question: dict, eligible: dict[str, bool]
+) -> dict[str, Any]:
     from libref.store.retriever import filter_by_doc_facets
 
     targets = {str(url) for url in question.get("targets", [])}
+    heading = str(question.get("expected_facets", {}).get("heading") or "")
     ids = [int(item["id"]) for item in found]
     url_by_id = {int(item["id"]): str(item.get("url") or "") for item in found}
+    path_by_id = {int(item["id"]): str(item.get("path") or "") for item in found}
     options = {
         "examples_only": {"block_type": "example"},
         "exclude_deprecated": {"exclude_deprecated": True},
@@ -339,12 +402,35 @@ def _filter_stats(conn, found: list[dict], question: dict) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for name, kwargs in options.items():
         kept = filter_by_doc_facets(conn, ids, **kwargs)
+        hit = any(
+            url_by_id[doc_id] in targets
+            and (not heading or heading.lower() in path_by_id[doc_id].lower())
+            for doc_id in kept
+        )
         out[name] = {
             "results": len(ids),
             "kept": len(kept),
-            "hits": int(any(url_by_id[doc_id] in targets for doc_id in kept)),
+            "hits": int(hit),
+            "eligible": bool(eligible[name]),
+            "eligible_hits": int(hit and eligible[name]),
         }
     return out
+
+
+def _attribution(
+    target_ids: set[int], fused_order: list[int], off: int, on: int
+) -> str:
+    if not target_ids.intersection(fused_order):
+        return "outside_pool"
+    if off and not on:
+        return "lost"
+    if not off and on:
+        return "entered"
+    if on > off:
+        return "demoted"
+    if on < off:
+        return "promoted"
+    return "unchanged"
 
 
 def _rank(
@@ -369,12 +455,17 @@ def _rank(
     rows: dict[str, list[dict]] = {"off": [], "on": []}
     ranks: dict[str, dict[str, int]] = {}
     filter_rows: list[dict] = []
+    attribution_rows: list[dict[str, Any]] = []
     found_by_query: dict[str, list[dict]] = {}
+    labels = ("outside_pool", "lost", "entered", "demoted", "promoted", "unchanged")
+    attribution = {label: 0 for label in labels}
     for question in questions:
         best = 2 if question.get("expected_facets", {}).get("heading") else 1
         ranks[str(question["id"])] = {}
+        target_ids = _target_doc_ids(conn, question, version_id)
+        statuses: dict[str, dict[str, Any]] = {}
         for label, service in services.items():
-            found, _status = asyncio.run(
+            found, statuses[label] = asyncio.run(
                 service.search_with_mode(
                     question["query"], "balanced", **scope, limit=K
                 )
@@ -387,8 +478,19 @@ def _rank(
             ranks[str(question["id"])][label] = next(
                 (index + 1 for index, gain in enumerate(gains) if gain > 0), 0
             )
+        off, on = ranks[str(question["id"])]["off"], ranks[str(question["id"])]["on"]
+        category = _attribution(
+            target_ids, list(statuses["on"].get("fused_order") or []), off, on
+        )
+        attribution[category] += 1
+        attribution_rows.append(
+            {"id": str(question["id"]), "category": category, "off": off, "on": on}
+        )
+        eligible = _eligibility(conn, question, version_id, target_ids)
         filter_rows.append(
-            _filter_stats(conn, found_by_query["off" + str(question["id"])], question)
+            _filter_stats(
+                conn, found_by_query["off" + str(question["id"])], question, eligible
+            )
         )
     total = len(filter_rows)
     filters = {
@@ -400,6 +502,14 @@ def _rank(
             "hit_rate": (
                 sum(row[name]["hits"] for row in filter_rows) / total if total else 0.0
             ),
+            "eligible_questions": sum(
+                int(row[name]["eligible"]) for row in filter_rows
+            ),
+            "eligible_hits": sum(row[name]["eligible_hits"] for row in filter_rows),
+            "eligible_hit_rate": (
+                sum(row[name]["eligible_hits"] for row in filter_rows)
+                / max(1, sum(int(row[name]["eligible"]) for row in filter_rows))
+            ),
         }
         for name in ("examples_only", "exclude_deprecated", "aligned_only")
     }
@@ -408,6 +518,8 @@ def _rank(
         "rows": rows,
         "version_id": version_id,
         "filters": filters,
+        "attribution": attribution,
+        "attribution_rows": attribution_rows,
     }
 
 
@@ -419,8 +531,14 @@ def _evaluate_fixture(
 
     name = f"{entry['project']}/{entry['kind']}"
     version_id = _version_id(conn, info)
+    stages: dict[str, int] = {}
+    started = time.monotonic()
     entity_source = _bind_entity_source(conn, entry, info)
+    stages["bind_ms"] = int((time.monotonic() - started) * 1000)
+    started = time.monotonic()
     sourced = _ingest_code_blocks(conn, entry, info, version_id, settings)
+    stages["ingest_ms"] = int((time.monotonic() - started) * 1000)
+    started = time.monotonic()
     mine_patterns(
         conn,
         str(info["library"]),
@@ -428,6 +546,8 @@ def _evaluate_fixture(
         ecosystem=str(info["ecosystem"]),
         profile="usage",
     )
+    stages["mine_ms"] = int((time.monotonic() - started) * 1000)
+    started = time.monotonic()
     counts = refresh_doc_features(
         conn,
         str(info["library"]),
@@ -435,8 +555,11 @@ def _evaluate_fixture(
         ecosystem=str(info["ecosystem"]),
         settings=settings,
     )
+    stages["refresh_ms"] = int((time.monotonic() - started) * 1000)
+    started = time.monotonic()
     entries = [_score_entry(conn, question, version_id) for question in questions]
     ranking = _rank(conn, settings, questions, info, version_id, alpha)
+    stages["evaluate_ms"] = int((time.monotonic() - started) * 1000)
     from tests.e2e.bench.metrics import (
         metric_series,
         paired_delta,
@@ -459,6 +582,9 @@ def _evaluate_fixture(
         "questions": entries,
         "ranks": ranking["ranks"],
         "filters": ranking["filters"],
+        "attribution": ranking["attribution"],
+        "attribution_rows": ranking["attribution_rows"],
+        "stages": stages,
         "metrics": {
             "off": before,
             "on": after,
@@ -481,6 +607,11 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
     auto_drift = [row for row in samples if row.get("auto_verdict") == "drift"]
     false_positive = [row for row in auto_drift if row.get("human_verdict") != "drift"]
     false_positive_rate = len(false_positive) / len(auto_drift) if auto_drift else 0.0
+    human_drift = [row for row in samples if row.get("human_verdict") == "drift"]
+    false_negative = [row for row in human_drift if row.get("auto_verdict") != "drift"]
+    false_negative_rate = (
+        len(false_negative) / len(human_drift) if human_drift else 0.0
+    )
     lines = [
         "# 文档特征冻结归档评测",
         "",
@@ -490,11 +621,26 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
         "- 题目标签按目标文档的派生证据核对；一致性只表示标签与派生表相符，语义正确性需独立复核。",
         (
             f"- 漂移抽检：样本 {len(samples)}，自动 drift {len(auto_drift)}，"
-            f"误报 {len(false_positive)}（{false_positive_rate:.1%}）；"
-            "样本不足，只记录误报率，不写门禁。"
+            f"误报 {len(false_positive)}（{false_positive_rate:.1%}），"
+            f"漏报 {len(false_negative)}（{false_negative_rate:.1%}）；"
+            "样本不足，只记录误报与漏报，不写门禁。"
         ),
         "",
     ]
+    for row in false_positive:
+        lines.append(
+            f"- 漂移误报：{row.get('corpus', '-')} | "
+            f"{row.get('url', '-')} | {row.get('heading', '-')} | "
+            f"{row.get('reason', '-')}"
+        )
+    for row in false_negative:
+        lines.append(
+            f"- 漂移漏报：{row.get('corpus', '-')} | "
+            f"{row.get('url', '-')} | {row.get('heading', '-')} | "
+            f"{row.get('reason', '-')}"
+        )
+    if false_positive or false_negative:
+        lines.append("")
     all_questions = [row for item in results for row in item["questions"]]
     entity_labeled = sum(1 for row in all_questions if row["entities_expected"])
     node_labeled = sum(1 for row in all_questions if row["nodes_expected"])
@@ -518,9 +664,10 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             f"- 解析漏斗：{_dump(item.get('snippet_funnel', {}))}",
             f"- 语言证据：{_dump(item.get('snippet_evidence', {}))}",
             f"- 派生计数：{_dump(item['derivation'])}",
+            f"- 阶段耗时：{_dump(item.get('stages', {}))}",
             "",
-            "| 题目 | 来源 | 锚点 | 实体对齐 | 树节点 | 特征一致 | 块类型 | 判定 | 排名 off/on |",
-            "|---|---|---|---|---|---|---|---|---|",
+            "| 题目 | 来源 | 锚点 | 实体对齐 | 强边对齐 | 树节点 | 特征一致 | 块类型 | 判定 | 排名 off/on |",
+            "|---|---|---|---|---|---|---|---|---|---|",
         ]
         by_id = {str(row["id"]): row for rows in questions.values() for row in rows}
         for row in item["questions"]:
@@ -534,6 +681,12 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
                     if row["entity_match"]
                     else _dump([row["entities_expected"], row["entities_found"]])
                 )
+            )
+            strong_match = row.get("entity_match_strong")
+            strong_cell = (
+                "unmeasurable"
+                if strong_match is None
+                else ("OK" if strong_match else "weak")
             )
             node_cell = (
                 "unmeasurable"
@@ -552,6 +705,7 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             lines.append(
                 f"| {row['id']} | {source} | {'OK' if not row['anchor_problems'] else _dump(row['anchor_problems'])} "
                 f"| {entity_cell} "
+                f"| {strong_cell} "
                 f"| {node_cell} "
                 f"| {'OK' if row['facet_match'] else _dump([row['facets_expected'], row['facet_checks']])} "
                 f"| {'OK' if row['block_type_match'] else row['block_type_expected']} "
@@ -563,6 +717,7 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
         lines += [
             "",
             _match_line("实体对齐", "entity_match", entries),
+            _match_line("强边对齐", "entity_match_strong", entries),
             _match_line("树节点一致", "node_match", entries),
             f"- 块特征一致：{sum(1 for row in entries if row['facet_match'])}/{len(entries)}",
             f"- 块类型一致：{sum(1 for row in entries if row['block_type_match'])}/{len(entries)}",
@@ -572,7 +727,9 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
         for name, stats in item["filters"].items():
             lines.append(
                 f"- 过滤 {name}：保留 {stats['kept']}/{stats['results']}，"
-                f"命中 {stats['hits']}，命中率 {stats['hit_rate']:.3f}"
+                f"命中 {stats['hits']}，全题命中率 {stats['hit_rate']:.3f}，"
+                f"合格题 {stats['eligible_questions']}，合格题命中率 "
+                f"{stats['eligible_hit_rate']:.3f}"
             )
         statuses = {
             key: value
@@ -606,8 +763,15 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             ),
             f"- nDCG 配对差分：{_dump(metrics['ndcg_delta'])}",
             f"- MRR 配对差分：{_dump(metrics['mrr_delta'])}",
-            "",
+            f"- 排名归因：{_dump(item.get('attribution', {}))}",
         ]
+        for row in item.get("attribution_rows", []):
+            if row.get("category") != "unchanged":
+                lines.append(
+                    f"- 排名明细：{row.get('id', '-')} {row.get('category', '-')} "
+                    f"{row.get('off', 0)}/{row.get('on', 0)}"
+                )
+        lines.append("")
     lines += ["## 汇总", ""]
     for item in results:
         metrics = item["metrics"]

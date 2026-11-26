@@ -74,17 +74,25 @@ def test_score_entry_matches_expected_feature_node_subset(monkeypatch: object) -
         "CREATE TABLE documents (id INTEGER, url TEXT, version_id INTEGER, metadata TEXT)"
     )
     conn.execute("CREATE TABLE versions (id INTEGER, library_id INTEGER)")
-    conn.execute("CREATE TABLE api_entities (qualified_name TEXT, version_id INTEGER)")
+    conn.execute(
+        "CREATE TABLE api_entities (id INTEGER, qualified_name TEXT, version_id INTEGER)"
+    )
     conn.execute(
         "CREATE TABLE doc_feature_node_links ("
         "version_id INTEGER, document_id INTEGER, node_path TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE doc_api_links ("
+        "version_id INTEGER, document_id INTEGER, api_entity_id INTEGER,"
+        " match_kind TEXT)"
     )
     conn.execute(
         "INSERT INTO documents VALUES (1, 'https://example.test/api', 1,"
         ' \'{"path": "Client / Connect"}\')'
     )
     conn.execute("INSERT INTO versions VALUES (1, 7)")
-    conn.execute("INSERT INTO api_entities VALUES ('demo.Client.connect', 2)")
+    conn.execute("INSERT INTO api_entities VALUES (1, 'demo.Client.connect', 2)")
+    conn.execute("INSERT INTO doc_api_links VALUES (1, 1, 1, 'symbol')")
     conn.executemany(
         "INSERT INTO doc_feature_node_links VALUES (?, ?, ?)",
         [(1, 1, "demo"), (1, 1, "demo.Client"), (1, 1, "demo.Client.connect")],
@@ -105,6 +113,7 @@ def test_score_entry_matches_expected_feature_node_subset(monkeypatch: object) -
     row = evaluate_doc_features._score_entry(conn, question, 1)
     assert row["anchor_problems"] == []
     assert row["facet_match"] is True
+    assert row["entity_match_strong"] is True
     assert row["node_match"] is True
     assert row["nodes_found"] == ["demo", "demo.Client", "demo.Client.connect"]
 
@@ -147,6 +156,7 @@ def test_report_marks_empty_labels_unmeasurable(tmp_path: Path) -> None:
         "entities_expected": [],
         "entities_found": [],
         "entity_match": None,
+        "entity_match_strong": None,
         "nodes_expected": [],
         "nodes_found": [],
         "node_match": None,
@@ -158,7 +168,13 @@ def test_report_marks_empty_labels_unmeasurable(tmp_path: Path) -> None:
         "verdict_expected": "",
         "verdict_match": None,
     }
-    second = dict(entry, id="N2", entities_expected=["demo.Client"], entity_match=True)
+    second = dict(
+        entry,
+        id="N2",
+        entities_expected=["demo.Client"],
+        entity_match=True,
+        entity_match_strong=True,
+    )
     result = {
         "name": "demo/docs",
         "revision": "r1",
@@ -191,9 +207,84 @@ def test_report_marks_empty_labels_unmeasurable(tmp_path: Path) -> None:
     )
     text = path.read_text(encoding="utf-8")
     assert (
-        "| N1 | docs | OK | unmeasurable | unmeasurable | OK | OK | unmeasurable | 1/1 |"
+        "| N1 | docs | OK | unmeasurable | unmeasurable | unmeasurable | OK | OK | unmeasurable | 1/1 |"
         in text
     )
     assert "- 实体对齐：1/1（有标签题）" in text
+    assert "- 强边对齐：1/1（有标签题）" in text
     assert "- 树节点一致：0/0（有标签题，不可测量）" in text
     assert "- 判定一致：0/0（有标签题，不可测量）" in text
+
+
+def test_filter_stats_use_eligible_questions_and_heading_hits() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE doc_features (document_id INTEGER, facet TEXT, value TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE doc_api_links ("
+        "document_id INTEGER, api_entity_id INTEGER, match_kind TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO doc_features VALUES (?, ?, ?)",
+        [
+            (1, "block_type", '{"kind": "example"}'),
+            (2, "block_type", '{"kind": "narrative"}'),
+            (2, "deprecated", '{"details": {"value": 1}}'),
+        ],
+    )
+    conn.execute("INSERT INTO doc_api_links VALUES (1, 1, 'symbol')")
+    question = {
+        "targets": ["https://example.test/api"],
+        "expected_facets": {"heading": "Connect", "block_type": "example"},
+    }
+    found = [
+        {
+            "id": 1,
+            "url": "https://example.test/api",
+            "path": "Client / Connect",
+        },
+        {"id": 2, "url": "https://example.test/api", "path": "Client / Notes"},
+    ]
+    eligible = {
+        "examples_only": True,
+        "exclude_deprecated": True,
+        "aligned_only": True,
+    }
+    row = evaluate_doc_features._filter_stats(conn, found, question, eligible)
+    assert row["examples_only"]["kept"] == 1
+    assert row["examples_only"]["eligible_hits"] == 1
+    assert row["exclude_deprecated"]["kept"] == 1
+    assert row["aligned_only"]["kept"] == 1
+
+
+def test_attribution_separates_pool_losses_from_rank_moves() -> None:
+    target = {7}
+    assert evaluate_doc_features._attribution(target, [], 1, 0) == "outside_pool"
+    assert evaluate_doc_features._attribution(target, [7], 2, 0) == "lost"
+    assert evaluate_doc_features._attribution(target, [7], 0, 3) == "entered"
+    assert evaluate_doc_features._attribution(target, [7], 2, 4) == "demoted"
+    assert evaluate_doc_features._attribution(target, [7], 4, 2) == "promoted"
+    assert evaluate_doc_features._attribution(target, [7], 1, 1) == "unchanged"
+
+
+def test_eligibility_uses_strong_links_only() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        "CREATE TABLE doc_api_links ("
+        "version_id INTEGER, document_id INTEGER, match_kind TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO doc_api_links VALUES (?, ?, ?)",
+        [(1, 1, "name_fuzzy"), (1, 2, "symbol")],
+    )
+    question = {
+        "expected_facets": {"block_type": "example", "deprecated": True},
+    }
+    assert evaluate_doc_features._eligibility(conn, question, 1, {1}) == {
+        "examples_only": True,
+        "exclude_deprecated": False,
+        "aligned_only": False,
+    }
+    assert evaluate_doc_features._eligibility(conn, question, 1, {2})["aligned_only"]

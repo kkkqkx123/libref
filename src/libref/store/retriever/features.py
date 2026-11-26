@@ -47,14 +47,14 @@ def filter_by_doc_facets(
         rows = conn.execute(
             "SELECT DISTINCT document_id FROM doc_api_links WHERE document_id IN ("
             + marks
-            + ")",
+            + ") AND match_kind IN ('symbol', 'signature')",
             doc_ids,
         ).fetchall()
         keep &= {int(row[0]) for row in rows}
     return [doc for doc in doc_ids if doc in keep]
 
 
-ALIGNMENT_BONUS = {"symbol": 0.1, "signature": 0.05, "name_fuzzy": 0.01}
+ALIGNMENT_BONUS = {"symbol": 0.1, "signature": 0.05}
 
 
 def _doc_feature_bonuses(

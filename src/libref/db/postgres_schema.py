@@ -440,7 +440,7 @@ CREATE TABLE IF NOT EXISTS doc_api_links(
   version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
   document_id BIGINT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
   api_entity_id BIGINT NOT NULL REFERENCES api_entities(id) ON DELETE CASCADE,
-  match_kind TEXT NOT NULL CHECK (match_kind IN ('symbol','signature','name_fuzzy')),
+  match_kind TEXT NOT NULL CHECK (match_kind IN ('symbol','signature','context_symbol','name_fuzzy')),
   confidence DOUBLE PRECISION NOT NULL,
   evidence JSONB NOT NULL DEFAULT '{}',
   tenant_id TEXT NOT NULL DEFAULT 'default',

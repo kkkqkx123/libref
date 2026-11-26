@@ -17,6 +17,7 @@ from libref.db.schema import (
     DOC_FEATURE_NODE_LINKS_SQL,
     DOC_FEATURE_SQL,
     DOC_LINK_EDGES_SQL,
+    DOC_LINK_KIND_SQL,
     DOC_SNIPPET_RECORDS_SQL,
     ENTITY_SOURCE_SQL,
     FACET_DERIVED_SQL,
@@ -90,6 +91,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(33, "doc-feature-node-links", DOC_FEATURE_NODE_LINKS_SQL),
     Migration(34, "doc-snippet-language-evidence", DOC_SNIPPET_RECORDS_SQL),
     Migration(35, "api-export-aliases", API_EXPORT_ALIASES_SQL),
+    Migration(36, "context-doc-links", DOC_LINK_KIND_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

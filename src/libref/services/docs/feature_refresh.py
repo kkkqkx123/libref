@@ -126,6 +126,13 @@ def _load_snippet_calls(conn, version_id: int, tenant_id: str) -> list[dict[str,
         except Exception:  # noqa: BLE001, S110
             pass
     sql += " ORDER BY ci.caller_file, ci.sample_id, ci.line_start, ci.call_order"
+    hashes = {
+        str(row[0]): str(row[1] or "")
+        for row in conn.execute(
+            "SELECT snippet_id, code_hash FROM doc_snippet_records WHERE version_id=?",
+            (version_id,),
+        ).fetchall()
+    }
     out: list[dict[str, Any]] = []
     for row in conn.execute(sql, params).fetchall():
         if reviews.get(int(row[0])) == "conflict":
@@ -145,9 +152,14 @@ def _load_snippet_calls(conn, version_id: int, tenant_id: str) -> list[dict[str,
                 "order": int(row[8] or 0),
                 "source_role": str(row[9] or "doc_snippet"),
                 "source_id": row[10],
+                "snippet_hash": hashes.get(_snippet_id(str(row[3] or "")), ""),
             }
         )
     return out
+
+
+def _snippet_id(sample_id: str) -> str:
+    return str(sample_id or "").split("::", 1)[0]
 
 
 def _ordinal(sample_id: str) -> int:
@@ -157,45 +169,72 @@ def _ordinal(sample_id: str) -> int:
 
 def _map_calls_to_documents(
     blocks: list[DocBlock], calls: list[dict[str, Any]]
-) -> tuple[dict[int, list[dict[str, Any]]], dict[int, list[str]]]:
-    """Attach snippet calls to chunks by page-scoped fence ordinal, then by name."""
+) -> tuple[dict[int, list[dict[str, Any]]], dict[int, list[str]], dict[str, int]]:
+    """Attach snippet calls to chunks by code identity, ordinal, then name."""
     by_url: dict[str, list[DocBlock]] = defaultdict(list)
     for block in blocks:
         if block.url:
             by_url[block.url].append(block)
     hash_by_doc: dict[int, dict[int, str]] = {}
+    hash_owner: dict[tuple[str, str], int] = {}
     for url, group in by_url.items():
-        del url
         ordinal = 0
         for block in sorted(group, key=lambda b: b.document_id):
             mapping: dict[int, str] = {}
             for code in fence_codes(block.content):
                 ordinal += 1
-                mapping[ordinal] = code_hash(code)
+                digest = code_hash(code)
+                mapping[ordinal] = digest
+                hash_owner.setdefault((url, digest), block.document_id)
             hash_by_doc[block.document_id] = mapping
     mapped: dict[int, list[dict[str, Any]]] = defaultdict(list)
     symbols: dict[int, list[str]] = defaultdict(list)
+    bindings = {"code_hash": 0, "ordinal": 0, "name": 0, "dropped": 0}
     for call in calls:
         url = str(call.get("url") or "")
         group = by_url.get(url, [])
+        snippet_hash = str(call.get("snippet_hash") or "")
         ordinal = _ordinal(call["sample_id"])
-        target = next(
-            (b for b in group if ordinal in hash_by_doc.get(b.document_id, {})),
-            None,
-        )
+        target = None
+        bind_kind = ""
+        digest = ""
+        if snippet_hash and (url, snippet_hash) in hash_owner:
+            target = next(
+                (b for b in group if b.document_id == hash_owner[(url, snippet_hash)]),
+                None,
+            )
+            bind_kind = "code_hash"
+            digest = snippet_hash
+        if target is None:
+            target = next(
+                (b for b in group if ordinal in hash_by_doc.get(b.document_id, {})),
+                None,
+            )
+            if target is not None:
+                bind_kind = "ordinal"
+                digest = hash_by_doc[target.document_id][ordinal]
         if target is None:
             low = str(call.get("callee") or "")
             target = next((b for b in group if low and low in b.content), None)
+            if target is not None:
+                bind_kind = "name"
         if target is None:
+            bindings["dropped"] += 1
             continue
-        digest = hash_by_doc.get(target.document_id, {}).get(ordinal, "")
-        enriched_call = {**call, "code_hash": digest}
+        bindings[bind_kind] += 1
+        enriched_call = {
+            **call,
+            "code_hash": digest,
+            "bind_kind": bind_kind,
+        }
         mapped[target.document_id].append(enriched_call)
         if enriched_call["callee"]:
             symbols[target.document_id].append(enriched_call["callee"])
-    return dict(mapped), {
-        key: list(dict.fromkeys(value)) for key, value in symbols.items()
-    }
+    return (
+        dict(mapped),
+        {key: list(dict.fromkeys(value)) for key, value in symbols.items()},
+        bindings,
+    )
 
 
 def _enriched_blocks(
@@ -218,6 +257,8 @@ def _enriched_blocks(
             {
                 "document_id": block.document_id,
                 "url": block.url,
+                "path": block.path,
+                "title": block.title,
                 "content": block.content,
                 "code_hashes": list(
                     {code_hash(code) for code in fence_codes(block.content)}
@@ -307,7 +348,8 @@ def _backfill_entities(conn, version_id: int) -> int:
     rows = conn.execute(
         "SELECT document_id, ae.qualified_name FROM doc_api_links l"
         " JOIN api_entities ae ON ae.id=l.api_entity_id"
-        " WHERE l.version_id=? ORDER BY document_id, ae.qualified_name",
+        " WHERE l.version_id=? AND l.match_kind IN ('symbol', 'signature')"
+        " ORDER BY document_id, ae.qualified_name",
         (version_id,),
     ).fetchall()
     wanted: dict[int, list[str]] = defaultdict(list)
@@ -548,7 +590,7 @@ def refresh_doc_features(
     from libref.chunking.doc_facets import DOC_FACETS
     from libref.services.registry.libraries import LibraryService
 
-    counts = {
+    counts: dict[str, Any] = {
         "features": 0,
         "links": 0,
         "entities_updated": 0,
@@ -608,7 +650,8 @@ def refresh_doc_features(
             conn.commit()
             return counts
         calls = _load_snippet_calls(conn, version_id, tenant_id)
-        mapped, snippet_symbols = _map_calls_to_documents(blocks, calls)
+        mapped, snippet_symbols, bindings = _map_calls_to_documents(blocks, calls)
+        counts["bindings"] = bindings
 
         entity_rows = conn.execute(
             "SELECT id, qualified_name, params, return_type, signature FROM api_entities"
@@ -688,13 +731,19 @@ def refresh_doc_features(
                 tenant_id=tenant_id,
             )
             profile_id = int(resolved["id"])
+            link_rows = conn.execute(
+                "SELECT document_id, api_entity_id, match_kind FROM doc_api_links"
+                " WHERE version_id=?",
+                (version_id,),
+            ).fetchall()
             links = [
+                {"document_id": r[0], "api_entity_id": r[1], "match_kind": r[2]}
+                for r in link_rows
+            ]
+            node_links = [
                 {"document_id": r[0], "api_entity_id": r[1]}
-                for r in conn.execute(
-                    "SELECT document_id, api_entity_id FROM doc_api_links"
-                    " WHERE version_id=?",
-                    (version_id,),
-                ).fetchall()
+                for r in link_rows
+                if str(r[2]) in ("symbol", "signature")
             ]
             entity_names = {
                 int(row[0]): str(row[1])
@@ -708,7 +757,7 @@ def refresh_doc_features(
                 (version_id, profile_id),
             ).fetchall()
             node_links = link_feature_nodes(
-                links,
+                node_links,
                 entity_names,
                 [{"path": row[0], "parent": row[1]} for row in node_rows],
             )
@@ -738,7 +787,11 @@ def refresh_doc_features(
                 )
             if "consistency" in wanted:
                 verdicts = compare_consistency(
-                    enriched, links, coverage, min_support=min_support
+                    enriched,
+                    links,
+                    coverage,
+                    entity_names=entity_names,
+                    min_support=min_support,
                 )
                 written, failed = _write_consistency(
                     conn,
