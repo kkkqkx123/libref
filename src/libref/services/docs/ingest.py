@@ -479,6 +479,20 @@ class IngestService:
                     registry_confirmed=registry_confirmed,
                     tenant_id=tenant_id,
                 )
+                if (scope or {}).get("snippet_languages") or (scope or {}).get(
+                    "snippet_language_rules"
+                ):
+                    from libref.services.code.snippet_records import (
+                        record_source_options,
+                    )
+
+                    record_source_options(
+                        self._conn,
+                        version_id,
+                        candidates=(scope or {}).get("snippet_languages") or (),
+                        rules=(scope or {}).get("snippet_language_rules") or {},
+                        tenant_id=tenant_id,
+                    )
 
                 sem = asyncio.Semaphore(self._settings.fetch_concurrency)
                 follow = bool(

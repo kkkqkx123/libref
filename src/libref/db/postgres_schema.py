@@ -501,6 +501,67 @@ CREATE TABLE IF NOT EXISTS doc_feature_node_links(
 CREATE INDEX IF NOT EXISTS idx_doc_feature_node_links_lookup
   ON doc_feature_node_links(profile_id, version_id, document_id);
 
+CREATE TABLE IF NOT EXISTS api_export_aliases(
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  alias TEXT NOT NULL,
+  target TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(version_id, alias, target, tenant_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_export_aliases_version
+  ON api_export_aliases(version_id, tenant_id);
+
+CREATE TABLE IF NOT EXISTS doc_snippet_sources(
+  version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  snippet_languages JSONB NOT NULL DEFAULT '[]',
+  language_rules JSONB NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL DEFAULT to_char(now(), 'YYYY-MM-DD HH24:MI:SS'),
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  PRIMARY KEY(version_id, tenant_id)
+);
+
+CREATE TABLE IF NOT EXISTS doc_snippet_records(
+  id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
+  source_key TEXT NOT NULL,
+  snippet_id TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  code TEXT NOT NULL DEFAULT '',
+  url TEXT NOT NULL DEFAULT '',
+  heading TEXT NOT NULL DEFAULT '',
+  ordinal INTEGER NOT NULL DEFAULT 0,
+  origin_kind TEXT NOT NULL DEFAULT '',
+  origin_location TEXT NOT NULL DEFAULT '',
+  origin_start_byte INTEGER NOT NULL DEFAULT 0,
+  origin_end_byte INTEGER NOT NULL DEFAULT 0,
+  origin_start_line INTEGER NOT NULL DEFAULT 0,
+  origin_end_line INTEGER NOT NULL DEFAULT 0,
+  raw_language TEXT NOT NULL DEFAULT '',
+  language TEXT NOT NULL DEFAULT '',
+  language_source TEXT NOT NULL DEFAULT '',
+  language_rule TEXT NOT NULL DEFAULT '',
+  parse_status TEXT NOT NULL DEFAULT 'unlabeled'
+      CHECK (parse_status IN ('ok','partial','unsupported','unlabeled',
+                              'ambiguous','failed','non_target')),
+  attempts JSONB NOT NULL DEFAULT '[]',
+  source_id BIGINT,
+  review_status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (review_status IN ('pending','confirmed','rejected')),
+  annotated_language TEXT NOT NULL DEFAULT '',
+  annotated_by TEXT NOT NULL DEFAULT '',
+  annotated_at TEXT,
+  tenant_id TEXT NOT NULL DEFAULT 'default',
+  UNIQUE(version_id, source_key, snippet_id, tenant_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_doc_snippet_records_status
+  ON doc_snippet_records(version_id, parse_status, tenant_id);
+CREATE INDEX IF NOT EXISTS idx_doc_snippet_records_source
+  ON doc_snippet_records(version_id, source_key, tenant_id);
+
 CREATE TABLE IF NOT EXISTS ingest_progress(
   version_id BIGINT NOT NULL REFERENCES versions(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,

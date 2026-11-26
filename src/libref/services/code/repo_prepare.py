@@ -298,7 +298,7 @@ def prepare_repo_index(
 
         _doc_store = _DocumentStore(conn)
 
-    all_decls, file_aliases, collect_counts, live = _collect_decl_index(
+    all_decls, file_aliases, collect_counts, live, export_facts = _collect_decl_index(
         conn,
         repo_name,
         root,
@@ -329,5 +329,6 @@ def prepare_repo_index(
         "doc_store": _doc_store,
         "all_decls": all_decls,
         "file_aliases": file_aliases,
+        "export_facts": export_facts,
         "live": live,
     }

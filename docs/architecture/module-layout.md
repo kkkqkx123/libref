@@ -61,6 +61,9 @@ libref/
 │   │   ├── resolution.py       # [P2] 两遍走：声明/导入 facts → 跨文件别名解析
 │   │   ├── cache.py            # [P2] 文件 hash + grammar fingerprint 增量缓存
 │   │   ├── code_blocks.py      # Markdown 与 Rust 文档代码围栏抽取
+│   │   ├── language_evidence.py # 块标记、祖先类名、邻近标题、人工规则与候选语言的纯解析
+│   │   ├── exports.py          # 源码公共导出别名事实：__all__、export * 与 pub use
+│   │   ├── snippet_status.py   # 片段解析状态分类：证据、歧义与无目标调用
 │   │   └── repos.py            # [P2] dulwich 克隆/更新开源仓库、文件遍历
 │   │
 │   ├── mining/                 # ── 统计与序列挖掘（借鉴 EpiCoder 统计 + PrefixSpan-py）──
@@ -118,6 +121,7 @@ libref/
 │   │   │   ├── code_ingest.py  # 克隆/抽取/实体落块
 │   │   │   ├── usage_sources.py # 语料源与挖掘档案
 │   │   │   ├── usage_ingest.py  # 文档与参考片段调用摄取
+│   │   │   ├── snippet_records.py # 片段语言证据、解析状态与人工标注回写
 │   │   │   ├── probe.py        # 只读仓库探查：目录普查后即止，不解析不落库
 │   │   │   ├── probe_remote.py # 远端探查：复用槽/托管接口/无 blob 树/浅克隆逐级降级
 │   │   │   ├── repo_source.py  # 仓库来源解析：显式地址优先，按名解析复用

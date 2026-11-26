@@ -6,62 +6,36 @@ import re
 from collections.abc import Iterable
 
 from libref.astminer.config import LANGUAGE_CONFIGS
+from libref.astminer.language_evidence import (
+    canonical_language,
+    language_from_text,
+    normalize_language_tag,
+)
 from libref.astminer.models import CodeSnippet
 
 _FENCE_RE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 _RUST_DOC_RE = re.compile(r"^\s*(///|//!) ?(.*)$")
-_LANGUAGE_ALIASES = {
-    "py": "python",
-    "python3": "python",
-    "js": "javascript",
-    "jsx": "javascript",
-    "ts": "typescript",
-    "tsx": "typescript",
-    "rs": "rust",
-    "csharp": "csharp",
-    "cs": "csharp",
-    "go": "go",
-    "java": "java",
-    "kt": "kotlin",
-    "kts": "kotlin",
-    "groovy": "groovy",
-    "c": "c",
-    "cpp": "cpp",
-    "cc": "cpp",
-    "c++": "cpp",
-}
 _IMPORT_LINE_RE = re.compile(r"^\s*(?:import|from|using|use)\b")
-_SKIP_TAGS = {
-    "compile_fail",
-    "ignore",
-    "text",
-    "txt",
-    "shell",
-    "bash",
-    "console",
-    "output",
-    "diff",
-}
+_PROMPT_RE = re.compile(r"^\s*(?:>>>|\.\.\.|\$|\d+(?:\.|:)\s*)+\s*")
+
+
+def strip_doc_prompt(line: str) -> str:
+    """Remove interactive prompts and line-number prefixes from one line."""
+    return _PROMPT_RE.sub("", str(line or ""), count=1)
 
 
 def import_context_from_text(text: str) -> str:
     """Import-like lines that can give a doc snippet resolvable aliases."""
-    lines = [
-        line.strip()
-        for line in str(text or "").splitlines()
-        if _IMPORT_LINE_RE.match(line)
-    ]
+    lines: list[str] = []
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if _IMPORT_LINE_RE.match(line):
+            lines.append(line)
+            continue
+        prompt_free = strip_doc_prompt(line).strip()
+        if prompt_free != line and _IMPORT_LINE_RE.match(prompt_free):
+            lines.append(prompt_free)
     return "\n".join(lines[-32:])
-
-
-def canonical_language(tag: str) -> str:
-    """Map a documentation language tag to a configured language name."""
-    cleaned = str(tag or "").strip().lower().replace(",", " ").replace(";", " ")
-    value = cleaned.split()[0] if cleaned else ""
-    value = _LANGUAGE_ALIASES.get(value, value)
-    if value in LANGUAGE_CONFIGS or value in ("c", "cpp"):
-        return value
-    return ""
 
 
 def _byte_starts(lines: list[str]) -> list[int]:
@@ -112,7 +86,11 @@ def fenced_blocks(
     origin_location: str = "",
     origin_lines: list[tuple[int, int]] | None = None,
 ) -> list[CodeSnippet]:
-    """Extract balanced fenced blocks with a configured language tag."""
+    """Extract balanced fenced blocks with their original language evidence.
+
+    Every non-empty fence is emitted, including blocks with no usable language,
+    so an unlabeled or unsupported block can be listed instead of vanishing.
+    """
     lines = str(text or "").splitlines()
     starts = _byte_starts(lines)
     out: list[CodeSnippet] = []
@@ -126,16 +104,20 @@ def fenced_blocks(
         marker, tag = match.group(1), match.group(2).strip()
         close_char = marker[0]
         close_len = len(marker)
-        tags = tag.lower().replace(",", " ").split()
-        if any(item in _SKIP_TAGS for item in tags):
-            index += 1
-            while index < len(lines) and not _is_close(
-                lines[index], close_char, close_len
-            ):
-                index += 1
-            index += 1
-            continue
         language = canonical_language(tag)
+        raw_language = normalize_language_tag(tag)
+        nearby = "\n".join(lines[max(0, index - 4) : index])
+        language_source = "block_tag" if raw_language else ""
+        if not language_source:
+            hinted = language_from_text(nearby)
+            if hinted:
+                raw_language = hinted
+                language = canonical_language(hinted)
+                language_source = (
+                    "nearby_heading"
+                    if any(line.strip().startswith("#") for line in nearby.splitlines())
+                    else "nearby_text"
+                )
         body: list[str] = []
         body_start = index + 1
         index += 1
@@ -143,7 +125,7 @@ def fenced_blocks(
             body.append(lines[index])
             index += 1
         index += 1
-        if not language or not any(line.strip() for line in body):
+        if not any(line.strip() for line in body):
             continue
         ordinal += 1
         code = "\n".join(body).strip()
@@ -156,6 +138,8 @@ def fenced_blocks(
             CodeSnippet(
                 sample_id=f"{sample_prefix}#{ordinal}",
                 language=language,
+                raw_language=raw_language,
+                language_source=language_source,
                 code=code,
                 url=url,
                 heading=heading,
@@ -219,7 +203,10 @@ def dedupe_snippets(snippets: Iterable[CodeSnippet]) -> list[CodeSnippet]:
     seen: set[tuple[str, str]] = set()
     out: list[CodeSnippet] = []
     for item in snippets:
-        key = (item.language, re.sub(r"\s+", " ", item.code).strip())
+        key = (
+            item.language or item.raw_language,
+            re.sub(r"\s+", " ", item.code).strip(),
+        )
         if key in seen:
             continue
         seen.add(key)

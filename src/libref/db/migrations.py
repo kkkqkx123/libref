@@ -7,6 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 
 from libref.db.schema import (
+    API_EXPORT_ALIASES_SQL,
     AST_CHUNK_RELATION_SQL,
     CALL_RELATION_SQL,
     CALL_RESOLVE_SQL,
@@ -16,6 +17,7 @@ from libref.db.schema import (
     DOC_FEATURE_NODE_LINKS_SQL,
     DOC_FEATURE_SQL,
     DOC_LINK_EDGES_SQL,
+    DOC_SNIPPET_RECORDS_SQL,
     ENTITY_SOURCE_SQL,
     FACET_DERIVED_SQL,
     FEATURE_TREE_CLUSTER_SQL,
@@ -86,6 +88,8 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(31, "doc-feature-facets", DOC_FEATURE_SQL),
     Migration(32, "entity-source-bindings", ENTITY_SOURCE_SQL),
     Migration(33, "doc-feature-node-links", DOC_FEATURE_NODE_LINKS_SQL),
+    Migration(34, "doc-snippet-language-evidence", DOC_SNIPPET_RECORDS_SQL),
+    Migration(35, "api-export-aliases", API_EXPORT_ALIASES_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

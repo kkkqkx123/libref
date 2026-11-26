@@ -10,16 +10,23 @@ from libref.astminer.calls import _build_calls
 from libref.astminer.config import LanguageConfig
 from libref.astminer.context import determine_module_path
 from libref.astminer.declarations import _build_decls, _comment_spans
-from libref.astminer.models import ApiDeclRecord, RawCall
+from libref.astminer.models import ApiDeclRecord, ParseEvidence, RawCall
 from libref.astminer.ownership import ScopedAlias, _build_aliases, _var_scope
 from libref.astminer.parse import _compiled_queries, get_parser, warm_configs
 
-__all__ = ["extract_file", "warm_configs"]
+__all__ = ["extract_file", "extract_file_with_evidence", "warm_configs"]
 
 
 def extract_file(
     path: str, cfg: LanguageConfig, source: bytes
 ) -> tuple[list[ApiDeclRecord], list[ScopedAlias], list[RawCall]]:
+    decls, aliases, calls, _evidence = extract_file_with_evidence(path, cfg, source)
+    return decls, aliases, calls
+
+
+def extract_file_with_evidence(
+    path: str, cfg: LanguageConfig, source: bytes
+) -> tuple[list[ApiDeclRecord], list[ScopedAlias], list[RawCall], ParseEvidence]:
     parser = get_parser(cfg)
     # The tree is built from shadow bytes with identical spans; all text is
     # still sliced from the original source, so evidence stays verbatim.
@@ -51,4 +58,10 @@ def extract_file(
             continue
         aliases.append((var, target, _var_scope(decls, var, at)))
     calls = _build_calls(path, cfg, source, call_matches, decls, tree.root_node)
-    return decls, aliases, calls
+    evidence = ParseEvidence(
+        has_error=bool(tree.root_node.has_error),
+        call_count=len(calls),
+        decl_count=len(decls),
+        alias_count=len(aliases),
+    )
+    return decls, aliases, calls, evidence

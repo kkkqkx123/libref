@@ -7,7 +7,7 @@
 - `cases.json`：库与版本、页面清单、API 实体、特征树节点、社区模式、下一版本覆盖页与可手算期望。
 - `pages/*.md`、`pages/*.html`：固定正文。围栏示例调用同一 API 的两种顺序，参数表与返回值小节、废弃标记、变更日志、歧义短名与无实体页面各占一页。
 - `pages_v11/*.md`：下一版本覆盖页，用于跨版本 facet 与实体变化清单。
-- `questions.json`：按语料标识分组的判定集；离线 `demo` 场景与冻结归档场景共用固定字段。每题带来源、来源引用、题目、稳定锚点、期望实体、期望特征树节点、期望块特征、期望判定与分级。`expected_facets` 记录 `block_type`、`heading_depth`、`length_bucket`、`code_ratio`、`has_table`、`version_marker`、`example_language`、`example_symbols`、`param_names`、`return_hint`、`deprecated` 等可核验标签；标题由锚点解析单独验证。`demo` 现有 12 题，覆盖 6 个页面的正反两种问法。
+- `questions.json`：按语料标识分组的判定集；离线 `demo` 场景与冻结归档场景共用固定字段。每题带来源、来源引用、题目、稳定锚点、块特征与分级；期望实体、期望判定、期望特征树节点只在题面与派生证据充分时写入，缺省表示不可测量。`expected_facets` 记录 `block_type`、`heading_depth`、`length_bucket`、`code_ratio`、`has_table`、`version_marker`、`example_language`、`example_symbols`、`param_names`、`return_hint`、`deprecated` 等可核验标签；标题由锚点解析单独验证。`demo` 现有 12 题，覆盖 6 个页面的正反两种问法。
 - `drift_samples.json`：人工标注的漂移样本；自动 drift 与人工结论不一致时计入误报统计，样本不足时只报告数量，不写门禁。现有 40 条样本，其中 28 条人工 drift、12 条人工 not_drift，覆盖离线夹具与 9 个真实站点归档。
 - `../../fixtures/doc_features/golden.json`：纯算法黄金集，含实体、文档块、片段调用、对齐边、特征树父链、期望节点关联与模式；单元测试无需数据库即可复核。
 
@@ -20,7 +20,7 @@ uv run pytest tests/integration/test_doc_feature_outputs.py -q
 
 输出到 `tests/e2e/outputs/doc_features/`，按 `01` 至 `10` 分别核查输入、块 facet、对齐边、模式覆盖、一致性判定、锚点解析、排名对照、指标、跨版本变化与漂移复核。`08-metrics.txt` 同时记录仅示例、排除废弃、仅对齐三类过滤后的结果数、保留数与命中率。`SUMMARY.txt` 只汇总条数、锚点解析与不变量，人工判定不写进单元测试。
 
-判定口径：稳定锚点只用 URL、标题路径、块分组标识与限定符号名；不用数据库 id、行号或块序号。相关等级沿用检索基准的强相关 2 分、一般相关 1 分、未命中 0 分。同一题目在 `doc_feature_alpha` 关闭与开启两列并排，数值差分与区间只作人工标定依据。
+判定口径：稳定锚点只用 URL、标题路径、块分组标识与限定符号名；不用数据库 id、行号或块序号。实体、判定、节点三类标签按有标签题统计，空标签在报告中记为 `unmeasurable`，不计入分母；块特征与块类型每题都有标签。相关等级沿用检索基准的强相关 2 分、一般相关 1 分、未命中 0 分。同一题目在 `doc_feature_alpha` 关闭与开启两列并排，数值差分与区间只作人工标定依据。
 
 ## 候选生成
 

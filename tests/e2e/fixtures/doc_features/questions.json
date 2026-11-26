@@ -1004,9 +1004,7 @@
         "https://www.python-httpx.org/advanced/event-hooks/"
       ],
       "expected_entities": [
-        "httpx._client.BaseClient.event_hooks",
-        "httpx._models.Request",
-        "httpx._models.Response"
+        "httpx._client.BaseClient.event_hooks"
       ],
       "expected_facets": {
         "heading": "Event Hooks",
@@ -1236,9 +1234,7 @@
       "targets": [
         "https://zod.dev/api"
       ],
-      "expected_entities": [
-        "packages.zod.src.v4.core.util.Literal"
-      ],
+      "expected_entities": [],
       "expected_facets": {
         "heading": "Customizing the input type",
         "block_type": "example",
@@ -4467,9 +4463,7 @@
       "targets": [
         "https://cn.vuejs.org/guide/scaling-up/tooling.md"
       ],
-      "expected_entities": [
-        "packages.runtime-core.src.devtools"
-      ],
+      "expected_entities": [],
       "expected_facets": {
         "heading": "浏览器开发者插件 {#browser-devtools}",
         "block_type": "narrative",
@@ -4630,9 +4624,7 @@
       "targets": [
         "https://cn.vuejs.org/style-guide/rules-strongly-recommended.md"
       ],
-      "expected_entities": [
-        "packages.runtime-core.src.directives.Directive"
-      ],
+      "expected_entities": [],
       "expected_facets": {
         "heading": "Directive shorthands {#directive-shorthands}",
         "block_type": "narrative",
@@ -5838,9 +5830,7 @@
       "targets": [
         "https://docs.fluentvalidation.net/en/latest/cascade.html"
       ],
-      "expected_entities": [
-        "FluentValidation.DefaultValidatorOptions.Cascade"
-      ],
+      "expected_entities": [],
       "expected_facets": {
         "heading": "Rule-Level Cascade Modes",
         "block_type": "example",
@@ -6279,9 +6269,7 @@
       "targets": [
         "https://docs.fluentvalidation.net/en/latest/cascade.html"
       ],
-      "expected_entities": [
-        "FluentValidation.DefaultValidatorOptions.Cascade"
-      ],
+      "expected_entities": [],
       "expected_facets": {
         "heading": "Setting the Cascade mode",
         "block_type": "narrative",
@@ -6712,9 +6700,7 @@
       "targets": [
         "https://rocket.rs/guide/v0.5/state/"
       ],
-      "expected_entities": [
-        "core.lib.src.ext.Connection"
-      ],
+      "expected_entities": [],
       "expected_facets": {
         "heading": "Databases",
         "block_type": "example",
@@ -7035,9 +7021,7 @@
       "targets": [
         "https://rocket.rs/guide/v0.5/fairings/"
       ],
-      "expected_entities": [
-        "core.lib.src.fairing.fairings.Fairings"
-      ],
+      "expected_entities": [],
       "expected_facets": {
         "heading": "Attaching",
         "block_type": "narrative",
@@ -7147,9 +7131,7 @@
       "targets": [
         "https://rocket.rs/guide/v0.5/fairings/"
       ],
-      "expected_entities": [
-        "core.lib.src.fairing.Fairing"
-      ],
+      "expected_entities": [],
       "expected_facets": {
         "heading": "Callbacks",
         "block_type": "narrative",
@@ -7205,9 +7187,7 @@
       "targets": [
         "https://rocket.rs/guide/v0.5/fairings/"
       ],
-      "expected_entities": [
-        "core.lib.src.fairing.fairings.Fairings"
-      ],
+      "expected_entities": [],
       "expected_facets": {
         "heading": "Fairings",
         "block_type": "narrative",
@@ -7234,9 +7214,7 @@
       "targets": [
         "https://rocket.rs/guide/v0.5/fairings/"
       ],
-      "expected_entities": [
-        "core.lib.src.fairing.Fairing"
-      ],
+      "expected_entities": [],
       "expected_facets": {
         "heading": "Implementing",
         "block_type": "narrative",

@@ -1,4 +1,5 @@
 import sqlite3
+from pathlib import Path
 
 from tests.e2e.bench import evaluate_doc_features
 
@@ -111,3 +112,88 @@ def test_score_entry_matches_expected_feature_node_subset(monkeypatch: object) -
     row = evaluate_doc_features._score_entry(conn, question, 1)
     assert row["node_match"] is False
     assert row["nodes_expected"] == ["demo.Missing"]
+
+    wrong_entity = dict(question, expected_entities=["demo.Missing"])
+    row = evaluate_doc_features._score_entry(conn, wrong_entity, 1)
+    assert row["entity_match"] is False
+
+    wrong_verdict = dict(question, expected_verdict="drift")
+    row = evaluate_doc_features._score_entry(conn, wrong_verdict, 1)
+    assert row["verdict_match"] is False
+
+    unlabeled = dict(question)
+    unlabeled["expected_entities"] = []
+    unlabeled["expected_feature_nodes"] = []
+    unlabeled["expected_verdict"] = ""
+    row = evaluate_doc_features._score_entry(conn, unlabeled, 1)
+    assert row["entity_match"] is None
+    assert row["node_match"] is None
+    assert row["verdict_match"] is None
+
+
+def test_match_stats_ignore_unlabeled_rows() -> None:
+    entries = [
+        {"entity_match": True},
+        {"entity_match": None},
+        {"entity_match": False},
+    ]
+    assert evaluate_doc_features._match_stats(entries, "entity_match") == (1, 2)
+
+
+def test_report_marks_empty_labels_unmeasurable(tmp_path: Path) -> None:
+    entry = {
+        "id": "N1",
+        "anchor_problems": [],
+        "entities_expected": [],
+        "entities_found": [],
+        "entity_match": None,
+        "nodes_expected": [],
+        "nodes_found": [],
+        "node_match": None,
+        "facets_expected": {"block_type": "example"},
+        "facet_checks": {"block_type": True},
+        "facet_match": True,
+        "block_type_expected": "example",
+        "block_type_match": True,
+        "verdict_expected": "",
+        "verdict_match": None,
+    }
+    second = dict(entry, id="N2", entities_expected=["demo.Client"], entity_match=True)
+    result = {
+        "name": "demo/docs",
+        "revision": "r1",
+        "source": "https://example.test",
+        "entity_source": "demo/code",
+        "snippet_counts": {"snippets": 0},
+        "derivation": {"coverage": 0},
+        "questions": [entry, second],
+        "ranks": {"N1": {"off": 1, "on": 1}, "N2": {"off": 1, "on": 1}},
+        "filters": {},
+        "metrics": {
+            "off": {"ndcg_at_k": 1.0, "mrr_at_k": 1.0},
+            "on": {"ndcg_at_k": 1.0, "mrr_at_k": 1.0},
+            "ndcg_delta": {
+                "delta": 0.0,
+                "lo": 0.0,
+                "hi": 0.0,
+                "significant": False,
+            },
+            "mrr_delta": {
+                "delta": 0.0,
+                "lo": 0.0,
+                "hi": 0.0,
+                "significant": False,
+            },
+        },
+    }
+    path = evaluate_doc_features._report(
+        [result], {"demo/docs": [{"id": "N1", "source": "docs"}]}, 0.0, tmp_path
+    )
+    text = path.read_text(encoding="utf-8")
+    assert (
+        "| N1 | docs | OK | unmeasurable | unmeasurable | OK | OK | unmeasurable | 1/1 |"
+        in text
+    )
+    assert "- 实体对齐：1/1（有标签题）" in text
+    assert "- 树节点一致：0/0（有标签题，不可测量）" in text
+    assert "- 判定一致：0/0（有标签题，不可测量）" in text

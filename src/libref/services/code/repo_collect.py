@@ -28,6 +28,7 @@ def _collect_decl_index(
     dict[str, list[tuple[str, str, str | None]]],
     dict[str, int],
     dict[str, tuple[str, int]],
+    list[tuple[str, str, str]],
 ]:
     """Declaration pass: parse or reuse cache, keep only decls and aliases.
 
@@ -39,11 +40,13 @@ def _collect_decl_index(
     from libref.astminer import cache as ast_cache
     from libref.astminer import config as ast_config
     from libref.astminer import engine as ast_engine
+    from libref.astminer import exports as ast_exports
     from libref.astminer import rules as ast_rules
 
     go_prefix = _read_go_module_prefix(root).replace("/", ".")
     all_decls: list = []
     file_aliases: dict[str, list[tuple[str, str, str | None]]] = {}
+    export_facts: list[tuple[str, str, str]] = []
     counts = {"files": 0, "parsed": 0, "cached": 0}
     live: dict[str, tuple[str, int]] = {}
     for rel in files:
@@ -61,7 +64,27 @@ def _collect_decl_index(
                 decls, aliases, _raw = ast_cache.decode_records(hit[1], rel)
             except ValueError:
                 counts["parsed"] += 1
-                decls, aliases, raw_calls = ast_engine.extract_file(rel, cfg, data)
+                decls, aliases, raw_calls, evidence = (
+                    ast_engine.extract_file_with_evidence(rel, cfg, data)
+                )
+                if evidence.has_api_evidence:
+                    ast_cache.store(
+                        conn,
+                        repo_name,
+                        rel,
+                        sha,
+                        fp,
+                        cfg.config_version,
+                        ast_cache.encode_records(decls, aliases, raw_calls),
+                    )
+            else:
+                counts["cached"] += 1
+        else:
+            counts["parsed"] += 1
+            decls, aliases, raw_calls, evidence = ast_engine.extract_file_with_evidence(
+                rel, cfg, data
+            )
+            if evidence.has_api_evidence:
                 ast_cache.store(
                     conn,
                     repo_name,
@@ -71,28 +94,16 @@ def _collect_decl_index(
                     cfg.config_version,
                     ast_cache.encode_records(decls, aliases, raw_calls),
                 )
-            else:
-                counts["cached"] += 1
-        else:
-            counts["parsed"] += 1
-            decls, aliases, raw_calls = ast_engine.extract_file(rel, cfg, data)
-            ast_cache.store(
-                conn,
-                repo_name,
-                rel,
-                sha,
-                fp,
-                cfg.config_version,
-                ast_cache.encode_records(decls, aliases, raw_calls),
-            )
         all_decls.extend(decls)
+        for fact in ast_exports.export_facts(rel, cfg.name, data):
+            export_facts.append((fact.alias, fact.target, fact.kind))
         if go_prefix and cfg.name == "go":
             aliases = [
                 (name, ast_rules.normalize_go_import(target, go_prefix), scope)
                 for name, target, scope in aliases
             ]
         file_aliases[rel] = list(aliases)
-    return all_decls, file_aliases, counts, live
+    return all_decls, file_aliases, counts, live, export_facts
 
 
 def _load_raw_batch(
@@ -126,15 +137,18 @@ def _load_raw_batch(
             else:
                 raw_calls.extend(raw)
                 continue
-        _decls, _aliases, raw = ast_engine.extract_file(rel, cfg, data)
-        raw_calls.extend(raw)
-        ast_cache.store(
-            conn,
-            repo_name,
-            rel,
-            sha,
-            fp,
-            cfg.config_version,
-            ast_cache.encode_records(_decls, _aliases, raw),
+        _decls, _aliases, raw, evidence = ast_engine.extract_file_with_evidence(
+            rel, cfg, data
         )
+        raw_calls.extend(raw)
+        if evidence.has_api_evidence:
+            ast_cache.store(
+                conn,
+                repo_name,
+                rel,
+                sha,
+                fp,
+                cfg.config_version,
+                ast_cache.encode_records(_decls, _aliases, raw),
+            )
     return raw_calls

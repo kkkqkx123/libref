@@ -40,6 +40,8 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "index_batch_files",
             "usage_mining_enabled",
             "doc_code_mining_enabled",
+            "snippet_languages",
+            "snippet_language_rules",
             "stdlib_filter_enabled",
             "stdlib_table_version",
             "probe_sample_limit",

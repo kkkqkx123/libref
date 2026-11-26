@@ -86,9 +86,11 @@ def test_doc_and_rust_fence_extraction(conn):
         "```shell\nlibref mine\n```",
         sample_prefix="doc:1",
     )
-    assert len(blocks) == 1
+    assert len(blocks) == 2
     assert blocks[0].language == "python"
     assert "demo.run()" in blocks[0].code
+    assert blocks[1].language == ""
+    assert blocks[1].raw_language == "shell"
 
     doc_blocks = rust_doc_blocks(
         b"/// Example:\n///\n/// ```rust,no_run\n/// libref::run();\n/// ```\n",

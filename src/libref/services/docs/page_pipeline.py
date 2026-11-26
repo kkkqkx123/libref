@@ -382,6 +382,26 @@ class PagePipeline:
                 from libref.crawler.code_blocks import html_code_blocks
                 from libref.services.code.usage_ingest import ingest_snippets
 
+                language_rules = {
+                    **{
+                        str(key): str(value)
+                        for key, value in dict(
+                            getattr(self._settings, "snippet_language_rules", {}) or {}
+                        ).items()
+                    },
+                    **{
+                        str(key): str(value)
+                        for key, value in dict(
+                            (scope or {}).get("snippet_language_rules", {}) or {}
+                        ).items()
+                    },
+                }
+                candidate_languages = list(
+                    (scope or {}).get("snippet_languages")
+                    or getattr(self._settings, "snippet_languages", [])
+                    or []
+                )
+
                 meta = conn.execute(
                     "SELECT l.name, v.version FROM versions v"
                     " JOIN libraries l ON l.id=v.library_id WHERE v.id=?",
@@ -393,15 +413,16 @@ class PagePipeline:
                     prefix = doc_source_key(version_id, url)
                     if kind == "html":
                         blocks = html_code_blocks(
-                            scraped.cleaned_html,
+                            raw_body,
                             sample_prefix=prefix,
                             url=url,
                             heading=scraped.title,
+                            manual_rules=language_rules,
                         )
                         origin = "html_code_block"
                     else:
                         blocks = fenced_blocks(
-                            markdown,
+                            raw_body,
                             sample_prefix=prefix,
                             url=url,
                             heading=page_title,
@@ -424,6 +445,8 @@ class PagePipeline:
                                 "kind": kind,
                             },
                             settings=self._settings,
+                            snippet_candidates=candidate_languages,
+                            snippet_language_rules=language_rules,
                         )
         split_start = _time.monotonic()
         self._account_page(store, tenant_id, snapshot_bytes=0)

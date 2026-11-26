@@ -13,6 +13,9 @@
       "doc_version": "unversioned",
       "entity_source": "httpx/code-7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016",
       "corpus_lang": "en",
+      "snippet_languages": [
+        "python"
+      ],
       "max_build_ms": 24000
     },
     {
@@ -43,6 +46,9 @@
       "doc_version": "unversioned",
       "entity_source": "zod/code-v4.6.7",
       "corpus_lang": "en",
+      "snippet_languages": [
+        "typescript"
+      ],
       "max_build_ms": 270000
     },
     {
@@ -82,6 +88,9 @@
         "/cookbook/"
       ],
       "corpus_lang": "en",
+      "snippet_languages": [
+        "java"
+      ],
       "max_build_ms": 15000
     },
     {
@@ -121,6 +130,9 @@
         "/partials/"
       ],
       "corpus_lang": "en",
+      "snippet_languages": [
+        "go"
+      ],
       "max_build_ms": 2700000
     },
     {
@@ -154,6 +166,10 @@
       "doc_version": "unversioned",
       "entity_source": "vue/code-v3.5.45",
       "corpus_lang": "cjk",
+      "snippet_languages": [
+        "typescript",
+        "javascript"
+      ],
       "tier": "main",
       "max_build_ms": 90000
     },
@@ -194,6 +210,9 @@
         "/docs/validation/latest/"
       ],
       "corpus_lang": "en",
+      "snippet_languages": [
+        "python"
+      ],
       "tier": "main",
       "max_build_ms": 180000
     },
@@ -236,6 +255,9 @@
         "/_sources/"
       ],
       "corpus_lang": "en",
+      "snippet_languages": [
+        "csharp"
+      ],
       "tier": "main",
       "max_build_ms": 180000,
       "follow_links": true,
@@ -284,6 +306,9 @@
         "/guide/v0.5/"
       ],
       "corpus_lang": "en",
+      "snippet_languages": [
+        "rust"
+      ],
       "tier": "main",
       "max_build_ms": 180000
     },
@@ -322,6 +347,11 @@
         "/current/userguide/"
       ],
       "corpus_lang": "en",
+      "snippet_languages": [
+        "java",
+        "kotlin",
+        "groovy"
+      ],
       "tier": "main",
       "max_build_ms": 270000
     },

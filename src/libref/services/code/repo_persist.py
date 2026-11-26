@@ -346,6 +346,27 @@ def _import_kind(importer_file: str, alias: str, target: str) -> str:
     return "import"
 
 
+def _persist_export_aliases(
+    conn, version_id: int, facts, tenant_id: str = "default"
+) -> int:
+    """Persist source-declared public aliases for documentation resolution."""
+    rows = [
+        (version_id, str(alias), str(target), str(kind), str(tenant_id))
+        for alias, target, kind in (facts or [])
+        if alias and target
+    ]
+    conn.execute("DELETE FROM api_export_aliases WHERE version_id=?", (version_id,))
+    if rows:
+        conn.executemany(
+            "INSERT INTO api_export_aliases(version_id, alias, target, kind, tenant_id)"
+            " VALUES(?, ?, ?, ?, ?)"
+            " ON CONFLICT(version_id, alias, target, tenant_id)"
+            " DO UPDATE SET kind=excluded.kind",
+            rows,
+        )
+    return len(rows)
+
+
 def _persist_import_edges(conn, library_id: int, version_id: int, file_aliases) -> int:
     rows: list[tuple] = []
     for importer_file, items in (file_aliases or {}).items():

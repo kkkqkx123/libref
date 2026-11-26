@@ -60,6 +60,12 @@ class LibrefSettings(BaseSettings):
     index_batch_files: int = Field(default=200, ge=1)
     usage_mining_enabled: bool = True
     doc_code_mining_enabled: bool = True
+    # Acquisition-time candidates for code blocks without explicit language
+    # evidence. Parsing validation decides whether a candidate is usable.
+    snippet_languages: Annotated[
+        list[str], NoDecode, BeforeValidator(_split_tool_names)
+    ] = Field(default_factory=list)
+    snippet_language_rules: dict[str, str] = Field(default_factory=dict)
     # Standard-library references are classified during extraction; disabling
     # the filter leaves them as ordinary inferred calls for review.
     stdlib_filter_enabled: bool = True

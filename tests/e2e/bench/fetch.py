@@ -100,6 +100,12 @@ def _doc_scope(entry: dict[str, Any]) -> dict[str, Any]:
         # Seed pages the main-content prune hides: navigation-only
         # links never surface through link following.
         scope["urls"] = extra
+    candidates = list(entry.get("snippet_languages") or ())
+    if candidates:
+        scope["snippet_languages"] = candidates
+    rules = dict(entry.get("snippet_language_rules") or {})
+    if rules:
+        scope["snippet_language_rules"] = rules
     return scope
 
 

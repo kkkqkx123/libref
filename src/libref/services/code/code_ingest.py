@@ -15,6 +15,7 @@ from libref.services.code.repo_ids import call_uid, entity_uid
 from libref.services.code.repo_persist import (
     _check_manifest_identity,
     _persist_entities,
+    _persist_export_aliases,
     _persist_import_edges,
     _persist_repo_deps,
     _sweep_calls,
@@ -197,6 +198,7 @@ async def _index_repo_inner(
     _doc_store = prepared["doc_store"]
     all_decls = prepared["all_decls"]
     file_aliases = prepared["file_aliases"]
+    export_facts = prepared["export_facts"]
     live = prepared["live"]
     persist_definitions = code_search
     filt = target_filter or {}
@@ -211,9 +213,13 @@ async def _index_repo_inner(
         counts["import_edges"] = _persist_import_edges(
             conn, library_id, version_id, file_aliases
         )
+        counts["export_aliases"] = _persist_export_aliases(
+            conn, version_id, export_facts, tenant_id=tenant_id
+        )
     else:
         n_entities, swept_entities = 0, 0
         counts["import_edges"] = 0
+        counts["export_aliases"] = 0
     counts["entities"] = n_entities
     counts["swept_entities"] = swept_entities
     conn.commit()

@@ -50,6 +50,8 @@ _RECIPE_KEYS = {
         "doc_version",
         "follow_links",
         "extra_urls",
+        "snippet_languages",
+        "snippet_language_rules",
     ),
     "code": ("repo_url", "subdir", "ref", "exclude_patterns"),
 }
@@ -115,6 +117,29 @@ def load_spec() -> list[dict[str, Any]]:
             raise ArchiveError(
                 f"bench.json max_files only applies to source fixtures: {entry!r}"
             )
+        if entry["kind"] == "docs":
+            from libref.astminer.language_evidence import canonical_language
+
+            candidates = list(entry.get("snippet_languages") or ())
+            if not all(isinstance(value, str) for value in candidates):
+                raise ArchiveError(
+                    f"bench.json snippet_languages must be strings: {entry!r}"
+                )
+            invalid = [
+                value for value in candidates if canonical_language(value) != value
+            ]
+            if invalid:
+                raise ArchiveError(
+                    f"bench.json snippet_languages must be registered languages: {invalid}"
+                )
+            rules = entry.get("snippet_language_rules") or {}
+            if not isinstance(rules, dict) or not all(
+                isinstance(key, str) and isinstance(value, str)
+                for key, value in rules.items()
+            ):
+                raise ArchiveError(
+                    f"bench.json snippet_language_rules must map strings to strings: {entry!r}"
+                )
         if entry["kind"] == "docs" and not str(entry.get("doc_version") or "").strip():
             raise ArchiveError(
                 f"bench.json document fixture lacks doc_version: {entry}; "

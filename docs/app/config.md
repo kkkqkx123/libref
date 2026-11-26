@@ -42,7 +42,9 @@
 | ingest_batch_pages | 整数（≥1） | 200 | LIBREF_INGEST_BATCH_PAGES | 入库批处理页数 |
 | index_batch_files | 整数（≥1） | 200 | LIBREF_INDEX_BATCH_FILES | 建库批处理文件数 |
 | usage_mining_enabled | 布尔 | 开 | LIBREF_USAGE_MINING_ENABLED | 是否从源码文档注释与文档代码块抽取用法语料 |
-| doc_code_mining_enabled | 布尔 | 开 | LIBREF_DOC_CODE_MINING_ENABLED | 文档抓取时是否抽取语言标注代码块 |
+| doc_code_mining_enabled | 布尔 | 开 | LIBREF_DOC_CODE_MINING_ENABLED | 文档抓取时是否抽取代码块，无标注块也会留下片段记录 |
+| snippet_languages | 字符串列表 | 空 | LIBREF_SNIPPET_LANGUAGES | 站点候选语言，只对无语言证据的代码块做解析验证 |
+| snippet_language_rules | 键值映射 | 空 | LIBREF_SNIPPET_LANGUAGE_RULES | URL/选择器规则到语言的映射，规则的键记为证据标识 |
 | stdlib_filter_enabled | 布尔 | 开 | LIBREF_STDLIB_FILTER_ENABLED | 抽取阶段是否把标准库调用标为 stdlib 并默认排除 |
 | stdlib_table_version | 字符串 | 1 | LIBREF_STDLIB_TABLE_VERSION | 标准库语言表版本，变更时重新索引才能生效 |
 | probe_sample_limit | 整数（≥1） | 20 | LIBREF_PROBE_SAMPLE_LIMIT | 探查采样上限 |

@@ -5,8 +5,9 @@ ingestion paths, then the production document-feature derivation runs on them.
 The report compares the same questions with doc_feature_alpha off and on and
 records alignment, feature-node, block-type, coverage, drift and ranking
 observations. Expected feature nodes are checked as a subset of the nodes linked
-to the question's target documents. Nothing here writes gates: a floor needs a
-deliberate human decision after a full replay.
+to the question's target documents. Unlabeled expectations are reported as
+unmeasurable and excluded from accuracy denominators. Nothing here writes gates:
+a floor needs a deliberate human decision after a full replay.
 
 Usage:
     uv run python -m tests.e2e.bench.evaluate_doc_features [--data DIR] [--out DIR]
@@ -101,10 +102,11 @@ def _ingest_code_blocks(
     from tests.e2e.bench import archive as bench_archive
 
     pipeline = PagePipeline(settings)
-    payload = bench_archive.payload_path(
-        entry, _load_json(bench_archive.archive_dir(entry) / bench_archive.META_FILE)
-    )
-    counts = {"pages": 0, "snippets": 0, "calls": 0}
+    meta = _load_json(bench_archive.archive_dir(entry) / bench_archive.META_FILE)
+    payload = bench_archive.payload_path(entry, meta)
+    candidates = list(meta["recipe"].get("snippet_languages") or ())
+    rules = dict(meta["recipe"].get("snippet_language_rules") or {})
+    counts: dict[str, int] = {"pages": 0}
     for row in bench_archive.iter_pages(payload):
         url = str(row["url"])
         body = str(row["body"] or "")
@@ -113,16 +115,17 @@ def _ingest_code_blocks(
             scraped = pipeline.scrape_cached(body, url)
             markdown = scraped.markdown
             snippets = html_code_blocks(
-                scraped.cleaned_html,
+                body,
                 sample_prefix=doc_source_key(version_id, url),
                 url=url,
                 heading=scraped.title,
+                manual_rules=rules,
             )
             origin = "html_code_block"
         else:
             markdown = pipeline.clean_with_cache(kind, body, url)
             snippets = fenced_blocks(
-                markdown,
+                body,
                 sample_prefix=doc_source_key(version_id, url),
                 url=url,
             )
@@ -132,7 +135,6 @@ def _ingest_code_blocks(
         counts["pages"] += 1
         if not snippets:
             continue
-        counts["snippets"] += len(snippets)
         result = ingest_snippets(
             conn,
             str(info["library"]),
@@ -145,9 +147,50 @@ def _ingest_code_blocks(
             source_url=url,
             selection={"url": url},
             settings=settings,
+            snippet_candidates=candidates,
+            snippet_language_rules=rules,
         )
-        counts["calls"] += int(result["calls"])
+        for key, value in result.items():
+            if key == "source_id":
+                continue
+            counts[key] = counts.get(key, 0) + int(value)
     return counts
+
+
+def _snippet_funnel(
+    conn, version_id: int, snippets: int, coverage: int
+) -> dict[str, int]:
+    """Observed path from snippets through resolved calls to pattern coverage."""
+    calls = conn.execute(
+        "SELECT count(*), sum(CASE WHEN target_status='resolved_target' THEN 1 ELSE 0 END),"
+        " count(DISTINCT sample_id) FROM call_instances"
+        " WHERE version_id=? AND source_role='doc_snippet'",
+        (version_id,),
+    ).fetchone()
+    patterns = conn.execute(
+        "SELECT count(*) FROM seq_patterns WHERE version_id=?", (version_id,)
+    ).fetchone()
+    return {
+        "snippets": int(snippets),
+        "calls": int(calls[0] or 0),
+        "resolved_target": int(calls[1] or 0),
+        "samples": int(calls[2] or 0),
+        "patterns": int(patterns[0] or 0) if patterns else 0,
+        "coverage": int(coverage),
+    }
+
+
+def _snippet_evidence(conn, version_id: int) -> dict[str, dict[str, int]]:
+    """Snippet counts by language evidence source and parse status."""
+    rows = conn.execute(
+        "SELECT language_source, parse_status, count(*) FROM doc_snippet_records"
+        " WHERE version_id=? GROUP BY language_source, parse_status",
+        (version_id,),
+    ).fetchall()
+    out: dict[str, dict[str, int]] = {}
+    for source, status, count in rows:
+        out.setdefault(str(source or "none"), {})[str(status)] = int(count)
+    return out
 
 
 def _resolve_anchor(conn, question: dict, version_id: int) -> list[str]:
@@ -226,6 +269,7 @@ def _score_entry(conn, question: dict, version_id: int) -> dict[str, Any]:
         ).fetchall():
             node_paths.add(str(row[0]))
     want_nodes = {str(path) for path in question.get("expected_feature_nodes", [])}
+    want_verdict = str(question.get("expected_verdict") or "")
     return {
         "id": str(question["id"]),
         "source_ref": str(question.get("source_ref") or ""),
@@ -233,22 +277,34 @@ def _score_entry(conn, question: dict, version_id: int) -> dict[str, Any]:
         "entities_expected": sorted(want),
         "entities_found": sorted(links),
         "entities_extra": sorted(links - want),
-        "entity_match": want <= links,
+        "entity_match": want <= links if want else None,
         "facets_expected": expected_facets,
         "facet_checks": facet_checks,
         "facet_match": all(facet_checks.values()),
         "block_type_expected": expected_type,
         "block_type_match": bool(expected_type)
         and facet_checks.get("block_type", False),
-        "verdict_expected": str(question.get("expected_verdict") or ""),
-        "verdict_match": not question.get("expected_verdict")
-        or any(
-            verdicts.get(doc_id) == question["expected_verdict"] for doc_id in doc_ids
+        "verdict_expected": want_verdict,
+        "verdict_match": (
+            any(verdicts.get(doc_id) == want_verdict for doc_id in doc_ids)
+            if want_verdict
+            else None
         ),
         "nodes_expected": sorted(want_nodes),
         "nodes_found": sorted(node_paths),
-        "node_match": not want_nodes or want_nodes <= node_paths,
+        "node_match": want_nodes <= node_paths if want_nodes else None,
     }
+
+
+def _match_stats(entries: list[dict[str, Any]], key: str) -> tuple[int, int]:
+    measured = [entry[key] for entry in entries if entry[key] is not None]
+    return sum(1 for value in measured if value), len(measured)
+
+
+def _match_line(name: str, key: str, entries: list[dict[str, Any]]) -> str:
+    hits, total = _match_stats(entries, key)
+    suffix = "（有标签题，不可测量）" if not total else "（有标签题）"
+    return f"- {name}：{hits}/{total}{suffix}"
 
 
 def _library_id(conn, version_id: int) -> int:
@@ -395,6 +451,10 @@ def _evaluate_fixture(
         "source": str(info.get("source") or ""),
         "entity_source": entity_source,
         "snippet_counts": sourced,
+        "snippet_funnel": _snippet_funnel(
+            conn, version_id, int(sourced.get("snippets", 0)), int(counts["coverage"])
+        ),
+        "snippet_evidence": _snippet_evidence(conn, version_id),
         "derivation": counts,
         "questions": entries,
         "ranks": ranking["ranks"],
@@ -420,6 +480,7 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
     samples = json.loads(DRIFT_SAMPLES.read_text(encoding="utf-8")).get("samples", [])
     auto_drift = [row for row in samples if row.get("auto_verdict") == "drift"]
     false_positive = [row for row in auto_drift if row.get("human_verdict") != "drift"]
+    false_positive_rate = len(false_positive) / len(auto_drift) if auto_drift else 0.0
     lines = [
         "# 文档特征冻结归档评测",
         "",
@@ -429,18 +490,21 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
         "- 题目标签按目标文档的派生证据核对；一致性只表示标签与派生表相符，语义正确性需独立复核。",
         (
             f"- 漂移抽检：样本 {len(samples)}，自动 drift {len(auto_drift)}，"
-            f"误报 {len(false_positive)}；未标满样本前不计算误报率门禁。"
+            f"误报 {len(false_positive)}（{false_positive_rate:.1%}）；"
+            "样本不足，只记录误报率，不写门禁。"
         ),
         "",
     ]
     all_questions = [row for item in results for row in item["questions"]]
+    entity_labeled = sum(1 for row in all_questions if row["entities_expected"])
     node_labeled = sum(1 for row in all_questions if row["nodes_expected"])
     verdict_labeled = sum(1 for row in all_questions if row["verdict_expected"])
     lines.extend(
         [
             f"- 题目总数：{len(all_questions)}",
-            f"- 树节点标签覆盖：{node_labeled}/{len(all_questions)}",
+            f"- 实体标签覆盖：{entity_labeled}/{len(all_questions)}",
             f"- 判定标签覆盖：{verdict_labeled}/{len(all_questions)}",
+            f"- 树节点标签覆盖：{node_labeled}/{len(all_questions)}",
             "",
         ]
     )
@@ -451,6 +515,8 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             f"- 归档修订：{item['revision']}",
             f"- 获取地址：{item['source']}",
             f"- 实体来源：{item['entity_source']}；代码块：{_dump(item['snippet_counts'])}",
+            f"- 解析漏斗：{_dump(item.get('snippet_funnel', {}))}",
+            f"- 语言证据：{_dump(item.get('snippet_evidence', {}))}",
             f"- 派生计数：{_dump(item['derivation'])}",
             "",
             "| 题目 | 来源 | 锚点 | 实体对齐 | 树节点 | 特征一致 | 块类型 | 判定 | 排名 off/on |",
@@ -460,27 +526,47 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
         for row in item["questions"]:
             source = by_id.get(str(row["id"]), {}).get("source", "-")
             rank = item["ranks"].get(str(row["id"]), {})
+            entity_cell = (
+                "unmeasurable"
+                if row["entity_match"] is None
+                else (
+                    "OK"
+                    if row["entity_match"]
+                    else _dump([row["entities_expected"], row["entities_found"]])
+                )
+            )
+            node_cell = (
+                "unmeasurable"
+                if row["node_match"] is None
+                else (
+                    "OK"
+                    if row["node_match"]
+                    else _dump([row["nodes_expected"], row["nodes_found"]])
+                )
+            )
+            verdict_cell = (
+                "unmeasurable"
+                if row["verdict_match"] is None
+                else ("OK" if row["verdict_match"] else row["verdict_expected"])
+            )
             lines.append(
                 f"| {row['id']} | {source} | {'OK' if not row['anchor_problems'] else _dump(row['anchor_problems'])} "
-                f"| {'OK' if row['entity_match'] else _dump([row['entities_expected'], row['entities_found']])} "
-                f"| {'unmeasurable' if not row['nodes_expected'] else ('OK' if row['node_match'] else _dump([row['nodes_expected'], row['nodes_found']]))} "
+                f"| {entity_cell} "
+                f"| {node_cell} "
                 f"| {'OK' if row['facet_match'] else _dump([row['facets_expected'], row['facet_checks']])} "
                 f"| {'OK' if row['block_type_match'] else row['block_type_expected']} "
-                f"| {'OK' if row['verdict_match'] else row['verdict_expected']} "
+                f"| {verdict_cell} "
                 f"| {rank.get('off', 0)}/{rank.get('on', 0)} |"
             )
         metrics = item["metrics"]
         entries = item["questions"]
         lines += [
             "",
-            (
-                f"- 实体对齐：{sum(1 for row in entries if row['entity_match'])}/{len(entries)}"
-                f"（期望实体子集命中）"
-            ),
-            f"- 树节点一致：{sum(1 for row in entries if row['nodes_expected'] and row['node_match'])}/{sum(1 for row in entries if row['nodes_expected'])}（有标签题）",
+            _match_line("实体对齐", "entity_match", entries),
+            _match_line("树节点一致", "node_match", entries),
             f"- 块特征一致：{sum(1 for row in entries if row['facet_match'])}/{len(entries)}",
             f"- 块类型一致：{sum(1 for row in entries if row['block_type_match'])}/{len(entries)}",
-            f"- 判定一致：{sum(1 for row in entries if row['verdict_match'])}/{len(entries)}",
+            _match_line("判定一致", "verdict_match", entries),
             f"- 覆盖行数：{item['derivation']['coverage']}",
         ]
         for name, stats in item["filters"].items():
@@ -488,9 +574,25 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
                 f"- 过滤 {name}：保留 {stats['kept']}/{stats['results']}，"
                 f"命中 {stats['hits']}，命中率 {stats['hit_rate']:.3f}"
             )
+        statuses = {
+            key: value
+            for key, value in item["snippet_counts"].items()
+            if key
+            in (
+                "ok",
+                "partial",
+                "unsupported",
+                "unlabeled",
+                "ambiguous",
+                "failed",
+                "non_target",
+            )
+        }
+        if statuses:
+            lines.append(f"- 片段解析状态：{_dump(statuses)}")
         if not item["snippet_counts"]["snippets"]:
             lines.append(
-                "- 该站原始正文没有语言标记代码块：实体对齐率只作记录，不计入门禁。"
+                "- 该站原始正文没有可抽取代码块：实体对齐率只作记录，不计入门禁。"
             )
         lines += [
             "",
