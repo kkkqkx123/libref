@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,13 +25,21 @@ _PG_URL = os.environ.get("LIBREF_TEST_POSTGRES_URL", "")
 
 def _fresh_postgres(url: str) -> None:
     import psycopg
+    from psycopg import sql
 
     parsed = psycopg.conninfo.conninfo_to_dict(url)
-    dbname = (parsed.get("dbname") or "postgres").replace('"', "")
+    dbname = str(parsed.get("dbname") or "postgres")
     admin = dict(parsed, dbname="postgres")
     with psycopg.connect(**admin, autocommit=True) as conn:
-        conn.execute(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)')
-        conn.execute(f'CREATE DATABASE "{dbname}"')
+        conn.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity"
+            " WHERE datname = %s AND pid <> pg_backend_pid()",
+            (dbname,),
+        )
+        conn.execute(
+            sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(dbname))
+        )
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(dbname)))
 
 
 class _PostgresSettings:
@@ -775,25 +784,75 @@ def test_gold_cases_match_seeded_source_of_truth(conn, monkeypatch, tmp_path) ->
         version="1.0",
         tenant_id="default",
     )
-    assert report["summary"]["total"] == len(_GOLD["cases"])
-    assert report["summary"]["matched"] == len(_GOLD["cases"])
+    assert report["summary"] == {
+        "total": len(_GOLD["cases"]),
+        "matched": len(_GOLD["cases"]),
+        "match_rate": 1.0,
+    }
     assert all(case["passed"] for case in report["cases"])
+    assert report["metrics"]["seed_resolution"] == 1.0
+    assert report["metrics"]["path_hit"] == 1.0
+    assert report["metrics"]["node_precision"] == 1.0
+    assert report["metrics"]["node_recall"] == 1.0
+    assert report["metrics"]["relation_precision"] == 1.0
+    assert report["metrics"]["relation_recall"] == 1.0
+    assert report["metrics"]["evidence_traceability"] == 1.0
+    assert report["metrics"]["unexpected_truncations"] == 0
 
 
 def test_audit_report_exposes_mismatch_without_gate(
     conn, monkeypatch, tmp_path
 ) -> None:
     _seed(conn)
-    case = dict(_GOLD["cases"][0], expected_nodes=["pkg.absent.Endpoint"])
+    case = dict(_GOLD["cases"][0], expected_nodes=["api:absent"])
     report = _service(conn, monkeypatch, tmp_path).audit(
         [case],
         library="graphlib",
         version="1.0",
         tenant_id="default",
     )
-    assert report["summary"] == {"total": 1, "matched": 0}
+    assert report["summary"]["total"] == 1
+    assert report["summary"]["matched"] == 0
     assert report["cases"][0]["passed"] is False
     assert report["cases"][0]["actual_nodes"]
+    assert report["cases"][0]["node_precision"] == 0.0
+    assert report["metrics"]["node_recall"] == 0.0
+
+
+def test_audit_detects_untraceable_evidence(conn, monkeypatch, tmp_path) -> None:
+    _seed(conn)
+    service = _service(conn, monkeypatch, tmp_path)
+    assert service._trace_evidence("call_instances:1@1:default") is True
+    assert service._trace_evidence("call_instances:9999@1:default") is False
+    case = dict(
+        _GOLD["cases"][0],
+        expected_evidence_refs=["call_instances:9999@1:default"],
+    )
+    report = service.audit(
+        [case], library="graphlib", version="1.0", tenant_id="default"
+    )
+    assert report["cases"][0]["evidence_traceability"] == 1.0
+    assert report["cases"][0]["passed"] is False
+    assert report["cases"][0]["actual_evidence_refs"] == ["call_instances:1@1:default"]
+
+
+def test_audit_reports_unexpected_truncation(conn, monkeypatch, tmp_path) -> None:
+    _seed(conn)
+    service = GraphQueryService(
+        conn,
+        make_settings(monkeypatch, tmp_path, graph_max_nodes=2),
+    )
+    report = service.audit(
+        [_GOLD["cases"][0]],
+        library="graphlib",
+        version="1.0",
+        tenant_id="default",
+    )
+    case = report["cases"][0]
+    assert case["truncated"] is True
+    assert case["truncation_ok"] is False
+    assert case["passed"] is False
+    assert report["metrics"]["unexpected_truncations"] == 1
 
 
 def test_audit_export_tool_writes_reviewable_report(
@@ -811,4 +870,46 @@ def test_audit_export_tool_writes_reviewable_report(
         version="1.0",
     )
     assert report["summary"]["matched"] == len(_GOLD["cases"])
-    assert all(case["evidence_refs"] for case in report["cases"])
+    assert all(case["actual_evidence_refs"] for case in report["cases"])
+    text = tool.render_text_report(report)
+    assert "# Graph query audit" in text
+    assert "- evidence traceability: 1.0" in text
+
+
+def test_audit_export_tool_supports_strict_mode(conn, monkeypatch, tmp_path) -> None:
+    _seed(conn)
+    tool_path = Path(__file__).resolve().parents[2] / "tools" / "export_graph_audit.py"
+    spec = importlib.util.spec_from_file_location(
+        "export_graph_audit_strict", tool_path
+    )
+    assert spec is not None and spec.loader is not None
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    mismatched = dict(_GOLD["cases"][0], expected_nodes=["api:absent"])
+    gold = tmp_path / "strict-gold.json"
+    gold.write_text(
+        json.dumps({"cases": [mismatched]}, ensure_ascii=False), encoding="utf-8"
+    )
+    out = tmp_path / "strict.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "export_graph_audit.py",
+            "--db",
+            str(tmp_path / "test.db"),
+            "--library",
+            "graphlib",
+            "--version",
+            "1.0",
+            "--gold",
+            str(gold),
+            "--out",
+            str(out),
+            "--strict",
+        ],
+    )
+    assert tool.main() == 1
+    assert out.is_file()
+    text = out.with_suffix(".md").read_text(encoding="utf-8")
+    assert "passed: False" in text

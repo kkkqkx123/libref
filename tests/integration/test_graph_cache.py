@@ -158,9 +158,10 @@ def test_cached_results_match_sql_gold_paths(conn, monkeypatch, tmp_path) -> Non
     assert [case["actual_relations"] for case in plain["cases"]] == [
         case["actual_relations"] for case in cached["cases"]
     ]
-    assert [case["evidence_refs"] for case in plain["cases"]] == [
-        case["evidence_refs"] for case in cached["cases"]
+    assert [case["actual_evidence_refs"] for case in plain["cases"]] == [
+        case["actual_evidence_refs"] for case in cached["cases"]
     ]
+    assert plain["metrics"] == cached["metrics"]
 
     options = {
         "entity": "pkg.client.Client.send",

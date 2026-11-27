@@ -17,6 +17,28 @@ Docker 已按系统包方式安装，属于正式环境：
 
 系统 Docker 没有 buildx 组件，构建命令需显式关闭 BuildKit。不要再向用户目录安装临时 Docker 工具链；旧的 `~/.local/share/libref-build-tools/` 与 `~/.local/share/libref-docker/` 已移除。
 
+## PostgreSQL 测试实例
+
+devs 上的 PostgreSQL 10.23 由 CCE 基准服务脚本按需启动，不作为系统服务常驻。该实例监听 `127.0.0.1:15432`，本地 trust 认证，连接串为 `postgres://postgres@127.0.0.1:15432/postgres`；启动前需要把文件描述符软限制提高到 65536：
+
+```bash
+ulimit -n 65536
+bash /data/kkkqkx/cce/repo/scripts/devs-benchmark-services.sh up postgres
+```
+
+`libref` 的生产 schema 使用 PG12+ 的生成列语法，不能用这台 PG10 跑跨后端用例。复测使用 `postgres:14` 容器，映射到 `127.0.0.1:15433`。容器作为可复用环境保留，但不常驻运行：首次以 `docker create --name libref-pg14 -e POSTGRES_HOST_AUTH_METHOD=trust -p 15433:5432 postgres:14` 创建，后续按需 `docker start libref-pg14`，复测后 `docker stop libref-pg14`。
+
+运行时把 `LIBREF_TEST_POSTGRES_URL` 指向该端口上的专用库名：
+
+```bash
+docker start libref-pg14
+LIBREF_TEST_POSTGRES_URL=postgres://postgres@127.0.0.1:15433/libref_graph_test \
+  uv run pytest -q tests/integration/test_graph_query.py -k postgres
+docker stop libref-pg14
+```
+
+测试会删除并重建 URL 中指定的数据库，因此不能指向 `postgres` 管理库。测试辅助先终止目标库连接再删库，不依赖高版本才有的 `WITH (FORCE)`。容器保留但不持续运行，不因单次复测删除。
+
 ## Podman 不可用的原因
 
 该机也装有 Podman 6.2，但启动时直接报 `Cgroups v1 not supported`。Podman 5 起不再支持 cgroup v1，而主机内核无法在不重启且不改启动参数的情况下切到 cgroup v2。因此 devs 上的镜像构建不使用 Podman。

@@ -1307,31 +1307,117 @@ export interface components {
             /** Count */
             count: number;
         };
+        /**
+         * GraphEdge
+         * @description A typed relation edge with traversal confidence and source evidence.
+         */
+        GraphEdge: {
+            /** Id */
+            id: string;
+            /** Source */
+            source: string;
+            /** Target */
+            target: string;
+            /** Relation */
+            relation: string;
+            /** Confidence */
+            confidence: string;
+            /**
+             * Weight
+             * @default 1
+             */
+            weight: number;
+            /** Source Table */
+            source_table: string;
+            /** Source Id */
+            source_id?: number | null;
+            /** Version Id */
+            version_id?: number | null;
+            /** Profile Id */
+            profile_id?: number | null;
+            /** Tenant Id */
+            tenant_id?: string | null;
+            /**
+             * Evidence Ref
+             * @default
+             */
+            evidence_ref: string;
+            /** Evidence */
+            evidence?: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * GraphNode
+         * @description A graph node with its source-of-truth identity and display fields.
+         */
+        GraphNode: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Kind */
+            kind: string;
+            /** Source Table */
+            source_table: string;
+            /** Source Id */
+            source_id?: number | null;
+            /** Version Id */
+            version_id?: number | null;
+            /** Profile Id */
+            profile_id?: number | null;
+            /** Tenant Id */
+            tenant_id?: string | null;
+            /**
+             * Confidence
+             * @default
+             */
+            confidence: string;
+            /**
+             * Evidence Ref
+             * @default
+             */
+            evidence_ref: string;
+            /**
+             * Weight
+             * @default 1
+             */
+            weight: number;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /**
+             * Path
+             * @default
+             */
+            path: string;
+            /**
+             * File
+             * @default
+             */
+            file: string;
+            /** Line Start */
+            line_start?: number | null;
+            /** Line End */
+            line_end?: number | null;
+        };
         /** GraphResponse */
         GraphResponse: {
             /** Mode */
             mode: string;
-            /** Seed */
-            seed: {
-                [key: string]: unknown;
-            };
-            /** Target */
-            target?: {
-                [key: string]: unknown;
-            } | null;
+            seed: components["schemas"]["GraphNode"];
+            target?: components["schemas"]["GraphNode"] | null;
             /**
              * Found
              * @default true
              */
             found: boolean;
             /** Nodes */
-            nodes?: {
-                [key: string]: unknown;
-            }[];
+            nodes?: components["schemas"]["GraphNode"][];
             /** Edges */
-            edges?: {
-                [key: string]: unknown;
-            }[];
+            edges?: components["schemas"]["GraphEdge"][];
             /**
              * Truncated
              * @default false
@@ -1350,9 +1436,7 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /** Documents */
-            documents?: {
-                [key: string]: unknown;
-            }[];
+            documents?: components["schemas"]["GraphNode"][];
         };
         /** ApiValidationError */
         HTTPValidationError: {

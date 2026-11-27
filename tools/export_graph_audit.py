@@ -5,7 +5,8 @@ Usage:
     uv run python tools/export_graph_audit.py \
         --db /path/to/libref.db \
         --library graphlib --version 1.0 \
-        --out /tmp/graph-audit.json
+        --out /tmp/graph-audit.json \
+        [--text /tmp/graph-audit.md] [--strict]
 """
 
 from __future__ import annotations
@@ -52,6 +53,74 @@ def build_report(
         conn.close()
 
 
+def _values(items: list[Any]) -> str:
+    return ", ".join(str(item) for item in items) if items else "-"
+
+
+def render_text_report(report: dict[str, Any]) -> str:
+    """Render one reviewable Markdown report from the structured report."""
+    summary = report["summary"]
+    metrics = report.get("metrics", {})
+    lines = [
+        "# Graph query audit",
+        "",
+        f"- library: {report['library']}",
+        f"- version: {report['version']}",
+        f"- profile: {report['profile']}",
+        f"- tenant: {report['tenant_id'] or '-'}",
+        (
+            f"- matched: {summary['matched']}/{summary['total']}"
+            f" ({summary.get('match_rate', 0.0)})"
+        ),
+        f"- seed resolution: {metrics.get('seed_resolution', 0.0)}",
+        f"- path hit: {metrics.get('path_hit', 0.0)}",
+        (
+            f"- node precision/recall:"
+            f" {metrics.get('node_precision', 0.0)}/{metrics.get('node_recall', 0.0)}"
+        ),
+        (
+            f"- relation precision/recall:"
+            f" {metrics.get('relation_precision', 0.0)}"
+            f"/{metrics.get('relation_recall', 0.0)}"
+        ),
+        f"- evidence traceability: {metrics.get('evidence_traceability', 0.0)}",
+        f"- unexpected truncations: {metrics.get('unexpected_truncations', 0)}",
+        "",
+        "## Cases",
+        "",
+    ]
+    for case in report["cases"]:
+        lines.extend(
+            [
+                f"### {case['name']}",
+                "",
+                f"- passed: {case['passed']}",
+                f"- mode: {case.get('mode', '-')}",
+                f"- error: {case.get('error') or '-'}",
+                (
+                    f"- seed: {case.get('actual_seed', '-')}"
+                    f" (expected {case.get('expected_seed', '-')})"
+                ),
+                (
+                    f"- nodes: {_values(case.get('actual_nodes', []))}"
+                    f" (expected {_values(case.get('expected_nodes', []))})"
+                ),
+                (
+                    f"- relations: {_values(case.get('actual_relations', []))}"
+                    f" (expected {_values(case.get('expected_relations', []))})"
+                ),
+                f"- evidence: {_values(case.get('actual_evidence_refs', []))}",
+                f"- evidence traceability: {case.get('evidence_traceability', 0.0)}",
+                (
+                    f"- truncated: {case.get('truncated', False)}"
+                    f" (expected {case.get('expected_truncated', False)})"
+                ),
+                "",
+            ]
+        )
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, required=True)
@@ -62,6 +131,8 @@ def main() -> int:
     parser.add_argument("--tenant-id", default="default")
     parser.add_argument("--profile", default="usage")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--text", type=Path)
+    parser.add_argument("--strict", action="store_true")
     args = parser.parse_args()
 
     report = build_report(
@@ -73,15 +144,20 @@ def main() -> int:
         tenant_id=args.tenant_id,
         profile=args.profile,
     )
+    text_path = args.text or args.out.with_suffix(".md")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(
         json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
+    text_path.parent.mkdir(parents=True, exist_ok=True)
+    text_path.write_text(render_text_report(report), encoding="utf-8")
     summary = report["summary"]
     print(
         f"graph audit: {summary['matched']}/{summary['total']} matched,"
-        f" report={args.out}"
+        f" json={args.out} text={text_path}"
     )
+    if args.strict and summary["matched"] != summary["total"]:
+        return 1
     return 0
 
 

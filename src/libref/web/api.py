@@ -11,6 +11,7 @@ from libref.errors import ALL_CODES as ERROR_CODES
 from libref.errors import ErrorCode
 from libref.services.graph_query import GraphDirection, GraphMode
 from libref.services.infra.jobs import JobKind
+from libref.store.graph import GraphEdge, GraphNode
 
 JobStatus = Literal["pending", "running", "done", "failed"]
 IsoDateTime = Annotated[str, Field(json_schema_extra={"format": "date-time"})]
@@ -64,18 +65,18 @@ class GraphQuery(BaseModel):
 
 class GraphResponse(BaseModel):
     mode: str
-    seed: dict[str, Any]
-    target: dict[str, Any] | None = None
+    seed: GraphNode
+    target: GraphNode | None = None
     found: bool = True
-    nodes: list[dict[str, Any]] = Field(default_factory=list)
-    edges: list[dict[str, Any]] = Field(default_factory=list)
+    nodes: list[GraphNode] = Field(default_factory=list)
+    edges: list[GraphEdge] = Field(default_factory=list)
     truncated: bool = False
     library: str | None = None
     version: str | None = None
     profile: str | None = None
     tenant_id: str | None = None
     usage: dict[str, Any] | None = None
-    documents: list[dict[str, Any]] = Field(default_factory=list)
+    documents: list[GraphNode] = Field(default_factory=list)
 
 
 class LibrarySearchQuery(BaseModel):

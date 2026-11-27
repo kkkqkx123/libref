@@ -78,7 +78,7 @@
 问题清单已全部闭环：
 
 - `shortest_path` 接收调用方 `direction`，`path` 查询按指定方向约束边；`usage` 显式拒绝非空 `depth`，不再静默忽略。
-- `GraphQueryService.audit()` 汇总 gold 用例的节点、关系与证据出处，只导出审核结果，不写入质量门禁。`tools/export_graph_audit.py` 提供离线导出入口。
+- `GraphQueryService.audit()` 按稳定节点 ID 精确判定种子、节点、关系、证据行与截断状态，同时汇总匹配率、路径命中率、节点/关系精确率与召回率；`tools/export_graph_audit.py` 同时导出 JSON 与 Markdown 报告，默认不门禁，显式 `--strict` 才使用退出码。评测收紧方案见同目录的图遍历查询评测与审核输出收紧文档。
 - 集成测试覆盖路径方向、`usage` 参数拒绝、gold 报告、不匹配报告与导出工具。
 - Web 与 MCP 文档同步说明 `path` 方向和 `usage` 一跳语义。
 

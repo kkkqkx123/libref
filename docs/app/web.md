@@ -62,7 +62,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 | relation_types | 否 | 无 | 关系类型过滤，未知类型返回参数错误 |
 | include_ambiguous | 否 | 关 | 诊断时展开歧义与非目标解析边 |
 
-返回 `seed`、`nodes`、`edges`、`truncated`、`library`、`version`、`profile`、`tenant_id`；`path` 另返回 `found` 与 `target`，`usage` 另返回挖掘统计与强边文档。
+返回 `seed`、`nodes`、`edges`、`truncated`、`library`、`version`、`profile`、`tenant_id`；`seed/target/nodes/edges/documents` 使用与图读模型一致的字段契约，`path` 另返回 `found` 与 `target`，`usage` 另返回挖掘统计与强边文档。
 
 ### GET /library-search
 

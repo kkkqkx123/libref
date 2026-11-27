@@ -5918,6 +5918,229 @@
         ],
         "title": "FeedbackResponse"
       },
+      "GraphEdge": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "relation": {
+            "type": "string",
+            "title": "Relation"
+          },
+          "confidence": {
+            "type": "string",
+            "title": "Confidence"
+          },
+          "weight": {
+            "type": "number",
+            "title": "Weight",
+            "default": 1.0
+          },
+          "source_table": {
+            "type": "string",
+            "title": "Source Table"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          },
+          "evidence_ref": {
+            "type": "string",
+            "title": "Evidence Ref",
+            "default": ""
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Evidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "target",
+          "relation",
+          "confidence",
+          "source_table"
+        ],
+        "title": "GraphEdge",
+        "description": "A typed relation edge with traversal confidence and source evidence."
+      },
+      "GraphNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "source_table": {
+            "type": "string",
+            "title": "Source Table"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "version_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version Id"
+          },
+          "profile_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profile Id"
+          },
+          "tenant_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tenant Id"
+          },
+          "confidence": {
+            "type": "string",
+            "title": "Confidence",
+            "default": ""
+          },
+          "evidence_ref": {
+            "type": "string",
+            "title": "Evidence Ref",
+            "default": ""
+          },
+          "weight": {
+            "type": "number",
+            "title": "Weight",
+            "default": 1.0
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "default": ""
+          },
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "default": ""
+          },
+          "file": {
+            "type": "string",
+            "title": "File",
+            "default": ""
+          },
+          "line_start": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line Start"
+          },
+          "line_end": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line End"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "kind",
+          "source_table"
+        ],
+        "title": "GraphNode",
+        "description": "A graph node with its source-of-truth identity and display fields."
+      },
       "GraphResponse": {
         "properties": {
           "mode": {
@@ -5925,21 +6148,17 @@
             "title": "Mode"
           },
           "seed": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Seed"
+            "$ref": "#/components/schemas/GraphNode"
           },
           "target": {
             "anyOf": [
               {
-                "additionalProperties": true,
-                "type": "object"
+                "$ref": "#/components/schemas/GraphNode"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Target"
+            ]
           },
           "found": {
             "type": "boolean",
@@ -5948,16 +6167,14 @@
           },
           "nodes": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/GraphNode"
             },
             "type": "array",
             "title": "Nodes"
           },
           "edges": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/GraphEdge"
             },
             "type": "array",
             "title": "Edges"
@@ -6025,8 +6242,7 @@
           },
           "documents": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/GraphNode"
             },
             "type": "array",
             "title": "Documents"

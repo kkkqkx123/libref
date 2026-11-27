@@ -1,5 +1,5 @@
 {
-  "description": "Graph query gold cases over the seeded graphlib source-of-truth facts.",
+  "description": "Graph query gold cases with stable node identities and row-backed evidence over the seeded source-of-truth facts.",
   "cases": [
     {
       "name": "direct-call-path",
@@ -7,8 +7,12 @@
       "entity": "pkg.client.Client",
       "target": "pkg.client.Client.send",
       "relation_types": ["call"],
-      "expected_nodes": ["pkg.client.Client.send"],
+      "expected_seed": "api:1",
+      "expected_found": true,
+      "expected_nodes": ["api:1", "api:2"],
       "expected_relations": ["call"],
+      "expected_evidence_refs": ["call_instances:1@1:default"],
+      "expected_truncated": false,
       "edges_from_seed_only": false
     },
     {
@@ -18,8 +22,11 @@
       "direction": "forward",
       "depth": 1,
       "relation_types": ["pattern_next"],
-      "expected_nodes": ["pkg.client.Client.send"],
+      "expected_seed": "api:1",
+      "expected_nodes": ["api:1", "api:2"],
       "expected_relations": ["pattern_next"],
+      "expected_evidence_refs": ["seq_patterns:1@1:default"],
+      "expected_truncated": false,
       "edges_from_seed_only": true
     },
     {
@@ -28,9 +35,12 @@
       "entity": "pkg.client.Client.send",
       "direction": "backward",
       "relation_types": ["mentions"],
-      "expected_nodes": ["API"],
-      "forbidden_nodes": ["Weak"],
+      "expected_seed": "api:2",
+      "expected_nodes": ["api:2", "doc:1"],
+      "forbidden_nodes": ["doc:2"],
       "expected_relations": ["mentions"],
+      "expected_evidence_refs": ["doc_api_links:1@1:default"],
+      "expected_truncated": false,
       "edges_from_seed_only": false
     },
     {
@@ -38,8 +48,20 @@
       "mode": "community",
       "entity": "pkg.client.Client.send",
       "relation_types": ["member"],
-      "expected_nodes": ["pkg.client.Client.close"],
+      "expected_seed": "api:2",
+      "expected_nodes": [
+        "api:2",
+        "api:4",
+        "cluster:1:4",
+        "feature:1:pkg.client.send"
+      ],
       "expected_relations": ["member"],
+      "expected_evidence_refs": [
+        "api_clusters:1@1:default",
+        "api_clusters:2@1:default",
+        "doc_feature_node_links:1@1:default"
+      ],
+      "expected_truncated": false,
       "edges_from_seed_only": false
     },
     {
@@ -47,8 +69,11 @@
       "mode": "impact",
       "entity": "pkg.client.Client",
       "relation_types": ["call"],
-      "expected_nodes": ["pkg/script.py"],
+      "expected_seed": "api:1",
+      "expected_nodes": ["api:1", "file:1:pkg/script.py"],
       "expected_relations": ["call"],
+      "expected_evidence_refs": ["call_instances:4@1:default"],
+      "expected_truncated": false,
       "edges_from_seed_only": false
     }
   ]

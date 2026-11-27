@@ -76,19 +76,18 @@ def resolve_version_id(
 ) -> int:
     """Resolve a library version inside one tenant; unknown or foreign rows miss."""
     tenant_id = require_tenant(tenant_id)
-    if is_global(tenant_id):
-        row = conn.execute(
-            "SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id"
-            " WHERE l.name=? AND v.version=? AND (? IS NULL OR l.ecosystem=?)",
-            (library, version, ecosystem, ecosystem),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id"
-            " WHERE l.name=? AND v.version=? AND (? IS NULL OR l.ecosystem=?)"
-            " AND l.tenant_id=? AND v.tenant_id=?",
-            (library, version, ecosystem, ecosystem, tenant_id, tenant_id),
-        ).fetchone()
+    sql = (
+        "SELECT v.id FROM versions v JOIN libraries l ON l.id = v.library_id"
+        " WHERE l.name=? AND v.version=?"
+    )
+    params: list[Any] = [library, version]
+    if ecosystem is not None:
+        sql += " AND l.ecosystem=?"
+        params.append(ecosystem)
+    if not is_global(tenant_id):
+        sql += " AND l.tenant_id=? AND v.tenant_id=?"
+        params.extend((tenant_id, tenant_id))
+    row = conn.execute(sql, tuple(params)).fetchone()
     if row is None:
         raise ValueError(f"unknown version: {library} {version}")
     return int(row[0])

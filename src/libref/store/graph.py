@@ -1321,11 +1321,11 @@ class GraphView:
             )
         tenant, params = self._tenant_sql("doc_link_edges")
         links = self._conn.execute(
-            "SELECT dst_url, version_id FROM doc_link_edges"
+            "SELECT id, dst_url, version_id FROM doc_link_edges"
             f" WHERE src_url = ? AND {self._version_sql()}{tenant} LIMIT ?",
             [node.url, *self._version_ids, *params, self._max_fanout],
         ).fetchall()
-        for dst, version_id in links:
+        for link_id, dst, version_id in links:
             for target in self._docs_by_url(str(dst)):
                 out.append(
                     self._make_edge(
@@ -1334,6 +1334,7 @@ class GraphView:
                         relation="doc_link",
                         confidence="INFERRED",
                         source_table="doc_link_edges",
+                        source_id=int(link_id),
                         version_id=int(version_id),
                         profile_id=self.profile_id,
                         evidence={"dst_url": str(dst)},
@@ -1399,12 +1400,12 @@ class GraphView:
             return []
         tenant, params = self._tenant_sql("doc_link_edges")
         rows = self._conn.execute(
-            "SELECT src_url, version_id FROM doc_link_edges"
+            "SELECT id, src_url, version_id FROM doc_link_edges"
             f" WHERE dst_url = ? AND {self._version_sql()}{tenant} LIMIT ?",
             [node.url, *self._version_ids, *params, self._max_fanout],
         ).fetchall()
         out: list[GraphEdge] = []
-        for src, version_id in rows:
+        for link_id, src, version_id in rows:
             for source in self._docs_by_url(str(src)):
                 out.append(
                     self._make_edge(
@@ -1413,6 +1414,7 @@ class GraphView:
                         relation="doc_link",
                         confidence="INFERRED",
                         source_table="doc_link_edges",
+                        source_id=int(link_id),
                         version_id=int(version_id),
                         profile_id=self.profile_id,
                         evidence={"src_url": str(src)},

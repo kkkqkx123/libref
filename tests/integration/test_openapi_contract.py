@@ -96,6 +96,23 @@ def test_contract_routes_in_openapi(tmp_path, monkeypatch) -> None:
         conn.close()
 
 
+def test_graph_response_names_node_and_edge_fields(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    conn = _open(tmp_path)
+    try:
+        document = _client(conn, monkeypatch, tmp_path).get("/openapi.json").json()
+        schemas = document["components"]["schemas"]
+        node = schemas["GraphNode"]["properties"]
+        edge = schemas["GraphEdge"]["properties"]
+        assert {"id", "label", "kind", "source_table", "evidence_ref"} <= set(node)
+        assert {"id", "source", "target", "relation", "source_id"} <= set(edge)
+        response = schemas["GraphResponse"]["properties"]
+        assert response["nodes"]["items"]["$ref"].endswith("/GraphNode")
+        assert response["edges"]["items"]["$ref"].endswith("/GraphEdge")
+    finally:
+        conn.close()
+
+
 def test_all_routes_expose_named_object_schemas(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     conn = _open(tmp_path)
