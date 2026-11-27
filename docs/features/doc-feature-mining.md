@@ -32,6 +32,6 @@
 
 ## 检索与出口
 
-`doc_feature_alpha` 是第四个乘法加成项，默认零。加成来自含示例、已对齐实体与废弃标记的块级信号，并复用既有健康门控；块类型过滤、废弃排除、仅看对齐页是显式检索参数，精确路与混合路都支持。`doc_insight` 在 MCP、CLI 与 Web 三处提供 `features` / `links` / `coverage` / `consistency` 四视图，可按块标识过滤；`links` 附带特征树节点路径。Web 前端提供独立洞察页、搜索过滤控件与阅读页的派生特征摘要；跨版本对比只读计算，不新增表。
+文档块特征、实体对齐边与同簇关系不进入排序，只在排序完成后对 top-N 结果附加只读注释；`doc_feature_annotation_top_n` 控制数量，设为 0 时关闭。块类型过滤、废弃排除、仅看对齐页仍是显式检索参数，精确路与混合路都支持。`doc_insight` 在 MCP、CLI 与 Web 三处提供 `features` / `links` / `coverage` / `consistency` 四视图，可按块标识过滤；`links` 附带特征树节点路径。Web 前端提供独立洞察页、搜索过滤控件与阅读页的派生特征摘要；跨版本对比只读计算，不新增表。
 
 配置、加权判定集与评估口径见 `docs/plan/doc-feature-mining.md`。

@@ -167,10 +167,10 @@ def test_insight_views_and_filters(conn, monkeypatch, tmp_path):
     assert verdicts and all(row["note"] == "" for row in verdicts)
     assert svc.compare_versions("demo", "1.0", "1.0") == []
 
-    from libref.store.retriever import _doc_feature_bonuses
+    from libref.store.retriever import doc_feature_annotations
 
-    bonuses = _doc_feature_bonuses(conn, [version_id])
-    assert bonuses[version_id][doc_id] > 0
+    notes = doc_feature_annotations(conn, [version_id], [doc_id])
+    assert notes[doc_id]
 
     kept = filter_by_doc_facets(
         conn, [doc_id], block_type="example", exclude_deprecated=True, aligned_only=True
@@ -271,10 +271,9 @@ def test_entity_source_binding_resolves_snippets_without_copying_entities(conn):
     )
 
 
-def test_alignment_bonus_weights_evidence(conn):
-    from libref.store.retriever import ALIGNMENT_BONUS, _doc_feature_bonuses
+def test_strong_alignment_appears_only_as_annotation(conn):
+    from libref.store.retriever import doc_feature_annotations
 
-    assert ALIGNMENT_BONUS == {"symbol": 0.1, "signature": 0.05}
     library_id, version_id, _doc_id = _seed(conn)
     conn.execute(
         "INSERT INTO pages(version_id, url) VALUES(?, ?)",
@@ -301,20 +300,20 @@ def test_alignment_bonus_weights_evidence(conn):
     )
     conn.commit()
 
-    def bonus():
-        return _doc_feature_bonuses(conn, [version_id])[version_id][weak_id]
+    def notes():
+        return doc_feature_annotations(conn, [version_id], [weak_id]).get(weak_id, [])
 
-    assert bonus() == pytest.approx(0.0)
+    assert not any(note.startswith("aligned:") for note in notes())
     conn.execute(
         "UPDATE doc_api_links SET match_kind='signature' WHERE document_id=?",
         (weak_id,),
     )
-    assert bonus() == pytest.approx(0.05)
+    assert any(note.startswith("aligned:") for note in notes())
     conn.execute(
         "UPDATE doc_api_links SET match_kind='symbol' WHERE document_id=?",
         (weak_id,),
     )
-    assert bonus() == pytest.approx(0.1)
+    assert any(note.startswith("aligned:") for note in notes())
 
 
 def test_consistency_gateway_failure_is_counted(conn, monkeypatch, tmp_path):

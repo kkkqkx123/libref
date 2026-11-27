@@ -106,14 +106,13 @@ rerank_top_n = 10
 rerank_truncate = 500
 
 [retrieval]
-# 混合检索：排名融合常数、双路权重、频次与分组加成、命中窗口扩展
+# 混合检索：排名融合常数、双路权重、频次加成、命中窗口扩展
 rrf_k = 20
 rrf_w_fts = 1.0
 rrf_w_vec = 1.0
 freq_alpha = 0.15
-cluster_alpha = 0.05
-# 文档侧特征加权默认关闭，待判定集标定后再开启
-doc_feature_alpha = 0.0
+# 派生特征只做结果增强，不参与排序；0 表示关闭
+doc_feature_annotation_top_n = 5
 # 候选放大与段落组装：召回倍数、组装倍数与下限、跨版本上限
 candidate_multiplier = 3
 assemble_multiplier = 2

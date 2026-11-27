@@ -474,17 +474,16 @@ def _rank_questions(
     import asyncio
 
     asyncio.run(vectors.prepare())
-    alpha = float(getattr(settings, "doc_feature_alpha", 0.0))
     off = SearchService(conn, settings, vec_store=vectors, embed=embedder)
-    on_settings = settings.model_copy(update={"doc_feature_alpha": max(alpha, 0.4)})
+    on_settings = settings.model_copy(update={"doc_feature_annotation_top_n": 5})
     on = SearchService(conn, on_settings, vec_store=vectors, embed=embedder)
     rows_off: list[dict] = []
     rows_on: list[dict] = []
     filter_rows: list[dict] = []
     lines = [
-        "# Retrieval ranking with doc_feature_alpha off and on",
+        "# Retrieval ranking with result annotation off and on",
         "",
-        "Both columns share one pool depth and one chunk budget; only the weight changes.",
+        "Both columns share one pool depth and one chunk budget; only text annotation changes.",
         "",
     ]
     for question in questions:
@@ -726,9 +725,8 @@ def render(out_dir: Path) -> dict[str, Any]:
         try:
             settings = bench_settings(
                 db_path,
-                doc_feature_alpha=0.0,
+                doc_feature_annotation_top_n=0,
                 freq_alpha=0.0,
-                cluster_alpha=0.0,
                 facet_alpha=0.0,
             )
             pipeline = PagePipeline(settings)

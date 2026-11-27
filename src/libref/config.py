@@ -165,7 +165,6 @@ class LibrefSettings(BaseSettings):
     rrf_w_fts: float = Field(default=1.0, ge=0)
     rrf_w_vec: float = Field(default=1.0, ge=0)
     freq_alpha: float = Field(default=0.15, ge=0)
-    cluster_alpha: float = Field(default=0.05, ge=0)
     candidate_multiplier: int = Field(default=3, ge=1)
     assemble_multiplier: int = Field(default=2, ge=1)
     assemble_min: int = Field(default=10, ge=1)
@@ -190,7 +189,7 @@ class LibrefSettings(BaseSettings):
     facet_min_gain: float = Field(default=0.0, ge=0)
     guard_enabled: bool = False
     facet_alpha: float = Field(default=0.05, ge=0)
-    doc_feature_alpha: float = Field(default=0.0, ge=0)
+    doc_feature_annotation_top_n: int = Field(default=5, ge=0)
     drift_topn: int = Field(default=20, ge=1)
     doc_feature_enabled: bool = True
     doc_feature_candidate_budget: int = Field(default=200, ge=1)

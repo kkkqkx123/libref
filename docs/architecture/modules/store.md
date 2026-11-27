@@ -47,13 +47,13 @@
 3. **向量候选**：先剔除 (model, dim) 与配置不符的漂移版本（`version_drift` 降级）→ 嵌入查询（失败降级纯 FTS）→ 多版本时截断至 `retrieval_max_versions`（默认 8）并发检索后按 (score, id) 合并。
 4. **RRF 融合**：`score(doc) = Σ w_lane/(rrf_k + rank_lane(doc))`，k=20 平滑常数，双通道权重各 1.0。
 5. **同源去重折叠**：两条分块通道（BM25 辅助 + embedding 主）索引同一 section；按 alignment key 分组后，凡 (key, part) 已有正文孪生的 BM25 行丢弃；每组最多保留 2 个 chunk（合并 section 合法地拆多块）。
-6. **特征过滤**（features.py）：block_type 白名单 / exclude_deprecated / aligned_only（仅 symbol/signature 级对齐的文档），基于 doc_features 与 doc_api_links 表；表缺失时放行。对齐加成 `symbol:0.1, signature:0.05`。
+6. **特征过滤**（features.py）：block_type 白名单 / exclude_deprecated / aligned_only（仅 symbol/signature 级对齐的文档），基于 doc_features 与 doc_api_links 表；表缺失时放行。对齐边只用于过滤与结果增强，不产生排序加成。
 7. **重排**：只作用于 recall 头部 `window = min(assemble_window, rerank_top_n)`；取正文截断后交 rerank 函数；失败保留融合序并记 `rerank_error` 降级。
 8. **组装与挖掘加成**（assembly.py）：
 
-   `final = base × (1 + alpha·bonus + cluster_alpha·cluster_bonus + facet_gate·facet_bonus + doc_gate·doc_bonus)`
+   `final = base × (1 + alpha·bonus + facet_gate·facet_bonus)`
 
-   其中 base = rerank 分优先、否则 RRF 分；bonus 来自模式支持度（实体精确匹配或正文标识符匹配，归一 0..1）；cluster_bonus 命中同簇 ≥2 成员得 1.0、恰 1 个得 0.3；四个 alpha 都受语料可复用性健康度（`reuse_diversity`）**封顶**——挖掘信号弱时 boost 被压低。
+   其中 base = rerank 分优先、否则 RRF 分；bonus 来自模式支持度（实体精确匹配或正文标识符匹配，归一 0..1），facet_bonus 来自查询实体可命中的参数形态。两者都受语料可复用性健康度（`reuse_diversity`）**封顶**——挖掘信号弱时 boost 被压低。文档块特征、实体对齐边与同簇关系不进入排序；排序完成后只对 top-N 附加只读派生注释，不改变 score 与名次。
 9. **窗口扩展**：按 page_id 分组取邻域行；对每条结果挑出 `order±radius` 同 lane（chunk_path）的邻块附为 `window` 预览；已与另一条结果相邻的不再附加。
 10. **证据判定**（evidence.py）：`pool coverage`（查询单元在候选池的覆盖比例，权重 0.6）+ `head coverage`（最好 3 篇的覆盖，0.4），最佳单篇覆盖 ≥0.5 视为集中答案，分散覆盖打 0.75 折；CJK 查询对无 CJK 语料词法覆盖结构性失效，返回中性 0.5（落 weak 带而非拒答带）。verdict 只报告不过滤——调用方必须能区分"候选弱"与"无候选"。阈值 strong 0.8 / weak 0.5。
 

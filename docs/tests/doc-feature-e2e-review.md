@@ -42,7 +42,7 @@ uv run python -m tests.e2e.bench.fetch
 
 ### 冻结归档层（显式开启）
 
-当前本地尚未下载 bench 文档归档，这一层暂不可运行。后续用现有 fetch 方法下载并构建后，新增独立评测入口 `tests/e2e/bench/evaluate_doc_features.py`，读取 `data/bench.db`，在真实规模的文档与源码分支上运行派生与检索对比。归档缺失时按环境不可用跳过；结果写到 `outputs/retrieval-bench/doc-features/`。这一层用于标定 `doc_feature_alpha` 与冻结门禁下限，不进入常规提交门禁。
+当前本地尚未下载 bench 文档归档，这一层暂不可运行。后续用现有 fetch 方法下载并构建后，新增独立评测入口 `tests/e2e/bench/evaluate_doc_features.py`，读取 `data/bench.db`，在真实规模的文档与源码分支上运行派生与检索对比。归档缺失时按环境不可用跳过；结果写到 `outputs/retrieval-bench/doc-features/`。这一层用于核对结果增强不改变排序，并记录派生证据质量，不标定加权门禁。
 
 归档层若要让 AST 对齐生效，需要在建库阶段处理文档代码块：复用 `page_pipeline` 的共享代码块抽取与 `ingest_snippets` 入口，把归档原始正文中的围栏/HTML 代码块登记为 `doc_snippet` 语料源。该步骤只能调用生产入口或从中提取的共享函数，不在基准里重写解析逻辑。缺少代码块的库仍可验证规则匹配与检索加权，但对齐准确率不计入门禁。
 
@@ -87,7 +87,7 @@ uv run python -m tests.e2e.bench.fetch
 | `04-coverage.txt` | 模式哈希、覆盖种类、支持度 |
 | `05-consistency.txt` | `match` / `drift` / `unknown` 与证据指纹；模型关闭时说明为空 |
 | `06-questions.txt` | 判定集条目、稳定锚点解析结果与人工期待，未解析锚点单独列出 |
-| `07-ranking.txt` | 每题的检索排名、命中等级、`doc_feature_alpha` 关闭/开启两列 |
+| `07-ranking.txt` | 每题的检索排名、命中等级、结果增强关闭/开启两列 |
 | `08-metrics.txt` | 对齐准确率、块类型一致率、覆盖率、漂移误报与 nDCG 差分 |
 | `09-drift.txt` | 同库不同版本的 facet 与实体变化清单 |
 | `SUMMARY.txt` | 各文件条数、锚点解析成功率、失败原因与不变量判定 |
@@ -104,10 +104,10 @@ uv run python -m tests.e2e.bench.fetch
 | 块类型一致率 | `block_type` facet 与人工期待一致 | ≥ 0.85 |
 | 覆盖召回 | 期望模式出现在 `doc_pattern_coverage` 的比例 | 记录值，先不设门禁 |
 | 漂移误报率 | 人工抽检 `drift` 样本中误判比例 | < 0.20 才允许默认展示 |
-| 检索增益 | test 上 nDCG@5 与 MRR@5 的配对差分及 95% 区间 | 不得显著回退；增益区间含零时保持 `doc_feature_alpha=0` |
+| 排序不变性 | test 上 nDCG@5 与 MRR@5 的配对差分及 95% 区间 | 结果增强关闭/开启必须完全一致，不作增益标定 |
 | 过滤有效性 | 只要示例、排除废弃、仅对齐三类过滤后的命中率与结果数 | 记录值，用于确认过滤器不是空结果制造器 |
 
-检索增益必须在同一池深、同一分块预算下比较，只切换 `doc_feature_alpha`；与 bench 的噪声带口径一致，差值落在抖动范围内一律记为平手。若两周内无法标定收益，只保留 D3 溯源价值，加权项不进默认预设。
+结果增强必须在同一池深、同一分块预算下比较，只切换 `doc_feature_annotation_top_n`；派生文本不得改变 score、候选池或名次。D3 只保留溯源与结果增强价值，不进入加权通道。
 
 ## 七、落点与实施顺序
 

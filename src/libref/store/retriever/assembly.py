@@ -7,10 +7,6 @@ from typing import TYPE_CHECKING, Any
 from libref.mining.idiom import reuse_diversity
 from libref.mining.scoring import (
     capped_alpha,
-    cluster_hit,
-    cluster_hit_exact,
-    cluster_hit_weak,
-    cluster_hit_weak_exact,
     content_idents,
     name_hit,
     support_for_content,
@@ -18,12 +14,11 @@ from libref.mining.scoring import (
 )
 from libref.store.retriever.candidates import _fetch_details
 from libref.store.retriever.features import (
-    _cluster_sets,
-    _doc_feature_bonuses,
     _facet_weights,
     _pattern_supports,
+    doc_feature_annotations,
 )
-from libref.text.snippet import truncate_material
+from libref.text.snippet import DERIVED_TAG, truncate_material
 
 
 class Assembly:
@@ -50,9 +45,7 @@ class Assembly:
         )
         fts_set, vec_set = set(fts_ids), set(vec_ids)
         raw_alpha = float(setting_or_default(self._settings, "freq_alpha"))
-        cluster_alpha = float(setting_or_default(self._settings, "cluster_alpha"))
         facet_alpha = float(setting_or_default(self._settings, "facet_alpha"))
-        doc_alpha = float(setting_or_default(self._settings, "doc_feature_alpha"))
         rrf = self._rrf_scores(fts_ids, vec_ids)
         vids = sorted({details[d]["version_id"] for d in fused if d in details})
         wanted: set[str] = set()
@@ -65,17 +58,11 @@ class Assembly:
                     if entity:
                         wanted.add(str(entity))
         patterns = _pattern_supports(self._conn, vids, wanted) if raw_alpha > 0 else {}
-        clusters = _cluster_sets(self._conn, vids) if cluster_alpha > 0 else {}
         facet_weights = _facet_weights(self._conn, vids) if facet_alpha > 0 else {}
-        doc_bonuses = _doc_feature_bonuses(self._conn, vids) if doc_alpha > 0 else {}
         health_rows = [{"support": s} for plist in patterns.values() for _, s in plist]
-        health = reuse_diversity(
-            health_rows,
-            [{"members": members} for sets in clusters.values() for members in sets],
-        )
+        health = reuse_diversity(health_rows, [])
         alpha = capped_alpha(raw_alpha, float(health.get("reusability", 0.0)))
         facet_gate = capped_alpha(facet_alpha, float(health.get("reusability", 0.0)))
-        doc_gate = capped_alpha(doc_alpha, float(health.get("reusability", 0.0)))
         scored: list[tuple[float, int]] = []
         for doc in fused:
             info = details.get(doc)
@@ -93,33 +80,6 @@ class Assembly:
                 bonus = (
                     support_for_content(info["content"], plist) if alpha > 0 else 0.0
                 )
-            cluster_bonus = 0.0
-            clist = clusters.get(info["version_id"], [])
-            if clist and cluster_alpha > 0:
-                if have_entities:
-                    for members in clist:
-                        if cluster_hit_exact(have_entities, members):
-                            cluster_bonus = 1.0
-                            break
-                    if cluster_bonus == 0.0:
-                        for members in clist:
-                            if cluster_hit_weak_exact(have_entities, members):
-                                cluster_bonus = 0.3
-                                break
-                else:
-                    content = info["content"] or ""
-                    for members in clist:
-                        if cluster_hit(content, members):
-                            cluster_bonus = 1.0
-                            break
-                    if cluster_bonus == 0.0:
-                        for members in clist:
-                            if cluster_hit_weak(content, members):
-                                cluster_bonus = 0.3
-                                break
-            doc_bonus = float(
-                doc_bonuses.get(info["version_id"], {}).get(info["id"], 0.0)
-            )
             facet_bonus = 0.0
             fweights = facet_weights.get(info["version_id"], [])
             if fweights and facet_gate > 0:
@@ -132,13 +92,7 @@ class Assembly:
                         if name_hit(callee, full, toks):
                             facet_bonus = 1.0
                             break
-            final = base * (
-                1.0
-                + alpha * bonus
-                + cluster_alpha * cluster_bonus
-                + facet_gate * facet_bonus
-                + doc_gate * doc_bonus
-            )
+            final = base * (1.0 + alpha * bonus + facet_gate * facet_bonus)
             scored.append((final, doc))
         scored.sort(key=lambda kv: kv[0], reverse=True)
         out: list[dict[str, Any]] = []
@@ -164,6 +118,7 @@ class Assembly:
                     "path": info["path"],
                     "library": info["library"],
                     "version": info["version"],
+                    "version_id": int(info["version_id"]),
                     "sources": sources,
                     "chunk_path": info.get("chunk_path", "embedding"),
                     "source_group_id": info.get("source_group_id", ""),
@@ -202,9 +157,35 @@ class Assembly:
             vec_ids,
             rerank_scores=rerank_scores,
         )
-        return self._expand_windows(
+        results, ok = self._expand_windows(
             results, enabled=expand_window, radius=window_radius
         )
+        return self._annotate_results(results), ok
+
+    def _annotate_results(self, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Attach derived facts to top results after ranking; scores stay unchanged."""
+        from libref.config import setting_or_default
+
+        top_n = int(setting_or_default(self._settings, "doc_feature_annotation_top_n"))
+        if top_n <= 0 or not results:
+            return results
+        if not bool(setting_or_default(self._settings, "doc_feature_enabled")):
+            return results
+        winners = results[:top_n]
+        notes = doc_feature_annotations(
+            self._conn,
+            sorted({int(item["version_id"]) for item in winners}),
+            [int(item["id"]) for item in winners],
+        )
+        for item in winners:
+            lines = notes.get(int(item["id"]), [])
+            if not lines:
+                continue
+            item["annotations"] = lines
+            item["raw_snippet"] = str(item["snippet"])
+            suffix = DERIVED_TAG + " " + "; ".join(lines)
+            item["snippet"] = f"{item['raw_snippet']}\n\n{suffix}"
+        return results
 
     def _expand_windows(
         self, results: list[dict[str, Any]], *, enabled: bool, radius: int

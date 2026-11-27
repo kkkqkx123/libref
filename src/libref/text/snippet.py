@@ -7,6 +7,8 @@ from collections.abc import Mapping
 
 _FENCE_RE = re.compile(r"^(```|~~~)")
 
+DERIVED_TAG = "[derived]"
+
 
 def xml_escape_attr(value: object) -> str:
     """Escape a value for use inside a double-quoted XML attribute."""

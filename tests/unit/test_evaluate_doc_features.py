@@ -183,33 +183,51 @@ def test_report_marks_empty_labels_unmeasurable(tmp_path: Path) -> None:
         "snippet_counts": {"snippets": 0},
         "derivation": {"coverage": 0},
         "questions": [entry, second],
-        "ranks": {"N1": {"off": 1, "on": 1}, "N2": {"off": 1, "on": 1}},
+        "ranks": {"N1": 1, "N2": 1},
         "filters": {},
-        "metrics": {
-            "off": {"ndcg_at_k": 1.0, "mrr_at_k": 1.0},
-            "on": {"ndcg_at_k": 1.0, "mrr_at_k": 1.0},
-            "ndcg_delta": {
-                "delta": 0.0,
-                "lo": 0.0,
-                "hi": 0.0,
-                "significant": False,
-            },
-            "mrr_delta": {
-                "delta": 0.0,
-                "lo": 0.0,
-                "hi": 0.0,
-                "significant": False,
-            },
+        "annotations": {
+            "top_n": 5,
+            "slots": 1,
+            "annotated": 1,
+            "outside_top_n": 0,
+            "changed_snippets": 1,
         },
+        "reviews": [
+            {
+                "id": "N1",
+                "query": "demo query",
+                "items": [
+                    {
+                        "rank": 1,
+                        "id": 1,
+                        "url": "https://example.test",
+                        "path": "Demo",
+                        "title": "Demo",
+                        "score": 1.0,
+                        "raw": "raw body",
+                        "annotated": "raw body\n\n[derived] block: example",
+                        "annotations": ["block: example"],
+                    }
+                ],
+            }
+        ],
     }
     path = evaluate_doc_features._report(
-        [result], {"demo/docs": [{"id": "N1", "source": "docs"}]}, 0.0, tmp_path
+        [result],
+        {"demo/docs": [{"id": "N1", "source": "docs"}]},
+        5,
+        tmp_path,
     )
     text = path.read_text(encoding="utf-8")
     assert (
-        "| N1 | docs | OK | unmeasurable | unmeasurable | unmeasurable | OK | OK | unmeasurable | 1/1 |"
+        "| N1 | docs | OK | unmeasurable | unmeasurable | unmeasurable | OK | OK | unmeasurable | 1 |"
         in text
     )
+    review = evaluate_doc_features._write_annotation_review([result], tmp_path, 5)
+    body = (review / "demo_docs" / "N1.md").read_text(encoding="utf-8")
+    assert "### Raw snippet" in body
+    assert "### Annotated snippet" in body
+    assert "- block: example" in body
     assert "- 实体对齐：1/1（有标签题）" in text
     assert "- 强边对齐：1/1（有标签题）" in text
     assert "- 树节点一致：0/0（有标签题，不可测量）" in text
@@ -257,16 +275,6 @@ def test_filter_stats_use_eligible_questions_and_heading_hits() -> None:
     assert row["examples_only"]["eligible_hits"] == 1
     assert row["exclude_deprecated"]["kept"] == 1
     assert row["aligned_only"]["kept"] == 1
-
-
-def test_attribution_separates_pool_losses_from_rank_moves() -> None:
-    target = {7}
-    assert evaluate_doc_features._attribution(target, [], 1, 0) == "outside_pool"
-    assert evaluate_doc_features._attribution(target, [7], 2, 0) == "lost"
-    assert evaluate_doc_features._attribution(target, [7], 0, 3) == "entered"
-    assert evaluate_doc_features._attribution(target, [7], 2, 4) == "demoted"
-    assert evaluate_doc_features._attribution(target, [7], 4, 2) == "promoted"
-    assert evaluate_doc_features._attribution(target, [7], 1, 1) == "unchanged"
 
 
 def test_eligibility_uses_strong_links_only() -> None:

@@ -108,7 +108,7 @@ def test_hybrid_marks_sources_and_fused_score_sorted(
 ) -> None:
     ids = _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0)
     vec = _FakeVec([ids["pattern"], ids["plain"]])
     results, status = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
@@ -122,10 +122,42 @@ def test_hybrid_marks_sources_and_fused_score_sorted(
     assert isinstance(results[0]["score"], float)
 
 
+def test_result_annotations_do_not_change_ranking(conn, tmp_path, monkeypatch) -> None:
+    ids = _seed(conn)
+    conn.execute(
+        "INSERT INTO doc_features(library_id, version_id, document_id, facet, value,"
+        " tenant_id) VALUES(1, 1, ?, 'block_type', ?, 'default')",
+        (ids["plain"], json.dumps({"kind": "example"})),
+    )
+    conn.commit()
+    monkeypatch.chdir(tmp_path)
+    off = make_settings(
+        monkeypatch, tmp_path, doc_feature_annotation_top_n=0, freq_alpha=0.0
+    )
+    on = make_settings(
+        monkeypatch, tmp_path, doc_feature_annotation_top_n=5, freq_alpha=0.0
+    )
+
+    def search(settings):
+        vec = _FakeVec([ids["pattern"], ids["plain"]])
+        return asyncio.run(
+            HybridRetriever(
+                conn, settings, vec_store=vec, embed=_fake_embed
+            ).search_async("quetzalhybrid", limit=8)
+        )[0]
+
+    before, after = search(off), search(on)
+    assert [(r["id"], r["score"]) for r in before] == [
+        (r["id"], r["score"]) for r in after
+    ]
+    assert all("annotations" not in r for r in before)
+    assert any(r.get("annotations") for r in after)
+
+
 def test_freq_alpha_zero_is_noop(conn, tmp_path, monkeypatch) -> None:
     ids = _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0)
     vec = _FakeVec([ids["plain"], ids["pattern"]])
     rec = HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed)
     rrf_order = rec._rrf([ids["plain"], ids["pattern"]], [ids["plain"], ids["pattern"]])
@@ -136,7 +168,7 @@ def test_freq_alpha_zero_is_noop(conn, tmp_path, monkeypatch) -> None:
 def test_freq_bonus_promotes_pattern_doc(conn, tmp_path, monkeypatch) -> None:
     ids = _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0)
     vec = _FakeVec([ids["plain"], ids["pattern"]])
     results, _status = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
@@ -220,7 +252,7 @@ def test_precise_attribution_ignores_substring(conn, tmp_path, monkeypatch) -> N
     )
     conn.commit()
     monkeypatch.chdir(tmp_path)
-    s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0)
     vec = _FakeVec([miss.inserted_ids[0], hit.inserted_ids[0]])
     results, _status = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
@@ -234,7 +266,7 @@ def test_precise_attribution_ignores_substring(conn, tmp_path, monkeypatch) -> N
 def test_dual_track_gate_records_both_roads(conn, tmp_path, monkeypatch) -> None:
     ids = _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0)
     vec = _FakeVec([ids["pattern"], ids["plain"]])
     fts_only, _status = asyncio.run(
         HybridRetriever(conn, s).search_async("quetzalhybrid", limit=8)
@@ -288,7 +320,7 @@ def test_quality_gate_mrr_recall_no_regression(conn, tmp_path, monkeypatch) -> N
         ("quickstart meadow", {ids["quick"]}),
     ]
     monkeypatch.chdir(tmp_path)
-    settings = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+    settings = make_settings(monkeypatch, tmp_path, freq_alpha=0.0)
     fts_mrrs: list[float] = []
     fts_recalls: list[float] = []
     for query, relevant in cases:
@@ -384,7 +416,7 @@ def test_preset_rejects_unknown(conn, tmp_path, monkeypatch) -> None:
 def test_precise_preset_skips_vectors(conn, tmp_path, monkeypatch) -> None:
     ids = _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = make_settings(monkeypatch, tmp_path, freq_alpha=5.0, cluster_alpha=0.05)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=5.05)
     vec = _FakeVec([ids["pattern"], ids["plain"]])
     results, status = asyncio.run(
         SearchService(conn, s, vec_store=vec, embed=_fake_embed).search_with_mode(
@@ -400,7 +432,7 @@ def test_precise_preset_skips_vectors(conn, tmp_path, monkeypatch) -> None:
 def test_status_carries_road_counts(conn, tmp_path, monkeypatch) -> None:
     ids = _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0)
     vec = _FakeVec([ids["pattern"], ids["plain"]])
     results, status = asyncio.run(
         HybridRetriever(conn, s, vec_store=vec, embed=_fake_embed).search_async(
@@ -440,7 +472,7 @@ def test_thorough_enables_window_by_default(conn, tmp_path, monkeypatch) -> None
         raw_content="quetzalwindow",
     )
     monkeypatch.chdir(tmp_path)
-    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0)
     results, status = asyncio.run(
         HybridRetriever(conn, s).search_async(
             "quetzalwindow", limit=1, expand_window=True
@@ -485,7 +517,7 @@ def test_auxiliary_lane_twin_is_dropped(conn, tmp_path, monkeypatch) -> None:
         raw_content=body,
     )
     monkeypatch.chdir(tmp_path)
-    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0)
     results, _status = asyncio.run(
         HybridRetriever(conn, s).search_async("quetzaltwin", limit=8)
     )
@@ -495,7 +527,7 @@ def test_auxiliary_lane_twin_is_dropped(conn, tmp_path, monkeypatch) -> None:
 def test_rerank_failure_is_reported_once(conn, tmp_path, monkeypatch) -> None:
     _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0)
 
     async def boom(query: str, texts: list[str], top_n: int | None):
         raise RuntimeError("provider down")
@@ -512,7 +544,7 @@ def test_rerank_failure_is_reported_once(conn, tmp_path, monkeypatch) -> None:
 def test_rerank_success_is_reported(conn, tmp_path, monkeypatch) -> None:
     ids = _seed(conn)
     monkeypatch.chdir(tmp_path)
-    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0, cluster_alpha=0.0)
+    s = make_settings(monkeypatch, tmp_path, freq_alpha=0.0)
 
     async def rank(query: str, texts: list[str], top_n: int | None):
         return [

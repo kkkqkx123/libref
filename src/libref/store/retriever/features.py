@@ -54,59 +54,89 @@ def filter_by_doc_facets(
     return [doc for doc in doc_ids if doc in keep]
 
 
-ALIGNMENT_BONUS = {"symbol": 0.1, "signature": 0.05}
-
-
-def _doc_feature_bonuses(
-    conn: sqlite3.Connection, vids: list[int]
-) -> dict[int, dict[int, float]]:
-    """Per-version document bonuses from example facets, deprecated marks, and links."""
-    if not vids:
+def doc_feature_annotations(
+    conn: sqlite3.Connection,
+    vids: list[int],
+    doc_ids: list[int],
+    *,
+    max_items: int = 5,
+) -> dict[int, list[str]]:
+    """Collect derived facts for post-rank result enhancement; never a score input."""
+    if not vids or not doc_ids or max_items <= 0:
         return {}
-    try:
-        conn.execute("SELECT 1 FROM doc_features LIMIT 0").fetchone()
-        conn.execute("SELECT 1 FROM doc_api_links LIMIT 0").fetchone()
-    except sqlite3.Error:
-        return {}
-    marks = ",".join("?" for _ in vids)
-    out: dict[int, dict[int, float]] = {}
-    for version_id in vids:
-        out[int(version_id)] = {}
+    version_marks = ",".join("?" for _ in vids)
+    doc_marks = ",".join("?" for _ in doc_ids)
+    params = [*vids, *doc_ids]
+    out: dict[int, list[str]] = {int(doc_id): [] for doc_id in doc_ids}
     rows = conn.execute(
-        "SELECT version_id, document_id, facet, value FROM doc_features"
-        f" WHERE version_id IN ({marks})"
-        " AND facet IN ('block_type', 'deprecated', 'code_ratio')",
-        vids,
+        "SELECT document_id, facet, value FROM doc_features"
+        f" WHERE version_id IN ({version_marks})"
+        f" AND document_id IN ({doc_marks})"
+        " AND facet IN ('block_type', 'deprecated', 'code_ratio')"
+        " ORDER BY document_id, facet",
+        params,
     ).fetchall()
-    for version_id, doc_id, facet, raw in rows:
+    for doc_id, facet, raw in rows:
         try:
             value = json.loads(raw) if raw else {}
         except TypeError, ValueError:
-            value = {}
-        slot = out.setdefault(int(version_id), {}).setdefault(int(doc_id), 0.0)
+            continue
+        doc = int(doc_id)
         if facet == "block_type" and value.get("kind") == "example":
-            out[int(version_id)][int(doc_id)] = slot + 0.5
-        elif (
-            facet == "code_ratio"
-            and float(value.get("details", {}).get("value") or 0) > 0
-        ):
-            out[int(version_id)][int(doc_id)] = slot + 0.25
+            out.setdefault(doc, []).append("block: example")
         elif facet == "deprecated" and value.get("details", {}).get("value"):
-            out[int(version_id)][int(doc_id)] = slot - 0.5
+            out.setdefault(doc, []).append("status: deprecated")
+        elif facet == "code_ratio":
+            ratio = float(value.get("details", {}).get("value") or 0)
+            if ratio > 0:
+                out.setdefault(doc, []).append(f"code ratio: {ratio:.2f}")
     link_rows = conn.execute(
-        "SELECT version_id, document_id, match_kind, count(*) FROM doc_api_links"
-        f" WHERE version_id IN ({marks}) GROUP BY version_id, document_id, match_kind",
-        vids,
+        "SELECT l.document_id, ae.qualified_name FROM doc_api_links l"
+        " JOIN api_entities ae ON ae.id=l.api_entity_id"
+        f" WHERE l.version_id IN ({version_marks})"
+        f" AND l.document_id IN ({doc_marks})"
+        " AND l.match_kind IN ('symbol', 'signature')"
+        " ORDER BY l.document_id, ae.qualified_name LIMIT 500",
+        params,
     ).fetchall()
-    for version_id, doc_id, kind, count in link_rows:
-        slot = out.setdefault(int(version_id), {}).setdefault(int(doc_id), 0.0)
-        out[int(version_id)][int(doc_id)] = slot + min(5, int(count)) * float(
-            ALIGNMENT_BONUS.get(str(kind), 0.0)
-        )
-    return {
-        vid: {doc: max(0.0, min(1.0, value)) for doc, value in rows.items()}
-        for vid, rows in out.items()
-    }
+    by_doc: dict[int, list[str]] = {}
+    for doc_id, name in link_rows:
+        names = by_doc.setdefault(int(doc_id), [])
+        if str(name) not in names:
+            names.append(str(name))
+    for doc_id, names in by_doc.items():
+        out.setdefault(doc_id, []).append("aligned: " + ", ".join(names[:max_items]))
+    clusters = _cluster_sets(conn, vids)
+    member_rows = conn.execute(
+        "SELECT version_id, document_id, api_entity_id FROM doc_api_links"
+        f" WHERE version_id IN ({version_marks})"
+        f" AND document_id IN ({doc_marks})"
+        " AND match_kind IN ('symbol', 'signature')",
+        params,
+    ).fetchall()
+    entity_names = dict(
+        conn.execute(
+            "SELECT id, qualified_name FROM api_entities"
+            f" WHERE version_id IN ({version_marks})",
+            vids,
+        ).fetchall()
+    )
+    for version_id, doc_id, entity_id in member_rows:
+        name = str(entity_names.get(int(entity_id)) or "")
+        if not name:
+            continue
+        related = [
+            member
+            for members in clusters.get(int(version_id), [])
+            if name in members
+            for member in members
+            if member != name
+        ][:max_items]
+        if related:
+            out.setdefault(int(doc_id), []).append(
+                "related: " + ", ".join(sorted(related))
+            )
+    return {doc: items[:max_items] for doc, items in out.items() if items}
 
 
 def alignment_key(meta: dict[str, Any] | None, url: str | None, doc_id: int) -> str:

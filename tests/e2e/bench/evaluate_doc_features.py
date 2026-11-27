@@ -2,9 +2,9 @@
 
 The archived page bodies are replayed through the production cleaning and snippet
 ingestion paths, then the production document-feature derivation runs on them.
-The report compares the same questions with doc_feature_alpha off and on and
+The report compares the same questions with result annotation off and on and
 records alignment, feature-node, block-type, coverage, drift and ranking
-observations. Expected feature nodes are checked as a subset of the nodes linked
+observations. Rankings must stay identical because annotations never change scores. Expected feature nodes are checked as a subset of the nodes linked
 to the question's target documents. Unlabeled expectations are reported as
 unmeasurable and excluded from accuracy denominators. Nothing here writes gates:
 a floor needs a deliberate human decision after a full replay.
@@ -41,7 +41,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="evaluate document feature derivation")
     parser.add_argument("--data", default=str(DATA))
     parser.add_argument("--out", default=str(OUTPUT))
-    parser.add_argument("--alpha", type=float, default=0.4)
+    parser.add_argument("--annotation-top-n", type=int, default=5)
     return parser.parse_args()
 
 
@@ -417,25 +417,15 @@ def _filter_stats(
     return out
 
 
-def _attribution(
-    target_ids: set[int], fused_order: list[int], off: int, on: int
-) -> str:
-    if not target_ids.intersection(fused_order):
-        return "outside_pool"
-    if off and not on:
-        return "lost"
-    if not off and on:
-        return "entered"
-    if on > off:
-        return "demoted"
-    if on < off:
-        return "promoted"
-    return "unchanged"
-
-
-def _rank(
-    conn, settings, questions: list[dict], info: dict, version_id: int, alpha: float
+def _collect_reviews(
+    conn,
+    settings,
+    questions: list[dict],
+    info: dict,
+    version_id: int,
+    annotation_top_n: int,
 ) -> dict[str, Any]:
+    """Collect one annotated search pass for content review, not ranking gain."""
     from libref.services.docs.search import SearchService
     from tests.e2e.bench.fakes import BagOfTermsEmbedder, SqliteVecStore
 
@@ -447,50 +437,65 @@ def _rank(
         "version": str(info["version"]),
         "ecosystem": str(info["ecosystem"]),
     }
-    on_settings = settings.model_copy(update={"doc_feature_alpha": alpha})
-    services = {
-        "off": SearchService(conn, settings, vec_store=vectors, embed=embedder),
-        "on": SearchService(conn, on_settings, vec_store=vectors, embed=embedder),
-    }
-    rows: dict[str, list[dict]] = {"off": [], "on": []}
-    ranks: dict[str, dict[str, int]] = {}
+    enabled = settings.model_copy(
+        update={"doc_feature_annotation_top_n": annotation_top_n}
+    )
+    service = SearchService(conn, enabled, vec_store=vectors, embed=embedder)
+    reviews: list[dict[str, Any]] = []
+    ranks: dict[str, int] = {}
     filter_rows: list[dict] = []
-    attribution_rows: list[dict[str, Any]] = []
-    found_by_query: dict[str, list[dict]] = {}
-    labels = ("outside_pool", "lost", "entered", "demoted", "promoted", "unchanged")
-    attribution = {label: 0 for label in labels}
+    slots = 0
+    annotated = 0
+    outside = 0
+    changed = 0
     for question in questions:
-        best = 2 if question.get("expected_facets", {}).get("heading") else 1
-        ranks[str(question["id"])] = {}
+        found, _status = asyncio.run(
+            service.search_with_mode(question["query"], "balanced", **scope, limit=K)
+        )
+        key = str(question["id"])
+        ranks[key] = next(
+            (
+                index + 1
+                for index, item in enumerate(found)
+                if _grade(item, question) > 0
+            ),
+            0,
+        )
         target_ids = _target_doc_ids(conn, question, version_id)
-        statuses: dict[str, dict[str, Any]] = {}
-        for label, service in services.items():
-            found, statuses[label] = asyncio.run(
-                service.search_with_mode(
-                    question["query"], "balanced", **scope, limit=K
-                )
-            )
-            found_by_query[label + str(question["id"])] = found
-            gains = [_grade(item, question) for item in found]
-            rows[label].append(
-                {"gains": gains, "best": best, "count": len(found), "duplicates": 0}
-            )
-            ranks[str(question["id"])][label] = next(
-                (index + 1 for index, gain in enumerate(gains) if gain > 0), 0
-            )
-        off, on = ranks[str(question["id"])]["off"], ranks[str(question["id"])]["on"]
-        category = _attribution(
-            target_ids, list(statuses["on"].get("fused_order") or []), off, on
-        )
-        attribution[category] += 1
-        attribution_rows.append(
-            {"id": str(question["id"]), "category": category, "off": off, "on": on}
-        )
         eligible = _eligibility(conn, question, version_id, target_ids)
-        filter_rows.append(
-            _filter_stats(
-                conn, found_by_query["off" + str(question["id"])], question, eligible
+        filter_rows.append(_filter_stats(conn, found, question, eligible))
+        slots += min(annotation_top_n, len(found))
+        items: list[dict[str, Any]] = []
+        for rank, item in enumerate(found, start=1):
+            notes = [str(note) for note in (item.get("annotations") or []) if note]
+            raw = str(item.get("raw_snippet") or item.get("snippet") or "")
+            rendered = str(item.get("snippet") or "")
+            if rank > annotation_top_n and notes:
+                outside += 1
+            if rank <= annotation_top_n:
+                if notes:
+                    annotated += 1
+                if raw != rendered:
+                    changed += 1
+            items.append(
+                {
+                    "rank": rank,
+                    "id": int(item["id"]),
+                    "url": str(item.get("url") or ""),
+                    "path": str(item.get("path") or ""),
+                    "title": str(item.get("title") or ""),
+                    "score": float(item.get("score") or 0.0),
+                    "raw": raw,
+                    "annotated": rendered,
+                    "annotations": notes,
+                }
             )
+        reviews.append(
+            {
+                "id": key,
+                "query": str(question.get("query") or ""),
+                "items": items,
+            }
         )
     total = len(filter_rows)
     filters = {
@@ -514,17 +519,26 @@ def _rank(
         for name in ("examples_only", "exclude_deprecated", "aligned_only")
     }
     return {
+        "reviews": reviews,
         "ranks": ranks,
-        "rows": rows,
-        "version_id": version_id,
         "filters": filters,
-        "attribution": attribution,
-        "attribution_rows": attribution_rows,
+        "annotations": {
+            "top_n": annotation_top_n,
+            "slots": slots,
+            "annotated": annotated,
+            "outside_top_n": outside,
+            "changed_snippets": changed,
+        },
     }
 
 
 def _evaluate_fixture(
-    conn, entry: dict, info: dict, questions: list[dict], settings, alpha: float
+    conn,
+    entry: dict,
+    info: dict,
+    questions: list[dict],
+    settings,
+    annotation_top_n: int,
 ) -> dict[str, Any]:
     from libref.services.code.mining_refresh import mine_patterns
     from libref.services.docs.feature_refresh import refresh_doc_features
@@ -558,16 +572,10 @@ def _evaluate_fixture(
     stages["refresh_ms"] = int((time.monotonic() - started) * 1000)
     started = time.monotonic()
     entries = [_score_entry(conn, question, version_id) for question in questions]
-    ranking = _rank(conn, settings, questions, info, version_id, alpha)
-    stages["evaluate_ms"] = int((time.monotonic() - started) * 1000)
-    from tests.e2e.bench.metrics import (
-        metric_series,
-        paired_delta,
-        summarize,
+    collected = _collect_reviews(
+        conn, settings, questions, info, version_id, annotation_top_n
     )
-
-    before = summarize(ranking["rows"]["off"], K)
-    after = summarize(ranking["rows"]["on"], K)
+    stages["evaluate_ms"] = int((time.monotonic() - started) * 1000)
     return {
         "name": name,
         "revision": str(info.get("revision") or ""),
@@ -580,41 +588,47 @@ def _evaluate_fixture(
         "snippet_evidence": _snippet_evidence(conn, version_id),
         "derivation": counts,
         "questions": entries,
-        "ranks": ranking["ranks"],
-        "filters": ranking["filters"],
-        "attribution": ranking["attribution"],
-        "attribution_rows": ranking["attribution_rows"],
+        "ranks": collected["ranks"],
+        "filters": collected["filters"],
+        "annotations": collected["annotations"],
+        "reviews": collected["reviews"],
         "stages": stages,
-        "metrics": {
-            "off": before,
-            "on": after,
-            "ndcg_delta": paired_delta(
-                metric_series(ranking["rows"]["on"], K)["ndcg"],
-                metric_series(ranking["rows"]["off"], K)["ndcg"],
-            ),
-            "mrr_delta": paired_delta(
-                metric_series(ranking["rows"]["on"], K)["mrr"],
-                metric_series(ranking["rows"]["off"], K)["mrr"],
-            ),
-        },
     }
 
 
-def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -> Path:
+def _report(
+    results: list[dict],
+    questions: dict,
+    annotation_top_n: int,
+    out_dir: Path,
+    samples: list[dict] | None = None,
+) -> Path:
     from datetime import UTC, datetime
 
-    samples = json.loads(DRIFT_SAMPLES.read_text(encoding="utf-8")).get("samples", [])
-    auto_drift = [row for row in samples if row.get("auto_verdict") == "drift"]
+    if samples is None:
+        samples = json.loads(DRIFT_SAMPLES.read_text(encoding="utf-8")).get(
+            "samples", []
+        )
+    auto_drift = [
+        row
+        for row in samples
+        if row.get("observed_auto_verdict", row.get("auto_verdict")) == "drift"
+    ]
     false_positive = [row for row in auto_drift if row.get("human_verdict") != "drift"]
     false_positive_rate = len(false_positive) / len(auto_drift) if auto_drift else 0.0
     human_drift = [row for row in samples if row.get("human_verdict") == "drift"]
-    false_negative = [row for row in human_drift if row.get("auto_verdict") != "drift"]
+    false_negative = [
+        row
+        for row in human_drift
+        if row.get("observed_auto_verdict", row.get("auto_verdict")) != "drift"
+    ]
     false_negative_rate = len(false_negative) / len(human_drift) if human_drift else 0.0
     lines = [
         "# 文档特征冻结归档评测",
         "",
         f"- 生成时间：{datetime.now(UTC).isoformat(timespec='seconds')}",
-        f"- 评测权重：doc_feature_alpha={alpha:g}（关闭列为 0，开启列仅切换该权重）",
+        f"- 结果增强：doc_feature_annotation_top_n={annotation_top_n}；逐题 raw/annotated 对照见 annotation/",
+        "- 排序不变性由集成测试覆盖，本报告不再做 off/on 排名差分。",
         "- 报告只记录观测值，不写门禁；归档修订变化后需重新标定下限。",
         "- 题目标签按目标文档的派生证据核对；一致性只表示标签与派生表相符，语义正确性需独立复核。",
         (
@@ -664,13 +678,13 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             f"- 派生计数：{_dump(item['derivation'])}",
             f"- 阶段耗时：{_dump(item.get('stages', {}))}",
             "",
-            "| 题目 | 来源 | 锚点 | 实体对齐 | 强边对齐 | 树节点 | 特征一致 | 块类型 | 判定 | 排名 off/on |",
+            "| 题目 | 来源 | 锚点 | 实体对齐 | 强边对齐 | 树节点 | 特征一致 | 块类型 | 判定 | 目标排名 |",
             "|---|---|---|---|---|---|---|---|---|---|",
         ]
         by_id = {str(row["id"]): row for rows in questions.values() for row in rows}
         for row in item["questions"]:
             source = by_id.get(str(row["id"]), {}).get("source", "-")
-            rank = item["ranks"].get(str(row["id"]), {})
+            rank = int(item["ranks"].get(str(row["id"]), 0))
             entity_cell = (
                 "unmeasurable"
                 if row["entity_match"] is None
@@ -708,10 +722,10 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
                 f"| {'OK' if row['facet_match'] else _dump([row['facets_expected'], row['facet_checks']])} "
                 f"| {'OK' if row['block_type_match'] else row['block_type_expected']} "
                 f"| {verdict_cell} "
-                f"| {rank.get('off', 0)}/{rank.get('on', 0)} |"
+                f"| {rank} |"
             )
-        metrics = item["metrics"]
         entries = item["questions"]
+        notes = item["annotations"]
         lines += [
             "",
             _match_line("实体对齐", "entity_match", entries),
@@ -721,6 +735,10 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             f"- 块类型一致：{sum(1 for row in entries if row['block_type_match'])}/{len(entries)}",
             _match_line("判定一致", "verdict_match", entries),
             f"- 覆盖行数：{item['derivation']['coverage']}",
+            (
+                f"- 注释覆盖：{notes['annotated']}/{notes['slots']}，"
+                f"top-N 外注释 {notes['outside_top_n']}，正文变化 {notes['changed_snippets']}"
+            ),
         ]
         for name, stats in item["filters"].items():
             lines.append(
@@ -749,36 +767,7 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
             lines.append(
                 "- 该站原始正文没有可抽取代码块：实体对齐率只作记录，不计入门禁。"
             )
-        lines += [
-            "",
-            (
-                f"- 关闭：nDCG@{K}={metrics['off']['ndcg_at_k']:.3f}，"
-                f"MRR@{K}={metrics['off']['mrr_at_k']:.3f}"
-            ),
-            (
-                f"- 开启：nDCG@{K}={metrics['on']['ndcg_at_k']:.3f}，"
-                f"MRR@{K}={metrics['on']['mrr_at_k']:.3f}"
-            ),
-            f"- nDCG 配对差分：{_dump(metrics['ndcg_delta'])}",
-            f"- MRR 配对差分：{_dump(metrics['mrr_delta'])}",
-            f"- 排名归因：{_dump(item.get('attribution', {}))}",
-        ]
-        for row in item.get("attribution_rows", []):
-            if row.get("category") != "unchanged":
-                lines.append(
-                    f"- 排名明细：{row.get('id', '-')} {row.get('category', '-')} "
-                    f"{row.get('off', 0)}/{row.get('on', 0)}"
-                )
         lines.append("")
-    lines += ["## 汇总", ""]
-    for item in results:
-        metrics = item["metrics"]
-        delta = metrics["ndcg_delta"]
-        lines.append(
-            f"- {item['name']}：nDCG 差分 {delta['delta']:+.3f} "
-            f"[{delta['lo']:+.3f}, {delta['hi']:+.3f}]，"
-            f"显著={'是' if delta['significant'] else '否'}"
-        )
     if not results:
         lines.append("- 没有可评测的归档夹具")
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -791,7 +780,127 @@ def _dump(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-def run(data: Path, out_dir: Path, alpha: float) -> list[dict[str, Any]]:
+def _write_annotation_review(
+    results: list[dict], out_dir: Path, annotation_top_n: int
+) -> Path:
+    """Export raw vs annotated top-K bodies for manual review."""
+    root = out_dir / "annotation"
+    root.mkdir(parents=True, exist_ok=True)
+    index = [
+        "# 文档特征结果增强审核",
+        "",
+        "- 召回模式：offline-bag-of-terms",
+        f"- 注释 top-N：{annotation_top_n}",
+        "- 排名未被注释改变；集成测试负责排序不变性断言。",
+        "",
+    ]
+    for item in results:
+        site = str(item["name"]).replace("/", "_")
+        site_dir = root / site
+        site_dir.mkdir(parents=True, exist_ok=True)
+        index.append(f"- [{item['name']}]({site}/index.md)")
+        site_index = [
+            f"# {item['name']}",
+            "",
+            f"- 归档修订：{item['revision']}",
+            f"- 实体来源：{item['entity_source']}",
+            "",
+            "| 题目 | 查询 | 注释命中/槽位 |",
+            "|---|---|---|",
+        ]
+        for review in item["reviews"]:
+            site_index.append(
+                f"| {review['id']} | {review['query']} | "
+                f"{len([r for r in review['items'] if r['annotations']])}/"
+                f"{min(annotation_top_n, len(review['items']))} |"
+            )
+            body = [
+                f"# Query: {review['id']}",
+                "",
+                f"- Query: {review['query']}",
+                f"- Site: {item['name']}",
+                "- Recall mode: offline-bag-of-terms",
+                f"- Annotation top-N: {annotation_top_n}",
+                f"- Archive revision: {item['revision']}",
+                f"- Entity source: {item['entity_source']}",
+                "",
+            ]
+            for row in review["items"]:
+                body += [
+                    f"## {row['rank']}. {row['title'] or row['url']}",
+                    "",
+                    f"- doc: {row['id']}",
+                    f"- url: {row['url']}",
+                    f"- path: {row['path']}",
+                    f"- score: {row['score']:.6f}",
+                    "",
+                    "### Raw snippet",
+                    "",
+                    "```text",
+                    row["raw"],
+                    "```",
+                    "",
+                    "### Annotated snippet",
+                    "",
+                    "```text",
+                    row["annotated"],
+                    "```",
+                    "",
+                    "### Annotation metadata",
+                    "",
+                ]
+                if row["annotations"]:
+                    body += [f"- {note}" for note in row["annotations"]]
+                else:
+                    body.append("- none")
+                body.append("")
+            (site_dir / f"{review['id']}.md").write_text(
+                "\n".join(body) + "\n", encoding="utf-8"
+            )
+        (site_dir / "index.md").write_text(
+            "\n".join(site_index) + "\n", encoding="utf-8"
+        )
+        index.append("")
+    (root / "index.md").write_text("\n".join(index) + "\n", encoding="utf-8")
+    return root
+
+
+def _observed_drift_verdicts(conn, samples: list[dict], manifest: dict) -> None:
+    """Read auto verdicts from the derived table, not from the fixture snapshot."""
+    for row in samples:
+        corpus = str(row.get("corpus") or "")
+        info = manifest.get("fixtures", {}).get(corpus)
+        if not info:
+            continue
+        version_id = conn.execute(
+            "SELECT v.id FROM versions v JOIN libraries l ON l.id=v.library_id"
+            " WHERE l.name=? AND l.ecosystem=? AND v.version=?",
+            (info["library"], info["ecosystem"], info["version"]),
+        ).fetchone()
+        if version_id is None:
+            continue
+        verdicts = set()
+        for (doc_id,) in conn.execute(
+            "SELECT id FROM documents WHERE url=? AND version_id=?"
+            " AND json_extract(metadata, '$.path') LIKE ?",
+            (row.get("url"), version_id[0], f"%{row.get('heading')}%"),
+        ).fetchall():
+            verdicts.update(
+                item[0]
+                for item in conn.execute(
+                    "SELECT verdict FROM doc_consistency"
+                    " WHERE version_id=? AND document_id=?",
+                    (version_id[0], doc_id),
+                ).fetchall()
+            )
+        row["observed_auto_verdict"] = (
+            "drift"
+            if "drift" in verdicts
+            else ("match" if "match" in verdicts else "unknown")
+        )
+
+
+def run(data: Path, out_dir: Path, annotation_top_n: int) -> list[dict[str, Any]]:
     """Replay every archived docs fixture that has a frozen judgment set."""
     from libref.db import apply_migrations, open_db
     from tests.e2e.bench import archive as bench_archive
@@ -804,7 +913,7 @@ def run(data: Path, out_dir: Path, alpha: float) -> list[dict[str, Any]]:
     manifest = _load_json(manifest_path)
     questions = _load_json(QUESTIONS)
     db_path = data / "bench.db"
-    settings = bench_settings(db_path, doc_feature_alpha=0.0)
+    settings = bench_settings(db_path, doc_feature_annotation_top_n=0)
     conn = open_db(db_path)
     applied = apply_migrations(conn)
     if applied:
@@ -829,20 +938,25 @@ def run(data: Path, out_dir: Path, alpha: float) -> list[dict[str, Any]]:
                 manifest["fixtures"][name],
                 questions[name],
                 settings,
-                alpha,
+                annotation_top_n,
             )
             result["elapsed_ms"] = int((time.monotonic() - started) * 1000)
             results.append(result)
             print(f"{name}: {result['derivation']} in {result['elapsed_ms']}ms")
     finally:
+        samples = json.loads(DRIFT_SAMPLES.read_text(encoding="utf-8")).get(
+            "samples", []
+        )
+        _observed_drift_verdicts(conn, samples, manifest)
         conn.close()
-    _report(results, questions, alpha, out_dir)
+    _report(results, questions, annotation_top_n, out_dir, samples)
+    _write_annotation_review(results, out_dir, annotation_top_n)
     return results
 
 
 def main() -> int:
     args = _parse_args()
-    results = run(Path(args.data), Path(args.out), float(args.alpha))
+    results = run(Path(args.data), Path(args.out), int(args.annotation_top_n))
     if not results:
         print("SKIP no archived fixture with doc-feature judgments", file=sys.stderr)
         return 0

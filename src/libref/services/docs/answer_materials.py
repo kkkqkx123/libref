@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from libref.text.snippet import omitted_tag, truncate_material, unit_tag
+from libref.text.snippet import DERIVED_TAG, omitted_tag, truncate_material, unit_tag
 
 SYSTEM_PROMPT = (
     "Answer only using the provided materials. "
@@ -89,6 +89,9 @@ def apply_total_budget(
     for item in results:
         doc_id = int(item["id"])
         body = truncate_material(full_by_id.get(doc_id), per_limit)
+        notes = [str(note) for note in (item.get("annotations") or []) if note]
+        if notes and body:
+            body = f"{body}\n\n{DERIVED_TAG} " + "; ".join(notes)
         if not body:
             continue
         remaining = total_limit - used

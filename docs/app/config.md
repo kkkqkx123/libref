@@ -149,8 +149,7 @@
 | rrf_w_fts | 浮点（≥0） | 1.0 | LIBREF_RRF_W_FTS | 全文路权重 |
 | rrf_w_vec | 浮点（≥0） | 1.0 | LIBREF_RRF_W_VEC | 向量路权重 |
 | freq_alpha | 浮点（≥0） | 0.15 | LIBREF_FREQ_ALPHA | 序列支持度加权 |
-| cluster_alpha | 浮点（≥0） | 0.05 | LIBREF_CLUSTER_ALPHA | 聚类加权 |
-| doc_feature_alpha | 浮点（≥0） | 0.0 | LIBREF_DOC_FEATURE_ALPHA | 文档特征加权，默认关闭 |
+| doc_feature_annotation_top_n | 整数（≥0） | 5 | LIBREF_DOC_FEATURE_ANNOTATION_TOP_N | 结果增强的 top-N 数量，0 表示关闭 |
 | doc_feature_enabled | 布尔 | 开 | LIBREF_DOC_FEATURE_ENABLED | 抓取后重建文档派生特征 |
 | doc_feature_candidate_budget | 整数（≥1） | 200 | LIBREF_DOC_FEATURE_CANDIDATE_BUDGET | 每块特征候选上限 |
 | doc_feature_terms_per_facet | 整数（≥1） | 20 | LIBREF_DOC_FEATURE_TERMS_PER_FACET | 每个特征取值上限 |
