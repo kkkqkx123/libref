@@ -56,6 +56,7 @@ from libref.services.factory import (
 from libref.services.graph_query import (
     GRAPH_DIRECTIONS,
     GRAPH_MODES,
+    GRAPH_RELATIONS,
     GraphQueryService,
 )
 from libref.services.infra.jobs import JobManager
@@ -90,6 +91,7 @@ from libref.services.registry.resolver import (
 __all__ = [
     "GRAPH_DIRECTIONS",
     "GRAPH_MODES",
+    "GRAPH_RELATIONS",
     "INDEX_REPO_JOB_KIND",
     "MINE_PATTERNS_JOB_KIND",
     "PRESETS",

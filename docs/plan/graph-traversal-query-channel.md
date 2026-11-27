@@ -82,9 +82,11 @@
 
 ## 已落地实现
 
-- `src/libref/store/graph.py`：只读逻辑图视图，支持实体解析、有界 BFS、最短路径、关系类型过滤、置信过滤与证据字段。
-- `src/libref/services/graph_query.py`：图查询编排，复用 `MiningReadService` 提供用法上下文；不触碰检索分数。
-- MCP `graph_query`、Web `GET /graph`、`librefctl graph` 三出口已接入同一服务；工具清单与 OpenAPI 契约同步。
+- `src/libref/store/graph.py`：只读逻辑图视图，支持实体解析、有界 BFS、最短路径、关系类型过滤、置信过滤与事实表证据。
+- `src/libref/services/graph_query.py`：图查询编排，提供邻域、路径、用法、社区与影响面五种形态；复用 `MiningReadService` 提供用法上下文，不触碰检索分数。
+- MCP `graph_query`、Web `GET /graph`、`librefctl graph` 三出口已接入同一服务；工具清单、OpenAPI 快照与前端类型同步。
+- 查询强制绑定库版本、profile 与租户；profile 作用域表按 profile 读取，版本解析唯一，不做跨版本拼接。
 - 配置新增 `graph_max_depth`、`graph_max_nodes`、`graph_max_fanout`、`graph_pattern_limit`，不新增排序权重。
-- 集成测试覆盖强边、弱边、歧义边默认排除、调用路径、用法上下文、版本必填与 Web 出口。
-- 调研资料归档在 `docs/research/`。
+- 集成测试与 gold 集合覆盖强边、弱边、歧义边与冲突边默认排除、调用路径方向、有序模式、社区兄弟实体、文件级影响面、profile 隔离与 Web 出口。
+- 审核导出由 `tools/export_graph_audit.py` 生成，只报告 gold 用例匹配情况与证据出处，不写质量门禁。
+- 完整问题清单、修改方案与落地状态见 `docs/plan/graph-traversal-completion.md`；调研资料归档在 `docs/research/`。

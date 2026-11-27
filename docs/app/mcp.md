@@ -25,19 +25,20 @@ MCP 出口面向模型，共二十九个工具。实现在 `src/libref/mcp_serve
 
 ### graph_query
 
-独立图查询，`mode` 三选一：`neighbors` 返回实体邻域，`path` 返回两实体间的有界最短路径，`usage` 返回邻域加频次、序列与实参形状。`library` 与 `version` 必填，避免跨版本拼接；`depth` 受配置上限约束，关系类型可按 `relation_types` 过滤。返回节点、边、证据、截断标记，`usage` 另返回复用挖掘读模型的统计与文档节点。该工具不参与语义排序，也不改变检索结果分数。
+独立图查询，`mode` 五选一：`neighbors` 返回实体邻域，`path` 返回两实体间的有界最短路径，`usage` 返回邻域加频次、序列与实参形状，`community` 返回同簇兄弟实体与特征父链，`impact` 沿反向调用边列出影响面。`library` 与 `version` 必填且版本必须唯一，避免跨版本拼接；`profile` 绑定挖掘作用域；`depth` 受配置上限约束，关系类型可按 `relation_types` 过滤。返回节点、边、证据、截断标记与作用域，`usage` 另返回复用挖掘读模型的统计与文档节点。该工具不参与语义排序，也不改变检索结果分数。
 
 | 参数 | 必填 | 默认 | 说明 |
 |---|---|---|---|
-| mode | 否 | neighbors | `neighbors/path/usage` |
+| mode | 否 | neighbors | `neighbors/path/usage/community/impact` |
 | entity | 是 | 无 | 限定名或唯一后缀 |
 | target | path 时必填 | 无 | 路径终点限定名 |
 | library/version | 是 | 无 | 库与版本坐标 |
 | ecosystem | 否 | 无 | 生态过滤 |
-| direction | 否 | both | `forward/backward/both` |
-| depth | 否 | 配置值 | 1 到配置上限的整数 |
-| relation_types | 否 | 无 | 关系类型过滤 |
-| include_ambiguous | 否 | 关 | 只在诊断时纳入歧义边 |
+| profile | 否 | usage | 挖掘 profile 名称 |
+| direction | 否 | both | `forward/backward/both`；`path` 按该方向约束边，`impact` 固定反向 |
+| depth | 否 | 配置值 | 1 到配置上限的整数；`usage` 固定一跳，显式传入会返回参数错误 |
+| relation_types | 否 | 无 | `call/import/inherit/mentions/covers_pattern/member/parent/doc_link/pattern_next` |
+| include_ambiguous | 否 | 关 | 诊断时展开歧义与非目标解析边 |
 
 ### answer
 

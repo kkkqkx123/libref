@@ -163,7 +163,7 @@ store/
 ├── postgres_fts.py      # 全文远程分支：关系库原生全文（tsvector 生成列 + ts_rank_cd）
 ├── snapshots.py         # 向量快照仓库（真源向量状态，供对账与重灌）
 ├── evidence.py          # 证据充分度：候选池与头部词项覆盖 → 可答/弱/不可答
-├── graph.py             # 只读逻辑图视图：有界 BFS、最短路径、边置信与证据
+├── graph.py             # 只读逻辑图视图：有界 BFS、最短路径、作用域绑定与事实表证据
 ├── retriever/           # 混合检索引擎
 │   ├── engine.py        # 检索主流程编排
 │   ├── assembly.py      # 检索组件装配
@@ -198,7 +198,7 @@ text/
 services/
 ├── __init__.py          # 立面重导出；出口只调立面或子包显式路径
 ├── factory.py           # 装配根：网关/向量与各服务装配，按有无密钥降级
-├── graph_query.py       # 独立图查询编排：邻域、路径、用法上下文
+├── graph_query.py       # 独立图查询编排：邻域、路径、用法、社区与影响面
 ├── infra/               # 进程级基础设施：无领域依赖
 │   ├── jobs.py          # 内存队列 + jobs 表 write-through + 心跳恢复
 │   ├── progress.py      # 断点游标：总量/指纹/水位存取

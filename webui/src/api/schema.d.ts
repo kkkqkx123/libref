@@ -109,6 +109,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Graph Query */
+        get: operations["graph_query_graph_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/library-search": {
         parameters: {
             query?: never;
@@ -1290,6 +1307,53 @@ export interface components {
             /** Count */
             count: number;
         };
+        /** GraphResponse */
+        GraphResponse: {
+            /** Mode */
+            mode: string;
+            /** Seed */
+            seed: {
+                [key: string]: unknown;
+            };
+            /** Target */
+            target?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Found
+             * @default true
+             */
+            found: boolean;
+            /** Nodes */
+            nodes?: {
+                [key: string]: unknown;
+            }[];
+            /** Edges */
+            edges?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Library */
+            library?: string | null;
+            /** Version */
+            version?: string | null;
+            /** Profile */
+            profile?: string | null;
+            /** Tenant Id */
+            tenant_id?: string | null;
+            /** Usage */
+            usage?: {
+                [key: string]: unknown;
+            } | null;
+            /** Documents */
+            documents?: {
+                [key: string]: unknown;
+            }[];
+        };
         /** ApiValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1570,9 +1634,9 @@ export interface components {
         /** InduceJobParams */
         InduceJobParams: {
             /** Library */
-            library: string;
+            library?: string | null;
             /** Version */
-            version: string;
+            version?: string | null;
             /** Ecosystem */
             ecosystem?: string | null;
             /** Topn */
@@ -1744,9 +1808,9 @@ export interface components {
         /** MineJobParams */
         MineJobParams: {
             /** Library */
-            library: string;
+            library?: string | null;
             /** Version */
-            version: string;
+            version?: string | null;
             /** Ecosystem */
             ecosystem?: string | null;
             /** Minsup */
@@ -2412,9 +2476,9 @@ export interface components {
         /** ScrapeRequest */
         ScrapeRequest: {
             /** Library */
-            library: string;
+            library?: string | null;
             /** Version */
-            version: string;
+            version?: string | null;
             /** Start Url */
             start_url: string;
             /**
@@ -2871,6 +2935,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Rejection */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    graph_query_graph_get: {
+        parameters: {
+            query?: {
+                mode?: "neighbors" | "path" | "usage" | "community" | "impact";
+                entity?: string;
+                target?: string | null;
+                library?: string;
+                version?: string;
+                ecosystem?: string | null;
+                profile?: string | null;
+                direction?: "forward" | "backward" | "both";
+                depth?: number | null;
+                relation_types?: string[] | null;
+                include_ambiguous?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GraphResponse"];
                 };
             };
             /** @description Validation Error */

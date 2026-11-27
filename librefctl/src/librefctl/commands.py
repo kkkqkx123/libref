@@ -126,7 +126,7 @@ class Command:
 
 
 _PRESET = ("precise", "balanced", "thorough")
-_GRAPH_MODE = ("neighbors", "path", "usage")
+_GRAPH_MODE = ("neighbors", "path", "usage", "community", "impact")
 _GRAPH_DIRECTION = ("forward", "backward", "both")
 _SCOPE = (
     query("library", "--library"),
@@ -172,6 +172,7 @@ COMMANDS: tuple[Command, ...] = (
             query("entity", "entity", required=True),
             query("target", "--target"),
             *_SCOPE,
+            query("profile", "--profile"),
             query("direction", "--direction", choices=_GRAPH_DIRECTION),
             query("depth", "--depth", kind="int"),
             query("relation_types", "--relation-type", action="append"),

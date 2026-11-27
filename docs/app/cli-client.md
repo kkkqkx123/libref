@@ -30,7 +30,7 @@
 | 域 | 命令 | 远端映射 |
 |---|---|---|
 | 连通 | `health`、`me` | `GET /health`、`GET /me` |
-| 检索 | `search`、`answer`、`read`、`catalog`、`resolve` | `GET /search`、`/answer`、`/read`、`/catalog`、`/resolve` |
+| 检索 | `search`、`graph`、`answer`、`read`、`catalog`、`resolve` | `GET /search`、`/graph`、`/answer`、`/read`、`/catalog`、`/resolve` |
 | 发现 | `discover`、`search-web`、`search-github` | `GET /library-search`、`/web-search`、`/github-search` |
 | 洞察 | `api-insight`、`pattern-insight`、`doc-insight`、`symbol-insight`、`call-insight`、`import-insight`、`link-stats`、`repo-deps`、`mining-health` | 同名 `GET` 路由 |
 | 探查 | `doc-probe`、`repo-probe` | `POST /doc-probe`、`POST /repo-probe`；仓库只接受远端地址 |

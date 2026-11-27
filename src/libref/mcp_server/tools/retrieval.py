@@ -238,18 +238,21 @@ def register(mcp, ctx, wrap) -> dict[str, object]:
             raise _as_error(exc) from exc
 
     def graph_query(
-        mode: Literal["neighbors", "path", "usage"] = "neighbors",
+        mode: Literal[
+            "neighbors", "path", "usage", "community", "impact"
+        ] = "neighbors",
         entity: str = "",
         target: str | None = None,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
+        profile: str | None = None,
         direction: Literal["forward", "backward", "both"] = "both",
         depth: int | None = None,
         relation_types: list[str] | None = None,
         include_ambiguous: bool = False,
     ) -> dict[str, Any]:
-        """Independent relation query: neighbors, shortest path, or usage context."""
+        """Independent relation query over bounded, evidence-backed graph paths."""
         if mode not in GRAPH_MODES:
             raise _invalid(f"unsupported graph mode: {mode}", field="mode")
         if direction not in GRAPH_DIRECTIONS:
@@ -271,6 +274,7 @@ def register(mcp, ctx, wrap) -> dict[str, object]:
                     version=version,
                     ecosystem=ecosystem,
                     tenant_id=_tenant(_principal()),
+                    profile=profile,
                     direction=direction,
                     depth=depth,
                     relation_types=relation_types,

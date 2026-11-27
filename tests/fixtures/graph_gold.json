@@ -1,0 +1,55 @@
+{
+  "description": "Graph query gold cases over the seeded graphlib source-of-truth facts.",
+  "cases": [
+    {
+      "name": "direct-call-path",
+      "mode": "path",
+      "entity": "pkg.client.Client",
+      "target": "pkg.client.Client.send",
+      "relation_types": ["call"],
+      "expected_nodes": ["pkg.client.Client.send"],
+      "expected_relations": ["call"],
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "ordered-pattern-edge",
+      "mode": "neighbors",
+      "entity": "pkg.client.Client",
+      "direction": "forward",
+      "depth": 1,
+      "relation_types": ["pattern_next"],
+      "expected_nodes": ["pkg.client.Client.send"],
+      "expected_relations": ["pattern_next"],
+      "edges_from_seed_only": true
+    },
+    {
+      "name": "strong-document-mentions",
+      "mode": "neighbors",
+      "entity": "pkg.client.Client.send",
+      "direction": "backward",
+      "relation_types": ["mentions"],
+      "expected_nodes": ["API"],
+      "forbidden_nodes": ["Weak"],
+      "expected_relations": ["mentions"],
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "cluster-siblings",
+      "mode": "community",
+      "entity": "pkg.client.Client.send",
+      "relation_types": ["member"],
+      "expected_nodes": ["pkg.client.Client.close"],
+      "expected_relations": ["member"],
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "file-level-impact",
+      "mode": "impact",
+      "entity": "pkg.client.Client",
+      "relation_types": ["call"],
+      "expected_nodes": ["pkg/script.py"],
+      "expected_relations": ["call"],
+      "edges_from_seed_only": false
+    }
+  ]
+}

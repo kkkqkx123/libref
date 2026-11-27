@@ -48,12 +48,13 @@ class SearchQuery(BaseModel):
 
 
 class GraphQuery(BaseModel):
-    mode: Literal["neighbors", "path", "usage"] = "neighbors"
+    mode: Literal["neighbors", "path", "usage", "community", "impact"] = "neighbors"
     entity: str = Field(min_length=1)
     target: str | None = None
     library: str | None = None
     version: str | None = None
     ecosystem: str | None = None
+    profile: str | None = None
     direction: Literal["forward", "backward", "both"] = "both"
     depth: int | None = Field(default=None, ge=1, le=5)
     relation_types: list[str] | None = None
@@ -68,6 +69,10 @@ class GraphResponse(BaseModel):
     nodes: list[dict[str, Any]] = Field(default_factory=list)
     edges: list[dict[str, Any]] = Field(default_factory=list)
     truncated: bool = False
+    library: str | None = None
+    version: str | None = None
+    profile: str | None = None
+    tenant_id: str | None = None
     usage: dict[str, Any] | None = None
     documents: list[dict[str, Any]] = Field(default_factory=list)
 

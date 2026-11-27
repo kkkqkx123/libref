@@ -133,12 +133,15 @@ def register(app, ctx) -> None:
     @app.get("/graph", response_model=GraphResponse)
     async def graph_query(
         request: Request,
-        mode: Literal["neighbors", "path", "usage"] = "neighbors",
+        mode: Literal["neighbors", "path", "usage", "community", "impact"] = (
+            "neighbors"
+        ),
         entity: str = "",
         target: str | None = None,
         library: str = "",
         version: str = "",
         ecosystem: str | None = None,
+        profile: str | None = None,
         direction: Literal["forward", "backward", "both"] = "both",
         depth: int | None = None,
         relation_types: Annotated[list[str] | None, Query()] = None,
@@ -158,6 +161,7 @@ def register(app, ctx) -> None:
             library=library,
             version=version,
             ecosystem=ecosystem,
+            profile=profile,
             direction=direction,
             depth=depth,
             relation_types=relation_types,
@@ -175,6 +179,7 @@ def register(app, ctx) -> None:
                     version=params.version,
                     ecosystem=params.ecosystem,
                     tenant_id=_tenant_of(principal),
+                    profile=params.profile,
                     direction=params.direction,
                     depth=params.depth,
                     relation_types=params.relation_types,
