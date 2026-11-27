@@ -609,9 +609,7 @@ def _report(results: list[dict], questions: dict, alpha: float, out_dir: Path) -
     false_positive_rate = len(false_positive) / len(auto_drift) if auto_drift else 0.0
     human_drift = [row for row in samples if row.get("human_verdict") == "drift"]
     false_negative = [row for row in human_drift if row.get("auto_verdict") != "drift"]
-    false_negative_rate = (
-        len(false_negative) / len(human_drift) if human_drift else 0.0
-    )
+    false_negative_rate = len(false_negative) / len(human_drift) if human_drift else 0.0
     lines = [
         "# 文档特征冻结归档评测",
         "",

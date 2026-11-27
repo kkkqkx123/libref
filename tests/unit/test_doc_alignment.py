@@ -203,3 +203,116 @@ def test_external_standard_context_is_not_drift():
     ]
     verdicts = compare_consistency(blocks, links, [], entity_names=names, min_support=2)
     assert verdicts[0]["verdict"] == "unknown"
+
+
+def test_code_object_deprecation_binds_without_entity_link():
+    blocks = [
+        {
+            "document_id": 1,
+            "content": "The WithTlsConfig method has been removed in favor of TLSConfig.",
+            "path": "Migration guide / Proxy",
+            "title": "Proxy",
+            "deprecated": True,
+            "code_hashes": [],
+        }
+    ]
+    verdicts = compare_consistency(blocks, [], [], entity_names={}, min_support=2)
+    assert verdicts[0]["verdict"] == "drift"
+    assert "withtlsconfig" in verdicts[0]["evidence"]["local_objects"]
+
+
+def test_heading_code_object_binds_short_deprecation_sentence():
+    blocks = [
+        {
+            "document_id": 1,
+            "content": "Deprecated. Use z.treeifyError() instead.",
+            "path": "Formatting errors / `z.formatError()`",
+            "title": "`z.formatError()`",
+            "deprecated": True,
+            "code_hashes": [],
+        }
+    ]
+    verdicts = compare_consistency(blocks, [], [], entity_names={}, min_support=2)
+    assert verdicts[0]["verdict"] == "drift"
+
+
+def test_heading_noun_binds_deprecation_warning():
+    blocks = [
+        {
+            "document_id": 1,
+            "content": (
+                "A deprecation warning is emitted when a configuration is used"
+                " in an unintended role."
+            ),
+            "path": "Creating Dependency Configurations / Deprecated configurations",
+            "title": "Deprecated configurations",
+            "deprecated": True,
+            "code_hashes": [],
+        }
+    ]
+    verdicts = compare_consistency(blocks, [], [], entity_names={}, min_support=2)
+    assert verdicts[0]["verdict"] == "drift"
+
+
+def test_callout_scope_binds_localized_deprecation():
+    blocks = [
+        {
+            "document_id": 1,
+            "content": ":::danger Core 不再支持\n以下内容仅适用于旧版本。\n:::",
+            "path": "响应性语法糖 / 显式启用",
+            "title": "显式启用",
+            "deprecated": True,
+            "code_hashes": [],
+        }
+    ]
+    verdicts = compare_consistency(blocks, [], [], entity_names={}, min_support=2)
+    assert verdicts[0]["verdict"] == "drift"
+
+
+def test_parameter_assignment_binds_deprecation_warning():
+    blocks = [
+        {
+            "document_id": 1,
+            "content": (
+                "Using the data=<text/byte content> will raise a deprecation warning."
+            ),
+            "path": "Compatibility Guide / Request Content",
+            "title": "Request Content",
+            "deprecated": True,
+            "code_hashes": [],
+        }
+    ]
+    verdicts = compare_consistency(blocks, [], [], entity_names={}, min_support=2)
+    assert verdicts[0]["verdict"] == "drift"
+
+
+def test_table_row_object_binds_short_deprecation():
+    blocks = [
+        {
+            "document_id": 1,
+            "content": (
+                "| Rules | map[string]string | **Deprecated.** Use `RuleList`. | nil |"
+            ),
+            "path": "Config",
+            "title": "Config",
+            "deprecated": True,
+            "code_hashes": [],
+        }
+    ]
+    verdicts = compare_consistency(blocks, [], [], entity_names={}, min_support=2)
+    assert verdicts[0]["verdict"] == "drift"
+
+
+def test_generic_deprecation_heading_is_unknown():
+    blocks = [
+        {
+            "document_id": 1,
+            "content": "Deprecated. Use the next major release.",
+            "path": "版本发布 / 废弃的特性",
+            "title": "废弃的特性",
+            "deprecated": True,
+            "code_hashes": [],
+        }
+    ]
+    verdicts = compare_consistency(blocks, [], [], entity_names={}, min_support=2)
+    assert verdicts[0]["verdict"] == "unknown"

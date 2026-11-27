@@ -33,6 +33,11 @@ _DEPRECATION_WORDS = (
     "deprecation",
     "no longer supported",
     "removed in",
+    "has been removed",
+    "have been removed",
+    "will be removed",
+    "已移除",
+    "被移除",
     "废弃",
     "弃用",
     "不再支持",
@@ -43,18 +48,51 @@ _NEGATION_WORDS = (
     "won't be deprecated",
     "不会废弃",
     "不会弃用",
+    "不会被移除",
+    "不会，",
+    "不会,",
+    "没有任何计划",
+    "没有计划",
+    "no plans",
 )
-_EXCLUDED_DRIFT_CONTEXT = (
-    "ipv6",
-    "ipv4",
-    "tls",
-    "ssl",
-    "site-local",
-    "rfc",
+_EXCLUDED_WORDS_RE = re.compile(
+    r"\b(ipv4|ipv6|tls|ssl|site-local|rfc)\b", re.IGNORECASE
+)
+_EXCLUDED_PHRASES = (
     "deprecation warning",
     "changelog",
     "lifecycle states",
     "feature states",
+)
+_CODE_OBJECT_RE = re.compile(
+    r"`[A-Za-z_][A-Za-z0-9_.:()/-]{1,64}`"
+    r"|\b[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+(?:\(\))?\b"
+    r"|\b[A-Za-z_][A-Za-z0-9_]*\(\)\b"
+    r"|\b[a-z][a-z0-9]*_[a-z0-9_]+\b"
+    r"|\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*\b"
+    r"|\b[a-z][a-z0-9_]*="
+)
+_HEADING_TOKEN_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*|[\u4e00-\u9fff]{2,}")
+_CALLOUT_RE = re.compile(r":::\s*(danger|warning|caution|注意|警告)", re.IGNORECASE)
+_GENERIC_OBJECTS = frozenset(
+    {
+        "deprecated",
+        "deprecation",
+        "warning",
+        "warnings",
+        "with",
+        "states",
+        "state",
+        "lifecycle",
+        "features",
+        "特性",
+        "版本",
+        "发布",
+        "状态",
+        "政策",
+        "支持",
+        "移除",
+    }
 )
 
 
@@ -368,8 +406,52 @@ def consistency_evidence_hash(parts: list[Any]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _bound_deprecation(content: str, entities: set[int], names: dict[int, str]) -> bool:
-    """Check whether a deprecation sentence names a tracked entity."""
+def _sentence_objects(sentence: str) -> set[str]:
+    return {
+        match.group(0).strip("`").lower()
+        for match in _CODE_OBJECT_RE.finditer(str(sentence or ""))
+    }
+
+
+def _heading_objects(path: str, title: str) -> set[str]:
+    out: set[str] = set()
+    for raw in (path, title):
+        for segment in str(raw or "").split("/"):
+            text = re.sub(r"\{#[^}]*\}", "", segment)
+            text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+            text = text.replace("`", "").replace("\\_", "_").strip()
+            out.update(_sentence_objects(text))
+            for match in _HEADING_TOKEN_RE.findall(text):
+                token = match.lower()
+                if any(word in token for word in _GENERIC_OBJECTS) or any(
+                    word in token for word in _DEPRECATION_WORDS
+                ):
+                    continue
+                if len(token) >= 4 or re.search(r"[\u4e00-\u9fff]", token):
+                    out.add(token)
+    return out
+
+
+def _matches_object(obj: str, text: str) -> bool:
+    """Whether a heading object is named by a deprecation sentence."""
+    if obj in text:
+        return True
+    tokens = [token.lower() for token in _HEADING_TOKEN_RE.findall(text)]
+    if re.search(r"[\u4e00-\u9fff]", obj):
+        return any(obj in token or token in obj for token in tokens)
+    prefix = obj[: min(6, len(obj))]
+    return any(token.startswith(prefix) for token in tokens if len(token) >= 4)
+
+
+def _bound_deprecation(
+    content: str,
+    entities: set[int],
+    names: dict[int, str],
+    *,
+    path: str = "",
+    title: str = "",
+) -> bool:
+    """Bind a deprecation sentence to an entity, code object, or scoped heading."""
     labels: set[str] = set()
     for entity_id in entities:
         name = str(names.get(entity_id) or "").lower()
@@ -377,17 +459,49 @@ def _bound_deprecation(content: str, entities: set[int], names: dict[int, str]) 
             continue
         labels.add(name)
         short = name.rpartition(".")[2]
-        if len(short) >= 3:
+        if len(short) >= 4:
             labels.add(short)
-    for sentence in _SENTENCE_RE.findall(str(content or "")):
+    text = str(content or "")
+    lowered = text.lower()
+    negated = any(word in lowered for word in _NEGATION_WORDS)
+    heading = _heading_objects(path, title)
+    heading_code = {obj for obj in heading if _CODE_OBJECT_RE.fullmatch(obj)}
+    callout = bool(_CALLOUT_RE.search(text))
+    heading_deprecated = any(
+        word in f"{path} {title}".lower() for word in _DEPRECATION_WORDS
+    )
+    lines = text.splitlines()
+    for sentence in _SENTENCE_RE.findall(text):
         low = sentence.lower()
         if not any(word in low for word in _DEPRECATION_WORDS):
             continue
         if any(word in low for word in _NEGATION_WORDS):
             continue
-        if any(word in low for word in _EXCLUDED_DRIFT_CONTEXT):
+        if _EXCLUDED_WORDS_RE.search(low):
+            continue
+        line = next((item for item in lines if sentence.strip() in item), sentence)
+        code = _sentence_objects(sentence) | _sentence_objects(line)
+        heading_match = (
+            {
+                obj
+                for obj in heading
+                if obj not in heading_code and _matches_object(obj, low)
+            }
+            if heading_deprecated or callout
+            else set()
+        )
+        if negated and not code:
+            continue
+        if (
+            any(phrase in low for phrase in _EXCLUDED_PHRASES)
+            and not heading_match
+            and not heading_code
+            and not code
+        ):
             continue
         if any(label in low for label in labels):
+            return True
+        if code or heading_code or heading_match or (callout and heading):
             return True
     return False
 
@@ -420,11 +534,22 @@ def compare_consistency(
         entities = linked.get(document_id, set())
         hashes = covered.get(document_id, set())
         bound = _bound_deprecation(
-            str(block.get("content") or ""), entities, entity_names
+            str(block.get("content") or ""),
+            entities,
+            entity_names,
+            path=str(block.get("path") or ""),
+            title=str(block.get("title") or ""),
         )
         evidence = {
             "deprecated": deprecated,
             "deprecation_bound": bound,
+            "deprecation_scope": str(block.get("path") or ""),
+            "local_objects": sorted(
+                _sentence_objects(str(block.get("content") or ""))
+                | _heading_objects(
+                    str(block.get("path") or ""), str(block.get("title") or "")
+                )
+            ),
             "entities": sorted(entities),
             "coverage": sorted(hashes),
             "code_hash": sorted(_code_hashes(block)),
@@ -434,6 +559,7 @@ def compare_consistency(
                 document_id,
                 evidence["deprecated"],
                 evidence["deprecation_bound"],
+                evidence["local_objects"],
                 evidence["entities"],
                 evidence["coverage"],
             ]

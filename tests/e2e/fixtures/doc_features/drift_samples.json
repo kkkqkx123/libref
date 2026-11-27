@@ -4,7 +4,7 @@
       "corpus": "httpx/docs",
       "url": "https://www.python-httpx.org/compatibility/",
       "heading": "Requests Compatibility Guide / Request Content",
-      "auto_verdict": "unknown",
+      "auto_verdict": "drift",
       "human_verdict": "drift",
       "reason": "正文明确说明 data=<text/byte content> 会触发弃用警告并将在 1.0 移除，属于真实 API 漂移。"
     },
@@ -60,7 +60,7 @@
       "corpus": "fiber/docs",
       "url": "https://docs.gofiber.io/whats_new",
       "heading": "🗺 Router / Constraint System",
-      "auto_verdict": "unknown",
+      "auto_verdict": "drift",
       "human_verdict": "drift",
       "reason": "正文说明 TypeConstraint、Constraint.ID 与 Constraint.RegexCompiler 被保留但已弃用。"
     },
@@ -76,7 +76,7 @@
       "corpus": "fiber/docs",
       "url": "https://docs.gofiber.io/whats_new",
       "heading": "🧬 Middlewares / Logger",
-      "auto_verdict": "unknown",
+      "auto_verdict": "drift",
       "human_verdict": "drift",
       "reason": "正文说明 TagHeader 常量已移除，改用 TagReqHeader。"
     },
@@ -132,7 +132,7 @@
       "corpus": "fiber/docs",
       "url": "https://docs.gofiber.io/whats_new",
       "heading": "🧬 Middlewares / Proxy",
-      "auto_verdict": "unknown",
+      "auto_verdict": "drift",
       "human_verdict": "drift",
       "reason": "迁移指南说明 WithTlsConfig 方法已移除，改用 TLSConfig 字段。"
     },
@@ -212,7 +212,7 @@
       "corpus": "vue/docs",
       "url": "https://cn.vuejs.org/guide/extras/reactivity-transform.md",
       "heading": "响应性语法糖 {#reactivity-transform} / 显式启用 {#explicit-opt-in}",
-      "auto_verdict": "unknown",
+      "auto_verdict": "drift",
       "human_verdict": "drift",
       "reason": "正文说明 Vue 3.4 与插件 5.0 已移除响应性语法糖，并给出 Vue Macros 迁移路径。"
     },
@@ -244,7 +244,7 @@
       "corpus": "gradle/docs",
       "url": "https://docs.gradle.org/current/userguide/declaring_configurations.md",
       "heading": "Creating Dependency Configurations / Deprecated configurations",
-      "auto_verdict": "unknown",
+      "auto_verdict": "drift",
       "human_verdict": "drift",
       "reason": "正文说明旧配置以非预期角色使用时会触发弃用警告，并需要改用替代配置。"
     },
@@ -260,7 +260,7 @@
       "corpus": "zod/docs",
       "url": "https://zod.dev/error-formatting",
       "heading": "Formatting errors / `z.formatError()`",
-      "auto_verdict": "unknown",
+      "auto_verdict": "drift",
       "human_verdict": "drift",
       "reason": "正文直接写明 z.formatError 已弃用并要求改用 z.treeifyError。"
     },
@@ -276,7 +276,7 @@
       "corpus": "pydantic/docs",
       "url": "https://pydantic.dev/docs/validation/latest/api/pydantic-core/pydantic_core/index.md",
       "heading": "pydantic\\_core / to\\_json / Parameters",
-      "auto_verdict": "unknown",
+      "auto_verdict": "drift",
       "human_verdict": "drift",
       "reason": "参数说明写明 timedelta_mode 将在 v3 弃用并推荐 temporal_mode，属于参数级漂移。"
     },
@@ -308,7 +308,7 @@
       "corpus": "vue/docs",
       "url": "https://cn.vuejs.org/guide/extras/reactivity-transform.md",
       "heading": "响应性语法糖 {#reactivity-transform}",
-      "auto_verdict": "unknown",
+      "auto_verdict": "drift",
       "human_verdict": "drift",
       "reason": "顶部警告块说明响应性语法糖已在 3.4 移除，并给出 Vue Macros 迁移路径。"
     },
