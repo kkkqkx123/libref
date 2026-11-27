@@ -150,6 +150,10 @@
 | rrf_w_vec | 浮点（≥0） | 1.0 | LIBREF_RRF_W_VEC | 向量路权重 |
 | freq_alpha | 浮点（≥0） | 0.15 | LIBREF_FREQ_ALPHA | 序列支持度加权 |
 | doc_feature_annotation_top_n | 整数（≥0） | 5 | LIBREF_DOC_FEATURE_ANNOTATION_TOP_N | 结果增强的 top-N 数量，0 表示关闭 |
+| graph_max_depth | 整数（1～5） | 2 | LIBREF_GRAPH_MAX_DEPTH | 独立图查询的默认最大跳数 |
+| graph_max_nodes | 整数（≥1） | 200 | LIBREF_GRAPH_MAX_NODES | 单次图查询节点上限 |
+| graph_max_fanout | 整数（≥1） | 20 | LIBREF_GRAPH_MAX_FANOUT | 单节点展开边数上限 |
+| graph_pattern_limit | 整数（≥0） | 200 | LIBREF_GRAPH_PATTERN_LIMIT | 序列模式参与图扩展的候选上限，0 表示关闭 |
 | doc_feature_enabled | 布尔 | 开 | LIBREF_DOC_FEATURE_ENABLED | 抓取后重建文档派生特征 |
 | doc_feature_candidate_budget | 整数（≥1） | 200 | LIBREF_DOC_FEATURE_CANDIDATE_BUDGET | 每块特征候选上限 |
 | doc_feature_terms_per_facet | 整数（≥1） | 20 | LIBREF_DOC_FEATURE_TERMS_PER_FACET | 每个特征取值上限 |

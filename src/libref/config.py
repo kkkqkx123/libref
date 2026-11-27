@@ -190,6 +190,10 @@ class LibrefSettings(BaseSettings):
     guard_enabled: bool = False
     facet_alpha: float = Field(default=0.05, ge=0)
     doc_feature_annotation_top_n: int = Field(default=5, ge=0)
+    graph_max_depth: int = Field(default=2, ge=1, le=5)
+    graph_max_nodes: int = Field(default=200, ge=1)
+    graph_max_fanout: int = Field(default=20, ge=1)
+    graph_pattern_limit: int = Field(default=200, ge=0)
     drift_topn: int = Field(default=20, ge=1)
     doc_feature_enabled: bool = True
     doc_feature_candidate_budget: int = Field(default=200, ge=1)

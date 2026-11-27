@@ -35,6 +35,7 @@ TOOL_ORDER: tuple[str, ...] = (
     "answer",
     "read_doc",
     "catalog",
+    "graph_query",
     "library_search",
     "web_search",
     "github_search",
@@ -408,6 +409,17 @@ def build_cases(ctx: dict[str, Any]) -> list[Case]:
             "link_stats",
             "page",
             {"library": "docs", "version": "1.0", "url": PAGE_URL},
+            "reader",
+        ),
+        Case(
+            "graph_query",
+            "neighbors",
+            {
+                "entity": "pkg.core.Service.create",
+                "library": "demo",
+                "version": "0.1",
+                "direction": "both",
+            },
             "reader",
         ),
         Case(

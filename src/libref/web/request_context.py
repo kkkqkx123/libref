@@ -83,6 +83,7 @@ class WebRequestContext:
         pages,
         catalog,
         mining,
+        graph,
         review,
         rerank,
         chat,
@@ -97,6 +98,7 @@ class WebRequestContext:
         self.pages = pages
         self.catalog = catalog
         self.mining = mining
+        self.graph = graph
         self.review = review
         self.rerank = rerank
         self.chat = chat
@@ -144,6 +146,7 @@ class WebRequestContext:
         pages = self.pages
         catalog = self.catalog
         mining = self.mining
+        graph = self.graph
         review = self.review
         rerank = self.rerank
         chat = self.chat
@@ -160,6 +163,7 @@ class WebRequestContext:
             return rc, True, est, bundle
         # Fallback single-connection path for tests without context
         from libref.services.docs.doc_insight import DocInsightService
+        from libref.services.graph_query import GraphQueryService
         from libref.services.ops.index_requests import IndexRequestService
 
         jobs = JobManager(conn)
@@ -168,6 +172,7 @@ class WebRequestContext:
             "pages": pages,
             "catalog": catalog,
             "mining": mining,
+            "graph": graph or GraphQueryService(conn, est, mining=mining),
             "doc_insight": DocInsightService(conn, est),
             "review": review,
             "index_requests": IndexRequestService(conn, est, jobs=jobs),

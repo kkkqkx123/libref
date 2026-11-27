@@ -1,6 +1,6 @@
 # MCP 功能总览
 
-MCP 出口面向模型，共二十八个工具。实现在 `src/libref/mcp_server/server.py`，组装时按配置过滤可见工具，未知工具名启动即报错。向量、重排与对话能力在组装处显式建立并复用于检索与问答。所有工具只做参数校验与服务调用，不抛协议层错误，失败以载荷内错误返回。写操作按 scope 校验，缺凭据返回未授权，缺 scope 返回禁止。
+MCP 出口面向模型，共二十九个工具。实现在 `src/libref/mcp_server/server.py`，组装时按配置过滤可见工具，未知工具名启动即报错。向量、重排与对话能力在组装处显式建立并复用于检索与问答。所有工具只做参数校验与服务调用，不抛协议层错误，失败以载荷内错误返回。写操作按 scope 校验，缺凭据返回未授权，缺 scope 返回禁止。
 
 标准输入输出供本机客户端使用，`serve-mcp` 与 `serve --stdio` 共用同一组装路径，由命令直接注入本地平台主体并校验配置指纹；流式 HTTP 只由组合 `serve` 的 `/mcp` 提供，与 Web 共用 `[web]` 监听和鉴权中间件。dev 模式必须显式开启且只许回环；enforced 模式每请求需 `Authorization: Bearer`，浏览器来源另需在 `allowed_origins` 中精确登记。工具可见性由允许名单减去拒绝名单决定，缺省全部可见，空允许名单表示零工具。
 
@@ -22,6 +22,22 @@ MCP 出口面向模型，共二十八个工具。实现在 `src/libref/mcp_serve
 | include_prerelease | 否 | 关 | 建议排序含预发布版本 |
 
 返回 `items/count/degraded/reasons/answerable/answerability/cross_lingual`，`reasons` 为降级原因枚举（向量缺失除外：纯全文无向量不算降级）。`answerable` 为证据是否足以回答：查询与语料共享书写系统时按池级与头部词项覆盖判定，不共享脚本（如中文查询打英文语料）时记为 `weak` 而非拒答；`cross_lingual` 表示全文单路因书写系统不匹配而零命中、结果全部来自向量单路。结果不按该判定过滤，调用方自行决定是否弃答。`suggest` 且空命中时附带 `suggestions`，发现失败附带 `suggest_error`。
+
+### graph_query
+
+独立图查询，`mode` 三选一：`neighbors` 返回实体邻域，`path` 返回两实体间的有界最短路径，`usage` 返回邻域加频次、序列与实参形状。`library` 与 `version` 必填，避免跨版本拼接；`depth` 受配置上限约束，关系类型可按 `relation_types` 过滤。返回节点、边、证据、截断标记，`usage` 另返回复用挖掘读模型的统计与文档节点。该工具不参与语义排序，也不改变检索结果分数。
+
+| 参数 | 必填 | 默认 | 说明 |
+|---|---|---|---|
+| mode | 否 | neighbors | `neighbors/path/usage` |
+| entity | 是 | 无 | 限定名或唯一后缀 |
+| target | path 时必填 | 无 | 路径终点限定名 |
+| library/version | 是 | 无 | 库与版本坐标 |
+| ecosystem | 否 | 无 | 生态过滤 |
+| direction | 否 | both | `forward/backward/both` |
+| depth | 否 | 配置值 | 1 到配置上限的整数 |
+| relation_types | 否 | 无 | 关系类型过滤 |
+| include_ambiguous | 否 | 关 | 只在诊断时纳入歧义边 |
 
 ### answer
 

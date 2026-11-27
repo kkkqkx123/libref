@@ -47,6 +47,31 @@ class SearchQuery(BaseModel):
     aligned_only: bool = False
 
 
+class GraphQuery(BaseModel):
+    mode: Literal["neighbors", "path", "usage"] = "neighbors"
+    entity: str = Field(min_length=1)
+    target: str | None = None
+    library: str | None = None
+    version: str | None = None
+    ecosystem: str | None = None
+    direction: Literal["forward", "backward", "both"] = "both"
+    depth: int | None = Field(default=None, ge=1, le=5)
+    relation_types: list[str] | None = None
+    include_ambiguous: bool = False
+
+
+class GraphResponse(BaseModel):
+    mode: str
+    seed: dict[str, Any]
+    target: dict[str, Any] | None = None
+    found: bool = True
+    nodes: list[dict[str, Any]] = Field(default_factory=list)
+    edges: list[dict[str, Any]] = Field(default_factory=list)
+    truncated: bool = False
+    usage: dict[str, Any] | None = None
+    documents: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class LibrarySearchQuery(BaseModel):
     query: str = Field(min_length=1)
     ecosystem: str | None = None
@@ -190,8 +215,8 @@ class JobQuery(BaseModel):
 
 
 class ScrapeRequest(BaseModel):
-    library: str = Field(min_length=1)
-    version: str = Field(min_length=1)
+    library: str | None = None
+    version: str | None = None
     start_url: str = Field(min_length=1)
     ecosystem: str = "custom"
     max_pages: int | None = None
@@ -245,8 +270,8 @@ class RepoProbeRequest(BaseModel):
 
 
 class LinkStatsQuery(BaseModel):
-    library: str = Field(min_length=1)
-    version: str = Field(min_length=1)
+    library: str | None = None
+    version: str | None = None
     ecosystem: str | None = None
     limit: int | None = Field(default=None, ge=1, le=500)
     url: str | None = None
@@ -305,8 +330,8 @@ class FeedbackResolve(BaseModel):
 
 
 class MineJobParams(ContractModel):
-    library: str = Field(min_length=1)
-    version: str = Field(min_length=1)
+    library: str | None = None
+    version: str | None = None
     ecosystem: str | None = None
     minsup: int | None = Field(default=None, ge=1)
     topn: int | None = Field(default=None, ge=1)
@@ -322,8 +347,8 @@ class MineJobParams(ContractModel):
 
 
 class InduceJobParams(ContractModel):
-    library: str = Field(min_length=1)
-    version: str = Field(min_length=1)
+    library: str | None = None
+    version: str | None = None
     ecosystem: str | None = None
     topn: int | None = Field(default=None, ge=1)
     include_ambiguous: bool = False

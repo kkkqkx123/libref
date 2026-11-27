@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import Depends, Request
+from fastapi import Depends, Query, Request
 
 from libref.crawler.registry import RegistryError
 from libref.web.api import (
     AnswerQuery,
     AnswerResponse,
     DiscoveryResponse,
+    GraphQuery,
+    GraphResponse,
     LibraryResponse,
     PageList,
     ReadQuery,
@@ -125,6 +127,61 @@ def register(app, ctx) -> None:
                     out["suggestions"] = []
                     out["suggest_error"] = f"{exc.kind}: {exc}"
             return out
+        finally:
+            close_rc(rc, should_close)
+
+    @app.get("/graph", response_model=GraphResponse)
+    async def graph_query(
+        request: Request,
+        mode: Literal["neighbors", "path", "usage"] = "neighbors",
+        entity: str = "",
+        target: str | None = None,
+        library: str = "",
+        version: str = "",
+        ecosystem: str | None = None,
+        direction: Literal["forward", "backward", "both"] = "both",
+        depth: int | None = None,
+        relation_types: Annotated[list[str] | None, Query()] = None,
+        include_ambiguous: bool = False,
+        principal=Depends(_guard),
+    ) -> dict[str, Any]:
+        if not entity.strip() or not library or not version:
+            raise ApiRejection(
+                400,
+                "invalid_argument",
+                "graph queries require entity, library and version",
+            )
+        params = GraphQuery(
+            mode=mode,
+            entity=entity,
+            target=target,
+            library=library,
+            version=version,
+            ecosystem=ecosystem,
+            direction=direction,
+            depth=depth,
+            relation_types=relation_types,
+            include_ambiguous=include_ambiguous,
+        )
+        _need(principal, "read")
+        rc, should_close, _est, bundle = _req_bundle(request, principal)
+        try:
+            try:
+                return bundle["graph"].query(
+                    params.mode,
+                    params.entity,
+                    target=params.target,
+                    library=params.library,
+                    version=params.version,
+                    ecosystem=params.ecosystem,
+                    tenant_id=_tenant_of(principal),
+                    direction=params.direction,
+                    depth=params.depth,
+                    relation_types=params.relation_types,
+                    include_ambiguous=params.include_ambiguous,
+                )
+            except ValueError as exc:
+                raise ApiRejection(400, "invalid_argument", str(exc)) from exc
         finally:
             close_rc(rc, should_close)
 

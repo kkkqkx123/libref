@@ -44,6 +44,9 @@ def build_web_app(
     catalog = LibraryService(conn)
     mining = MiningReadService(conn, settings)
     review = ReviewService(conn)
+    from libref.services.graph_query import GraphQueryService
+
+    graph = GraphQueryService(conn, settings, mining=mining)
     from contextlib import asynccontextmanager
 
     from libref.services.infra.runtime import check_config_fingerprint, drain
@@ -131,6 +134,7 @@ def build_web_app(
         pages,
         catalog,
         mining,
+        graph,
         review,
         rerank,
         chat,

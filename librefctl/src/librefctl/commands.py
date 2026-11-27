@@ -126,6 +126,8 @@ class Command:
 
 
 _PRESET = ("precise", "balanced", "thorough")
+_GRAPH_MODE = ("neighbors", "path", "usage")
+_GRAPH_DIRECTION = ("forward", "backward", "both")
 _SCOPE = (
     query("library", "--library"),
     query("version", "--version"),
@@ -158,6 +160,22 @@ COMMANDS: tuple[Command, ...] = (
             query("block_type", "--block-type"),
             query("exclude_deprecated", "--exclude-deprecated", action="store_true"),
             query("aligned_only", "--aligned-only", action="store_true"),
+        ),
+    ),
+    Command(
+        "graph",
+        "GET",
+        "/graph",
+        "Query the independent relation graph",
+        (
+            query("mode", "--mode", choices=_GRAPH_MODE),
+            query("entity", "entity", required=True),
+            query("target", "--target"),
+            *_SCOPE,
+            query("direction", "--direction", choices=_GRAPH_DIRECTION),
+            query("depth", "--depth", kind="int"),
+            query("relation_types", "--relation-type", action="append"),
+            query("include_ambiguous", "--include-ambiguous", action="store_true"),
         ),
     ),
     Command(

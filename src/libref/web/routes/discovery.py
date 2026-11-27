@@ -72,6 +72,10 @@ def register(app, ctx) -> None:
                     ),
                 )
                 raise ApiRejection(400, "invalid_argument", str(exc)) from exc
+            if not body.library or not body.version:
+                raise ApiRejection(
+                    400, "invalid_argument", "library and version are required"
+                )
             mgr = bundle["jobs"]
             job_id = start_scrape_job(
                 mgr,
@@ -376,6 +380,10 @@ def register(app, ctx) -> None:
             url=url,
         )
         _need(principal, "read")
+        if not params.library or not params.version:
+            raise ApiRejection(
+                400, "invalid_argument", "library and version are required"
+            )
         rc, should_close, est, bundle = _req_bundle(request, principal)
         try:
             try:

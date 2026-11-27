@@ -17,6 +17,7 @@ from libref.mcp_server.context import (
     _not_found,
 )
 from libref.mcp_server.contract import ToolFailure
+from libref.services.graph_query import GRAPH_DIRECTIONS, GRAPH_MODES
 
 
 def register(mcp, ctx, wrap) -> dict[str, object]:
@@ -236,8 +237,53 @@ def register(mcp, ctx, wrap) -> dict[str, object]:
         except Exception as exc:
             raise _as_error(exc) from exc
 
+    def graph_query(
+        mode: Literal["neighbors", "path", "usage"] = "neighbors",
+        entity: str = "",
+        target: str | None = None,
+        library: str | None = None,
+        version: str | None = None,
+        ecosystem: str | None = None,
+        direction: Literal["forward", "backward", "both"] = "both",
+        depth: int | None = None,
+        relation_types: list[str] | None = None,
+        include_ambiguous: bool = False,
+    ) -> dict[str, Any]:
+        """Independent relation query: neighbors, shortest path, or usage context."""
+        if mode not in GRAPH_MODES:
+            raise _invalid(f"unsupported graph mode: {mode}", field="mode")
+        if direction not in GRAPH_DIRECTIONS:
+            raise _invalid(
+                f"unsupported graph direction: {direction}", field="direction"
+            )
+        if not entity.strip():
+            raise _invalid("entity is empty", field="entity")
+        if mode == "path" and not str(target or "").strip():
+            raise _invalid("path mode requires target", field="target")
+        _rc5, _bundle5, _should_close5 = _make_bundle()
+        try:
+            try:
+                return _bundle5["graph"].query(
+                    mode,
+                    entity,
+                    target=target,
+                    library=library,
+                    version=version,
+                    ecosystem=ecosystem,
+                    tenant_id=_tenant(_principal()),
+                    direction=direction,
+                    depth=depth,
+                    relation_types=relation_types,
+                    include_ambiguous=include_ambiguous,
+                )
+            except Exception as exc:
+                raise _as_error(exc) from exc
+        finally:
+            _close(_rc5, _should_close5)
+
     return {
         "search": search,
+        "graph_query": graph_query,
         "library_search": library_search,
         "web_search": web_search,
         "github_search": github_search,

@@ -14,7 +14,14 @@ from tests.conftest import make_settings
 
 pytestmark = pytest.mark.integration
 
-_CONTRACT_PATHS = ("/search", "/answer", "/read", "/pages", "/review")
+_CONTRACT_PATHS = (
+    "/search",
+    "/graph",
+    "/answer",
+    "/read",
+    "/pages",
+    "/review",
+)
 _METHODS = frozenset({"get", "post", "put", "delete"})
 
 

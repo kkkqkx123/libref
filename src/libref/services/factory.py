@@ -11,6 +11,7 @@ from libref.services.infra.vectors import build_gateway, build_vector
 __all__ = [
     "build_discovery_service",
     "build_gateway",
+    "build_graph_query_service",
     "build_ingest_service",
     "build_maintenance_service",
     "build_search_service",
@@ -48,6 +49,14 @@ def build_discovery_service(conn, settings):
     from libref.services.registry.discovery import DiscoveryService
 
     return DiscoveryService(conn, settings)
+
+
+def build_graph_query_service(conn, settings):
+    """Assemble the independent graph query service; it needs no vectors."""
+    from libref.services.code.mining_read import MiningReadService
+    from libref.services.graph_query import GraphQueryService
+
+    return GraphQueryService(conn, settings, mining=MiningReadService(conn, settings))
 
 
 def build_ingest_service(conn, settings, *, gateway=None, vec_store=None, embed=None):

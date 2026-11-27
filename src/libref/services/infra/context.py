@@ -61,6 +61,7 @@ class AppContext:
         from libref.services.docs.doc_insight import DocInsightService
         from libref.services.docs.pages import PageService
         from libref.services.docs.search import SearchService
+        from libref.services.graph_query import GraphQueryService
         from libref.services.infra.jobs import JobManager
         from libref.services.ops.index_requests import IndexRequestService
         from libref.services.ops.review import ReviewService
@@ -82,6 +83,7 @@ class AppContext:
             embed=self.embed,
             rerank=rerank,
         )
+        mining = MiningReadService(conn, self.settings)
         jobs = JobManager(
             conn,
             instance_id=str(
@@ -92,7 +94,8 @@ class AppContext:
             "search": search,
             "pages": PageService(conn),
             "catalog": LibraryService(conn),
-            "mining": MiningReadService(conn, self.settings),
+            "mining": mining,
+            "graph": GraphQueryService(conn, self.settings, mining=mining),
             "doc_insight": DocInsightService(conn, self.settings),
             "review": ReviewService(conn),
             "index_requests": IndexRequestService(conn, self.settings, jobs=jobs),

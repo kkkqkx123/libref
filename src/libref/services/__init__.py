@@ -53,6 +53,11 @@ from libref.services.factory import (
     build_maintenance_service,
     build_search_service,
 )
+from libref.services.graph_query import (
+    GRAPH_DIRECTIONS,
+    GRAPH_MODES,
+    GraphQueryService,
+)
 from libref.services.infra.jobs import JobManager
 from libref.services.ops.maintenance import (
     MaintenanceService,
@@ -83,6 +88,8 @@ from libref.services.registry.resolver import (
 )
 
 __all__ = [
+    "GRAPH_DIRECTIONS",
+    "GRAPH_MODES",
     "INDEX_REPO_JOB_KIND",
     "MINE_PATTERNS_JOB_KIND",
     "PRESETS",
@@ -92,6 +99,7 @@ __all__ = [
     "SYSTEM_PROMPT",
     "DiscoveryService",
     "DocProbe",
+    "GraphQueryService",
     "IngestService",
     "JobManager",
     "LibraryService",

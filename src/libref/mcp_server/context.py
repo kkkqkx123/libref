@@ -54,6 +54,7 @@ ALL_MCP_TOOLS: frozenset[str] = frozenset(
         "answer",
         "read_doc",
         "catalog",
+        "graph_query",
         "doc_probe",
         "repo_probe",
         "repo_dependencies",
@@ -102,6 +103,7 @@ _READ_TOOLS = frozenset(
         "answer",
         "read_doc",
         "catalog",
+        "graph_query",
         "doc_probe",
         "repo_probe",
         "repo_dependencies",
@@ -142,6 +144,7 @@ class McpContext:
         embed_fn,
         rerank_fn,
         chat_fn,
+        graph_svc=None,
     ) -> None:
         self.conn = conn
         self.settings = settings
@@ -157,6 +160,7 @@ class McpContext:
         self.embed_fn = embed_fn
         self.rerank_fn = rerank_fn
         self.chat_fn = chat_fn
+        self.graph_svc = graph_svc
 
     def principal(self):
         resolve_settings = self.settings
@@ -212,6 +216,7 @@ class McpContext:
         pages = self.pages
         catalog_svc = self.catalog_svc
         mining = self.mining
+        graph_svc = self.graph_svc
         review_svc = self.review_svc
         resolve_settings = self.settings
         vec_store = self.vec_store
@@ -233,6 +238,7 @@ class McpContext:
                 raise
             return rc, bundle, True
         from libref.services.docs.doc_insight import DocInsightService
+        from libref.services.graph_query import GraphQueryService
         from libref.services.infra.jobs import JobManager
         from libref.services.ops.index_requests import IndexRequestService
 
@@ -244,6 +250,8 @@ class McpContext:
                 "pages": pages,
                 "catalog": catalog_svc,
                 "mining": mining,
+                "graph": graph_svc
+                or GraphQueryService(conn, resolve_settings, mining=mining),
                 "doc_insight": DocInsightService(conn, resolve_settings),
                 "review": review_svc,
                 "jobs": local_jobs,

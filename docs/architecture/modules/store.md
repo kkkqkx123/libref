@@ -65,6 +65,10 @@
 - **simvec 后端**：Rust 绑定动态加载；图参数固定在创建时（shape 区段）；full_scan_threshold 之前走精确扫描、之后发布图。
 - **容量门**：写入将越过 `vector_max_points` 上限时硬停（向量是派生物，源真相未动，扩容后批次可重放）。
 
+### 独立图查询（graph.py）
+
+逻辑图视图从既有事实表惰性读取节点与边：API 实体、调用实例、导入边、文档强对齐边、特征节点、簇成员、序列模式与文档链接。它不新建真相表，也不进入 FTS/向量 RRF 排名。遍历按版本、租户、关系类型和置信过滤，带深度、节点数、扇出与模式候选上限；边保留事实表来源和证据，供服务层组装审核输出。
+
 ## 对外接口
 
 `DocumentStore`、`HybridRetriever`、`Fts5FulltextStore`/`PostgresFulltextStore`、`SnapshotStore`、`SimvecVecStore`/`QdrantVecStore`/`VectorProfile`、`filter_by_doc_facets`。

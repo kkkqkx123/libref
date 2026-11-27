@@ -49,6 +49,9 @@ def build_mcp_server(
     catalog_svc = LibraryService(conn)
     mining = MiningReadService(conn, resolve_settings)
     review_svc = ReviewService(conn)
+    from libref.services.graph_query import GraphQueryService
+
+    graph_svc = GraphQueryService(conn, resolve_settings, mining=mining)
 
     ctx = McpContext(
         conn,
@@ -65,6 +68,7 @@ def build_mcp_server(
         embed_fn,
         rerank_fn,
         chat_fn,
+        graph_svc=graph_svc,
     )
     from libref.mcp_server.tools import discovery as discovery_tools
     from libref.mcp_server.tools import index_requests as index_request_tools
