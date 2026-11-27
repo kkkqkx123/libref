@@ -9,9 +9,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import sqlite3
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+from libref.store.graph_cache import CacheKey, GraphAdjacencyCache, graph_cache_context
+
+logger = logging.getLogger(__name__)
 
 Direction = Literal["forward", "backward", "both"]
 
@@ -26,6 +35,22 @@ GRAPH_RELATIONS = (
     "parent",
     "doc_link",
     "pattern_next",
+)
+
+_SNAPSHOT_TABLES = (
+    "api_entities",
+    "call_instances",
+    "review_status",
+    "seq_patterns",
+    "doc_api_links",
+    "api_clusters",
+    "feature_nodes",
+    "doc_feature_node_links",
+    "import_edges",
+    "documents",
+    "doc_link_edges",
+    "doc_pattern_coverage",
+    "doc_consistency",
 )
 
 
@@ -77,6 +102,124 @@ class GraphSubgraph(BaseModel):
     found: bool = True
 
 
+_NODE_FIELDS = tuple(GraphNode.model_fields)
+_EDGE_FIELDS = tuple(GraphEdge.model_fields)
+_EDGE_SOURCE_INDEX = _EDGE_FIELDS.index("source")
+_EDGE_TARGET_INDEX = _EDGE_FIELDS.index("target")
+
+_NodeRecord = tuple[Any, ...]
+_NodeVariants = tuple[tuple[str, tuple[_NodeRecord, ...]], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _EdgeRecord:
+    """Immutable edge values plus node descriptions added while deriving it."""
+
+    values: tuple[Any, ...]
+    nodes: _NodeVariants
+    rank: tuple[int, float, str]
+    direction: Direction
+    anchor: str
+
+    @property
+    def source(self) -> str:
+        return str(self.values[_EDGE_SOURCE_INDEX])
+
+    @property
+    def target(self) -> str:
+        return str(self.values[_EDGE_TARGET_INDEX])
+
+
+def _pack_node(node: GraphNode) -> _NodeRecord:
+    return tuple(getattr(node, name) for name in _NODE_FIELDS)
+
+
+def _unpack_node(record: _NodeRecord) -> GraphNode:
+    return GraphNode(**dict(zip(_NODE_FIELDS, record, strict=True)))
+
+
+def _pack_edge(
+    edge: GraphEdge,
+    nodes: _NodeVariants = (),
+    *,
+    direction: Direction = "forward",
+    anchor: str = "",
+) -> _EdgeRecord:
+    values: list[Any] = []
+    for name in _EDGE_FIELDS:
+        value = getattr(edge, name)
+        if isinstance(value, dict):
+            value = json.dumps(
+                value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+        values.append(value)
+    rank = (
+        10 if edge.relation in {"call", "inherit", "mentions", "import"} else 1,
+        edge.weight,
+        edge.id,
+    )
+    return _EdgeRecord(tuple(values), nodes, rank, direction, anchor)
+
+
+def _unpack_edge(record: _EdgeRecord) -> GraphEdge:
+    values = dict(zip(_EDGE_FIELDS, record.values, strict=True))
+    values["evidence"] = json.loads(values["evidence"])
+    return GraphEdge(**values)
+
+
+def _merge_edge_records(old: _EdgeRecord, new: _EdgeRecord) -> _EdgeRecord:
+    variants = dict(old.nodes)
+    for node_id, records in new.nodes:
+        variants[node_id] = tuple(dict.fromkeys((*variants.get(node_id, ()), *records)))
+    return _EdgeRecord(
+        old.values, tuple(sorted(variants.items())), old.rank, old.direction, old.anchor
+    )
+
+
+class _AdjacencySnapshot:
+    """Immutable forward and backward adjacency indexes for one fact scope."""
+
+    def __init__(
+        self,
+        records: dict[tuple[str, Direction], _EdgeRecord],
+        *,
+        table_scans: int = 0,
+    ) -> None:
+        self._records = tuple(records.values())
+        self.table_scans = int(table_scans)
+        forward: dict[str, list[_EdgeRecord]] = {}
+        backward: dict[str, list[_EdgeRecord]] = {}
+        for record in sorted(self._records, key=lambda item: item.rank, reverse=True):
+            index = forward if record.direction == "forward" else backward
+            index.setdefault(record.anchor, []).append(record)
+        self.forward: Mapping[str, tuple[_EdgeRecord, ...]] = MappingProxyType(
+            {key: tuple(value) for key, value in forward.items()}
+        )
+        self.backward: Mapping[str, tuple[_EdgeRecord, ...]] = MappingProxyType(
+            {key: tuple(value) for key, value in backward.items()}
+        )
+
+    @property
+    def edge_count(self) -> int:
+        return len(self._records)
+
+
+@dataclass(frozen=True, slots=True)
+class _PatternCandidate:
+    """One adjacent pattern pair, kept for deterministic representative choice."""
+
+    pattern_id: int
+    support: int
+    position: int
+    names: tuple[str, ...]
+    version_id: int
+    profile_id: int
+
+    @property
+    def rank(self) -> tuple[int, int, int]:
+        return (int(self.support), -int(self.pattern_id), -int(self.position))
+
+
 def _digest(raw: str) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
@@ -116,6 +259,60 @@ def _strong_link_sql(alias: str | None = None) -> tuple[str, list[str]]:
     prefix = f"{alias}." if alias else ""
     marks = ",".join("?" for _ in STRONG_DOC_LINKS)
     return f"{prefix}match_kind IN ({marks})", list(STRONG_DOC_LINKS)
+
+
+class _PatternIndex:
+    """Query-local index of merged adjacent pairs from sampled patterns."""
+
+    def __init__(self) -> None:
+        self._by_source: dict[tuple[bool, str], dict[str, _PatternCandidate]] = {}
+        self._nodes: dict[tuple[int, str], GraphNode] = {}
+
+    def add(
+        self,
+        rows: list[tuple],
+        resolve: Callable[[set[str]], dict[tuple[int, str], GraphNode]],
+    ) -> None:
+        names: set[str] = set()
+        for _, raw, _, _, _ in rows:
+            try:
+                names.update(str(name) for name in json.loads(raw) if str(name))
+            except TypeError, ValueError:
+                continue
+        self._nodes = resolve(names)
+        for pattern_id, raw, support, version_id, profile_id in rows:
+            try:
+                parsed = (
+                    [str(name) for name in json.loads(raw) if str(name)] if raw else []
+                )
+            except TypeError, ValueError:
+                continue
+            for position in range(len(parsed) - 1):
+                previous, current = parsed[position], parsed[position + 1]
+                candidate = _PatternCandidate(
+                    pattern_id=int(pattern_id),
+                    support=int(support or 0),
+                    position=position,
+                    names=tuple(parsed),
+                    version_id=int(version_id),
+                    profile_id=int(profile_id),
+                )
+                for outbound, source, target in (
+                    (True, previous, current),
+                    (False, current, previous),
+                ):
+                    bucket = self._by_source.setdefault((outbound, source), {})
+                    current_best = bucket.get(target)
+                    if current_best is None or candidate.rank > current_best.rank:
+                        bucket[target] = candidate
+
+    def candidates(
+        self, label: str, *, outbound: bool
+    ) -> list[tuple[str, _PatternCandidate]]:
+        return list(self._by_source.get((outbound, label), {}).items())
+
+    def node(self, version_id: int, name: str) -> GraphNode | None:
+        return self._nodes.get((version_id, name))
 
 
 class _EmptyCursor:
@@ -181,7 +378,9 @@ class GraphView:
         pattern_limit: int = 200,
         query_budget: int = 400,
         include_ambiguous: bool = False,
+        cache: GraphAdjacencyCache | None = None,
     ) -> None:
+        self._raw_conn = conn
         self._budget = _QueryBudget(query_budget)
         self._conn = _BudgetedConnection(conn, self._budget)
         self._version_ids = sorted({int(v) for v in version_ids})
@@ -198,17 +397,55 @@ class GraphView:
         self._edges: dict[str, GraphEdge] = {}
         self._tenant_columns: dict[str, bool] = {}
         self._truncated = False
+        self._cache = cache
+        self._cache_lease: Any = None
+        self._snapshot: _AdjacencySnapshot | None = None
+        self._pattern_index: _PatternIndex | None = None
 
     def _open_budget(self) -> None:
         self._truncated = False
         self._budget.used = 0
         self._budget.exhausted = False
         self._budget.active = True
+        self._prepare_snapshot()
 
     def _close_budget(self) -> None:
         self._budget.active = False
         if self._budget.exhausted:
             self._truncated = True
+        self._release_snapshot()
+
+    def _prepare_snapshot(self) -> None:
+        if self._cache is None or self._snapshot is not None:
+            return
+        context = graph_cache_context(self._raw_conn)
+        if context is None:
+            logger.debug("graph cache fallback: watermark unavailable")
+            return
+        backend, identity, watermark = context
+        key = CacheKey(
+            backend=backend,
+            identity=identity,
+            tenant=self._tenant_id,
+            version=self.version_id,
+            profiles=tuple(self._profile_ids),
+            profile_name=self._profile_name,
+            include_ambiguous=self._include_ambiguous,
+            pattern_limit=self._pattern_limit,
+            watermark=watermark,
+        )
+        cache = self._cache
+        lease = cache.acquire(key, lambda: self._build_snapshot(cache.max_edges))
+        if lease is None:
+            return
+        self._cache_lease = lease
+        self._snapshot = lease.snapshot
+
+    def _release_snapshot(self) -> None:
+        if self._cache_lease is not None:
+            self._cache_lease.release()
+            self._cache_lease = None
+        self._snapshot = None
 
     @property
     def version_id(self) -> int:
@@ -654,53 +891,90 @@ class GraphView:
             out.extend(self._import_edges(node))
         return out
 
+    def _resolve_pattern_names(
+        self, names: set[str]
+    ) -> dict[tuple[int, str], GraphNode]:
+        if not names:
+            return {}
+        tenant, params = self._tenant_sql("api_entities")
+        marks = ",".join("?" for _ in names)
+        rows = self._conn.execute(
+            "SELECT id, qualified_name, kind, file, version_id, line_start, line_end"
+            " FROM api_entities"
+            f" WHERE {self._version_sql()} AND qualified_name IN ({marks}){tenant}"
+            " ORDER BY qualified_name, id",
+            [*self._version_ids, *sorted(names), *params],
+        ).fetchall()
+        grouped: dict[tuple[int, str], list[tuple]] = {}
+        for row in rows:
+            grouped.setdefault((int(row[4]), str(row[1])), []).append(tuple(row))
+        resolved: dict[tuple[int, str], GraphNode] = {}
+        for key, group in grouped.items():
+            if len(group) != 1:
+                continue
+            node = self._api_node(group[0])
+            self._add_node(node)
+            resolved[key] = node
+        return resolved
+
+    def _ensure_pattern_index(self) -> _PatternIndex:
+        if self._pattern_index is not None:
+            return self._pattern_index
+        index = _PatternIndex()
+        if self._pattern_limit:
+            tenant, params = self._tenant_sql("seq_patterns")
+            profile = self._profile_sql()
+            rows = [
+                tuple(row)
+                for row in self._conn.execute(
+                    "SELECT id, pattern, support, version_id, profile_id FROM seq_patterns"
+                    f" WHERE {self._version_sql()} AND {profile}{tenant}"
+                    " ORDER BY support DESC, id LIMIT ?",
+                    [
+                        *self._version_ids,
+                        *self._profile_ids,
+                        *params,
+                        self._pattern_limit,
+                    ],
+                ).fetchall()
+            ]
+            index.add(rows, self._resolve_pattern_names)
+        self._pattern_index = index
+        return index
+
     def _pattern_edges(self, node: GraphNode, *, outbound: bool) -> list[GraphEdge]:
         if not self._pattern_limit or not node.label or node.version_id is None:
             return []
-        tenant, params = self._tenant_sql("seq_patterns")
-        profile = self._profile_sql()
-        rows = self._conn.execute(
-            "SELECT id, pattern, support, version_id, profile_id FROM seq_patterns"
-            f" WHERE {self._version_sql()} AND {profile}{tenant}"
-            " ORDER BY support DESC, id LIMIT ?",
-            [*self._version_ids, *self._profile_ids, *params, self._pattern_limit],
-        ).fetchall()
-        out: list[GraphEdge] = []
-        for pattern_id, raw, support, version_id, profile_id in rows:
-            try:
-                names = [str(n) for n in json.loads(raw) if str(n)] if raw else []
-            except ValueError:
+        index = self._ensure_pattern_index()
+        merged: dict[str, tuple[_PatternCandidate, GraphNode]] = {}
+        for target_name, candidate in index.candidates(node.label, outbound=outbound):
+            target = index.node(candidate.version_id, target_name)
+            if target is None:
                 continue
-            for position in range(len(names) - 1):
-                source_name, target_name = (
-                    (names[position], names[position + 1])
-                    if outbound
-                    else (names[position + 1], names[position])
+            previous = merged.get(target.id)
+            if previous is None or candidate.rank > previous[0].rank:
+                merged[target.id] = (candidate, target)
+        out: list[GraphEdge] = []
+        for candidate, target in merged.values():
+            out.append(
+                self._make_edge(
+                    source=node.id,
+                    target=target.id,
+                    relation="pattern_next",
+                    confidence="INFERRED",
+                    source_table="seq_patterns",
+                    source_id=candidate.pattern_id,
+                    version_id=candidate.version_id,
+                    profile_id=candidate.profile_id,
+                    weight=float(candidate.support or 1),
+                    evidence={
+                        "pattern": list(candidate.names),
+                        "support": candidate.support,
+                        "position": candidate.position,
+                        "pattern_id": candidate.pattern_id,
+                    },
                 )
-                if source_name != node.label:
-                    continue
-                source = self._entity_by_name(source_name, int(version_id))
-                target = self._entity_by_name(target_name, int(version_id))
-                if source is None or target is None:
-                    continue
-                out.append(
-                    self._make_edge(
-                        source=source.id,
-                        target=target.id,
-                        relation="pattern_next",
-                        confidence="INFERRED",
-                        source_table="seq_patterns",
-                        source_id=int(pattern_id),
-                        version_id=int(version_id),
-                        profile_id=int(profile_id),
-                        weight=float(support or 1),
-                        evidence={
-                            "pattern": names,
-                            "support": int(support or 0),
-                            "position": position,
-                        },
-                    )
-                )
+            )
         return out
 
     def _doc_mentions(self, node: GraphNode) -> list[GraphEdge]:
@@ -1189,8 +1463,39 @@ class GraphView:
             )
         return out
 
+    def _build_snapshot(self, max_edges: int) -> _AdjacencySnapshot | None:
+        builder = _SnapshotView(self, max_edges)
+        try:
+            return builder.build()
+        finally:
+            builder.close()
+
     def neighbors(self, node: GraphNode, *, direction: Direction) -> list[GraphEdge]:
-        """Return edges adjacent to one node in the requested direction."""
+        """Return edges adjacent to one node through the active provider."""
+        if self._snapshot is None:
+            return self._sql_neighbors(node, direction=direction)
+        if not self._budget.take():
+            return []
+        records: list[_EdgeRecord] = []
+        if direction in ("forward", "both"):
+            records.extend(self._snapshot.forward.get(node.id, ()))
+        if direction in ("backward", "both"):
+            records.extend(self._snapshot.backward.get(node.id, ()))
+        variants: dict[str, list[_NodeRecord]] = {}
+        edges: list[GraphEdge] = []
+        for record in records:
+            edges.append(_unpack_edge(record))
+            for node_id, records_for_node in record.nodes:
+                variants.setdefault(node_id, []).extend(records_for_node)
+        for node_id, node_variants in variants.items():
+            for node_record in node_variants:
+                self._add_node(_unpack_node(node_record))
+        return edges
+
+    def _sql_neighbors(
+        self, node: GraphNode, *, direction: Direction
+    ) -> list[GraphEdge]:
+        """Derive adjacency from fact tables without any cached projection."""
         out: list[GraphEdge] = []
         if node.source_table == "api_entities":
             if direction in ("forward", "both"):
@@ -1425,3 +1730,258 @@ class GraphView:
             edges=sorted(self._edges.values(), key=lambda e: (-e.weight, e.id)),
             truncated=bool(truncated or self._truncated),
         )
+
+
+class _SnapshotOverflow(Exception):
+    """Raised when a snapshot would exceed its configured edge capacity."""
+
+
+def _copy_graph_facts(
+    conn: Any,
+    version_ids: list[int],
+    profile_ids: list[int],
+    tenant_id: str | None,
+) -> tuple[sqlite3.Connection | None, int]:
+    """Copy scoped contribution tables once into an indexed in-memory database.
+
+    Derivation SQL keeps running unchanged, but only against this snapshot copy;
+    the source fact tables are scanned once per contribution table. Backends
+    without a SQLite file path return ``None`` so the caller uses SQL directly.
+    """
+    raw = getattr(conn, "raw", conn)
+    if not isinstance(raw, sqlite3.Connection):
+        return None, 0
+    memory: sqlite3.Connection | None = None
+    try:
+        rows = raw.execute("PRAGMA database_list").fetchall()
+        path = next(
+            (str(row[2]) for row in rows if str(row[1]) == "main" and row[2]), ""
+        )
+        if not path:
+            return None, 0
+        memory = sqlite3.connect(":memory:")
+        memory.execute("ATTACH DATABASE ? AS graph_src", (path,))
+        scans = 0
+        for table in _SNAPSHOT_TABLES:
+            ddl = memory.execute(
+                "SELECT sql FROM graph_src.sqlite_master WHERE type='table' AND name=?",
+                (table,),
+            ).fetchone()
+            if ddl is None or not ddl[0]:
+                continue
+            memory.execute(str(ddl[0]))
+            columns = [
+                str(row[1])
+                for row in memory.execute(f"PRAGMA graph_src.table_info({table})")
+            ]
+            if not columns:
+                continue
+            conditions: list[str] = []
+            params: list[Any] = []
+            if "version_id" in columns:
+                conditions.append(
+                    f"version_id IN ({','.join('?' for _ in version_ids)})"
+                )
+                params.extend(version_ids)
+            if "profile_id" in columns:
+                conditions.append(
+                    f"profile_id IN ({','.join('?' for _ in profile_ids)})"
+                )
+                params.extend(profile_ids)
+            if tenant_id is not None and "tenant_id" in columns:
+                conditions.append("tenant_id = ?")
+                params.append(tenant_id)
+            where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+            names = ",".join(columns)
+            memory.execute(
+                f"INSERT INTO {table}({names})"
+                f" SELECT {names} FROM graph_src.{table}{where}",
+                params,
+            )
+            indexes = memory.execute(
+                "SELECT sql FROM graph_src.sqlite_master"
+                " WHERE type='index' AND tbl_name=? AND sql IS NOT NULL",
+                (table,),
+            ).fetchall()
+            for index in indexes:
+                memory.execute(str(index[0]))
+            scans += 1
+        return memory, scans
+    except Exception as exc:  # noqa: BLE001 -- any copy failure falls back to SQL
+        logger.debug(
+            "graph snapshot fact copy failed reason=%s error=%s",
+            type(exc).__name__,
+            exc,
+        )
+        if memory is not None:
+            memory.close()
+        return None, 0
+
+
+class _SnapshotView(GraphView):
+    """Scan contribution tables once and record edges through SQL derivations."""
+
+    def __init__(self, source: GraphView, max_edges: int) -> None:
+        facts, scans = _copy_graph_facts(
+            source._raw_conn,
+            source._version_ids,
+            source._profile_ids,
+            source._tenant_id,
+        )
+        self._facts = facts
+        self._scans = scans
+        super().__init__(
+            facts or source._raw_conn,
+            source._version_ids,
+            tenant_id=source._tenant_id,
+            profile_ids=source._profile_ids,
+            profile_name=source._profile_name,
+            max_nodes=source._max_nodes,
+            max_fanout=max(source._max_fanout, int(max_edges) + 1),
+            pattern_limit=source._pattern_limit,
+            query_budget=1,
+            include_ambiguous=source._include_ambiguous,
+        )
+        self._budget.active = False
+        self._max_edges = max(1, int(max_edges))
+        self._records: dict[tuple[str, Direction], _EdgeRecord] = {}
+        self._seeds: dict[str, GraphNode] = {}
+
+    def close(self) -> None:
+        if self._facts is not None:
+            self._facts.close()
+
+    def _scan(self, sql: str, params: list[Any] | None = None) -> list[tuple]:
+        return [
+            tuple(row)
+            for row in self._raw_conn.execute(sql, tuple(params or ())).fetchall()
+        ]
+
+    def _seed(self, node: GraphNode) -> None:
+        self._seeds.setdefault(node.id, node)
+
+    def neighbors(self, node: GraphNode, *, direction: Direction) -> list[GraphEdge]:
+        before = dict(self._nodes)
+        edges = self._sql_neighbors(node, direction=direction)
+        added = {key: value for key, value in self._nodes.items() if key not in before}
+        for edge in edges:
+            variants = tuple(
+                (node_id, (_pack_node(added[node_id]),))
+                for node_id in sorted({edge.source, edge.target})
+                if node_id in added
+            )
+            record = _pack_edge(edge, variants, direction=direction, anchor=node.id)
+            key = (edge.id, direction)
+            previous = self._records.get(key)
+            self._records[key] = (
+                record if previous is None else _merge_edge_records(previous, record)
+            )
+        if len(self._records) > self._max_edges:
+            raise _SnapshotOverflow
+        return edges
+
+    def _load_seeds(self) -> None:
+        tenant, params = self._tenant_sql("api_entities")
+        for row in self._scan(
+            "SELECT id, qualified_name, kind, file, version_id, line_start, line_end"
+            " FROM api_entities"
+            f" WHERE {self._version_sql()}{tenant} ORDER BY id",
+            [*self._version_ids, *params],
+        ):
+            self._seed(self._api_node(row))
+
+        tenant, params = self._tenant_sql("documents")
+        for row in self._scan(
+            "SELECT id, url, title, path, version_id FROM documents"
+            f" WHERE {self._version_sql()}{tenant} ORDER BY id",
+            [*self._version_ids, *params],
+        ):
+            self._seed(self._doc_node(row))
+
+        tenant, params = self._tenant_sql("api_clusters")
+        profile = self._profile_sql()
+        for row in self._scan(
+            "SELECT id, cluster_id, size, version_id, profile_id FROM api_clusters"
+            f" WHERE {self._version_sql()} AND {profile}{tenant} ORDER BY id",
+            [*self._version_ids, *self._profile_ids, *params],
+        ):
+            self._seed(
+                self._cluster_node(
+                    cluster_id=int(row[1]),
+                    source_id=int(row[0]),
+                    version_id=int(row[3]),
+                    profile_id=int(row[4]),
+                    size=int(row[2]),
+                )
+            )
+
+        tenant, params = self._tenant_sql("feature_nodes")
+        for row in self._scan(
+            "SELECT id, path, version_id, profile_id FROM feature_nodes"
+            f" WHERE {self._version_sql()} AND {profile}{tenant} ORDER BY id",
+            [*self._version_ids, *self._profile_ids, *params],
+        ):
+            self._seed(
+                self._feature_node(str(row[1]), int(row[2]), int(row[3]), int(row[0]))
+            )
+
+        tenant, params = self._tenant_sql("doc_pattern_coverage")
+        for row in self._scan(
+            "SELECT id, pattern_hash, pattern, support, version_id, profile_id"
+            " FROM doc_pattern_coverage"
+            f" WHERE {self._version_sql()} AND {profile}{tenant} ORDER BY id",
+            [*self._version_ids, *self._profile_ids, *params],
+        ):
+            try:
+                names = (
+                    [str(name) for name in json.loads(row[2]) if str(name)]
+                    if row[2]
+                    else []
+                )
+            except TypeError, ValueError:
+                names = []
+            self._seed(
+                self._pattern_node(
+                    names=names,
+                    digest=str(row[1] or _pattern_digest(names)),
+                    source_table="doc_pattern_coverage",
+                    source_id=int(row[0]),
+                    version_id=int(row[4]),
+                    profile_id=int(row[5]),
+                    support=int(row[3] or 0),
+                )
+            )
+
+        tenant, params = self._tenant_sql("call_instances")
+        for row in self._scan(
+            "SELECT DISTINCT caller_file, version_id FROM call_instances"
+            f" WHERE {self._version_sql()} AND in_target_api = 1{tenant}"
+            " ORDER BY caller_file",
+            [*self._version_ids, *params],
+        ):
+            self._seed(self._file_node(int(row[1]), str(row[0])))
+        tenant, params = self._tenant_sql("import_edges")
+        for row in self._scan(
+            "SELECT DISTINCT importer_file, version_id FROM import_edges"
+            f" WHERE {self._version_sql()}{tenant} ORDER BY importer_file",
+            [*self._version_ids, *params],
+        ):
+            self._seed(self._file_node(int(row[1]), str(row[0])))
+
+    def build(self) -> _AdjacencySnapshot:
+        self._load_seeds()
+        pending = list(self._seeds.values())
+        processed: set[str] = set()
+        while pending:
+            node = pending.pop(0)
+            if node.id in processed:
+                continue
+            processed.add(node.id)
+            for direction in ("forward", "backward"):
+                self._nodes = {node.id: node}
+                self.neighbors(node, direction=direction)
+            for node_id, discovered in self._nodes.items():
+                if node_id not in self._seeds:
+                    self._seeds[node_id] = discovered
+                    pending.append(discovered)
+        return _AdjacencySnapshot(self._records, table_scans=self._scans)

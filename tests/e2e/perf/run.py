@@ -91,7 +91,8 @@ def main() -> int:
         }
     dataset = ctx.get("dataset")
     if dataset is not None:
-        report["settings"] = harness.settings_snapshot(harness._bench_settings(dataset))
+        settings = ctx.get("settings") or harness._bench_settings(dataset)
+        report["settings"] = harness.settings_snapshot(settings)
     for case in report["cases"]:
         for failure in case.get("failures", []):
             report["failures"].append(f"{case['case_id']}/{case['variant']}: {failure}")

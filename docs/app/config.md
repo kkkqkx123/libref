@@ -154,7 +154,10 @@
 | graph_max_nodes | 整数（≥1） | 200 | LIBREF_GRAPH_MAX_NODES | 单次图查询节点上限 |
 | graph_max_fanout | 整数（≥1） | 20 | LIBREF_GRAPH_MAX_FANOUT | 单节点展开边数上限 |
 | graph_pattern_limit | 整数（≥0） | 200 | LIBREF_GRAPH_PATTERN_LIMIT | 序列模式参与图扩展的候选上限，0 表示关闭 |
-| graph_query_budget | 整数（≥1） | 400 | LIBREF_GRAPH_QUERY_BUDGET | 单次图遍历的事实表查询次数上限，耗尽时返回截断标记 |
+| graph_query_budget | 整数（≥1） | 400 | LIBREF_GRAPH_QUERY_BUDGET | 单次图遍历的逻辑邻接读取上限：SQL 路径按事实表读取计次，缓存路径按快照邻接读取计次；耗尽时返回截断标记 |
+| graph_cache_enabled | 布尔 | 关 | LIBREF_GRAPH_CACHE_ENABLED | 启用进程内派生邻接快照；快照失效或构建失败时回退 SQL |
+| graph_cache_max_edges | 整数（≥1） | 50000 | LIBREF_GRAPH_CACHE_MAX_EDGES | 进程内所有邻接快照的边数总额；超出则驱逐空闲快照或回退 SQL |
+| graph_cache_ttl_seconds | 浮点（≥0） | 300 | LIBREF_GRAPH_CACHE_TTL_SECONDS | 空闲快照的驱逐时间；引用中的快照不会被驱逐 |
 | doc_feature_enabled | 布尔 | 开 | LIBREF_DOC_FEATURE_ENABLED | 抓取后重建文档派生特征 |
 | doc_feature_candidate_budget | 整数（≥1） | 200 | LIBREF_DOC_FEATURE_CANDIDATE_BUDGET | 每块特征候选上限 |
 | doc_feature_terms_per_facet | 整数（≥1） | 20 | LIBREF_DOC_FEATURE_TERMS_PER_FACET | 每个特征取值上限 |

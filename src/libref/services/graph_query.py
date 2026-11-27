@@ -9,6 +9,7 @@ from libref.services.code.mining_read import MiningReadService
 from libref.services.code.mining_read.common import _profile_context
 from libref.services.registry.libraries import mining_version_ids
 from libref.store.graph import GRAPH_RELATIONS, GraphNode, GraphSubgraph, GraphView
+from libref.store.graph_cache import get_graph_adjacency_cache
 
 GraphMode = Literal["neighbors", "path", "usage", "community", "impact"]
 GraphDirection = Literal["forward", "backward", "both"]
@@ -59,6 +60,12 @@ class GraphQueryService:
         pids = _profile_context(self._conn, vids, name)[0]
         if not pids:
             raise ValueError(f"unknown profile: {name}")
+        cache = None
+        if setting_or_default(self._settings, "graph_cache_enabled"):
+            cache = get_graph_adjacency_cache(
+                int(setting_or_default(self._settings, "graph_cache_max_edges")),
+                float(setting_or_default(self._settings, "graph_cache_ttl_seconds")),
+            )
         return GraphView(
             self._conn,
             vids,
@@ -72,6 +79,7 @@ class GraphQueryService:
             ),
             query_budget=int(setting_or_default(self._settings, "graph_query_budget")),
             include_ambiguous=include_ambiguous,
+            cache=cache,
         )
 
     def _depth(self, depth: int | None) -> int:

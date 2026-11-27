@@ -47,7 +47,7 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### GET /graph
 
-独立图查询，返回节点、边、路径与证据，不与检索结果混排，也不改变检索分数。`entity` 与 `library`、`version` 必填；`mode` 取 `neighbors`、`path`、`usage`、`community`、`impact`。`community` 走同簇成员与特征父链，`impact` 走反向调用边并保留文件级调用点。`profile` 必须已建立，否则返回参数错误；方向按每一跳边的朝向解释，截断标记同时覆盖扇出、节点上限、查询次数预算与文档块上限。
+独立图查询，返回节点、边、路径与证据，不与检索结果混排，也不改变检索分数。`entity` 与 `library`、`version` 必填；`mode` 取 `neighbors`、`path`、`usage`、`community`、`impact`。`community` 走同簇成员与特征父链，`impact` 走反向调用边并保留文件级调用点。`profile` 必须已建立，否则返回参数错误；方向按每一跳边的朝向解释，截断标记同时覆盖扇出、节点上限、逻辑邻接预算与文档块上限。
 
 | 参数 | 必填 | 默认 | 说明 |
 |---|---|---|---|

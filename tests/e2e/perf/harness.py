@@ -104,6 +104,14 @@ def settings_snapshot(settings: Any) -> dict[str, Any]:
         "minsup",
         "maxlen",
         "minlen",
+        "graph_max_depth",
+        "graph_max_nodes",
+        "graph_max_fanout",
+        "graph_pattern_limit",
+        "graph_query_budget",
+        "graph_cache_enabled",
+        "graph_cache_max_edges",
+        "graph_cache_ttl_seconds",
         "auth_mode",
     )
     return {key: full[key] for key in keys if key in full}
@@ -896,6 +904,246 @@ def case_exit_web(cfg: dict[str, Any], ctx: dict[str, Any]) -> list[dict[str, An
         conn.close()
 
 
+def case_graph_adjacency(
+    cfg: dict[str, Any], ctx: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Compare SQL adjacency reads with cold and warm derived snapshots."""
+    from libref.services.graph_query import GraphQueryService
+    from libref.services.registry.libraries import mining_version_ids
+    from libref.store.graph_cache import (
+        clear_graph_adjacency_caches,
+        get_graph_adjacency_cache,
+    )
+
+    dataset = ctx.get("dataset", DEFAULT_DATASET)
+    fixture = str(cfg["fixture"])
+    variants = ("sql", "cache_cold", "cache_warm")
+    max_edges = int(cfg["graph_cache_max_edges"])
+    ttl = float(cfg["graph_cache_ttl_seconds"])
+    cache = get_graph_adjacency_cache(max_edges, ttl)
+
+    def skipped(reason: str) -> list[dict[str, Any]]:
+        return [
+            _result(
+                "service.graph_adjacency",
+                name,
+                {"samples_ms": [], "stats": stats([])},
+                notes=[f"skipped: {reason}"],
+            )
+            for name in variants
+        ]
+
+    if not dataset.is_file() or not (dataset.parent / "manifest.json").is_file():
+        return skipped("benchmark dataset unavailable")
+    ctx["dataset"] = dataset
+    info = _manifest_for(ctx, dataset)["fixtures"].get(fixture)
+    if info is None:
+        return skipped(f"fixture unavailable: {fixture}")
+
+    conn = _connect(dataset)
+    try:
+        scope = _scope(info)
+        tenant = str(cfg.get("tenant_id", "default"))
+        profile = str(cfg.get("profile", "usage"))
+        versions = mining_version_ids(
+            conn,
+            scope["library"],
+            scope["version"],
+            scope["ecosystem"],
+            tenant_id=tenant,
+        )
+        if len(versions) != 1:
+            return skipped(f"version is not unique: {fixture}")
+        version_id = versions[0]
+        profiles = [
+            int(row[0])
+            for row in conn.execute(
+                "SELECT id FROM mining_profiles WHERE version_id=? AND name=?"
+                " ORDER BY id",
+                (version_id, profile),
+            )
+        ]
+        if not profiles:
+            return skipped(f"profile unavailable: {fixture}/{profile}")
+
+        columns = {
+            str(row[1]) for row in conn.execute("PRAGMA table_info(call_instances)")
+        }
+        tenant_sql = ""
+        entity_params: list[Any] = [version_id]
+        if "tenant_id" in columns:
+            tenant_sql = " AND ci.tenant_id = ?"
+            entity_params.append(tenant)
+        rows = conn.execute(
+            "SELECT a.qualified_name, count(*) AS calls FROM call_instances ci"
+            " JOIN api_entities a ON a.id=ci.callee_entity_id"
+            f" WHERE ci.version_id=? AND ci.in_target_api=1{tenant_sql}"
+            " GROUP BY a.id ORDER BY calls DESC, a.id LIMIT ?",
+            [*entity_params, int(cfg["entity_limit"])],
+        ).fetchall()
+        entities = [str(row[0]) for row in rows]
+        if not entities:
+            return skipped(f"no hot entities for {fixture}")
+
+        knobs = {
+            "graph_max_depth": int(cfg.get("depth", 2)),
+            "graph_query_budget": int(cfg.get("query_budget", 20000)),
+            "graph_pattern_limit": int(cfg.get("pattern_limit", 200)),
+            "graph_cache_max_edges": max_edges,
+            "graph_cache_ttl_seconds": ttl,
+        }
+        sql_settings = _bench_settings(dataset, graph_cache_enabled=False, **knobs)
+        cache_settings = _bench_settings(dataset, graph_cache_enabled=True, **knobs)
+        ctx["settings"] = cache_settings
+        sql_service = GraphQueryService(conn, sql_settings)
+        cache_service = GraphQueryService(conn, cache_settings)
+
+        queries: list[dict[str, Any]] = []
+        for entity in entities:
+            for direction in cfg["directions"]:
+                queries.append(
+                    {
+                        "mode": "neighbors",
+                        "entity": entity,
+                        "direction": direction,
+                        "depth": knobs["graph_max_depth"],
+                        "library": scope["library"],
+                        "version": scope["version"],
+                        "ecosystem": scope["ecosystem"],
+                        "tenant_id": tenant,
+                        "profile": profile,
+                    }
+                )
+
+        def run_sql() -> list[dict[str, Any]]:
+            return [sql_service.query(**query) for query in queries]
+
+        def run_cache() -> list[dict[str, Any]]:
+            return [cache_service.query(**query) for query in queries]
+
+        def run_cold() -> list[dict[str, Any]]:
+            clear_graph_adjacency_caches()
+            return run_cache()
+
+        def traced(fn: Any) -> list[str]:
+            captured: list[str] = []
+            conn.set_trace_callback(captured.append)
+            try:
+                fn()
+            finally:
+                conn.set_trace_callback(None)
+            return captured
+
+        clear_graph_adjacency_caches()
+        expected = run_sql()
+        clear_graph_adjacency_caches()
+        actual = run_cache()
+        failures: list[str] = []
+        if expected != actual:
+            failures.append("SQL and cache adjacency results differ")
+
+        graph_tables = (
+            "api_entities",
+            "call_instances",
+            "review_status",
+            "seq_patterns",
+            "doc_api_links",
+            "api_clusters",
+            "feature_nodes",
+            "import_edges",
+            "documents",
+            "doc_link_edges",
+            "doc_pattern_coverage",
+            "doc_consistency",
+        )
+
+        def adjacency_reads(statements: list[str]) -> int:
+            return sum(
+                1
+                for statement in statements
+                if any(table in statement.lower() for table in graph_tables)
+            )
+
+        sql_trace = traced(run_sql)
+        clear_graph_adjacency_caches()
+        scans_before = cache.stats["table_scans"]
+        build_trace = traced(run_cache)
+        scans_after = cache.stats["table_scans"]
+        warm_trace = traced(run_cache)
+        counters: dict[str, Any] = {
+            "queries_per_batch": len(queries),
+            "entities": len(entities),
+            "sql_adjacency_reads": adjacency_reads(sql_trace),
+            "cache_build_adjacency_reads": adjacency_reads(build_trace),
+            "cache_build_table_scans": scans_after - scans_before,
+            "cache_warm_adjacency_reads": adjacency_reads(warm_trace),
+        }
+
+        clear_graph_adjacency_caches()
+        sql_measured = measure(
+            run_sql,
+            warmup=int(cfg["warmup"]),
+            repeats=int(cfg["repeats"]),
+        )
+        clear_graph_adjacency_caches()
+        cold_measured = measure(
+            run_cold,
+            warmup=0,
+            repeats=int(cfg["repeats"]),
+        )
+        clear_graph_adjacency_caches()
+        before = cache.stats
+        warm_measured = measure(
+            run_cache,
+            warmup=int(cfg["warmup"]),
+            repeats=int(cfg["repeats"]),
+        )
+        after = cache.stats
+        sql_median = sql_measured["measured"]["stats"]["median_ms"]
+        cold_median = cold_measured["measured"]["stats"]["median_ms"]
+        warm_median = warm_measured["measured"]["stats"]["median_ms"]
+        speedup = round(sql_median / warm_median, 3) if warm_median else 0.0
+        delta = sql_median - warm_median
+        amortized = round(cold_median / delta, 2) if delta > 0 else None
+        warm_item = _result(
+            "service.graph_adjacency",
+            "cache_warm",
+            warm_measured["measured"],
+            counters={
+                **counters,
+                "sql_median_ms": sql_median,
+                "cache_cold_median_ms": cold_median,
+                "warm_speedup": speedup,
+                "amortization_batches": amortized,
+                "builds_during_warm_run": after["builds"] - before["builds"],
+                "hits_during_warm_run": after["hits"] - before["hits"],
+            },
+            failures=failures,
+            notes=[
+                f"warm speedup {speedup}x vs SQL",
+                f"cold build amortizes after {amortized} batches",
+            ],
+        )
+        return [
+            _result(
+                "service.graph_adjacency",
+                "sql",
+                sql_measured["measured"],
+                counters=counters,
+                failures=failures,
+            ),
+            _result(
+                "service.graph_adjacency",
+                "cache_cold",
+                cold_measured["measured"],
+                counters=counters,
+            ),
+            warm_item,
+        ]
+    finally:
+        conn.close()
+
+
 CASES: dict[str, Callable[[dict[str, Any], dict[str, Any]], list[dict[str, Any]]]] = {
     "micro.prefixspan": case_prefixspan,
     "micro.chunking": case_chunking,
@@ -905,6 +1153,7 @@ CASES: dict[str, Callable[[dict[str, Any], dict[str, Any]], list[dict[str, Any]]
     "store.fts_scope": case_fts_scope,
     "store.mining_scan": case_mining_scan,
     "service.retrieval": case_service_retrieval,
+    "service.graph_adjacency": case_graph_adjacency,
     "exit.web": case_exit_web,
 }
 

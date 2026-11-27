@@ -62,6 +62,19 @@
       "warmup": 1,
       "repeats": 3
     },
+    "service.graph_adjacency": {
+      "gear": "corpus",
+      "fixture": "gradle/code-v9.9.1",
+      "entity_limit": 8,
+      "directions": ["forward", "backward", "both"],
+      "depth": 2,
+      "query_budget": 20000,
+      "pattern_limit": 200,
+      "graph_cache_max_edges": 50000,
+      "graph_cache_ttl_seconds": 300,
+      "warmup": 1,
+      "repeats": 5
+    },
     "exit.web": {
       "gear": "exit",
       "fixture": "httpx/docs",
