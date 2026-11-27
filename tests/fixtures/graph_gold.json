@@ -1,11 +1,13 @@
 {
-  "description": "Graph query gold cases with stable node identities and row-backed evidence over the seeded source-of-truth facts.",
+  "description": "Hand-verified graph gold cases over the seeded source-of-truth facts in test_graph_query.py::_seed.",
   "cases": [
     {
       "name": "direct-call-path",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:call_instances#1",
       "mode": "path",
       "entity": "pkg.client.Client",
       "target": "pkg.client.Client.send",
+      "direction": "forward",
       "relation_types": ["call"],
       "expected_seed": "api:1",
       "expected_found": true,
@@ -13,10 +15,11 @@
       "expected_relations": ["call"],
       "expected_evidence_refs": ["call_instances:1@1:default"],
       "expected_truncated": false,
-      "edges_from_seed_only": false
+      "edges_from_seed_only": true
     },
     {
       "name": "ordered-pattern-edge",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:seq_patterns#1",
       "mode": "neighbors",
       "entity": "pkg.client.Client",
       "direction": "forward",
@@ -31,9 +34,11 @@
     },
     {
       "name": "strong-document-mentions",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:doc_api_links#1",
       "mode": "neighbors",
       "entity": "pkg.client.Client.send",
       "direction": "backward",
+      "depth": 1,
       "relation_types": ["mentions"],
       "expected_seed": "api:2",
       "expected_nodes": ["api:2", "doc:1"],
@@ -45,6 +50,7 @@
     },
     {
       "name": "cluster-siblings",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:api_clusters#1-2,doc_feature_node_links#1",
       "mode": "community",
       "entity": "pkg.client.Client.send",
       "relation_types": ["member"],
@@ -66,6 +72,7 @@
     },
     {
       "name": "file-level-impact",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:call_instances#4",
       "mode": "impact",
       "entity": "pkg.client.Client",
       "relation_types": ["call"],
@@ -73,6 +80,151 @@
       "expected_nodes": ["api:1", "file:1:pkg/script.py"],
       "expected_relations": ["call"],
       "expected_evidence_refs": ["call_instances:4@1:default"],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "reverse-import-edge",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:import_edges#1",
+      "mode": "neighbors",
+      "entity": "pkg.client.Client",
+      "direction": "backward",
+      "depth": 1,
+      "relation_types": ["import"],
+      "expected_seed": "api:1",
+      "expected_nodes": ["api:1", "file:1:pkg/entry.py"],
+      "expected_relations": ["import"],
+      "expected_evidence_refs": ["import_edges:1@1:default"],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "inherited-base-edge",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:api_entities#5",
+      "mode": "neighbors",
+      "entity": "pkg.client.SecureClient",
+      "direction": "forward",
+      "depth": 1,
+      "relation_types": ["inherit"],
+      "expected_seed": "api:5",
+      "expected_nodes": ["api:1", "api:5"],
+      "expected_relations": ["inherit"],
+      "expected_evidence_refs": ["api_entities:5@1:default"],
+      "expected_truncated": false,
+      "edges_from_seed_only": true
+    },
+    {
+      "name": "document-pattern-evidence",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:doc_api_links#1,doc_pattern_coverage#1,doc_consistency#1",
+      "mode": "neighbors",
+      "entity": "pkg.client.Client.send",
+      "direction": "both",
+      "depth": 2,
+      "relation_types": ["mentions", "covers_pattern"],
+      "expected_seed": "api:2",
+      "expected_nodes": ["api:2", "doc:1", "pattern:1:pattern-1"],
+      "expected_relations": ["covers_pattern", "mentions"],
+      "expected_evidence_refs": [
+        "doc_api_links:1@1:default",
+        "doc_pattern_coverage:1@1:default"
+      ],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "document-navigation-chunks",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:doc_api_links#1,doc_link_edges#1",
+      "mode": "neighbors",
+      "entity": "pkg.client.Client.send",
+      "direction": "both",
+      "depth": 2,
+      "relation_types": ["mentions", "doc_link"],
+      "expected_seed": "api:2",
+      "expected_nodes": ["api:2", "doc:1", "doc:3", "doc:4"],
+      "expected_relations": ["doc_link", "mentions"],
+      "expected_evidence_refs": [
+        "doc_api_links:1@1:default",
+        "doc_link_edges:1@1:default"
+      ],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "feature-parent-chain",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:feature_nodes#1,doc_feature_node_links#1,api_clusters#1-2",
+      "mode": "community",
+      "entity": "pkg.client.Client.send",
+      "relation_types": ["member", "parent"],
+      "expected_seed": "api:2",
+      "expected_nodes": [
+        "api:2",
+        "api:4",
+        "cluster:1:4",
+        "feature:1:pkg.client",
+        "feature:1:pkg.client.send"
+      ],
+      "expected_relations": ["member", "parent"],
+      "expected_evidence_refs": [
+        "api_clusters:1@1:default",
+        "api_clusters:2@1:default",
+        "doc_feature_node_links:1@1:default",
+        "feature_nodes:1@1:default"
+      ],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "usage-context",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:call_instances#1,call_instances#3,seq_patterns#1,doc_api_links#1",
+      "mode": "usage",
+      "entity": "pkg.client.Client.send",
+      "relation_types": ["call", "mentions", "pattern_next"],
+      "expected_seed": "api:2",
+      "expected_nodes": ["api:1", "api:2", "api:4", "doc:1"],
+      "expected_relations": ["call", "mentions", "pattern_next"],
+      "expected_evidence_refs": [
+        "call_instances:1@1:default",
+        "call_instances:3@1:default",
+        "doc_api_links:1@1:default",
+        "seq_patterns:1@1:default",
+        "seq_patterns:2@1:default"
+      ],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "ambiguous-call-diagnostic",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:call_instances#2,call_instances#4",
+      "mode": "neighbors",
+      "entity": "pkg.client.Client",
+      "direction": "backward",
+      "depth": 1,
+      "relation_types": ["call"],
+      "include_ambiguous": true,
+      "expected_seed": "api:1",
+      "expected_nodes": ["api:1", "api:3", "file:1:pkg/script.py"],
+      "expected_relations": ["call"],
+      "expected_evidence_refs": [
+        "call_instances:2@1:default",
+        "call_instances:4@1:default"
+      ],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "path-miss-with-relation-filter",
+      "source_ref": "tests/integration/test_graph_query.py::_seed:import_edges#1",
+      "mode": "path",
+      "entity": "pkg.client.Client",
+      "target": "pkg.helper.retry",
+      "direction": "forward",
+      "depth": 1,
+      "relation_types": ["import"],
+      "expected_seed": "api:1",
+      "expected_found": false,
+      "expected_nodes": [],
+      "expected_relations": [],
+      "expected_evidence_refs": [],
       "expected_truncated": false,
       "edges_from_seed_only": false
     }

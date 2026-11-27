@@ -7,10 +7,16 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from libref.services.graph_query import GraphQueryService
+from libref.services.graph_query import (
+    GRAPH_DIRECTIONS,
+    GRAPH_MODES,
+    GraphQueryService,
+)
+from libref.store.graph import GRAPH_RELATIONS
 from tests.conftest import make_settings, seed_library_version
 
 pytestmark = pytest.mark.integration
@@ -55,12 +61,13 @@ def _seed(conn) -> None:
     conn.executemany(
         "INSERT INTO api_entities"
         " (id, entity_uid, library_id, version_id, qualified_name, kind, bases)"
-        " VALUES (?, ?, 1, 1, ?, ?, '[]')",
+        " VALUES (?, ?, 1, 1, ?, ?, ?)",
         [
-            (1, "a", "pkg.client.Client", "class"),
-            (2, "b", "pkg.client.Client.send", "method"),
-            (3, "c", "pkg.helper.retry", "function"),
-            (4, "d", "pkg.client.Client.close", "method"),
+            (1, "a", "pkg.client.Client", "class", "[]"),
+            (2, "b", "pkg.client.Client.send", "method", "[]"),
+            (3, "c", "pkg.helper.retry", "function", "[]"),
+            (4, "d", "pkg.client.Client.close", "method", "[]"),
+            (5, "e", "pkg.client.SecureClient", "class", '["pkg.client.Client"]'),
         ],
     )
     conn.execute(
@@ -784,20 +791,111 @@ def test_gold_cases_match_seeded_source_of_truth(conn, monkeypatch, tmp_path) ->
         version="1.0",
         tenant_id="default",
     )
-    assert report["summary"] == {
-        "total": len(_GOLD["cases"]),
-        "matched": len(_GOLD["cases"]),
-        "match_rate": 1.0,
-    }
+    assert report["summary"]["total"] == len(_GOLD["cases"])
+    assert report["summary"]["matched"] == len(_GOLD["cases"])
+    assert report["summary"]["match_rate"] == 1.0
+    assert report["summary"]["errors"] == 0
     assert all(case["passed"] for case in report["cases"])
-    assert report["metrics"]["seed_resolution"] == 1.0
-    assert report["metrics"]["path_hit"] == 1.0
-    assert report["metrics"]["node_precision"] == 1.0
-    assert report["metrics"]["node_recall"] == 1.0
-    assert report["metrics"]["relation_precision"] == 1.0
-    assert report["metrics"]["relation_recall"] == 1.0
-    assert report["metrics"]["evidence_traceability"] == 1.0
+    for key in (
+        "seed_resolution",
+        "path_hit",
+        "node_precision",
+        "node_recall",
+        "relation_precision",
+        "relation_recall",
+        "evidence_traceability",
+        "node_evidence_traceability",
+    ):
+        assert report["metrics"][key] == 1.0, key
     assert report["metrics"]["unexpected_truncations"] == 0
+    assert report["metrics"]["missed_truncations"] == 0
+
+
+def test_gold_cases_are_fixture_backed(conn, monkeypatch, tmp_path) -> None:
+    _seed(conn)
+    cases = _GOLD["cases"]
+    row_tables = {
+        "api_entities",
+        "call_instances",
+        "seq_patterns",
+        "doc_api_links",
+        "api_clusters",
+        "doc_feature_node_links",
+        "feature_nodes",
+        "import_edges",
+        "doc_link_edges",
+        "doc_pattern_coverage",
+        "documents",
+    }
+    names: set[str] = set()
+    modes: set[str] = set()
+    relations: set[str] = set()
+    for case in cases:
+        assert case["name"] not in names
+        names.add(case["name"])
+        for key in (
+            "source_ref",
+            "mode",
+            "entity",
+            "expected_seed",
+            "expected_nodes",
+            "expected_relations",
+            "expected_evidence_refs",
+        ):
+            assert case.get(key) is not None, (case["name"], key)
+        assert str(case["source_ref"]).startswith(
+            "tests/integration/test_graph_query.py::_seed"
+        )
+        assert case["mode"] in GRAPH_MODES
+        assert case.get("direction", "both") in GRAPH_DIRECTIONS
+        assert set(case.get("relation_types") or []) <= set(GRAPH_RELATIONS)
+        relations.update(case["expected_relations"])
+        assert not set(case.get("forbidden_nodes") or []) & set(case["expected_nodes"])
+        for ref in case["expected_evidence_refs"]:
+            table, separator, marker = str(ref).partition(":")
+            assert separator and table in row_tables
+            row_id, separator, scope = marker.partition("@")
+            assert separator and row_id.isdigit()
+            version, _, tenant = scope.partition(":")
+            assert version.isdigit()
+            columns = {
+                str(row[1])
+                for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            sql = f"SELECT 1 FROM {table} WHERE id = ? AND version_id = ?"
+            params: list[Any] = [int(row_id), int(version)]
+            if "tenant_id" in columns:
+                sql += " AND tenant_id = ?"
+                params.append(tenant)
+            assert conn.execute(sql, params).fetchone() is not None, ref
+        for node_id in case["expected_nodes"]:
+            kind, separator, marker = str(node_id).partition(":")
+            assert separator
+            if kind == "api":
+                assert conn.execute(
+                    "SELECT 1 FROM api_entities WHERE id = ?", (int(marker),)
+                ).fetchone()
+            elif kind == "doc":
+                assert conn.execute(
+                    "SELECT 1 FROM documents WHERE id = ?", (int(marker),)
+                ).fetchone()
+            elif kind == "cluster":
+                assert conn.execute(
+                    "SELECT 1 FROM api_clusters WHERE id = ?",
+                    (int(marker.split(":")[0]),),
+                ).fetchone()
+            elif kind == "pattern":
+                assert conn.execute(
+                    "SELECT 1 FROM doc_pattern_coverage WHERE id = ?",
+                    (int(marker.split(":")[0]),),
+                ).fetchone()
+            else:
+                assert kind in {"file", "feature"}
+        modes.add(case["mode"])
+    assert modes == set(GRAPH_MODES)
+    assert relations == set(GRAPH_RELATIONS)
+    assert any(case.get("include_ambiguous") for case in cases)
+    assert any(case.get("expected_found") is False for case in cases)
 
 
 def test_audit_report_exposes_mismatch_without_gate(
@@ -819,11 +917,38 @@ def test_audit_report_exposes_mismatch_without_gate(
     assert report["metrics"]["node_recall"] == 0.0
 
 
-def test_audit_detects_untraceable_evidence(conn, monkeypatch, tmp_path) -> None:
+def test_audit_checks_evidence_scope_and_expected_refs(
+    conn, monkeypatch, tmp_path
+) -> None:
     _seed(conn)
     service = _service(conn, monkeypatch, tmp_path)
-    assert service._trace_evidence("call_instances:1@1:default") is True
-    assert service._trace_evidence("call_instances:9999@1:default") is False
+    edge = {
+        "source_table": "call_instances",
+        "version_id": 1,
+        "tenant_id": "default",
+        "profile_id": 1,
+    }
+    assert service._trace_evidence("call_instances:1@1:default", edge=edge) is True
+    assert service._trace_evidence("call_instances:9999@1:default", edge=edge) is False
+    assert (
+        service._trace_evidence(
+            "call_instances:1@1:default",
+            edge={**edge, "source_table": "seq_patterns"},
+        )
+        is False
+    )
+    pattern_ref = "seq_patterns:1@1:default"
+    pattern_edge = {
+        "source_table": "seq_patterns",
+        "version_id": 1,
+        "tenant_id": "default",
+        "profile_id": 1,
+    }
+    assert service._trace_evidence(pattern_ref, edge=pattern_edge) is True
+    assert (
+        service._trace_evidence(pattern_ref, edge={**pattern_edge, "profile_id": 999})
+        is False
+    )
     case = dict(
         _GOLD["cases"][0],
         expected_evidence_refs=["call_instances:9999@1:default"],
@@ -853,6 +978,20 @@ def test_audit_reports_unexpected_truncation(conn, monkeypatch, tmp_path) -> Non
     assert case["truncation_ok"] is False
     assert case["passed"] is False
     assert report["metrics"]["unexpected_truncations"] == 1
+    assert report["metrics"]["missed_truncations"] == 0
+
+
+def test_audit_separates_errors_from_truncation(conn, monkeypatch, tmp_path) -> None:
+    _seed(conn)
+    case = dict(_GOLD["cases"][0], entity="pkg.client.Absent")
+    report = _service(conn, monkeypatch, tmp_path).audit(
+        [case], library="graphlib", version="1.0", tenant_id="default"
+    )
+    assert report["summary"]["errors"] == 1
+    assert report["cases"][0]["error"] == "unknown entity: pkg.client.Absent"
+    assert report["cases"][0]["truncated"] is False
+    assert report["metrics"]["unexpected_truncations"] == 0
+    assert report["metrics"]["missed_truncations"] == 0
 
 
 def test_audit_export_tool_writes_reviewable_report(
@@ -870,10 +1009,18 @@ def test_audit_export_tool_writes_reviewable_report(
         version="1.0",
     )
     assert report["summary"]["matched"] == len(_GOLD["cases"])
-    assert all(case["actual_evidence_refs"] for case in report["cases"])
+    assert report["database"] == str(tmp_path / "test.db")
+    assert report["gold"] == str(tool.DEFAULT_GOLD)
+    assert all(
+        case["actual_evidence_refs"] or case["expected_found"] is False
+        for case in report["cases"]
+    )
     text = tool.render_text_report(report)
     assert "# Graph query audit" in text
-    assert "- evidence traceability: 1.0" in text
+    assert "- edge evidence traceability: 1.0" in text
+    assert "- node evidence traceability: 1.0" in text
+    assert "- source ref: tests/integration/test_graph_query.py::_seed" in text
+    assert "(expected call_instances:1@1:default)" in text
 
 
 def test_audit_export_tool_supports_strict_mode(conn, monkeypatch, tmp_path) -> None:
@@ -913,3 +1060,35 @@ def test_audit_export_tool_supports_strict_mode(conn, monkeypatch, tmp_path) -> 
     assert out.is_file()
     text = out.with_suffix(".md").read_text(encoding="utf-8")
     assert "passed: False" in text
+
+
+def test_audit_export_tool_strict_mode_rejects_empty_gold(
+    conn, monkeypatch, tmp_path
+) -> None:
+    _seed(conn)
+    tool_path = Path(__file__).resolve().parents[2] / "tools" / "export_graph_audit.py"
+    spec = importlib.util.spec_from_file_location("export_graph_audit_empty", tool_path)
+    assert spec is not None and spec.loader is not None
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    gold = tmp_path / "empty-gold.json"
+    gold.write_text(json.dumps({"cases": []}), encoding="utf-8")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "export_graph_audit.py",
+            "--db",
+            str(tmp_path / "test.db"),
+            "--library",
+            "graphlib",
+            "--version",
+            "1.0",
+            "--gold",
+            str(gold),
+            "--out",
+            str(tmp_path / "empty.json"),
+            "--strict",
+        ],
+    )
+    assert tool.main() == 1

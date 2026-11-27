@@ -41,7 +41,7 @@ def build_report(
     conn = open_db(db_path)
     try:
         service = build_graph_query_service(conn, LibrefSettings())
-        return service.audit(
+        report = service.audit(
             cases,
             library=library,
             version=version,
@@ -49,6 +49,9 @@ def build_report(
             tenant_id=tenant_id,
             profile=profile,
         )
+        report["database"] = str(db_path)
+        report["gold"] = str(gold_path)
+        return report
     finally:
         conn.close()
 
@@ -64,14 +67,19 @@ def render_text_report(report: dict[str, Any]) -> str:
     lines = [
         "# Graph query audit",
         "",
+        f"- database: {report.get('database', '-')}",
+        f"- gold: {report.get('gold', '-')}",
         f"- library: {report['library']}",
         f"- version: {report['version']}",
+        f"- ecosystem: {report.get('ecosystem') or '-'}",
         f"- profile: {report['profile']}",
         f"- tenant: {report['tenant_id'] or '-'}",
+        f"- include ambiguous: {report.get('include_ambiguous', False)}",
         (
             f"- matched: {summary['matched']}/{summary['total']}"
             f" ({summary.get('match_rate', 0.0)})"
         ),
+        f"- errors: {summary.get('errors', 0)}",
         f"- seed resolution: {metrics.get('seed_resolution', 0.0)}",
         f"- path hit: {metrics.get('path_hit', 0.0)}",
         (
@@ -83,8 +91,13 @@ def render_text_report(report: dict[str, Any]) -> str:
             f" {metrics.get('relation_precision', 0.0)}"
             f"/{metrics.get('relation_recall', 0.0)}"
         ),
-        f"- evidence traceability: {metrics.get('evidence_traceability', 0.0)}",
+        (f"- edge evidence traceability: {metrics.get('evidence_traceability', 0.0)}"),
+        (
+            f"- node evidence traceability:"
+            f" {metrics.get('node_evidence_traceability', 0.0)}"
+        ),
         f"- unexpected truncations: {metrics.get('unexpected_truncations', 0)}",
+        f"- missed truncations: {metrics.get('missed_truncations', 0)}",
         "",
         "## Cases",
         "",
@@ -94,23 +107,45 @@ def render_text_report(report: dict[str, Any]) -> str:
             [
                 f"### {case['name']}",
                 "",
+                f"- source ref: {case.get('source_ref') or '-'}",
                 f"- passed: {case['passed']}",
                 f"- mode: {case.get('mode', '-')}",
+                f"- target: {case.get('target') or '-'}",
+                f"- direction: {case.get('direction', '-')}",
+                f"- depth: {case.get('depth') or '-'}",
+                (f"- relation types: {_values(case.get('relation_types', []))}"),
+                f"- include ambiguous: {case.get('include_ambiguous', False)}",
                 f"- error: {case.get('error') or '-'}",
                 (
                     f"- seed: {case.get('actual_seed', '-')}"
                     f" (expected {case.get('expected_seed', '-')})"
                 ),
                 (
+                    f"- found: {case.get('found', False)}"
+                    f" (expected {case.get('expected_found', '-')})"
+                ),
+                (
                     f"- nodes: {_values(case.get('actual_nodes', []))}"
                     f" (expected {_values(case.get('expected_nodes', []))})"
                 ),
+                f"- forbidden nodes: {_values(case.get('forbidden_nodes', []))}",
                 (
                     f"- relations: {_values(case.get('actual_relations', []))}"
                     f" (expected {_values(case.get('expected_relations', []))})"
                 ),
-                f"- evidence: {_values(case.get('actual_evidence_refs', []))}",
-                f"- evidence traceability: {case.get('evidence_traceability', 0.0)}",
+                (
+                    f"- evidence: {_values(case.get('actual_evidence_refs', []))}"
+                    f" (expected {_values(case.get('expected_evidence_refs', []))})"
+                ),
+                (
+                    f"- edge evidence traceability:"
+                    f" {case.get('evidence_traceability', 0.0)}"
+                ),
+                (
+                    f"- node evidence traceability:"
+                    f" {case.get('node_evidence_traceability', 0.0)}"
+                ),
+                f"- synthetic nodes: {_values(case.get('synthetic_nodes', []))}",
                 (
                     f"- truncated: {case.get('truncated', False)}"
                     f" (expected {case.get('expected_truncated', False)})"
@@ -156,7 +191,11 @@ def main() -> int:
         f"graph audit: {summary['matched']}/{summary['total']} matched,"
         f" json={args.out} text={text_path}"
     )
-    if args.strict and summary["matched"] != summary["total"]:
+    if args.strict and (
+        summary["total"] == 0
+        or summary["matched"] != summary["total"]
+        or summary.get("errors", 0)
+    ):
         return 1
     return 0
 

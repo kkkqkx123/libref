@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from libref.config import setting_or_default
@@ -28,6 +29,16 @@ _EVIDENCE_TABLES = frozenset(
         "feature_nodes",
         "import_edges",
         "doc_link_edges",
+        "doc_pattern_coverage",
+    }
+)
+_ROW_TABLES = _EVIDENCE_TABLES | {"documents"}
+_PROFILE_TABLES = frozenset(
+    {
+        "seq_patterns",
+        "api_clusters",
+        "doc_feature_node_links",
+        "feature_nodes",
         "doc_pattern_coverage",
     }
 )
@@ -263,8 +274,10 @@ class GraphQueryService:
     @staticmethod
     def _set_scores(expected: set[str], actual: set[str]) -> tuple[float, float]:
         hit = len(expected & actual)
+        if not expected and not actual:
+            return 1.0, 1.0
         precision = hit / len(actual) if actual else 0.0
-        recall = hit / len(expected) if expected else (1.0 if not actual else 0.0)
+        recall = hit / len(expected) if expected else 0.0
         return round(precision, 4), round(recall, 4)
 
     def _table_has_tenant(self, table: str) -> bool:
@@ -280,9 +293,12 @@ class GraphQueryService:
                 )
         return self._tenant_columns[table]
 
-    def _trace_evidence(self, ref: str) -> bool:
+    def _trace_evidence(
+        self, ref: str, *, edge: Mapping[str, Any] | None = None
+    ) -> bool:
+        """Verify that an evidence marker names a row in the active fact scope."""
         table, separator, marker = str(ref).partition(":")
-        if not separator or table not in _EVIDENCE_TABLES:
+        if not separator or table not in _ROW_TABLES:
             return False
         row_id, separator, scope = marker.partition("@")
         if not separator or not row_id.isdigit():
@@ -290,13 +306,38 @@ class GraphQueryService:
         version, _, tenant = scope.partition(":")
         if not version.isdigit():
             return False
+        if edge is not None:
+            if str(edge.get("source_table") or "") != table:
+                return False
+            if int(edge.get("version_id") or 0) != int(version):
+                return False
+            if (edge.get("tenant_id") or "-") != (tenant or "-"):
+                return False
         sql = f"SELECT 1 FROM {table} WHERE id = ? AND version_id = ?"
         params: list[Any] = [int(row_id), int(version)]
         if tenant and tenant != "-" and self._table_has_tenant(table):
             sql += " AND tenant_id = ?"
             params.append(tenant)
+        if (
+            edge is not None
+            and edge.get("profile_id") is not None
+            and table in _PROFILE_TABLES
+        ):
+            sql += " AND profile_id = ?"
+            params.append(int(edge["profile_id"]))
         sql += " LIMIT 1"
         return self._conn.execute(sql, params).fetchone() is not None
+
+    @staticmethod
+    def _case_params(case: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "source_ref": str(case.get("source_ref") or ""),
+            "target": case.get("target"),
+            "direction": str(case.get("direction") or "both"),
+            "depth": case.get("depth"),
+            "relation_types": list(case.get("relation_types") or []),
+            "include_ambiguous": bool(case.get("include_ambiguous", False)),
+        }
 
     def audit(
         self,
@@ -328,7 +369,9 @@ class GraphQueryService:
                     direction=case.get("direction", "both"),
                     depth=case.get("depth"),
                     relation_types=case.get("relation_types"),
-                    include_ambiguous=include_ambiguous,
+                    include_ambiguous=bool(
+                        case.get("include_ambiguous", include_ambiguous)
+                    ),
                 )
             except ValueError as exc:
                 error = str(exc)
@@ -336,8 +379,10 @@ class GraphQueryService:
         matched = sum(1 for item in results if item["passed"])
         total_edges = sum(int(item["evidence_total"]) for item in results)
         traceable = sum(int(item["evidence_traceable"]) for item in results)
+        total_nodes = sum(int(item["node_evidence_total"]) for item in results)
+        traceable_nodes = sum(int(item["node_evidence_traceable"]) for item in results)
         path_cases = [item for item in results if item["expected_found"] is not None]
-        path_hits = sum(1 for item in path_cases if item["found"] and item["found_ok"])
+        path_hits = sum(1 for item in path_cases if item["found_ok"])
         metrics = {
             "seed_resolution": self._rate(
                 sum(1 for item in results if item["seed_resolved"]), len(results)
@@ -348,8 +393,16 @@ class GraphQueryService:
             "relation_precision": self._average(results, "relation_precision"),
             "relation_recall": self._average(results, "relation_recall"),
             "evidence_traceability": self._rate(traceable, total_edges),
+            "node_evidence_traceability": self._rate(traceable_nodes, total_nodes),
             "unexpected_truncations": sum(
-                1 for item in results if not item["truncation_ok"]
+                1
+                for item in results
+                if item["truncated"] and not item["expected_truncated"]
+            ),
+            "missed_truncations": sum(
+                1
+                for item in results
+                if not item["truncated"] and item["expected_truncated"]
             ),
         }
         return {
@@ -357,12 +410,15 @@ class GraphQueryService:
             "version": version,
             "profile": str(profile or "usage"),
             "tenant_id": tenant_id,
+            "ecosystem": ecosystem,
+            "include_ambiguous": include_ambiguous,
             "cases": results,
             "metrics": metrics,
             "summary": {
                 "total": len(results),
                 "matched": matched,
                 "match_rate": self._rate(matched, len(results)),
+                "errors": sum(1 for item in results if item["error"]),
             },
         }
 
@@ -382,41 +438,70 @@ class GraphQueryService:
         expected_found = None if expected_found is None else bool(expected_found)
         expected_truncated = bool(case.get("expected_truncated", False))
         seed_only = bool(case.get("edges_from_seed_only", False))
+        params = self._case_params(case)
+        empty_ok = (
+            expected_found is False
+            and not expected_nodes
+            and not expected_relations
+            and not expected_refs
+        )
+        base = {
+            "name": name,
+            "mode": str(case.get("mode", "")),
+            "passed": False,
+            "error": error,
+            **params,
+            "expected_seed": expected_seed,
+            "actual_seed": "",
+            "seed_resolved": False,
+            "expected_found": expected_found,
+            "found": False,
+            "found_ok": False,
+            "expected_nodes": sorted(expected_nodes),
+            "actual_nodes": [],
+            "node_precision": 0.0,
+            "node_recall": 0.0,
+            "forbidden_nodes": sorted(forbidden),
+            "expected_relations": sorted(expected_relations),
+            "actual_relations": [],
+            "relation_precision": 0.0,
+            "relation_recall": 0.0,
+            "expected_evidence_refs": sorted(expected_refs),
+            "actual_evidence_refs": [],
+            "evidence_traceable": 0,
+            "evidence_total": 0,
+            "evidence_traceability": 0.0,
+            "node_evidence_traceable": 0,
+            "node_evidence_total": 0,
+            "node_evidence_traceability": 0.0,
+            "synthetic_nodes": [],
+            "expected_truncated": expected_truncated,
+            "truncated": False,
+            "truncation_ok": False,
+            "edges_from_seed_only": seed_only,
+        }
         if result is None:
-            return {
-                "name": name,
-                "mode": str(case.get("mode", "")),
-                "passed": False,
-                "error": error,
-                "expected_seed": expected_seed,
-                "actual_seed": "",
-                "seed_resolved": False,
-                "expected_found": expected_found,
-                "found": False,
-                "found_ok": False,
-                "expected_nodes": sorted(expected_nodes),
-                "actual_nodes": [],
-                "node_precision": 0.0,
-                "node_recall": 0.0,
-                "forbidden_nodes": sorted(forbidden),
-                "expected_relations": sorted(expected_relations),
-                "actual_relations": [],
-                "relation_precision": 0.0,
-                "relation_recall": 0.0,
-                "expected_evidence_refs": sorted(expected_refs),
-                "actual_evidence_refs": [],
-                "evidence_traceable": 0,
-                "evidence_total": 0,
-                "evidence_traceability": 0.0,
-                "expected_truncated": expected_truncated,
-                "truncated": False,
-                "truncation_ok": False,
-                "edges_from_seed_only": seed_only,
-            }
+            return base
+        edges = result["edges"]
         nodes = {str(node["id"]) for node in result["nodes"]}
-        relations = {str(edge["relation"]) for edge in result["edges"]}
-        refs = [str(edge["evidence_ref"]) for edge in result["edges"]]
-        traceable = sum(self._trace_evidence(ref) for ref in refs)
+        relations = {str(edge["relation"]) for edge in edges}
+        refs = [str(edge["evidence_ref"]) for edge in edges]
+        traceable = sum(
+            self._trace_evidence(ref, edge=edge)
+            for ref, edge in zip(refs, edges, strict=True)
+        )
+        row_nodes = [
+            node
+            for node in result["nodes"]
+            if node.get("source_id") is not None
+            and node.get("source_table") in _ROW_TABLES
+        ]
+        traceable_nodes = sum(
+            self._trace_evidence(str(node["evidence_ref"])) for node in row_nodes
+        )
+        synthetic_nodes = [
+            str(node["id"]) for node in result["nodes"] if node not in row_nodes
+        ]
         node_precision, node_recall = self._set_scores(expected_nodes, nodes)
         relation_precision, relation_recall = self._set_scores(
             expected_relations, relations
@@ -428,54 +513,46 @@ class GraphQueryService:
         truncated = bool(result.get("truncated", False))
         truncation_ok = truncated == expected_truncated
         evidence_ok = (
-            bool(refs)
+            (bool(refs) or empty_ok)
             and traceable == len(refs)
             and (not expected_refs or set(refs) == expected_refs)
         )
         passed = (
             seed_resolved
             and found_ok
-            and bool(expected_nodes)
+            and (bool(expected_nodes) or empty_ok)
             and nodes == expected_nodes
             and not forbidden & nodes
-            and bool(expected_relations)
+            and (bool(expected_relations) or empty_ok)
             and relations == expected_relations
             and evidence_ok
             and truncation_ok
-            and (
-                not seed_only
-                or all(edge["source"] == actual_seed for edge in result["edges"])
-            )
+            and (not seed_only or all(edge["source"] == actual_seed for edge in edges))
         )
         return {
-            "name": name,
+            **base,
             "mode": str(result.get("mode", "")),
             "passed": passed,
-            "error": error,
-            "expected_seed": expected_seed,
             "actual_seed": actual_seed,
             "seed_resolved": seed_resolved,
-            "expected_found": expected_found,
             "found": found,
             "found_ok": found_ok,
-            "expected_nodes": sorted(expected_nodes),
             "actual_nodes": sorted(nodes),
             "node_precision": node_precision,
             "node_recall": node_recall,
-            "forbidden_nodes": sorted(forbidden),
-            "expected_relations": sorted(expected_relations),
             "actual_relations": sorted(relations),
             "relation_precision": relation_precision,
             "relation_recall": relation_recall,
-            "expected_evidence_refs": sorted(expected_refs),
             "actual_evidence_refs": sorted(refs),
             "evidence_traceable": traceable,
             "evidence_total": len(refs),
             "evidence_traceability": self._rate(traceable, len(refs)),
-            "expected_truncated": expected_truncated,
+            "node_evidence_traceable": traceable_nodes,
+            "node_evidence_total": len(row_nodes),
+            "node_evidence_traceability": self._rate(traceable_nodes, len(row_nodes)),
+            "synthetic_nodes": sorted(synthetic_nodes),
             "truncated": truncated,
             "truncation_ok": truncation_ok,
-            "edges_from_seed_only": seed_only,
         }
 
     @staticmethod

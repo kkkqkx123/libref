@@ -179,6 +179,7 @@ def test_cached_results_match_sql_gold_paths(conn, monkeypatch, tmp_path) -> Non
             "direction": case.get("direction", "both"),
             "depth": case.get("depth"),
             "relation_types": case.get("relation_types"),
+            "include_ambiguous": case.get("include_ambiguous", False),
         }
         plain_result = _query(conn, monkeypatch, tmp_path, **options)
         cached_result = _query(conn, monkeypatch, tmp_path, cache=True, **options)

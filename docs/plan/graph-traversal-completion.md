@@ -62,7 +62,7 @@
 
 ### 评测与契约同步
 
-- 新增 `tests/fixtures/graph_gold.json`，覆盖调用路径、有序模式、强边文档、同簇兄弟与文件级影响面；集成测试逐条校验节点集合、关系类型与证据出处，不引入质量门禁。
+- 新增 `tests/fixtures/graph_gold.json`，人工对照 `_seed` 覆盖五种模式、九种关系、路径未命中、歧义诊断、文档多块导航与截断期望；集成测试逐条校验事实出处、节点集合、关系类型与证据引用，不引入质量门禁。编写规则见 `docs/spec/doc-feature-judgments.md`。
 - 重新导出 OpenAPI 快照并生成前端类型，使 `/graph` 与新增参数进入契约。
 - 补齐 Web 与 CLI 用户文档，更新架构文档中的图查询说明和计划文档的落地状态。
 
@@ -78,7 +78,7 @@
 问题清单已全部闭环：
 
 - `shortest_path` 接收调用方 `direction`，`path` 查询按指定方向约束边；`usage` 显式拒绝非空 `depth`，不再静默忽略。
-- `GraphQueryService.audit()` 按稳定节点 ID 精确判定种子、节点、关系、证据行与截断状态，同时汇总匹配率、路径命中率、节点/关系精确率与召回率；`tools/export_graph_audit.py` 同时导出 JSON 与 Markdown 报告，默认不门禁，显式 `--strict` 才使用退出码。评测收紧方案见同目录的图遍历查询评测与审核输出收紧文档。
+- `GraphQueryService.audit()` 按稳定节点 ID 精确判定种子、节点、关系、边与节点证据行、找到状态与截断状态，同时汇总匹配率、错误数、路径状态一致率、节点/关系精确率与召回率；`tools/export_graph_audit.py` 同时导出自足的 JSON 与 Markdown 报告，默认不门禁，显式 `--strict` 对空 gold、错误或未匹配返回失败。评测收紧方案见同目录的图遍历查询评测与审核输出收紧文档。
 - 集成测试覆盖路径方向、`usage` 参数拒绝、gold 报告、不匹配报告与导出工具。
 - Web 与 MCP 文档同步说明 `path` 方向和 `usage` 一跳语义。
 
