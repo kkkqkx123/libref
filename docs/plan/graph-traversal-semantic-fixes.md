@@ -67,4 +67,4 @@
 - 语义与身份修改已落地在 `store/graph.py` 与 `services/graph_query.py`；集成测试覆盖关系过滤裁剪、路径截断、参数拒绝、合成节点证据、页面级文档链接多块展开与查询预算截断。
 - 强边常量、Web/MCP 类型复用、CLI 常量契约校验、图读索引与文档同步已完成。
 - Postgres 图查询集成测试已加入现有集成测试文件；未提供 `LIBREF_TEST_POSTGRES_URL` 时按既有后端测试惯例跳过。
-- 派生邻接缓存与模式展开去重仍未引入：它们属于性能优化而非正确性问题，只有在真实语料尾延迟测量证明 SQL 次数成为瓶颈后才应实施。设计方案见 `docs/plan/long-term/graph-adjacency-cache.md` 与 `docs/plan/long-term/graph-pattern-expansion.md`。
+- 派生邻接缓存与模式展开去重仍未引入：它们属于性能优化而非正确性问题，只有在真实语料尾延迟测量证明 SQL 次数成为瓶颈后才应实施。设计方案见 `docs/plan/long-term/graph-adjacency-cache.md` 与 `docs/plan/long-term/graph-pattern-expansion.md`；当前规模数据与图数据库选型阈值见 `docs/plan/long-term/graph-storage-scaling.md`。
