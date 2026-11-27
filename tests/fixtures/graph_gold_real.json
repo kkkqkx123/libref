@@ -1,0 +1,196 @@
+{
+  "description": "Hand-verified code-side graph gold cases over the frozen benchmark database. Each case carries its own scope and fact-row source reference.",
+  "cases": [
+    {
+      "name": "real-call-inbound-aggregated",
+      "source_ref": "tests/e2e/bench/data/bench.db@gradle/v9.9.1:call_instances#66968,66976",
+      "scope": {
+        "library": "gradle",
+        "version": "v9.9.1",
+        "tenant_id": "default",
+        "profile": "usage"
+      },
+      "mode": "neighbors",
+      "entity": "org.gradle.plugin.use.internal.PluginUseScriptBlockMetadataCompiler.formatErrorMessage",
+      "direction": "backward",
+      "depth": 1,
+      "relation_types": ["call"],
+      "expected_seed": "api:39300",
+      "expected_nodes": ["api:39283", "api:39286", "api:39300"],
+      "expected_relations": ["call"],
+      "expected_evidence_refs": [
+        "call_instances:66968@35:default",
+        "call_instances:66976@35:default"
+      ],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "real-call-outbound-aggregated",
+      "source_ref": "tests/e2e/bench/data/bench.db@gradle/v9.9.1:call_instances#66595,66600",
+      "scope": {
+        "library": "gradle",
+        "version": "v9.9.1",
+        "tenant_id": "default",
+        "profile": "usage"
+      },
+      "mode": "neighbors",
+      "entity": "org.gradle.internal.xml.XmlTransformer.doTransform",
+      "direction": "forward",
+      "depth": 1,
+      "relation_types": ["call"],
+      "expected_seed": "api:38895",
+      "expected_nodes": ["api:38895", "api:38903", "api:38904"],
+      "expected_relations": ["call"],
+      "expected_evidence_refs": [
+        "call_instances:66595@35:default",
+        "call_instances:66600@35:default"
+      ],
+      "expected_truncated": false,
+      "edges_from_seed_only": true
+    },
+    {
+      "name": "real-direct-call-path",
+      "source_ref": "tests/e2e/bench/data/bench.db@gradle/v9.9.1:call_instances#66976",
+      "scope": {
+        "library": "gradle",
+        "version": "v9.9.1",
+        "tenant_id": "default",
+        "profile": "usage"
+      },
+      "mode": "path",
+      "entity": "org.gradle.plugin.use.internal.PluginUseScriptBlockMetadataCompiler.compile.visitMethodCallExpression",
+      "target": "org.gradle.plugin.use.internal.PluginUseScriptBlockMetadataCompiler.formatErrorMessage",
+      "direction": "forward",
+      "depth": 1,
+      "relation_types": ["call"],
+      "expected_seed": "api:39286",
+      "expected_found": true,
+      "expected_nodes": ["api:39286", "api:39300"],
+      "expected_relations": ["call"],
+      "expected_evidence_refs": ["call_instances:66976@35:default"],
+      "expected_truncated": false,
+      "edges_from_seed_only": true
+    },
+    {
+      "name": "real-path-miss",
+      "source_ref": "tests/e2e/bench/data/bench.db@gradle/v9.9.1:call_instances#66595",
+      "scope": {
+        "library": "gradle",
+        "version": "v9.9.1",
+        "tenant_id": "default",
+        "profile": "usage"
+      },
+      "mode": "path",
+      "entity": "org.gradle.internal.xml.XmlTransformer.doTransform",
+      "target": "org.gradle.plugin.use.internal.PluginUseScriptBlockMetadataCompiler.formatErrorMessage",
+      "direction": "forward",
+      "depth": 1,
+      "relation_types": ["call"],
+      "expected_seed": "api:38895",
+      "expected_found": false,
+      "expected_nodes": [],
+      "expected_relations": [],
+      "expected_evidence_refs": [],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "real-reverse-import",
+      "source_ref": "tests/e2e/bench/data/bench.db@gradle/v9.9.1:import_edges#15676",
+      "scope": {
+        "library": "gradle",
+        "version": "v9.9.1",
+        "tenant_id": "default",
+        "profile": "usage"
+      },
+      "mode": "neighbors",
+      "entity": "org.gradle.api.internal.AbstractTask",
+      "direction": "backward",
+      "depth": 1,
+      "relation_types": ["import"],
+      "expected_seed": "api:26443",
+      "expected_nodes": [
+        "api:26443",
+        "file:35:subprojects/core/src/testFixtures/groovy/org/gradle/api/tasks/AbstractSpockTaskTest.groovy"
+      ],
+      "expected_relations": ["import"],
+      "expected_evidence_refs": ["import_edges:15676@35:default"],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "real-file-level-impact",
+      "source_ref": "tests/e2e/bench/data/bench.db@gradle/v9.9.1:call_instances#49962,49968",
+      "scope": {
+        "library": "gradle",
+        "version": "v9.9.1",
+        "tenant_id": "default",
+        "profile": "usage"
+      },
+      "mode": "impact",
+      "entity": "org.gradle.internal.scopeids.CrossVersionScopeIdsIntegrationTest.runEarlier",
+      "relation_types": ["call"],
+      "expected_seed": "api:26378",
+      "expected_nodes": [
+        "api:26378",
+        "file:35:subprojects/core/src/crossVersionTest/groovy/org/gradle/internal/scopeids/CrossVersionScopeIdsIntegrationTest.groovy"
+      ],
+      "expected_relations": ["call"],
+      "expected_evidence_refs": ["call_instances:49962@35:default"],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "real-usage-context",
+      "source_ref": "tests/e2e/bench/data/bench.db@gradle/v9.9.1:call_instances#66968,66976",
+      "scope": {
+        "library": "gradle",
+        "version": "v9.9.1",
+        "tenant_id": "default",
+        "profile": "usage"
+      },
+      "mode": "usage",
+      "entity": "org.gradle.plugin.use.internal.PluginUseScriptBlockMetadataCompiler.formatErrorMessage",
+      "relation_types": ["call"],
+      "expected_seed": "api:39300",
+      "expected_nodes": ["api:39283", "api:39286", "api:39300"],
+      "expected_relations": ["call"],
+      "expected_evidence_refs": [
+        "call_instances:66968@35:default",
+        "call_instances:66976@35:default"
+      ],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    },
+    {
+      "name": "real-httpx-multi-scope",
+      "source_ref": "tests/e2e/bench/data/bench.db@httpx/7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016:call_instances#6-12",
+      "scope": {
+        "library": "httpx",
+        "version": "7cff5f79bc78649bbcd3fd9aa7a74c86e0f63016",
+        "tenant_id": "default",
+        "profile": "usage"
+      },
+      "mode": "neighbors",
+      "entity": "httpx._api.request",
+      "direction": "backward",
+      "depth": 1,
+      "relation_types": ["call"],
+      "expected_seed": "api:2",
+      "expected_nodes": ["api:2", "api:5", "api:6", "api:7", "api:8", "api:9", "api:10", "api:11"],
+      "expected_relations": ["call"],
+      "expected_evidence_refs": [
+        "call_instances:6@2:default",
+        "call_instances:7@2:default",
+        "call_instances:8@2:default",
+        "call_instances:9@2:default",
+        "call_instances:10@2:default",
+        "call_instances:11@2:default",
+        "call_instances:12@2:default"
+      ],
+      "expected_truncated": false,
+      "edges_from_seed_only": false
+    }
+  ]
+}

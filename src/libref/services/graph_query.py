@@ -329,9 +329,10 @@ class GraphQueryService:
         return self._conn.execute(sql, params).fetchone() is not None
 
     @staticmethod
-    def _case_params(case: dict[str, Any]) -> dict[str, Any]:
+    def _case_params(case: dict[str, Any], scope: dict[str, Any]) -> dict[str, Any]:
         return {
             "source_ref": str(case.get("source_ref") or ""),
+            "scope": scope,
             "target": case.get("target"),
             "direction": str(case.get("direction") or "both"),
             "depth": case.get("depth"),
@@ -339,21 +340,34 @@ class GraphQueryService:
             "include_ambiguous": bool(case.get("include_ambiguous", False)),
         }
 
+    @staticmethod
+    def _audit_scope(case: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+        override = case.get("scope") or {}
+        return {key: override.get(key, defaults.get(key)) for key in defaults}
+
     def audit(
         self,
         cases: list[dict[str, Any]],
         *,
-        library: str,
-        version: str,
+        library: str | None = None,
+        version: str | None = None,
         ecosystem: str | None = None,
         tenant_id: str | None = None,
         profile: str | None = None,
         include_ambiguous: bool = False,
     ) -> dict[str, Any]:
         """Export gold-case results for review without enforcing a quality gate."""
+        defaults = {
+            "library": library,
+            "version": version,
+            "ecosystem": ecosystem,
+            "tenant_id": tenant_id,
+            "profile": profile,
+        }
         results: list[dict[str, Any]] = []
         for case in cases:
             name = str(case.get("name") or "")
+            scope = self._audit_scope(case, defaults)
             result: dict[str, Any] | None = None
             error = ""
             try:
@@ -361,11 +375,11 @@ class GraphQueryService:
                     case["mode"],
                     case["entity"],
                     target=case.get("target"),
-                    library=library,
-                    version=version,
-                    ecosystem=ecosystem,
-                    tenant_id=tenant_id,
-                    profile=profile,
+                    library=scope["library"],
+                    version=scope["version"],
+                    ecosystem=scope["ecosystem"],
+                    tenant_id=scope["tenant_id"],
+                    profile=scope["profile"],
                     direction=case.get("direction", "both"),
                     depth=case.get("depth"),
                     relation_types=case.get("relation_types"),
@@ -375,7 +389,7 @@ class GraphQueryService:
                 )
             except ValueError as exc:
                 error = str(exc)
-            results.append(self._audit_case(name, case, result, error))
+            results.append(self._audit_case(name, case, result, error, scope))
         matched = sum(1 for item in results if item["passed"])
         total_edges = sum(int(item["evidence_total"]) for item in results)
         traceable = sum(int(item["evidence_traceable"]) for item in results)
@@ -428,6 +442,7 @@ class GraphQueryService:
         case: dict[str, Any],
         result: dict[str, Any] | None,
         error: str,
+        scope: dict[str, Any],
     ) -> dict[str, Any]:
         expected_nodes = set(case.get("expected_nodes", []))
         expected_relations = set(case.get("expected_relations", []))
@@ -438,7 +453,7 @@ class GraphQueryService:
         expected_found = None if expected_found is None else bool(expected_found)
         expected_truncated = bool(case.get("expected_truncated", False))
         seed_only = bool(case.get("edges_from_seed_only", False))
-        params = self._case_params(case)
+        params = self._case_params(case, scope)
         empty_ok = (
             expected_found is False
             and not expected_nodes

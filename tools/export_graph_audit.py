@@ -7,6 +7,9 @@ Usage:
         --library graphlib --version 1.0 \
         --out /tmp/graph-audit.json \
         [--text /tmp/graph-audit.md] [--strict]
+
+Gold cases may declare their own `scope`; in that case the library and version
+arguments only provide defaults and may be omitted.
 """
 
 from __future__ import annotations
@@ -24,8 +27,8 @@ DEFAULT_GOLD = ROOT / "tests" / "fixtures" / "graph_gold.json"
 def build_report(
     db_path: Path,
     *,
-    library: str,
-    version: str,
+    library: str | None = None,
+    version: str | None = None,
     gold_path: Path = DEFAULT_GOLD,
     ecosystem: str | None = None,
     tenant_id: str = "default",
@@ -69,8 +72,8 @@ def render_text_report(report: dict[str, Any]) -> str:
         "",
         f"- database: {report.get('database', '-')}",
         f"- gold: {report.get('gold', '-')}",
-        f"- library: {report['library']}",
-        f"- version: {report['version']}",
+        f"- library: {report['library'] or '-'}",
+        f"- version: {report['version'] or '-'}",
         f"- ecosystem: {report.get('ecosystem') or '-'}",
         f"- profile: {report['profile']}",
         f"- tenant: {report['tenant_id'] or '-'}",
@@ -108,6 +111,13 @@ def render_text_report(report: dict[str, Any]) -> str:
                 f"### {case['name']}",
                 "",
                 f"- source ref: {case.get('source_ref') or '-'}",
+                (
+                    "- scope: "
+                    f"library={case.get('scope', {}).get('library') or '-'},"
+                    f" version={case.get('scope', {}).get('version') or '-'},"
+                    f" profile={case.get('scope', {}).get('profile') or '-'},"
+                    f" tenant={case.get('scope', {}).get('tenant_id') or '-'}"
+                ),
                 f"- passed: {case['passed']}",
                 f"- mode: {case.get('mode', '-')}",
                 f"- target: {case.get('target') or '-'}",
@@ -159,8 +169,8 @@ def render_text_report(report: dict[str, Any]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, required=True)
-    parser.add_argument("--library", required=True)
-    parser.add_argument("--version", required=True)
+    parser.add_argument("--library")
+    parser.add_argument("--version")
     parser.add_argument("--gold", type=Path, default=DEFAULT_GOLD)
     parser.add_argument("--ecosystem")
     parser.add_argument("--tenant-id", default="default")

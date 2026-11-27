@@ -898,6 +898,28 @@ def test_gold_cases_are_fixture_backed(conn, monkeypatch, tmp_path) -> None:
     assert any(case.get("expected_found") is False for case in cases)
 
 
+def test_audit_honors_case_scope(conn, monkeypatch, tmp_path) -> None:
+    _seed(conn)
+    case = dict(
+        _GOLD["cases"][0],
+        scope={
+            "library": "graphlib",
+            "version": "1.0",
+            "tenant_id": "default",
+            "profile": "usage",
+        },
+    )
+    report = _service(conn, monkeypatch, tmp_path).audit(
+        [case],
+        library="graphlib",
+        version="1.0",
+        tenant_id="default",
+        profile="missing",
+    )
+    assert report["summary"]["matched"] == 1
+    assert report["cases"][0]["scope"]["profile"] == "usage"
+
+
 def test_audit_report_exposes_mismatch_without_gate(
     conn, monkeypatch, tmp_path
 ) -> None:
