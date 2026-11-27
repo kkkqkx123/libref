@@ -113,11 +113,12 @@ rrf_w_vec = 1.0
 freq_alpha = 0.15
 # 派生特征只做结果增强，不参与排序；0 表示关闭
 doc_feature_annotation_top_n = 5
-# 独立图查询边界：默认跳数、节点与扇出上限、序列模式候选上限
+# 独立图查询边界：默认跳数、节点与扇出上限、序列模式候选上限、单次遍历查询次数上限
 graph_max_depth = 2
 graph_max_nodes = 200
 graph_max_fanout = 20
 graph_pattern_limit = 200
+graph_query_budget = 400
 # 候选放大与段落组装：召回倍数、组装倍数与下限、跨版本上限
 candidate_multiplier = 3
 assemble_multiplier = 2

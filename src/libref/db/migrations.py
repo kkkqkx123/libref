@@ -23,6 +23,7 @@ from libref.db.schema import (
     FACET_DERIVED_SQL,
     FEATURE_TREE_CLUSTER_SQL,
     GOVERNANCE_SQL,
+    GRAPH_READ_INDEXES_SQL,
     IMPORT_EDGES_SQL,
     INDEX_REQUESTS_SQL,
     INITIAL_SCHEMA_SQL,
@@ -92,6 +93,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(34, "doc-snippet-language-evidence", DOC_SNIPPET_RECORDS_SQL),
     Migration(35, "api-export-aliases", API_EXPORT_ALIASES_SQL),
     Migration(36, "context-doc-links", DOC_LINK_KIND_SQL),
+    Migration(37, "graph-read-indexes", GRAPH_READ_INDEXES_SQL),
 )
 
 _MIGRATIONS_TABLE_SQL = """

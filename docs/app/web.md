@@ -47,17 +47,17 @@ Web 出口是查询面，另带反馈、任务、凭据与抓取写入。实现�
 
 ### GET /graph
 
-独立图查询，返回节点、边、路径与证据，不与检索结果混排，也不改变检索分数。`entity` 与 `library`、`version` 必填；`mode` 取 `neighbors`、`path`、`usage`、`community`、`impact`。`community` 走同簇成员与特征父链，`impact` 走反向调用边并保留文件级调用点。
+独立图查询，返回节点、边、路径与证据，不与检索结果混排，也不改变检索分数。`entity` 与 `library`、`version` 必填；`mode` 取 `neighbors`、`path`、`usage`、`community`、`impact`。`community` 走同簇成员与特征父链，`impact` 走反向调用边并保留文件级调用点。`profile` 必须已建立，否则返回参数错误；方向按每一跳边的朝向解释，截断标记同时覆盖扇出、节点上限、查询次数预算与文档块上限。
 
 | 参数 | 必填 | 默认 | 说明 |
 |---|---|---|---|
 | mode | 否 | neighbors | 五种图查询形态 |
 | entity | 是 | 无 | 限定名或唯一后缀 |
-| target | path 时必填 | 无 | 路径终点限定名 |
+| target | path 时必填 | 无 | 路径终点限定名；非 `path` 模式传入会返回参数错误 |
 | library/version | 是 | 无 | 库与版本坐标；版本必须唯一 |
 | ecosystem | 否 | 无 | 生态过滤 |
-| profile | 否 | usage | 挖掘 profile 名称 |
-| direction | 否 | both | `forward/backward/both`；`path` 按该方向约束边，`impact` 固定反向 |
+| profile | 否 | usage | 挖掘 profile 名称；未建立时返回参数错误 |
+| direction | 否 | both | `neighbors/path` 按方向约束边；`community/usage` 仅接受 `both`；`impact` 接受 `both/backward` 且固定反向 |
 | depth | 否 | 配置值 | 1 到配置上限的整数；`usage` 固定一跳，显式传入会返回参数错误 |
 | relation_types | 否 | 无 | 关系类型过滤，未知类型返回参数错误 |
 | include_ambiguous | 否 | 关 | 诊断时展开歧义与非目标解析边 |

@@ -9,9 +9,10 @@ from typing import Any
 import httpx
 import pytest
 
+from libref.services.graph_query import GRAPH_DIRECTIONS, GRAPH_MODES
 from librefctl import app
 from librefctl.app import _collect, _request_body, build_parser
-from librefctl.commands import BY_NAME
+from librefctl.commands import _GRAPH_DIRECTION, _GRAPH_MODE, BY_NAME
 from librefctl.output import exit_code, failure, success
 from librefctl.transport import Client, ClientError
 
@@ -263,3 +264,8 @@ def test_wait_times_out_on_non_terminal_state() -> None:
     finally:
         client.close()
     assert raised.value.code == "unavailable"
+
+
+def test_graph_command_vocabulary_matches_the_service() -> None:
+    assert _GRAPH_MODE == GRAPH_MODES
+    assert _GRAPH_DIRECTION == GRAPH_DIRECTIONS

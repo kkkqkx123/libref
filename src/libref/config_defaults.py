@@ -133,6 +133,7 @@ SECTION_FIELDS: dict[str, frozenset[str]] = {
             "graph_max_nodes",
             "graph_max_fanout",
             "graph_pattern_limit",
+            "graph_query_budget",
             "cluster_threshold",
             "cluster_min_size",
             "facet_topn",

@@ -57,6 +57,8 @@ class GraphQueryService:
     ) -> GraphView:
         name = str(profile or "usage")
         pids = _profile_context(self._conn, vids, name)[0]
+        if not pids:
+            raise ValueError(f"unknown profile: {name}")
         return GraphView(
             self._conn,
             vids,
@@ -68,6 +70,7 @@ class GraphQueryService:
             pattern_limit=int(
                 setting_or_default(self._settings, "graph_pattern_limit")
             ),
+            query_budget=int(setting_or_default(self._settings, "graph_query_budget")),
             include_ambiguous=include_ambiguous,
         )
 
@@ -110,8 +113,14 @@ class GraphQueryService:
             raise ValueError("entity is empty")
         if mode == "path" and not str(target or "").strip():
             raise ValueError("target is required for path queries")
+        if mode != "path" and str(target or "").strip():
+            raise ValueError("target is only supported for path queries")
         if mode == "usage" and depth is not None:
             raise ValueError("depth is not supported for usage queries")
+        if mode in ("community", "usage") and direction != "both":
+            raise ValueError(f"{mode} queries require direction='both'")
+        if mode == "impact" and direction not in ("both", "backward"):
+            raise ValueError("impact queries only support backward direction")
         if relation_types is not None:
             unknown = sorted(set(relation_types) - set(GRAPH_RELATIONS))
             if unknown:
@@ -144,7 +153,7 @@ class GraphQueryService:
                 direction=direction,
                 relation_types=relation_types,
             )
-            if path_graph is None:
+            if not path_graph.found:
                 return {
                     "mode": mode,
                     "seed": seed.model_dump(mode="json"),
@@ -152,7 +161,7 @@ class GraphQueryService:
                     "found": False,
                     "nodes": [],
                     "edges": [],
-                    "truncated": False,
+                    "truncated": path_graph.truncated,
                     **scope,
                 }
             return {

@@ -86,7 +86,7 @@
 - `src/libref/services/graph_query.py`：图查询编排，提供邻域、路径、用法、社区与影响面五种形态；复用 `MiningReadService` 提供用法上下文，不触碰检索分数。
 - MCP `graph_query`、Web `GET /graph`、`librefctl graph` 三出口已接入同一服务；工具清单、OpenAPI 快照与前端类型同步。
 - 查询强制绑定库版本、profile 与租户；profile 作用域表按 profile 读取，版本解析唯一，不做跨版本拼接。
-- 配置新增 `graph_max_depth`、`graph_max_nodes`、`graph_max_fanout`、`graph_pattern_limit`，不新增排序权重。
+- 配置新增 `graph_max_depth`、`graph_max_nodes`、`graph_max_fanout`、`graph_pattern_limit`、`graph_query_budget`，不新增排序权重。
 - 集成测试与 gold 集合覆盖强边、弱边、歧义边与冲突边默认排除、调用路径方向、有序模式、社区兄弟实体、文件级影响面、profile 隔离与 Web 出口。
 - 审核导出由 `tools/export_graph_audit.py` 生成，只报告 gold 用例匹配情况与证据出处，不写质量门禁。
-- 完整问题清单、修改方案与落地状态见 `docs/plan/graph-traversal-completion.md`；调研资料归档在 `docs/research/`。
+- 完整问题清单、修改方案与落地状态见 `docs/plan/graph-traversal-completion.md`；语义一致性复核见同目录的图遍历查询语义修正文档；调研资料归档在 `docs/research/`。

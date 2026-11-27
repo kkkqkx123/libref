@@ -194,6 +194,7 @@ class LibrefSettings(BaseSettings):
     graph_max_nodes: int = Field(default=200, ge=1)
     graph_max_fanout: int = Field(default=20, ge=1)
     graph_pattern_limit: int = Field(default=200, ge=0)
+    graph_query_budget: int = Field(default=400, ge=1)
     drift_topn: int = Field(default=20, ge=1)
     doc_feature_enabled: bool = True
     doc_feature_candidate_budget: int = Field(default=200, ge=1)

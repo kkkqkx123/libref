@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal
 from fastapi import Depends, Query, Request
 
 from libref.crawler.registry import RegistryError
+from libref.services.graph_query import GraphDirection, GraphMode
 from libref.web.api import (
     AnswerQuery,
     AnswerResponse,
@@ -133,16 +134,14 @@ def register(app, ctx) -> None:
     @app.get("/graph", response_model=GraphResponse)
     async def graph_query(
         request: Request,
-        mode: Literal["neighbors", "path", "usage", "community", "impact"] = (
-            "neighbors"
-        ),
+        mode: GraphMode = "neighbors",
         entity: str = "",
         target: str | None = None,
         library: str = "",
         version: str = "",
         ecosystem: str | None = None,
         profile: str | None = None,
-        direction: Literal["forward", "backward", "both"] = "both",
+        direction: GraphDirection = "both",
         depth: int | None = None,
         relation_types: Annotated[list[str] | None, Query()] = None,
         include_ambiguous: bool = False,

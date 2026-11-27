@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from libref.astminer.models import Confidence
 from libref.errors import ALL_CODES as ERROR_CODES
 from libref.errors import ErrorCode
+from libref.services.graph_query import GraphDirection, GraphMode
 from libref.services.infra.jobs import JobKind
 
 JobStatus = Literal["pending", "running", "done", "failed"]
@@ -48,14 +49,14 @@ class SearchQuery(BaseModel):
 
 
 class GraphQuery(BaseModel):
-    mode: Literal["neighbors", "path", "usage", "community", "impact"] = "neighbors"
+    mode: GraphMode = "neighbors"
     entity: str = Field(min_length=1)
     target: str | None = None
     library: str | None = None
     version: str | None = None
     ecosystem: str | None = None
     profile: str | None = None
-    direction: Literal["forward", "backward", "both"] = "both"
+    direction: GraphDirection = "both"
     depth: int | None = Field(default=None, ge=1, le=5)
     relation_types: list[str] | None = None
     include_ambiguous: bool = False

@@ -418,6 +418,7 @@ def build_cases(ctx: dict[str, Any]) -> list[Case]:
                 "entity": "pkg.core.Service.create",
                 "library": "demo",
                 "version": "0.1",
+                "profile": "implementation",
                 "direction": "both",
             },
             "reader",

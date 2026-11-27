@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,26 @@ _GOLD = json.loads(
         encoding="utf-8"
     )
 )
+_PG_URL = os.environ.get("LIBREF_TEST_POSTGRES_URL", "")
+
+
+def _fresh_postgres(url: str) -> None:
+    import psycopg
+
+    parsed = psycopg.conninfo.conninfo_to_dict(url)
+    dbname = (parsed.get("dbname") or "postgres").replace('"', "")
+    admin = dict(parsed, dbname="postgres")
+    with psycopg.connect(**admin, autocommit=True) as conn:
+        conn.execute(f'DROP DATABASE IF EXISTS "{dbname}" WITH (FORCE)')
+        conn.execute(f'CREATE DATABASE "{dbname}"')
+
+
+class _PostgresSettings:
+    metadata_backend = "postgres"
+    fulltext_backend = "postgres"
+    postgres_url = _PG_URL
+    postgres_pool_size = 2
+    postgres_timeout = 5.0
 
 
 def _seed(conn) -> None:
@@ -106,17 +127,29 @@ def _seed(conn) -> None:
         "INSERT INTO review_status(entity_type, entity_id, status, tenant_id)"
         " VALUES('call_instance', 5, 'conflict', 'default')"
     )
-    conn.execute(
-        "INSERT INTO pages(id, version_id, url) VALUES(1, 1, 'https://g.example/api')"
+    conn.executemany(
+        "INSERT INTO pages(id, version_id, url) VALUES(?, 1, ?)",
+        [
+            (1, "https://g.example/api"),
+            (2, "https://g.example/related"),
+        ],
     )
     conn.executemany(
         "INSERT INTO documents"
         " (id, library_id, version_id, page_id, url, content, metadata, sort_order)"
-        " VALUES (?, 1, 1, 1, ?, ?, ?, ?)",
+        " VALUES (?, 1, 1, ?, ?, ?, ?, ?)",
         [
-            (1, "https://g.example/api", "send body", json.dumps({"title": "API"}), 0),
+            (
+                1,
+                1,
+                "https://g.example/api",
+                "send body",
+                json.dumps({"title": "API"}),
+                0,
+            ),
             (
                 2,
+                1,
                 "https://g.example/weak",
                 "weak body",
                 json.dumps({"title": "Weak"}),
@@ -124,10 +157,19 @@ def _seed(conn) -> None:
             ),
             (
                 3,
+                2,
                 "https://g.example/related",
                 "related body",
                 json.dumps({"title": "Related"}),
+                0,
+            ),
+            (
+                4,
                 2,
+                "https://g.example/related",
+                "related detail body",
+                json.dumps({"title": "Related Detail"}),
+                1,
             ),
         ],
     )
@@ -206,6 +248,71 @@ def _seed(conn) -> None:
     conn.commit()
 
 
+def _seed_postgres(session) -> None:
+    lib_id = session.insert(
+        "INSERT INTO libraries(ecosystem, name) VALUES('npm', 'graph-pg')"
+    )
+    version_id = session.insert(
+        "INSERT INTO versions(library_id, version) VALUES(?, '1.0')", (lib_id,)
+    )
+    caller = session.insert(
+        "INSERT INTO api_entities(entity_uid, library_id, version_id, qualified_name,"
+        " kind) VALUES(?, ?, ?, ?, ?)",
+        ("pg-client", lib_id, version_id, "pkg.Client", "class"),
+    )
+    callee = session.insert(
+        "INSERT INTO api_entities(entity_uid, library_id, version_id, qualified_name,"
+        " kind) VALUES(?, ?, ?, ?, ?)",
+        ("pg-send", lib_id, version_id, "pkg.Client.send", "method"),
+    )
+    session.insert(
+        "INSERT INTO mining_profiles(version_id, name, support_mode, fingerprint)"
+        " VALUES(?, 'usage', 'sample', 'pg')",
+        (version_id,),
+    )
+    session.execute(
+        "INSERT INTO call_instances(call_uid, callee_entity_id, callee_name, repo,"
+        " caller_file, line_start, line_end, confidence, version_id,"
+        " caller_entity_id, in_target_api)"
+        " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "pg-call",
+            callee,
+            "pkg.Client.send",
+            "pg-repo",
+            "pkg/app.py",
+            4,
+            6,
+            "EXTRACTED",
+            version_id,
+            caller,
+            1,
+        ),
+    )
+    page = session.insert(
+        "INSERT INTO pages(version_id, url) VALUES(?, 'https://pg.example/api')",
+        (version_id,),
+    )
+    doc = session.insert(
+        "INSERT INTO documents(library_id, version_id, page_id, url, content,"
+        " metadata, sort_order) VALUES(?, ?, ?, ?, ?, ?::jsonb, ?)",
+        (
+            lib_id,
+            version_id,
+            page,
+            "https://pg.example/api",
+            "API body",
+            json.dumps({"title": "API"}),
+            0,
+        ),
+    )
+    session.execute(
+        "INSERT INTO doc_api_links(library_id, version_id, document_id,"
+        " api_entity_id, match_kind, confidence) VALUES(?, ?, ?, ?, ?, ?)",
+        (lib_id, version_id, doc, callee, "symbol", 0.9),
+    )
+
+
 def _service(conn, monkeypatch, tmp_path) -> GraphQueryService:
     return GraphQueryService(
         conn, make_settings(monkeypatch, tmp_path, graph_max_depth=2)
@@ -246,13 +353,21 @@ def test_neighbors_keep_strong_edges_and_bounded_direction(
     )
     labels = {node["label"] for node in backward["nodes"]}
     assert "API" in labels
-    assert "Related" in labels
+    assert "Related" not in labels
     assert "Weak" not in labels
     assert "cluster:4" in labels
     assert "pkg.client.Client" in labels
     assert "pkg/entry.py" in labels
     assert backward["profile"] == "usage"
     assert backward["tenant_id"] == "default"
+    both = _call(
+        conn,
+        monkeypatch,
+        tmp_path,
+        entity="pkg.client.Client.send",
+        direction="both",
+    )
+    assert "Related" in {node["label"] for node in both["nodes"]}
 
 
 def test_path_uses_only_graph_edges(conn, monkeypatch, tmp_path) -> None:
@@ -340,7 +455,7 @@ def test_coverage_and_consistency_are_audit_evidence(
         monkeypatch,
         tmp_path,
         entity="pkg.client.Client.send",
-        direction="backward",
+        direction="both",
         relation_types=["mentions", "covers_pattern"],
         depth=2,
     )
@@ -483,6 +598,173 @@ def test_usage_rejects_explicit_depth(conn, monkeypatch, tmp_path) -> None:
             entity="pkg.client.Client.send",
             depth=2,
         )
+
+
+def test_relation_filter_prunes_unrelated_nodes(conn, monkeypatch, tmp_path) -> None:
+    _seed(conn)
+    result = _call(
+        conn,
+        monkeypatch,
+        tmp_path,
+        entity="pkg.client.Client.send",
+        direction="backward",
+        relation_types=["call"],
+    )
+    labels = {node["label"] for node in result["nodes"]}
+    assert "pkg.client.Client" in labels
+    assert "cluster:4" not in labels
+    assert "API" not in labels
+    assert "pkg.client.send" not in labels
+    assert all(edge["relation"] == "call" for edge in result["edges"])
+
+
+def test_path_reports_node_budget_truncation(conn, monkeypatch, tmp_path) -> None:
+    _seed(conn)
+    service = GraphQueryService(
+        conn,
+        make_settings(monkeypatch, tmp_path, graph_max_depth=2, graph_max_nodes=2),
+    )
+    result = service.query(
+        "path",
+        "pkg.client.Client",
+        target="pkg.client.Client.close",
+        library="graphlib",
+        version="1.0",
+        tenant_id="default",
+        relation_types=["call"],
+    )
+    assert result["found"] is False
+    assert result["truncated"] is True
+
+
+def test_fixed_modes_reject_inapplicable_arguments(conn, monkeypatch, tmp_path) -> None:
+    _seed(conn)
+    with pytest.raises(ValueError, match="target is only supported"):
+        _call(
+            conn,
+            monkeypatch,
+            tmp_path,
+            target="pkg.client.Client.send",
+        )
+    with pytest.raises(ValueError, match="community queries require"):
+        _call(
+            conn,
+            monkeypatch,
+            tmp_path,
+            mode="community",
+            direction="forward",
+        )
+    with pytest.raises(ValueError, match="unknown profile"):
+        _call(conn, monkeypatch, tmp_path, profile="missing")
+
+
+def test_synthetic_nodes_keep_consistent_evidence(conn, monkeypatch, tmp_path) -> None:
+    _seed(conn)
+    result = _call(
+        conn,
+        monkeypatch,
+        tmp_path,
+        entity="pkg.client.Client.send",
+        direction="backward",
+    )
+    cluster = next(node for node in result["nodes"] if node["kind"] == "cluster")
+    row_id = int(cluster["source_id"])
+    assert (
+        conn.execute(
+            "SELECT count(*) FROM api_clusters WHERE id = ?", (row_id,)
+        ).fetchone()[0]
+        == 1
+    )
+    member_edges = [edge for edge in result["edges"] if edge["source"] == cluster["id"]]
+    assert member_edges
+    for edge in member_edges:
+        assert edge["source_table"] == "api_clusters"
+        assert (
+            conn.execute(
+                "SELECT count(*) FROM api_clusters WHERE id = ?", (edge["source_id"],)
+            ).fetchone()[0]
+            == 1
+        )
+    feature = next(
+        node for node in result["nodes"] if node["label"] == "pkg.client.send"
+    )
+    assert feature["source_id"] is None
+
+
+def test_query_budget_marks_truncation(conn, monkeypatch, tmp_path) -> None:
+    _seed(conn)
+    service = GraphQueryService(
+        conn, make_settings(monkeypatch, tmp_path, graph_query_budget=2)
+    )
+    result = service.query(
+        "neighbors",
+        "pkg.client.Client",
+        library="graphlib",
+        version="1.0",
+        tenant_id="default",
+        direction="forward",
+        depth=1,
+    )
+    assert result["edges"]
+    assert result["truncated"] is True
+
+
+def test_doc_link_expands_all_chunks_of_target_page(
+    conn, monkeypatch, tmp_path
+) -> None:
+    _seed(conn)
+    result = _call(
+        conn,
+        monkeypatch,
+        tmp_path,
+        entity="pkg.client.Client.send",
+        direction="both",
+        relation_types=["mentions", "doc_link"],
+    )
+    labels = {node["label"] for node in result["nodes"]}
+    assert {"API", "Related", "Related Detail"} <= labels
+
+
+@pytest.mark.skipif(not _PG_URL, reason="LIBREF_TEST_POSTGRES_URL not set")
+def test_postgres_graph_query_reads_the_same_facts(monkeypatch, tmp_path) -> None:
+    from libref.db.assembly import build_metadata_session
+
+    _fresh_postgres(_PG_URL)
+    session = build_metadata_session(_PostgresSettings())
+    try:
+        session.apply_migrations()
+        _seed_postgres(session)
+        service = GraphQueryService(session, make_settings(monkeypatch, tmp_path))
+        scope = {"library": "graph-pg", "version": "1.0", "tenant_id": "default"}
+        forward = service.query(
+            "neighbors",
+            "pkg.Client",
+            direction="forward",
+            depth=1,
+            relation_types=["call"],
+            **scope,
+        )
+        assert "pkg.Client.send" in {node["label"] for node in forward["nodes"]}
+        assert any(edge["relation"] == "call" for edge in forward["edges"])
+        backward = service.query(
+            "path",
+            "pkg.Client.send",
+            target="pkg.Client",
+            direction="backward",
+            relation_types=["call"],
+            **scope,
+        )
+        assert backward["found"] is True
+        mentions = service.query(
+            "neighbors",
+            "pkg.Client.send",
+            direction="both",
+            relation_types=["mentions"],
+            **scope,
+        )
+        assert "API" in {node["label"] for node in mentions["nodes"]}
+    finally:
+        session.close()
 
 
 def test_gold_cases_match_seeded_source_of_truth(conn, monkeypatch, tmp_path) -> None:

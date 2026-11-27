@@ -755,4 +755,21 @@ CREATE INDEX IF NOT EXISTS idx_pages_url ON pages(url);
 CREATE INDEX IF NOT EXISTS idx_documents_url ON documents(url);
 CREATE INDEX IF NOT EXISTS idx_libraries_tenant ON libraries(tenant_id, ecosystem, name);
 CREATE INDEX IF NOT EXISTS idx_versions_tenant ON versions(tenant_id, library_id);
+
+CREATE INDEX IF NOT EXISTS idx_graph_call_caller
+  ON call_instances(version_id, caller_entity_id, in_target_api);
+CREATE INDEX IF NOT EXISTS idx_graph_call_callee
+  ON call_instances(version_id, callee_entity_id, in_target_api);
+CREATE INDEX IF NOT EXISTS idx_graph_doc_api_document
+  ON doc_api_links(version_id, document_id);
+CREATE INDEX IF NOT EXISTS idx_graph_feature_path
+  ON feature_nodes(version_id, profile_id, path);
+CREATE INDEX IF NOT EXISTS idx_graph_feature_node_path
+  ON doc_feature_node_links(version_id, profile_id, node_path);
+CREATE INDEX IF NOT EXISTS idx_graph_cluster_member
+  ON api_clusters(version_id, profile_id, member);
+CREATE INDEX IF NOT EXISTS idx_graph_pattern_hash
+  ON doc_pattern_coverage(version_id, profile_id, pattern_hash);
+CREATE INDEX IF NOT EXISTS idx_graph_consistency_document
+  ON doc_consistency(version_id, profile_id, document_id);
 """

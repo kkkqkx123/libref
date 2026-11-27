@@ -925,6 +925,26 @@ CREATE INDEX IF NOT EXISTS idx_quota_events_subject
   ON quota_events(tenant_id, principal_id, created_at);
 """
 
+# ── Graph traversal read paths over existing fact tables ──
+GRAPH_READ_INDEXES_SQL = """
+CREATE INDEX IF NOT EXISTS idx_graph_call_caller
+  ON call_instances(version_id, caller_entity_id, in_target_api);
+CREATE INDEX IF NOT EXISTS idx_graph_call_callee
+  ON call_instances(version_id, callee_entity_id, in_target_api);
+CREATE INDEX IF NOT EXISTS idx_graph_doc_api_document
+  ON doc_api_links(version_id, document_id);
+CREATE INDEX IF NOT EXISTS idx_graph_feature_path
+  ON feature_nodes(version_id, profile_id, path);
+CREATE INDEX IF NOT EXISTS idx_graph_feature_node_path
+  ON doc_feature_node_links(version_id, profile_id, node_path);
+CREATE INDEX IF NOT EXISTS idx_graph_cluster_member
+  ON api_clusters(version_id, profile_id, member);
+CREATE INDEX IF NOT EXISTS idx_graph_pattern_hash
+  ON doc_pattern_coverage(version_id, profile_id, pattern_hash);
+CREATE INDEX IF NOT EXISTS idx_graph_consistency_document
+  ON doc_consistency(version_id, profile_id, document_id);
+"""
+
 # ── Quota tables alone for runtime ensure without touching other groups ──
 QUOTA_RUNTIME_SQL = QUOTA_TABLES_SQL
 

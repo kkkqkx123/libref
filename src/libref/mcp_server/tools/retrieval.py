@@ -17,7 +17,12 @@ from libref.mcp_server.context import (
     _not_found,
 )
 from libref.mcp_server.contract import ToolFailure
-from libref.services.graph_query import GRAPH_DIRECTIONS, GRAPH_MODES
+from libref.services.graph_query import (
+    GRAPH_DIRECTIONS,
+    GRAPH_MODES,
+    GraphDirection,
+    GraphMode,
+)
 
 
 def register(mcp, ctx, wrap) -> dict[str, object]:
@@ -238,16 +243,14 @@ def register(mcp, ctx, wrap) -> dict[str, object]:
             raise _as_error(exc) from exc
 
     def graph_query(
-        mode: Literal[
-            "neighbors", "path", "usage", "community", "impact"
-        ] = "neighbors",
+        mode: GraphMode = "neighbors",
         entity: str = "",
         target: str | None = None,
         library: str | None = None,
         version: str | None = None,
         ecosystem: str | None = None,
         profile: str | None = None,
-        direction: Literal["forward", "backward", "both"] = "both",
+        direction: GraphDirection = "both",
         depth: int | None = None,
         relation_types: list[str] | None = None,
         include_ambiguous: bool = False,

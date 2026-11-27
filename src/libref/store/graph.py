@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 Direction = Literal["forward", "backward", "both"]
 
-STRONG_DOC_LINKS = frozenset({"symbol", "signature"})
+STRONG_DOC_LINKS = ("symbol", "signature")
 GRAPH_RELATIONS = (
     "call",
     "import",
@@ -74,6 +74,7 @@ class GraphSubgraph(BaseModel):
     nodes: list[GraphNode] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
     truncated: bool = False
+    found: bool = True
 
 
 def _digest(raw: str) -> str:
@@ -111,6 +112,59 @@ def _pattern_digest(names: list[str]) -> str:
     return _digest(json.dumps(names, ensure_ascii=False))
 
 
+def _strong_link_sql(alias: str | None = None) -> tuple[str, list[str]]:
+    prefix = f"{alias}." if alias else ""
+    marks = ",".join("?" for _ in STRONG_DOC_LINKS)
+    return f"{prefix}match_kind IN ({marks})", list(STRONG_DOC_LINKS)
+
+
+class _EmptyCursor:
+    """Cursor shape for reads skipped after the query budget is exhausted."""
+
+    def fetchone(self) -> None:
+        return None
+
+    def fetchall(self) -> list[tuple[Any, ...]]:
+        return []
+
+
+class _QueryBudget:
+    """Count fact-table reads issued during one bounded traversal."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = max(1, int(limit))
+        self.used = 0
+        self.exhausted = False
+        self.active = False
+
+    def take(self) -> bool:
+        if not self.active:
+            return True
+        if self.used >= self.limit:
+            self.exhausted = True
+            return False
+        self.used += 1
+        return True
+
+
+class _BudgetedConnection:
+    """Connection surface that enforces the active traversal query budget."""
+
+    def __init__(self, conn, budget: _QueryBudget) -> None:
+        self._conn = conn
+        self._budget = budget
+
+    def execute(self, sql: str, params: Any = ()) -> Any:
+        if sql.lstrip().upper().startswith("PRAGMA"):
+            return self._conn.execute(sql, params)
+        if not self._budget.take():
+            return _EmptyCursor()
+        return self._conn.execute(sql, params)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+
 class GraphView:
     """Bounded graph view over one version and one mining profile."""
 
@@ -125,9 +179,11 @@ class GraphView:
         max_nodes: int = 200,
         max_fanout: int = 20,
         pattern_limit: int = 200,
+        query_budget: int = 400,
         include_ambiguous: bool = False,
     ) -> None:
-        self._conn = conn
+        self._budget = _QueryBudget(query_budget)
+        self._conn = _BudgetedConnection(conn, self._budget)
         self._version_ids = sorted({int(v) for v in version_ids})
         if len(self._version_ids) != 1:
             raise ValueError("graph view requires one exact version")
@@ -141,6 +197,18 @@ class GraphView:
         self._nodes: dict[str, GraphNode] = {}
         self._edges: dict[str, GraphEdge] = {}
         self._tenant_columns: dict[str, bool] = {}
+        self._truncated = False
+
+    def _open_budget(self) -> None:
+        self._truncated = False
+        self._budget.used = 0
+        self._budget.exhausted = False
+        self._budget.active = True
+
+    def _close_budget(self) -> None:
+        self._budget.active = False
+        if self._budget.exhausted:
+            self._truncated = True
 
     @property
     def version_id(self) -> int:
@@ -276,14 +344,12 @@ class GraphView:
             id=f"file:{version_id}:{path}",
             label=path,
             kind="file",
-            source_table="call_instances",
+            source_table="file",
             version_id=version_id,
             profile_id=self.profile_id,
             tenant_id=self._tenant_id,
             confidence="EXTRACTED",
-            evidence_ref=_evidence_ref(
-                "call_instances", None, version_id, self._tenant_id, path
-            ),
+            evidence_ref=_evidence_ref("file", None, version_id, self._tenant_id, path),
             file=path,
         )
 
@@ -335,13 +401,14 @@ class GraphView:
             tenant_id=self._tenant_id,
             confidence="INFERRED",
             evidence_ref=_evidence_ref(
-                "api_clusters", cluster_id, version_id, self._tenant_id, ""
+                "api_clusters", source_id, version_id, self._tenant_id, ""
             ),
             weight=float(size),
+            path=str(cluster_id),
         )
 
     def _feature_node(
-        self, path: str, version_id: int, profile_id: int, source_id: int
+        self, path: str, version_id: int, profile_id: int, source_id: int | None
     ) -> GraphNode:
         return GraphNode(
             id=f"feature:{profile_id}:{path}",
@@ -365,21 +432,24 @@ class GraphView:
         if not text:
             return None
         tenant, params = self._tenant_sql("api_entities")
-        row = self._conn.execute(
+        exact = self._conn.execute(
             "SELECT id, qualified_name, kind, file, version_id, line_start, line_end"
             " FROM api_entities"
-            f" WHERE {self._version_sql()} AND qualified_name = ?{tenant} LIMIT 1",
+            f" WHERE {self._version_sql()} AND qualified_name = ?{tenant}"
+            " ORDER BY id",
             [*self._version_ids, text, *params],
-        ).fetchone()
-        if row is not None:
-            node = self._api_node(tuple(row))
+        ).fetchall()
+        if exact:
+            if len(exact) != 1:
+                return None
+            node = self._api_node(tuple(exact[0]))
             self._add_node(node)
             return node
         rows = self._conn.execute(
             "SELECT id, qualified_name, kind, file, version_id, line_start, line_end"
             " FROM api_entities"
             f" WHERE {self._version_sql()} AND qualified_name LIKE ? ESCAPE '\\'{tenant}"
-            " ORDER BY qualified_name LIMIT 100",
+            " ORDER BY qualified_name, id",
             [*self._version_ids, f"%{_escape_like(text)}", *params],
         ).fetchall()
         matches = [
@@ -408,34 +478,37 @@ class GraphView:
         self._add_node(node)
         return node
 
-    def _doc_by_url(self, url: str) -> GraphNode | None:
+    def _docs_by_url(self, url: str) -> list[GraphNode]:
         tenant, params = self._tenant_sql("documents")
-        row = self._conn.execute(
+        rows = self._conn.execute(
             "SELECT id, url, title, path, version_id FROM documents"
-            f" WHERE url = ? AND {self._version_sql()}{tenant} LIMIT 1",
-            [url, *self._version_ids, *params],
-        ).fetchone()
-        if row is None:
-            return None
-        node = self._doc_node(tuple(row))
-        self._add_node(node)
-        return node
+            f" WHERE url = ? AND {self._version_sql()}{tenant}"
+            " ORDER BY sort_order, id LIMIT ?",
+            [url, *self._version_ids, *params, self._max_fanout + 1],
+        ).fetchall()
+        if len(rows) > self._max_fanout:
+            self._truncated = True
+        nodes = [self._doc_node(tuple(row)) for row in rows[: self._max_fanout]]
+        for node in nodes:
+            self._add_node(node)
+        return nodes
 
     def _entity_by_name(self, name: str, version_id: int) -> GraphNode | None:
         tenant, params = self._tenant_sql("api_entities")
-        row = self._conn.execute(
+        rows = self._conn.execute(
             "SELECT id, qualified_name, kind, file, version_id, line_start, line_end"
             " FROM api_entities"
-            f" WHERE qualified_name = ? AND version_id = ?{tenant} LIMIT 1",
+            f" WHERE qualified_name = ? AND version_id = ?{tenant}"
+            " ORDER BY id",
             [name, version_id, *params],
-        ).fetchone()
-        if row is None:
+        ).fetchall()
+        if len(rows) != 1:
             return None
-        node = self._api_node(tuple(row))
+        node = self._api_node(tuple(rows[0]))
         self._add_node(node)
         return node
 
-    def _api_row(self, api_id: int, version_id: int) -> tuple:
+    def _api_row(self, api_id: int, version_id: int) -> tuple | None:
         tenant, params = self._tenant_sql("api_entities")
         row = self._conn.execute(
             "SELECT id, qualified_name, kind, file, version_id, line_start, line_end"
@@ -444,7 +517,7 @@ class GraphView:
             [api_id, version_id, *params],
         ).fetchone()
         if row is None:
-            return (api_id, f"api:{api_id}", "api", "", version_id, 0, 0)
+            return None
         return tuple(row)
 
     def _call_edge(self, row: tuple, *, outbound: bool) -> GraphEdge | None:
@@ -488,7 +561,10 @@ class GraphView:
         for node_id in (source, target):
             if node_id.startswith("api:") and node_id not in self._nodes:
                 api_id = int(node_id.split(":", 1)[1])
-                self._add_node(self._api_node(self._api_row(api_id, version_id)))
+                row_data = self._api_row(api_id, version_id)
+                if row_data is None:
+                    return None
+                self._add_node(self._api_node(row_data))
         level = "EXTRACTED" if confidence == "EXTRACTED" else "INFERRED"
         if confidence == "AMBIGUOUS":
             level = "AMBIGUOUS"
@@ -525,13 +601,23 @@ class GraphView:
             f"{review} WHERE {column} = ? AND {self._version_sql('ci.version_id')}"
             " AND ci.in_target_api = 1"
             " AND (rs.status IS NULL OR rs.status != 'conflict')"
-            f"{tenant}",
+            f"{tenant}"
+            " ORDER BY ci.id",
             [*review_params, node.source_id, *self._version_ids, *tparams],
         ).fetchall()
+        calls: list[GraphEdge] = []
         for row in rows:
             edge = self._call_edge(tuple(row), outbound=outbound)
             if edge is not None:
-                out.append(edge)
+                calls.append(edge)
+        grouped: dict[tuple[str, str], list[GraphEdge]] = {}
+        for edge in calls:
+            grouped.setdefault((edge.source, edge.target), []).append(edge)
+        for group in grouped.values():
+            representative = group[0]
+            representative.weight = float(len(group))
+            representative.evidence["call_count"] = len(group)
+            out.append(representative)
         tenant, params = self._tenant_sql("api_entities")
         bases = self._conn.execute(
             "SELECT bases FROM api_entities WHERE id = ?"
@@ -621,13 +707,19 @@ class GraphView:
         if node.source_id is None or node.version_id is None:
             return []
         tenant, params = self._tenant_sql("doc_api_links")
+        strong, strong_params = _strong_link_sql()
         rows = self._conn.execute(
             "SELECT id, document_id, match_kind, confidence, version_id"
             " FROM doc_api_links"
             f" WHERE api_entity_id = ? AND {self._version_sql()}"
-            " AND match_kind IN ('symbol','signature')"
-            f"{tenant} ORDER BY confidence DESC LIMIT ?",
-            [node.source_id, *self._version_ids, *params, self._max_fanout],
+            f" AND {strong}{tenant} ORDER BY confidence DESC LIMIT ?",
+            [
+                node.source_id,
+                *self._version_ids,
+                *strong_params,
+                *params,
+                self._max_fanout,
+            ],
         ).fetchall()
         out: list[GraphEdge] = []
         for link_id, doc_id, kind, confidence, version_id in rows:
@@ -685,7 +777,7 @@ class GraphView:
                     relation="member",
                     confidence="INFERRED",
                     source_table="api_clusters",
-                    source_id=int(cluster_id),
+                    source_id=int(row_id),
                     version_id=int(version_id),
                     profile_id=int(profile_id),
                     evidence={
@@ -698,17 +790,18 @@ class GraphView:
         return out
 
     def _cluster_neighbors(self, node: GraphNode) -> list[GraphEdge]:
-        if node.source_id is None or node.version_id is None:
+        if not node.path or node.version_id is None:
             return []
+        cluster_id = int(node.path)
         tenant, params = self._tenant_sql("api_clusters")
         profile = self._profile_sql()
         rows = self._conn.execute(
-            "SELECT member, size, representative, version_id, profile_id"
+            "SELECT id, member, size, representative, version_id, profile_id"
             " FROM api_clusters"
             f" WHERE cluster_id = ? AND {self._version_sql()} AND {profile}{tenant}"
             " ORDER BY member LIMIT ?",
             [
-                node.source_id,
+                cluster_id,
                 *self._version_ids,
                 *self._profile_ids,
                 *params,
@@ -716,7 +809,7 @@ class GraphView:
             ],
         ).fetchall()
         out: list[GraphEdge] = []
-        for member, size, representative, version_id, profile_id in rows:
+        for row_id, member, size, representative, version_id, profile_id in rows:
             api = self._entity_by_name(str(member), int(version_id))
             if api is None:
                 continue
@@ -727,11 +820,11 @@ class GraphView:
                     relation="member",
                     confidence="INFERRED",
                     source_table="api_clusters",
-                    source_id=int(node.source_id),
+                    source_id=int(row_id),
                     version_id=int(version_id),
                     profile_id=int(profile_id),
                     evidence={
-                        "cluster_id": int(node.source_id),
+                        "cluster_id": cluster_id,
                         "representative": str(representative or ""),
                         "size": int(size),
                     },
@@ -745,18 +838,19 @@ class GraphView:
         tenant_l, params_l = self._tenant_sql("doc_feature_node_links", "l")
         tenant_a, params_a = self._tenant_sql("doc_api_links", "a")
         profile = self._profile_sql("l.profile_id")
+        strong, strong_params = _strong_link_sql("a")
         rows = self._conn.execute(
             "SELECT DISTINCT l.id, l.node_path, l.version_id, l.profile_id"
             " FROM doc_feature_node_links l"
             " JOIN doc_api_links a ON a.document_id=l.document_id"
             " AND a.version_id=l.version_id"
             f" WHERE a.api_entity_id = ? AND {self._version_sql('l.version_id')}"
-            f" AND {profile} AND a.match_kind IN ('symbol','signature')"
-            f"{tenant_l}{tenant_a} LIMIT ?",
+            f" AND {profile} AND {strong}{tenant_l}{tenant_a} LIMIT ?",
             [
                 node.source_id,
                 *self._version_ids,
                 *self._profile_ids,
+                *strong_params,
                 *params_l,
                 *params_a,
                 self._max_fanout,
@@ -765,7 +859,7 @@ class GraphView:
         out: list[GraphEdge] = []
         for link_id, path, version_id, profile_id in rows:
             feature = self._feature_node(
-                str(path), int(version_id), int(profile_id), int(link_id)
+                str(path), int(version_id), int(profile_id), None
             )
             self._add_node(feature)
             out.append(
@@ -825,7 +919,10 @@ class GraphView:
             ],
         ).fetchall()
         for link_id, api_id in rows:
-            api = self._api_node(self._api_row(int(api_id), node.version_id))
+            row_data = self._api_row(int(api_id), node.version_id)
+            if row_data is None:
+                continue
+            api = self._api_node(row_data)
             self._add_node(api)
             out.append(
                 self._make_edge(
@@ -914,16 +1011,25 @@ class GraphView:
             return []
         out: list[GraphEdge] = []
         tenant, params = self._tenant_sql("doc_api_links")
+        strong, strong_params = _strong_link_sql()
         rows = self._conn.execute(
             "SELECT id, api_entity_id, match_kind, confidence, version_id"
             " FROM doc_api_links"
             f" WHERE document_id = ? AND {self._version_sql()}"
-            " AND match_kind IN ('symbol','signature')"
-            f"{tenant} ORDER BY confidence DESC LIMIT ?",
-            [node.source_id, *self._version_ids, *params, self._max_fanout],
+            f" AND {strong}{tenant} ORDER BY confidence DESC LIMIT ?",
+            [
+                node.source_id,
+                *self._version_ids,
+                *strong_params,
+                *params,
+                self._max_fanout,
+            ],
         ).fetchall()
         for link_id, api_id, kind, confidence, version_id in rows:
-            api = self._api_node(self._api_row(int(api_id), int(version_id)))
+            row_data = self._api_row(int(api_id), int(version_id))
+            if row_data is None:
+                continue
+            api = self._api_node(row_data)
             self._add_node(api)
             out.append(
                 self._make_edge(
@@ -946,22 +1052,20 @@ class GraphView:
             [node.url, *self._version_ids, *params, self._max_fanout],
         ).fetchall()
         for dst, version_id in links:
-            target = self._doc_by_url(str(dst))
-            if target is None:
-                continue
-            out.append(
-                self._make_edge(
-                    source=node.id,
-                    target=target.id,
-                    relation="doc_link",
-                    confidence="INFERRED",
-                    source_table="doc_link_edges",
-                    version_id=int(version_id),
-                    profile_id=self.profile_id,
-                    evidence={"dst_url": str(dst)},
-                    evidence_key=f"{node.url}|{dst}",
+            for target in self._docs_by_url(str(dst)):
+                out.append(
+                    self._make_edge(
+                        source=node.id,
+                        target=target.id,
+                        relation="doc_link",
+                        confidence="INFERRED",
+                        source_table="doc_link_edges",
+                        version_id=int(version_id),
+                        profile_id=self.profile_id,
+                        evidence={"dst_url": str(dst)},
+                        evidence_key=f"{node.url}|{dst}",
+                    )
                 )
-            )
         tenant, params = self._tenant_sql("doc_pattern_coverage")
         profile = self._profile_sql()
         covered = self._conn.execute(
@@ -1016,6 +1120,33 @@ class GraphView:
             )
         return out
 
+    def _doc_backlinks(self, node: GraphNode) -> list[GraphEdge]:
+        if not node.url or node.version_id is None:
+            return []
+        tenant, params = self._tenant_sql("doc_link_edges")
+        rows = self._conn.execute(
+            "SELECT src_url, version_id FROM doc_link_edges"
+            f" WHERE dst_url = ? AND {self._version_sql()}{tenant} LIMIT ?",
+            [node.url, *self._version_ids, *params, self._max_fanout],
+        ).fetchall()
+        out: list[GraphEdge] = []
+        for src, version_id in rows:
+            for source in self._docs_by_url(str(src)):
+                out.append(
+                    self._make_edge(
+                        source=source.id,
+                        target=node.id,
+                        relation="doc_link",
+                        confidence="INFERRED",
+                        source_table="doc_link_edges",
+                        version_id=int(version_id),
+                        profile_id=self.profile_id,
+                        evidence={"src_url": str(src)},
+                        evidence_key=f"{src}|{node.url}",
+                    )
+                )
+        return out
+
     def _pattern_neighbors(self, node: GraphNode) -> list[GraphEdge]:
         if not node.path or node.version_id is None or node.profile_id is None:
             return []
@@ -1060,23 +1191,42 @@ class GraphView:
 
     def neighbors(self, node: GraphNode, *, direction: Direction) -> list[GraphEdge]:
         """Return edges adjacent to one node in the requested direction."""
+        out: list[GraphEdge] = []
         if node.source_table == "api_entities":
-            out = []
             if direction in ("forward", "both"):
                 out.extend(self._api_neighbors(node, outbound=True))
             if direction in ("backward", "both"):
                 out.extend(self._api_neighbors(node, outbound=False))
             return out
         if node.source_table == "documents":
-            return self._doc_neighbors(node)
-        if node.source_table == "call_instances" and node.kind == "file":
-            return self._file_neighbors(node) if direction != "backward" else []
+            if direction in ("forward", "both"):
+                out.extend(self._doc_neighbors(node))
+            if direction in ("backward", "both"):
+                out.extend(self._doc_backlinks(node))
+            return out
+        if node.kind == "file":
+            return (
+                self._file_neighbors(node) if direction in ("forward", "both") else []
+            )
         if node.source_table == "api_clusters":
-            return self._cluster_neighbors(node) if direction != "backward" else []
+            return (
+                self._cluster_neighbors(node)
+                if direction in ("forward", "both")
+                else []
+            )
         if node.source_table == "feature_nodes":
-            return self._feature_neighbors(node) if direction != "backward" else []
+            edges = self._feature_neighbors(node)
+            if direction in ("forward", "both"):
+                out.extend(edge for edge in edges if edge.source == node.id)
+            if direction in ("backward", "both"):
+                out.extend(edge for edge in edges if edge.target == node.id)
+            return out
         if node.source_table == "doc_pattern_coverage":
-            return self._pattern_neighbors(node) if direction != "backward" else []
+            return (
+                self._pattern_neighbors(node)
+                if direction in ("backward", "both")
+                else []
+            )
         return []
 
     @staticmethod
@@ -1097,6 +1247,27 @@ class GraphView:
             return False
         return not (edge.confidence == "AMBIGUOUS" and not self._include_ambiguous)
 
+    def _neighbor_candidates(
+        self,
+        node: GraphNode,
+        *,
+        direction: Direction,
+        wanted: frozenset[str] | None,
+    ) -> list[GraphEdge]:
+        before = dict(self._nodes)
+        edges = [
+            edge
+            for edge in self.neighbors(node, direction=direction)
+            if self._accept(edge, wanted)
+        ]
+        added = {key: value for key, value in self._nodes.items() if key not in before}
+        self._nodes = before
+        for edge in edges:
+            for node_id in (edge.source, edge.target):
+                if node_id in added:
+                    self._add_node(added[node_id])
+        return edges
+
     def bfs(
         self,
         root: GraphNode,
@@ -1106,6 +1277,7 @@ class GraphView:
         relation_types: list[str] | None = None,
     ) -> GraphSubgraph:
         """Bounded breadth-first expansion from one seed node."""
+        self._open_budget()
         wanted = frozenset(relation_types) if relation_types else None
         self._add_node(root)
         visited = {root.id}
@@ -1119,9 +1291,9 @@ class GraphView:
             if node is None:
                 continue
             candidates: dict[tuple[str, str], GraphEdge] = {}
-            for edge in self.neighbors(node, direction=direction):
-                if not self._accept(edge, wanted):
-                    continue
+            for edge in self._neighbor_candidates(
+                node, direction=direction, wanted=wanted
+            ):
                 other = self._target_of(edge, node_id)
                 if other == node_id:
                     continue
@@ -1155,7 +1327,11 @@ class GraphView:
                 if other not in visited:
                     visited.add(other)
                     frontier.append((other, hop + 1))
-        return self._result(truncated)
+        keep = {root.id}
+        for edge in self._edges.values():
+            keep.update((edge.source, edge.target))
+        self._close_budget()
+        return self._result(truncated, keep_nodes=keep)
 
     def shortest_path(
         self,
@@ -1165,18 +1341,20 @@ class GraphView:
         depth: int,
         direction: Direction = "both",
         relation_types: list[str] | None = None,
-    ) -> GraphSubgraph | None:
+    ) -> GraphSubgraph:
         """Bounded shortest path using the requested edge direction."""
+        self._open_budget()
         wanted = frozenset(relation_types) if relation_types else None
         self._add_node(start)
         self._add_node(end)
         if start.id == end.id:
+            self._close_budget()
             return self._result(False)
         frontier: list[tuple[str, int]] = [(start.id, 0)]
         seen = {start.id}
         parents: dict[str, tuple[str, GraphEdge]] = {}
         truncated = False
-        while frontier and len(seen) < self._max_nodes:
+        while frontier:
             node_id, hop = frontier.pop(0)
             if hop >= max(0, int(depth)):
                 continue
@@ -1184,9 +1362,9 @@ class GraphView:
             if node is None:
                 continue
             candidates: dict[str, GraphEdge] = {}
-            for edge in self.neighbors(node, direction=direction):
-                if not self._accept(edge, wanted):
-                    continue
+            for edge in self._neighbor_candidates(
+                node, direction=direction, wanted=wanted
+            ):
                 other = self._target_of(edge, node_id)
                 current = candidates.get(other)
                 if current is None or self._rank(edge) > self._rank(current):
@@ -1197,14 +1375,19 @@ class GraphView:
                 candidates.items(), key=lambda item: self._rank(item[1]), reverse=True
             )[: self._max_fanout]
             for target, edge in ordered:
+                if target not in seen and len(self._nodes) >= self._max_nodes:
+                    truncated = True
+                    continue
                 self._add_edge(edge)
                 if target not in seen:
                     seen.add(target)
                     parents[target] = (node_id, edge)
                     if target == end.id:
+                        self._close_budget()
                         return self._path_result(start.id, end.id, parents, truncated)
                     frontier.append((target, hop + 1))
-        return None
+        self._close_budget()
+        return GraphSubgraph(truncated=truncated or self._truncated, found=False)
 
     def _path_result(
         self,
@@ -1229,9 +1412,16 @@ class GraphView:
         }
         return self._result(truncated)
 
-    def _result(self, truncated: bool) -> GraphSubgraph:
+    def _result(
+        self, truncated: bool, *, keep_nodes: set[str] | None = None
+    ) -> GraphSubgraph:
+        nodes = [
+            node
+            for node in self._nodes.values()
+            if keep_nodes is None or node.id in keep_nodes
+        ]
         return GraphSubgraph(
-            nodes=sorted(self._nodes.values(), key=lambda n: n.id),
+            nodes=sorted(nodes, key=lambda n: n.id),
             edges=sorted(self._edges.values(), key=lambda e: (-e.weight, e.id)),
-            truncated=bool(truncated),
+            truncated=bool(truncated or self._truncated),
         )
